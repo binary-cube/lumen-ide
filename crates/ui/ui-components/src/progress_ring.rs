@@ -10,8 +10,9 @@ use kernel::cache::{Memo, Purge};
 use kernel::{Point, Rect, Rgba};
 use render_api::{ImageData, ImageInstance, Layer};
 
-/// The arc's steps for a whole turn (where it starts and how far it goes).
-pub const STEPS: u16 = 120;
+/// The arc's steps for a whole turn (where it starts and how far it goes): one a degree,
+/// so a frame at the stack's pace (about 30 a second) moves it by less than the eye sees.
+pub const STEPS: u16 = 360;
 
 /// What a ring looks like (device pixels).
 #[derive(Debug, Clone, Copy, PartialEq)]

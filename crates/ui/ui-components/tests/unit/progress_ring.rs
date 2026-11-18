@@ -109,10 +109,13 @@ fn the_image_is_kept_until_what_it_shows_changes() {
     assert!(ring.kept().is_none());
     let first = ring.image(&s, 0.0, 0.5).id;
     assert_eq!(ring.image(&s, 0.0, 0.5).id, first, "the same: not rasterized again");
-    assert_eq!(ring.image(&s, 0.0, 0.5 + 0.3 / 120.0).id, first, "less than a step");
-    let next = ring.image(&s, 0.0, 0.5 + 1.0 / 120.0).id;
+    assert_eq!(ring.image(&s, 0.0, 0.5 + 0.3 / f32::from(STEPS)).id, first, "less than a step");
+    let next = ring.image(&s, 0.0, 0.5 + 1.0 / f32::from(STEPS)).id;
     assert_ne!(next, first, "a step: another image");
-    assert_ne!(ring.image(&RingSpec { color: TRACK, ..s }, 0.0, 0.5 + 1.0 / 120.0).id, next);
+    assert_ne!(
+        ring.image(&RingSpec { color: TRACK, ..s }, 0.0, 0.5 + 1.0 / f32::from(STEPS)).id,
+        next
+    );
     assert_ne!(ring.image(&RingSpec { size: 50, ..s }, 0.0, 0.5).id, next);
     // A start a whole turn on is the same start.
     let a = ring.image(&s, 0.1, 0.5).id;

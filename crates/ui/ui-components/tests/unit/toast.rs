@@ -152,9 +152,10 @@ fn the_ring_shows_the_time_left_and_none_stays_without_one() {
     // The next frame, nothing changed: the same image (nothing rasterized again).
     assert_eq!(paint(&n, &mut text, &mut stack)[1].1[0].0, id);
     // Less than a step later: still the same; a step later: another.
-    n.set_elapsed(ids[0], Duration::from_millis(2010));
+    // (A step: its 4 s over the ring's steps, ~11 ms.)
+    n.set_elapsed(ids[0], Duration::from_millis(2003));
     assert_eq!(paint(&n, &mut text, &mut stack)[1].1[0].0, id);
-    n.set_elapsed(ids[0], Duration::from_millis(2100));
+    n.set_elapsed(ids[0], Duration::from_millis(2050));
     assert_ne!(paint(&n, &mut text, &mut stack)[1].1[0].0, id);
     // No toast left: the rings are let go.
     let empty = Notifications::new();

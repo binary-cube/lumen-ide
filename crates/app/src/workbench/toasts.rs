@@ -205,7 +205,8 @@ impl Workbench {
             .shown()
             .filter(|t| !t.is_leaving())
             .filter_map(|t| match t.notification.kind {
-                NotificationKind::Progress => Some(ui_workbench::toast::SPINNER_STEP),
+                // Its bar sweeping (or moving as it's told): at the stack's own pace.
+                NotificationKind::Progress => Some(ui_workbench::toast::MIN_FRAME),
                 _ if paused => None,
                 _ => t
                     .notification

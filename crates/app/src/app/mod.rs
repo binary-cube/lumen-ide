@@ -498,8 +498,9 @@ impl EditorApp {
                     window.request_redraw();
                     full_due = frame_start;
                 } else if self.workbench.loading() {
-                    // A loader turning: about 20 frames a second are enough.
-                    const LOADER_FRAME: std::time::Duration = std::time::Duration::from_millis(50);
+                    // A loader turning, a progress bar sweeping: about 30 frames a second
+                    // (smooth to the eye; only while work goes on).
+                    const LOADER_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
                     let at = std::time::Instant::now() + LOADER_FRAME;
                     window.request_redraw_at(at);
                     full_due = full_due.min(at);
