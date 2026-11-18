@@ -81,6 +81,8 @@ struct State {
     stop: Option<Arc<AtomicBool>>,
     /// The periodic look, waiting for its next time.
     later: Option<kernel::work::Later>,
+    /// Why the last download failed (the user's words; gone when one begins again).
+    failed: Option<String>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -177,6 +179,7 @@ pub fn begin_download() -> Option<(Arc<Available>, Arc<AtomicBool>)> {
         let available = Arc::clone(available);
         let stop = Arc::new(AtomicBool::new(false));
         s.stop = Some(Arc::clone(&stop));
+        s.failed = None;
         let total = available.file.size;
         s.phase = Phase::Downloading { available: Arc::clone(&available), received: 0, total };
         s.tell = Some(Tell::Progress);
@@ -206,6 +209,7 @@ pub fn end_download(version: &app_updates::Version, ended: Result<Staged, String
             Err(why) => {
                 s.phase = Phase::Available(available);
                 if !stopped {
+                    s.failed = Some(why.clone());
                     s.tell = Some(Tell::Failed(why));
                 }
             }
@@ -241,6 +245,11 @@ pub fn progress(received: u64, total: u64) {
     if moved {
         wake_all();
     }
+}
+
+/// Why the last download failed (`None`: it didn't, or another began since).
+pub fn download_failed() -> Option<String> {
+    with(|s| s.failed.clone())
 }
 
 /// What to tell, the first window to ask taking it.

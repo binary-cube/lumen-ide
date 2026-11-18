@@ -141,11 +141,16 @@ fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
                 .with_action(t("updates.restart_now"), INSTALL)
                 .with_action(t("updates.whats_new"), WHATS_NEW),
         ),
-        Tell::UpToDate => Notification::info(i18n::tr!(
-            "updates.up_to_date",
-            app = app,
-            version = kernel::brand::VERSION
-        )),
+        // In the spinner's place (the next one is a new notification).
+        Tell::UpToDate => {
+            let told = ours(Notification::success(i18n::tr!(
+                "updates.up_to_date",
+                app = app,
+                version = kernel::brand::VERSION
+            )));
+            state::forget_notification();
+            told
+        }
         Tell::Failed(text) => ours(Notification::warning(text)),
         Tell::Updated(outcome) => match outcome.error {
             None => Notification::success(i18n::tr!(
@@ -198,7 +203,13 @@ pub(crate) fn skip(host: &mut dyn WorkbenchHost) {
 struct Check;
 
 impl CommandHandler for Check {
-    fn run(&self, _host: &mut dyn WorkbenchHost) -> bool {
+    /// Looked for at once, a spinner meanwhile: the update's notification, replaced by the
+    /// answer (found, up to date, or what went wrong).
+    fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
+        if !matches!(state::phase(), Phase::Downloading { .. } | Phase::Ready { .. }) {
+            let (id, _) = state::notification();
+            host.update_notification(Notification::progress(t("updates.checking")).with_id(id));
+        }
         checker::check(true);
         true
     }

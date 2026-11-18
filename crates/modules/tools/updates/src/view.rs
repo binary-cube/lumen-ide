@@ -86,8 +86,6 @@ pub struct NotesView {
     laid: Option<(f32, f32, Laid)>,
     scroll: f32,
     bar: EdgeScrollbar,
-    hits: Vec<(Rect, Hit)>,
-    hover: Option<Hit>,
     action: Option<ViewerAction>,
     done: bool,
 }
@@ -96,19 +94,20 @@ pub struct NotesView {
 const ROW: f32 = 22.0;
 const TITLE_ROW: f32 = 28.0;
 const GAP: f32 = 10.0;
-const FOOTER: f32 = 64.0;
+/// Room under the notes (the buttons are the window's footer).
+const FOOTER: f32 = 16.0;
 const HEADER: f32 = 40.0;
 
 impl NotesView {
     fn press(&mut self, hit: Hit) {
         match hit {
-            Hit::Go => {
-                // Downloading: nothing more to do here (its notification follows it).
-                if matches!(state::phase(), Phase::Downloading { .. }) {
-                    return;
-                }
-                self.finish(|host| crate::install(host));
-            }
+            // Downloaded here (the window stays, its progress shown); once ready, the
+            // restart. Downloading: nothing to press.
+            Hit::Go => match state::phase() {
+                Phase::Available(_) => crate::checker::download(),
+                Phase::Ready { .. } => self.finish(|host| crate::install(host)),
+                Phase::Downloading { .. } | Phase::Idle => {}
+            },
             Hit::Skip => self.finish(|host| crate::skip(host)),
             Hit::Close => {
                 self.done = true;
@@ -123,10 +122,6 @@ impl NotesView {
     ) {
         self.done = true;
         self.action = Some(ViewerAction::WithHost(WithHost::once(job)));
-    }
-
-    fn hit(&self, p: Point) -> Option<Hit> {
-        self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
 
     /// The main button's label as things are: update, downloading (how far), restart.
@@ -195,8 +190,38 @@ impl Viewer for NotesView {
         Some(crate::ICON)
     }
 
-    fn key_hints(&self) -> Vec<(Vec<&'static str>, String)> {
-        vec![(vec!["↵"], self.go_label().0)]
+    /// In the window's footer, the first the rightmost: the main one (↵), Skip, Close.
+    /// While it downloads, Skip can't be pressed (it would stop it); Close only hides the
+    /// window (the download goes on, its notification follows it).
+    fn modal_buttons(&self) -> Vec<ui_components::ModalButton> {
+        use ui_components::ModalButton;
+        let (go, can_go) = self.go_label();
+        let mut skip = ModalButton::other("skip", t("updates.notes_skip"));
+        skip.enabled = !matches!(state::phase(), Phase::Downloading { .. });
+        vec![
+            ModalButton::main("go", go, can_go),
+            skip,
+            ModalButton::other("close", t("updates.notes_close")),
+        ]
+    }
+
+    /// The download's progress, ready, or why it failed.
+    fn modal_status(&self) -> Option<ui_components::ModalStatus> {
+        use ui_components::ModalStatus;
+        match state::phase() {
+            Phase::Downloading { received, total, .. } => Some(ModalStatus::Busy(i18n::tr!(
+                "updates.downloading_detail",
+                received = i18n::bytes(received),
+                total = i18n::bytes(total)
+            ))),
+            Phase::Ready { .. } => Some(ModalStatus::Done(t("updates.notes_ready"))),
+            _ => state::download_failed().map(ModalStatus::Failed),
+        }
+    }
+
+    /// Frames while it downloads (the progress moving).
+    fn is_loading(&self) -> bool {
+        matches!(state::phase(), Phase::Downloading { .. })
     }
 
     fn closed(&self) -> bool {
@@ -207,7 +232,6 @@ impl Viewer for NotesView {
         let ViewerPaint { bounds: b, scale, text, scene, palette: p, .. } = ctx;
         let ds = Ctx::new(p, scale);
         let px = |v: f32| ds.px(v);
-        self.hits.clear();
         let pad = px(24.0);
         let notes_box = Rect::new(
             b.min_x() + pad,
@@ -285,39 +309,28 @@ impl Viewer for NotesView {
         let width = notes_box.size.width - px(12.0);
         self.laid = Some((width, ds.scale, laid));
         self.bar.paint(scene, p, scale, notes_box, content, self.scroll);
-        // The buttons, right to left: the main one, Skip, Close.
-        let layer = scene.push_layer(Some(b));
-        let bh = px(ds::BUTTON_H);
-        let by = b.max_y() - px(FOOTER) + (px(FOOTER) - bh) / 2.0;
-        let (go, can_go) = self.go_label();
-        let w = ds::primary_width(text, &ds, &[&go]);
-        let g = Rect::new(b.max_x() - pad - w, by, w, bh);
-        ds::primary_button(layer, text, &ds, g, &go, can_go, self.hover == Some(Hit::Go));
-        self.hits.push((g, Hit::Go));
-        let skip = t("updates.notes_skip");
-        let sw = ds::primary_width(text, &ds, &[&skip]);
-        let s = Rect::new(g.min_x() - px(10.0) - sw, by, sw, bh);
-        ds::secondary_button(layer, text, &ds, s, &skip, true, self.hover == Some(Hit::Skip));
-        self.hits.push((s, Hit::Skip));
-        let close = t("updates.notes_close");
-        let cw = ds::primary_width(text, &ds, &[&close]);
-        let c = Rect::new(b.min_x() + pad, by, cw, bh);
-        ds::secondary_button(layer, text, &ds, c, &close, true, self.hover == Some(Hit::Close));
-        self.hits.push((c, Hit::Close));
+        // Under the notes, while it downloads or once it's ready: how far.
+        let fraction = match state::phase() {
+            Phase::Downloading { received, total, .. } if total > 0 => {
+                Some(received as f32 / total as f32)
+            }
+            Phase::Ready { .. } => Some(1.0),
+            _ => None,
+        };
+        if let Some(fraction) = fraction {
+            let bar =
+                Rect::new(notes_box.min_x(), b.max_y() - px(10.0), notes_box.size.width, px(4.0));
+            ds::progress_bar(scene.push_layer(Some(b)), &ds, bar, Some(fraction.clamp(0.0, 1.0)));
+        }
     }
 
-    fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(hit) = self.hit(p) {
-            self.press(hit);
-        }
-        self.action.take()
+    /// The notes are read, not selected: the arrow (the buttons are the footer's: a hand).
+    fn cursor_at(&self, _p: Point) -> Option<ui_components::ViewerCursor> {
+        Some(ui_components::ViewerCursor::Arrow)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let hover = self.hit(p);
-        let changed = hover != self.hover;
-        self.hover = hover;
-        changed | self.bar.hover(p)
+        self.bar.hover(p)
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -338,6 +351,7 @@ impl Viewer for NotesView {
         match id {
             "go" => self.press(Hit::Go),
             "skip" => self.press(Hit::Skip),
+            "close" => self.press(Hit::Close),
             _ => return false,
         }
         true
