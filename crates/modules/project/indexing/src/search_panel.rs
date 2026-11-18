@@ -177,8 +177,9 @@ pub struct ProjectSearch {
 const VISIBLE: usize = 7;
 /// The scrolled rows shown when files or folders by name take the top of the list.
 const VISIBLE_UNDER_FOLDERS: usize = 4;
-/// The files a file name's pattern lists shown at once (one line each).
-const LISTED_VISIBLE: usize = 10;
+/// The files a file name's pattern lists shown at once (one line each: as many as fit in
+/// the results' height, under their header).
+const LISTED_VISIBLE: usize = 9;
 const RECENT: usize = 6;
 /// The folders suggested for the one typed, at most.
 pub const SUGGESTIONS: usize = 6;
@@ -567,14 +568,18 @@ impl ProjectSearch {
             fixed + usize::from(fixed > 0 && rows > 0)
         };
         let folders = named + folders;
-        let empty_h = px(150.0);
+        // The list as tall whatever it shows (empty, the recent searches, a few results,
+        // a file pattern's files): the results' height, so the window never jumps as one
+        // types — taller only when folders over the results need it.
+        let full = VISIBLE as f32 * px(56.0) + px(space::SM) * 2.0;
         let list_h = if rows + folders == 0 {
-            empty_h
+            full
         } else {
-            rows as f32 * row_h
+            let needed = rows as f32 * row_h
                 + folders as f32 * folder_h
                 + headers as f32 * header_h
-                + px(space::SM) * 2.0
+                + px(space::SM) * 2.0;
+            needed.max(full)
         };
         let scope_h = if self.scope_open { px(50.0) } else { 0.0 };
         let replace_h = if self.replace_open { px(50.0) } else { 0.0 };
