@@ -117,28 +117,51 @@ start-up time and memory of a native app.
 ## Installing
 
 Download the file for your system from the
-[releases](https://github.com/binary-cube/lumen-ide/releases):
+[releases](https://github.com/binary-cube/lumen-ide/releases) (the newest one at the top).
+Once installed, Lumen updates itself: it tells you when a new version is out, and
+installs it when you choose to.
 
-| System | File | Then |
-|---|---|---|
-| macOS (Apple Silicon) | `lumen-<version>-macos-arm64.zip` | unzip, move **Lumen.app** to *Applications* |
-| Windows (x64) | `lumen-<version>-windows-x64.zip` | unzip anywhere, run `lumen.exe` |
-| Linux (x86_64) | `lumen-<version>-linux-x86_64.tar.gz` | extract, run `./lumen` |
+### macOS (Apple Silicon)
+
+1. Download `lumen-<version>-macos-arm64.zip` and open it: **Lumen.app** appears.
+2. Drag **Lumen.app** into your **Applications** folder.
+3. Open it. The first time, macOS says it *could not verify "Lumen.app"* (it isn't
+   notarized by Apple yet). Click **Done**, then:
+   1. open **System Settings › Privacy & Security**;
+   2. scroll down to *"Lumen.app" was blocked to protect your Mac* and click **Open Anyway**;
+   3. confirm with your password or Touch ID, and click **Open**.
+
+   Or, instead of these three steps, in **Terminal**:
+
+   ```sh
+   xattr -dr com.apple.quarantine /Applications/Lumen.app
+   ```
+
+This is asked only once: the app's own updates don't ask again. When you open a project
+in *Documents*, *Desktop* or *Downloads*, macOS asks whether Lumen may read that folder:
+click **Allow**.
 
 Intel Macs have no build of their own: Lumen builds on them from source (below).
 
-> [!IMPORTANT]
-> **The builds aren't signed yet**, so the system warns the first time you open them:
->
-> - **macOS** says it "could not verify" the app: click **Done**, then **System Settings ›
->   Privacy & Security ›** *"Lumen.app" was blocked* **› Open Anyway**, and **Open** once more
->   (right-click › Open no longer does it on recent macOS). Or, in a terminal:
->   `xattr -dr com.apple.quarantine /Applications/Lumen.app`. Once: the app's own updates
->   don't ask again.
-> - **Windows** SmartScreen says it protected your PC: **More info** › **Run anyway**.
->
-> Each release lists the files' SHA-256 in `SHA256SUMS`, and `latest.json` is signed with
-> the project's key (`packaging/release-key.pub`).
+### Windows (x64)
+
+- **The installer**, `lumen-<version>-windows-x64-setup.exe`: run it. It installs Lumen
+  for you only (no administrator), adds it to the Start menu, and to *Settings › Apps*
+  to remove it.
+- **Or the program alone**, `lumen-<version>-windows-x64.zip`: unzip it anywhere and run
+  `lumen.exe`.
+
+The first time, SmartScreen may say *Windows protected your PC* (the builds aren't
+signed yet): click **More info**, then **Run anyway**.
+
+### Linux (x86_64)
+
+Download `lumen-<version>-linux-x86_64.tar.gz`, extract it, and run `./lumen`.
+
+### Checking a download
+
+Each release lists its files' SHA-256 in `SHA256SUMS`; `latest.json`, what the app's
+updates read, is signed with the project's key (`packaging/release-key.pub`).
 
 ## Building from source
 

@@ -11,6 +11,8 @@ id = "lumen"
 project_dir = ".lumen"
 # The macOS bundle identifier.
 bundle_id = "dev.lumen.editor"
+# Who makes it: the Windows installer's publisher.
+publisher = "Binary Cube"
 # Where the code and the releases are (`owner/name` on GitHub): the app's updates come
 # from its releases.
 repository = "binary-cube/lumen-ide"

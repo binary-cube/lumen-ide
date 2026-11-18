@@ -129,17 +129,59 @@ jobs:
           wait-for-completion-timeout-in-seconds: 3600
           skip-decompress: true
           output-artifact-directory: signed
-      - name: The signed program in the zip (Windows)
+      # The zip and the installer made from the program (the signed one when it was):
+      # both offered, the zip as it was, the installer for the Start menu and Settings ›
+      # Apps (Inno Setup, installed here if the machine hasn't it).
+      - name: The zip and the installer (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem signed -Recurse -Filter *.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($exe) {
+            $sig = Get-AuthenticodeSignature $exe.FullName
+            Write-Host "signed: $($sig.Status) by $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { throw "the signature isn't valid: $($sig.StatusMessage)" }
+            $exe = $exe.FullName
+          } else {
+            $exe = (Get-ChildItem target/release -Filter *.exe | Select-Object -First 1).FullName
+          }
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+          ./scripts/build.ps1 -Installer -Exe $exe
+      - name: The installer to sign (Windows)
+        id: unsigned-setup
+        if: matrix.os == 'windows-latest' && env.HAS_SIGNPATH == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-windows-setup
+          path: dist/*-setup.exe
+          archive: false
+          if-no-files-found: error
+      - name: The installer signed by SignPath (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'lumen-ide' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INSTALLER_CONFIGURATION_SLUG || 'installer' }}
+          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          skip-decompress: true
+          output-artifact-directory: signed-setup
+      - name: The signed installer in its place (Windows)
         if: matrix.os == 'windows-latest' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         run: |
-          $exe = Get-ChildItem signed -Recurse -Filter *.exe | Select-Object -First 1
-          if (-not $exe) { throw "SignPath gave no program back" }
-          $sig = Get-AuthenticodeSignature $exe.FullName
+          $setup = Get-ChildItem signed-setup -Recurse -Filter *-setup.exe | Select-Object -First 1
+          if (-not $setup) { throw "SignPath gave no installer back" }
+          $sig = Get-AuthenticodeSignature $setup.FullName
           Write-Host "signed: $($sig.Status) by $($sig.SignerCertificate.Subject)"
           if ($sig.Status -ne 'Valid') { throw "the signature isn't valid: $($sig.StatusMessage)" }
-          $zip = Get-ChildItem dist -Filter *-windows-x64.zip | Select-Object -First 1
-          Compress-Archive -Path $exe.FullName -DestinationPath $zip.FullName -Force
+          Copy-Item $setup.FullName dist/ -Force
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: ./scripts/build.sh linux --full
@@ -149,6 +191,7 @@ jobs:
           path: |
             dist/*.zip
             dist/*.tar.gz
+            dist/*-setup.exe
           if-no-files-found: error
 
   publish:
@@ -194,7 +237,7 @@ jobs:
             echo "## Download"
             echo
             echo "- **macOS** (Apple Silicon): \`*-macos-arm64.zip\`"
-            echo "- **Windows** (x64): \`*-windows-x64.zip\`"
+            echo "- **Windows** (x64): \`*-windows-x64-setup.exe\` (an installer), or \`*-windows-x64.zip\` (the program alone)"
             echo "- **Linux** (x86_64): \`*-linux-x86_64.tar.gz\`"
             echo
             echo "The builds aren't signed yet: macOS and Windows warn the first time they're"
@@ -223,7 +266,7 @@ jobs:
         run: |
           name="$(sed -n 's/^name *= *"\(.*\)"/\1/p' brand.toml | head -1)"
           tag="v$VERSION"
-          files=(dist/*.zip dist/*.tar.gz dist/SHA256SUMS dist/latest.json dist/latest.json.sig)
+          files=(dist/*.zip dist/*.tar.gz dist/*-setup.exe dist/SHA256SUMS dist/latest.json dist/latest.json.sig)
           # Drafts of this version made before (a run again): replaced only once the new one
           # exists — a step failing leaves them as they were. A published release is never
           # touched.

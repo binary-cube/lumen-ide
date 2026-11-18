@@ -73,6 +73,8 @@ fn the_manifest_is_written_from_the_release_files() {
     std::fs::write(dist.join("app-1.0.0-macos-universal.zip"), b"mac").unwrap();
     std::fs::write(dist.join("app-1.0.0-windows-x64.zip"), b"win").unwrap();
     std::fs::write(dist.join("app-0.9.0-windows-x64.zip"), b"old").unwrap();
+    // The installer: in the sums, never in the manifest (the app updates from the archive).
+    std::fs::write(dist.join("app-1.0.0-windows-x64-setup.exe"), b"setup").unwrap();
     let secret_file = root.join("secret");
     make_key(&root, &secret_file).unwrap();
     assert!(make_key(&root, &root.join("again")).is_err(), "a key once");
@@ -89,7 +91,13 @@ fn the_manifest_is_written_from_the_release_files() {
     let signature = std::fs::read_to_string(dist.join("latest.json.sig")).unwrap();
     let public = std::fs::read_to_string(root.join(PUBLIC_KEY)).unwrap();
     assert!(verify(&text, &signature, &public));
-    assert_eq!(std::fs::read_to_string(dist.join("SHA256SUMS")).unwrap().lines().count(), 2);
+    let sums = std::fs::read_to_string(dist.join("SHA256SUMS")).unwrap();
+    assert_eq!(sums.lines().count(), 3, "{sums}");
+    assert!(sums.contains("app-1.0.0-windows-x64-setup.exe"));
+    assert!(done.contains("installer  app-1.0.0-windows-x64-setup.exe"), "{done}");
+    assert!(is_installer("app-1.0.0-windows-x64-setup.exe", "app", "1.0.0"));
+    assert!(!is_installer("app-1.0.0-windows-x64.zip", "app", "1.0.0"));
+    assert!(!is_installer("app-0.9.0-windows-x64-setup.exe", "app", "1.0.0"), "another version's");
 
     assert!(write_manifest(&root, &dist, "app", "1.0.0", "d", None, true).is_err(), "required");
     let (other, _) = new_key().unwrap();
