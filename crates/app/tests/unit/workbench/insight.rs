@@ -9,6 +9,23 @@ const SQUARE: &str = "<?php\nnamespace App;\n\nclass Square implements Shape\n{\
 const CIRCLE: &str = "<?php\nnamespace App;\n\nclass Circle implements Shape\n{\n    public function area(int $scale, bool $round = false): float { return 1.0; }\n}\n";
 const USE: &str = "<?php\nnamespace App;\n\nfunction draw(Shape $shape): void {}\n";
 
+/// PHP answered by the built-in engine while the test runs (the servers' tests give the
+/// process a server for it), beside the tests that don't choose PHP's server.
+fn beside_php_servers()
+-> (std::sync::RwLockReadGuard<'static, ()>, language_servers::settings::Pinned) {
+    let lock =
+        super::super::servers::tests::PHP.read().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut chosen = language_servers::settings::config();
+    chosen.engines = vec![(
+        "php".into(),
+        language_servers::settings::Choice {
+            engine: code_intelligence::servers::Engine::BuiltIn,
+            server: None,
+        },
+    )];
+    (lock, language_servers::settings::pin(chosen))
+}
+
 fn opened(name: &str, open: &str, extra: &[(&str, String)]) -> (Workbench, TextSystem, PathBuf) {
     let (support, _) = crate::modules::load(&extensions::ModuleSelection::default());
     let mut wb = Workbench::new(Arc::new(support), Ports::local());
@@ -73,6 +90,7 @@ fn hints(wb: &Workbench) -> Vec<(usize, String)> {
 
 #[test]
 fn literal_arguments_get_their_parameters_name_and_follow_the_edits() {
+    let _php = beside_php_servers();
     let (mut wb, mut text, _) = opened("hints", "Square.php", &[]);
     settle(&mut wb, &mut text, "the hints", |wb| !hints(wb).is_empty());
     let at = SQUARE.find("2, true").unwrap();
@@ -105,6 +123,7 @@ fn a_large_file_works_out_only_the_lines_in_view() {
     for i in 0..5000 {
         big.push_str(&format!("add({i}, 2);\n"));
     }
+    let _php = beside_php_servers();
     let (mut wb, mut text, _) = opened("large", "big.php", &[("big.php", big.clone())]);
     let started = std::time::Instant::now();
     settle(&mut wb, &mut text, "the hints", |wb| !hints(wb).is_empty());
@@ -123,6 +142,7 @@ fn a_large_file_works_out_only_the_lines_in_view() {
 
 #[test]
 fn lenses_count_usages_and_implementations_and_open_them() {
+    let _php = beside_php_servers();
     let (mut wb, mut text, _) = opened("lenses", "Shape.php", &[]);
     settle(&mut wb, &mut text, "the lenses", |wb| !wb.tabs[wb.active].insight.lines.is_empty());
     let lines = wb.tabs[wb.active].insight.lines.clone();

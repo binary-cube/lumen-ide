@@ -19,7 +19,7 @@ static SEEN: Mutex<Option<HashMap<PathBuf, Served>>> = Mutex::new(None);
 type Served = (Arc<Mutex<Seen>>, Behaviour);
 /// The tests run side by side (each its own project, its own fake server); one choosing
 /// PHP's server (the process's setting) runs alone among those with PHP files.
-static PHP: RwLock<()> = RwLock::new(());
+pub(crate) static PHP: RwLock<()> = RwLock::new(());
 /// A question's timeout in these tests.
 const TIMEOUT: Duration = Duration::from_secs(3);
 

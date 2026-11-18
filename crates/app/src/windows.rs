@@ -141,9 +141,22 @@ impl Application for AppWindows {
                     reopen.appeared(id.0, std::time::Instant::now());
                 }
                 // Started again after an update: the windows of the session before it.
-                if let Some(session) = self.reopen_at_start.take() {
-                    tracing::info!("the session before the update reopened");
-                    self.shared.reopen_ask.set(Some((session, id)));
+                if let Some(asked) = self.reopen_at_start.take() {
+                    // Not written before the app ended (another instance's file, a crash):
+                    // the newest one there instead of a blank window.
+                    let past = crate::sessions::past();
+                    let session = match past.get(asked) {
+                        Some(_) => Some(asked),
+                        None => past.past(self.sessions.id).next().map(|s| s.id),
+                    };
+                    tracing::info!(
+                        asked = %kernel::id::uuid_text(asked),
+                        found = session == Some(asked),
+                        "the session before the update reopened"
+                    );
+                    if let Some(session) = session {
+                        self.shared.reopen_ask.set(Some((session, id)));
+                    }
                 }
             }
             Err(_) => tracing::error!("the new window crashed on start"),
@@ -245,6 +258,7 @@ impl Application for AppWindows {
     fn exiting(&mut self) {
         storage::settings::flush();
         if let Some(dir) = self.update.take() {
+            tracing::info!(session = %kernel::id::uuid_text(self.sessions.id), "the update handed over");
             crate::updating::hand_over(&dir, self.sessions.id);
         }
     }

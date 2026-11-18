@@ -33,11 +33,12 @@ const MARGIN: usize = 60;
 const MAX_COUNTED_FILES: usize = 5000;
 
 /// What the hints are for: the document, its version, the lines (a window around the
-/// visible ones, by [`MARGIN`]).
-type HintKey = (DocumentId, u64, usize, usize);
+/// visible ones, by [`MARGIN`]), and whether a server answers there (one getting ready
+/// after the built-in engine's are shown: its own asked then).
+type HintKey = (DocumentId, u64, usize, usize, bool);
 /// What the lenses are for: the document, its version, the index's builds and the files'
-/// generation.
-type LensKey = (DocumentId, u64, u64, u64);
+/// generation, and whether a server answers there.
+type LensKey = (DocumentId, u64, u64, u64, bool);
 
 /// A lens part: what a click on it does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -201,7 +202,8 @@ impl Workbench {
         // Whole blocks of lines: a small scroll keeps the key.
         let from = first.saturating_sub(MARGIN) / MARGIN * MARGIN;
         let to = (last + MARGIN).div_ceil(MARGIN) * MARGIN;
-        Some((tab.doc.id(), tab.doc.version(), from, to))
+        let served = self.served_at(tab.doc.selections().primary().head).uses_server();
+        Some((tab.doc.id(), tab.doc.version(), from, to, served))
     }
 
     fn sync_hints(&mut self) -> bool {
@@ -312,7 +314,8 @@ impl Workbench {
     fn lens_key(&self) -> Option<LensKey> {
         let tab = self.tabs.get(self.active).filter(|t| t.editor_visible())?;
         let builds = self.data.indexer.as_ref().map_or(0, |i| i.builds_finished());
-        Some((tab.doc.id(), tab.doc.version(), builds, self.data.generations.files()))
+        let served = self.served_at(tab.doc.selections().primary().head).uses_server();
+        Some((tab.doc.id(), tab.doc.version(), builds, self.data.generations.files(), served))
     }
 
     fn sync_lenses(&mut self) -> bool {

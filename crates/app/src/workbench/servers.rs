@@ -918,4 +918,4 @@ impl Workbench {
 
 #[cfg(test)]
 #[path = "../../tests/unit/workbench/servers.rs"]
-mod tests;
+pub(super) mod tests;
