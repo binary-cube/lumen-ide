@@ -166,6 +166,10 @@ pub struct ProjectSearch {
     recent: Vec<String>,
     /// The panel's appearance (fade and a slight slide), as in settings.
     appear: Option<ui_components::anim::Tween>,
+    /// The scrolled rows' scrollbar (the app's: thin, wider under the mouse, dragged), and
+    /// where it was drawn: the rows' area, a row's height, how many rows.
+    bar: ui_components::EdgeScrollbar,
+    bar_area: Option<(Rect, f32, usize)>,
 }
 
 const VISIBLE: usize = 7;
@@ -386,7 +390,9 @@ impl ProjectSearch {
         let option = self.option_at(p).map(|(_, o)| o);
         let replace = self.replace_button.contains(p);
         let replace_all = self.replace_open && self.replace_all.contains(p);
-        let changed = hover != self.hover
+        let bar = self.bar.hover(p);
+        let changed = bar
+            || hover != self.hover
             || esc != self.esc_hover
             || scope != self.scope_hover
             || option != self.option_hover
@@ -410,6 +416,33 @@ impl ProjectSearch {
             || (self.can_replace && self.replace_all.contains(p))
     }
 
+    /// A press on the scrollbar: its thumb taken, or the list moved there. `true` if on it.
+    pub fn press_bar(&mut self, p: Point) -> bool {
+        let Some(offset) = self.bar.press(p) else { return false };
+        self.scroll_to(offset);
+        true
+    }
+
+    /// The scrollbar's thumb dragged to `p`. `true` if it was being dragged.
+    pub fn drag_bar(&mut self, p: Point) -> bool {
+        let Some(offset) = self.bar.drag(p) else { return false };
+        self.scroll_to(offset);
+        true
+    }
+
+    /// The mouse released: the thumb let go. `true` if it was held.
+    pub fn release_bar(&mut self) -> bool {
+        self.bar.release()
+    }
+
+    /// The scrolled rows from `offset` (physical pixels, as the scrollbar gives it).
+    fn scroll_to(&mut self, offset: f32) {
+        let Some((_, row_h, _)) = self.bar_area.filter(|(_, h, _)| *h > 0.0) else { return };
+        let (count, visible) = self.scrolled();
+        let first = (offset / row_h).round().max(0.0) as usize;
+        self.first = first.min(count.saturating_sub(visible));
+    }
+
     pub fn scroll(&mut self, rows: isize) {
         let (count, visible) = self.scrolled();
         let max = count.saturating_sub(visible) as isize;
@@ -428,6 +461,7 @@ impl ProjectSearch {
         self.suggestion_rows.clear();
         self.option_buttons.clear();
         self.enable = Rect::default();
+        self.bar_area = None;
         if !self.open {
             return;
         }
@@ -471,6 +505,10 @@ impl ProjectSearch {
             ds::empty_state(layer, text, &f.ctx, list, &title, Some(&detail));
         } else {
             self.paint_list(layer, text, &f, &fonts, list, file_icon);
+            if let Some((area, row_h, count)) = self.bar_area {
+                let (content, offset) = (count as f32 * row_h, self.first as f32 * row_h);
+                self.bar.paint(scene, palette, self.scale, area, content, offset);
+            }
         }
         self.paint_footer(mode, text, scene, &f, &fonts);
     }

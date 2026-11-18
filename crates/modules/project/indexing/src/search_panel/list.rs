@@ -86,25 +86,11 @@ impl ProjectSearch {
             }
             self.rows.push((rect, index));
         }
-        // The scrollbar of the scrolled rows: there are more and where you are.
+        // The scrollbar of the scrolled rows (drawn over the list: the app's own).
         if f.count > f.visible {
-            self.paint_scrollbar(layer, f, scroll_top, list.max_y());
+            let area = Rect::new(p.min_x(), scroll_top, p.size.width - px(2.0), top - scroll_top);
+            self.bar_area = Some((area, f.row_h, f.count));
         }
-    }
-
-    /// The scrolled rows' scrollbar (from `top` to the list's `bottom`).
-    pub(super) fn paint_scrollbar(&self, layer: &mut Layer, f: &Frame<'_>, top: f32, bottom: f32) {
-        let (ctx, p, palette) = (&f.ctx, f.panel, f.ctx.palette);
-        let px = |v: f32| ctx.px(v);
-        let (count, visible) = (f.count, f.visible);
-        let track = Rect::new(p.max_x() - px(9.0), top + px(2.0), px(4.0), bottom - top - px(12.0));
-        layer.quad(Quad::filled(track, ctx.fade(palette.text.with_alpha(0.05))).rounded(px(2.0)));
-        let thumb_h = (track.size.height * visible as f32 / count as f32).max(px(24.0));
-        let room = track.size.height - thumb_h;
-        let max_first = (count - visible) as f32;
-        let y = track.min_y() + room * (self.first as f32 / max_first).clamp(0.0, 1.0);
-        let thumb = Rect::new(track.min_x(), y.round(), track.size.width, thumb_h.round());
-        layer.quad(Quad::filled(thumb, ctx.fade(palette.text.with_alpha(0.28))).rounded(px(2.0)));
     }
 
     /// The footer: the keys on the left; on the right the search mode or its action.

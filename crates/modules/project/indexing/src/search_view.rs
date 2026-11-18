@@ -563,6 +563,10 @@ impl Viewer for SearchView {
     /// Outside the panel: nothing (it closes only with esc). A click anywhere but on the
     /// folders suggested or the folder's field closes their list (what it hit still acts).
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
+        // The scrollbar first: its thumb taken (dragged next), or the list moved there.
+        if self.panel.press_bar(p) {
+            return None;
+        }
         let hit = self.panel.hit(p);
         let keeps_list = matches!(
             hit,
@@ -589,6 +593,14 @@ impl Viewer for SearchView {
 
     fn hover(&mut self, p: Point) -> bool {
         self.panel.hover(p)
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.panel.drag_bar(p)
+    }
+
+    fn release(&mut self) -> bool {
+        self.panel.release_bar()
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
