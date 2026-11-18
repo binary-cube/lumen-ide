@@ -148,6 +148,8 @@ pub struct ProjectSearch {
     folders: Vec<FileMatch>,
     /// In the list: the files by name, the folders, then what the files hold (or the
     /// recent searches).
+    /// The named files are a file name's pattern's list: they scroll (none fixed).
+    listing: bool,
     selected: usize,
     first: usize,
     viewport: Rect,
@@ -175,6 +177,8 @@ pub struct ProjectSearch {
 const VISIBLE: usize = 7;
 /// The scrolled rows shown when files or folders by name take the top of the list.
 const VISIBLE_UNDER_FOLDERS: usize = 4;
+/// The files a file name's pattern lists shown at once (one line each).
+const LISTED_VISIBLE: usize = 10;
 const RECENT: usize = 6;
 /// The folders suggested for the one typed, at most.
 pub const SUGGESTIONS: usize = 6;
@@ -218,10 +222,22 @@ impl ProjectSearch {
         self.first = 0;
     }
 
-    /// The files and the folders whose name matches.
+    /// The files and the folders whose name matches (a few, over the text's results).
     pub fn set_named(&mut self, files: Vec<FileMatch>, folders: Vec<FileMatch>) {
         self.named = files;
         self.folders = folders;
+        self.listing = false;
+        self.selected = 0;
+        self.first = 0;
+    }
+
+    /// The files a file name's pattern found (`*.png`: maybe hundreds): the rows that
+    /// scroll, the window as tall as ever.
+    pub fn set_listed(&mut self, files: Vec<FileMatch>) {
+        self.named = files;
+        self.folders.clear();
+        self.results.clear();
+        self.listing = true;
         self.selected = 0;
         self.first = 0;
     }
@@ -236,7 +252,7 @@ impl ProjectSearch {
 
     /// The rows by name, above the scrolled ones (always shown).
     fn fixed(&self) -> usize {
-        self.named.len() + self.folders.len()
+        if self.listing { self.folders.len() } else { self.named.len() + self.folders.len() }
     }
 
     pub fn result(&self, index: usize) -> Option<&Hit> {
@@ -277,7 +293,13 @@ impl ProjectSearch {
     }
 
     fn count(&self) -> usize {
-        if self.showing_recent() { self.recent.len() } else { self.fixed() + self.results.len() }
+        if self.showing_recent() {
+            self.recent.len()
+        } else if self.listing {
+            self.named.len()
+        } else {
+            self.fixed() + self.results.len()
+        }
     }
 
     /// How many file rows fit (fewer when folders are listed above them).
@@ -289,6 +311,8 @@ impl ProjectSearch {
     fn scrolled(&self) -> (usize, usize) {
         if self.showing_recent() {
             (self.recent.len(), VISIBLE)
+        } else if self.listing {
+            (self.named.len(), LISTED_VISIBLE)
         } else {
             (self.results.len(), self.file_rows())
         }
@@ -298,6 +322,9 @@ impl ProjectSearch {
     pub fn action(&self, index: usize) -> Option<ProjectSearchAction> {
         if self.showing_recent() {
             return (index < self.recent.len()).then_some(ProjectSearchAction::Recent(index));
+        }
+        if self.listing {
+            return (index < self.named.len()).then_some(ProjectSearchAction::OpenNamed(index));
         }
         let (named, fixed) = (self.named.len(), self.fixed());
         if index < named {
@@ -523,15 +550,17 @@ impl ProjectSearch {
         let field_h = px(60.0);
         let footer_h = px(42.0);
         let recent = self.showing_recent();
-        let row_h = if recent { px(38.0) } else { px(56.0) };
+        // A file listed by its name: a row of one line, as the recent searches'.
+        let row_h = if recent || self.listing { px(38.0) } else { px(56.0) };
         let folder_h = px(38.0);
         let header_h = px(28.0);
         // The scrolled rows (recent searches or files) and the fixed folder rows above them.
         let (count, visible) = self.scrolled();
         let rows = count.min(visible);
-        let (named, folders) = if recent { (0, 0) } else { (self.named.len(), self.folders.len()) };
+        let (named, folders) =
+            if recent || self.listing { (0, 0) } else { (self.named.len(), self.folders.len()) };
         // A header over each section shown (the scrolled rows' only under another one).
-        let headers = if recent {
+        let headers = if recent || self.listing {
             1
         } else {
             let fixed = usize::from(named > 0) + usize::from(folders > 0);

@@ -17,12 +17,14 @@ impl ProjectSearch {
         let (ctx, p) = (&f.ctx, f.panel);
         let px = |v: f32| ctx.px(v);
         let (recent, folders) = (f.recent, f.folders);
-        let named = self.named.len();
+        let named = if self.listing { 0 } else { self.named.len() };
         let mut top = list.min_y() + px(space::SM);
         // The rows to draw: (list index, top, height).
         let mut slots: Vec<(usize, f32, f32)> = Vec::with_capacity(folders + f.rows);
         if recent {
             paint_header(layer, text, f, fonts, &mut top, &t("search.recent"));
+        } else if self.listing {
+            paint_header(layer, text, f, fonts, &mut top, &t("search.files"));
         } else if folders > 0 {
             // The files by name, then the folders: a section each, when it has rows.
             for (from, to, title) in
@@ -76,6 +78,14 @@ impl ProjectSearch {
                 };
                 if let Some(cut) = paint_name_row(layer, text, f, fonts, rect, item, icon) {
                     self.tips.push((cut, item.path.clone()));
+                }
+            } else if self.listing {
+                let file = &self.named[index];
+                let (id, color) = file_icon(file.name());
+                if let Some(cut) =
+                    paint_name_row(layer, text, f, fonts, rect, file, (Some(id), color))
+                {
+                    self.tips.push((cut, file.path.clone()));
                 }
             } else {
                 let hit = &self.results[index - folders];

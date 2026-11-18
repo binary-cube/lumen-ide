@@ -294,7 +294,7 @@ impl SearchView {
                 self.panel.set_error(None);
                 self.panel.set_exact(None);
                 let files = files_named(&data.queries.file_list(), query.pattern.trim());
-                self.panel.set_named(files, Vec::new());
+                self.panel.set_listed(files);
             }
             Err(error) => {
                 self.panel.set_error(Some(readable_error(&error.to_string())));
@@ -332,6 +332,13 @@ impl SearchView {
         self.panel.set_error(None);
         self.panel.set_exact(None);
         let Some(data) = &self.data else { return };
+        // A file name's pattern (`*.png`, one word with a `*` or `?`): the files named so.
+        let typed = self.panel.input.text().trim();
+        if looks_like_glob(typed) && !typed.contains(char::is_whitespace) {
+            let files = files_named(&data.queries.file_list(), typed);
+            self.panel.set_listed(files);
+            return;
+        }
         // Searches keep the semantic model (loaded once, shared by every window).
         let semantic = data.semantic.as_ref();
         if let Some(semantic) = semantic {

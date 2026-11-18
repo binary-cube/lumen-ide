@@ -421,3 +421,15 @@ fn a_search_runs_on_a_worker_and_its_results_come_by_a_poll() {
         Some(ViewerAction::OpenAt { path: PathBuf::from("/result/src/a.php"), line: 3 })
     );
 }
+
+/// Without any option, a file name's pattern lists its files too (as one word: with a
+/// space it's searched as text).
+#[test]
+fn a_file_name_s_pattern_needs_no_option() {
+    let mut view = opened(kernel::ProjectId::new(), "/r", None);
+    view.text_input("*.png");
+    let named: Vec<&str> =
+        (0..5).filter_map(|i| view.panel.named(i)).map(|f| f.path.as_str()).collect();
+    assert_eq!(named, ["assets/logo.png", "assets/img/cat.png"]);
+    assert!(view.panel.result(0).is_none(), "no text searched");
+}
