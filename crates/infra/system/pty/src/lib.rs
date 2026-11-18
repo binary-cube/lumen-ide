@@ -338,6 +338,71 @@ pub fn themed_prompt(profile: &ShellProfile) -> ShellProfile {
     }
 }
 
+/// `profile` keeping the commands typed in the project at `root` apart (its own history file,
+/// in the app's data folder: `terminal-history/<the project's key>/`, made only for the
+/// user); unchanged for a shell that keeps none of its own, or when it can't be made.
+pub fn project_history(profile: &ShellProfile, root: &std::path::Path) -> ShellProfile {
+    use terminal_session::shell_history as history;
+    let Some(program) = profile.program.as_deref() else { return profile.clone() };
+    let kind = history::kind(program);
+    let key = history::project_key(&root.to_string_lossy());
+    let file = match history::file_name(kind) {
+        Some(name) => {
+            let Some(data) = files::places::data_dir() else { return profile.clone() };
+            let dir = data.join("terminal-history").join(&key);
+            let file = dir.join(name);
+            if let Err(e) = private_file(&dir, &file) {
+                tracing::warn!("the project's shell history can't be made: {e}");
+                return profile.clone();
+            }
+            file.to_string_lossy().into_owned()
+        }
+        None => String::new(),
+    };
+    let wslenv = std::env::var("WSLENV").ok();
+    let Some(moved) = history::per_project(profile, &file, &key, wslenv.as_deref()) else {
+        return profile.clone();
+    };
+    // zsh: named last, after the system's files and the user's (macOS's `/etc/zshrc` sets
+    // its own `HISTFILE`): through startup files of the app's.
+    if kind != history::Kind::Zsh {
+        return moved;
+    }
+    let Some(cache) = files::places::cache_dir() else { return moved };
+    let dir = cache.join("terminal-history-zsh");
+    let user_zdotdir = std::env::var("ZDOTDIR").ok().filter(|d| !d.is_empty());
+    let shown = dir.to_string_lossy().into_owned();
+    let Some(wrapped) =
+        terminal_session::prompt::zsh_history_only(&moved, &shown, user_zdotdir.as_deref())
+    else {
+        return moved;
+    };
+    let written = std::fs::create_dir_all(&dir).and_then(|()| {
+        wrapped.files.iter().try_for_each(|(name, text)| std::fs::write(dir.join(name), text))
+    });
+    match written {
+        Ok(()) => wrapped.profile,
+        Err(e) => {
+            tracing::warn!("zsh's startup files for the project's history can't be written: {e}");
+            moved
+        }
+    }
+}
+
+/// `file` in `dir`, both made if missing, for this user only (as `~/.bash_history`).
+fn private_file(dir: &std::path::Path, file: &std::path::Path) -> io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        options.mode(0o600);
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?;
+    }
+    options.open(file).map(drop)
+}
+
 /// Starts the shell from `profile` in a PTY of size `size`.
 pub fn spawn(profile: &ShellProfile, size: TermSize, waker: Waker) -> io::Result<PtySession> {
     static NEXT_ID: AtomicU64 = AtomicU64::new(1);

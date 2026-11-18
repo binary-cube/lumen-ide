@@ -39,7 +39,9 @@ fn each_known_shell_its_way_others_left_alone() {
     assert!(fish.files.is_empty());
     let pwsh = themed(&shell(r"C:\pwsh\pwsh.exe", &["-NoLogo"]), "C:/t", None).unwrap();
     assert_eq!(pwsh.profile.args[..3], ["-NoLogo", "-NoExit", "-EncodedCommand"]);
-    assert_eq!(pwsh.profile.args[3], encoded(POWERSHELL_PROMPT));
+    // The project's history kept first (a no-op without one), then the prompt.
+    let command = format!("{}; {POWERSHELL_PROMPT}", crate::shell_history::POWERSHELL_HISTORY);
+    assert_eq!(pwsh.profile.args[3], encoded(&command));
     let cmd = themed(&shell(r"C:\Windows\System32\cmd.exe", &[]), "C:/t", None).unwrap();
     assert!(cmd.profile.env["PROMPT"].contains("$P"));
     assert_eq!(themed(&shell("/usr/local/bin/nu", &[]), "/tmp/p", None), None);

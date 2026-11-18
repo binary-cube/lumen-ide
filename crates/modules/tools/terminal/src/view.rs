@@ -397,7 +397,11 @@ impl TerminalView {
         // The shell chosen in the settings (by default the user's own, a login shell).
         let profile = match &self.launch {
             Some(launch) => crate::config::launched(launch, self.cwd.clone()),
-            None => crate::config::profile(&self.config(), self.cwd.clone()),
+            None => {
+                // In a project (opened at its root): its own history.
+                let project = self._live.as_ref().and_then(|l| l.0).and(self.cwd.as_deref());
+                crate::config::profile(&self.config(), self.cwd.clone(), project)
+            }
         };
         let size = self.term_size();
         match pty::spawn(&profile, size, waker) {

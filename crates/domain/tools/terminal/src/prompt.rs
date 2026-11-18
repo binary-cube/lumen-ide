@@ -76,7 +76,11 @@ pub fn themed(
                 "-NoLogo".into(),
                 "-NoExit".into(),
                 "-EncodedCommand".into(),
-                encoded(POWERSHELL_PROMPT),
+                // The project's history kept too (its own command replaced by this one).
+                encoded(&format!(
+                    "{}; {POWERSHELL_PROMPT}",
+                    crate::shell_history::POWERSHELL_HISTORY
+                )),
             ];
             Vec::new()
         }
@@ -87,6 +91,31 @@ pub fn themed(
         _ => return None,
     };
     Some(ThemedPrompt { profile: themed, files })
+}
+
+/// zsh with the project's history only (no prompt of ours): started with `ZDOTDIR` at `dir`,
+/// whose files read the user's own, then name the history file last — macOS's
+/// `/etc/zshrc` sets `HISTFILE` itself, after the environment and before `.zshrc`. `None`:
+/// not zsh.
+pub fn zsh_history_only(
+    profile: &ShellProfile,
+    dir: &str,
+    user_zdotdir: Option<&str>,
+) -> Option<ThemedPrompt> {
+    if kind(profile.program.as_deref()?)? != "zsh" {
+        return None;
+    }
+    let mut wrapped = profile.clone();
+    wrapped.env.insert("ZDOTDIR".into(), dir.into());
+    if let Some(own) = user_zdotdir {
+        wrapped.env.insert("EDITOR_USER_ZDOTDIR".into(), own.into());
+    }
+    let files = vec![
+        (".zshenv", zsh_reads(".zshenv")),
+        (".zprofile", zsh_reads(".zprofile")),
+        (".zshrc", format!("{}{ZSH_RESTORE}", zsh_reads(".zshrc"))),
+    ];
+    Some(ThemedPrompt { profile: wrapped, files })
 }
 
 /// A PowerShell command as `-EncodedCommand` takes it: UTF-16LE, in base64.
@@ -131,12 +160,14 @@ PROMPT='%F{green}%n@%m%f %F{blue}%~%f${vcs_info_msg_0_} %F{yellow}%#%f '
 "#;
 
 /// Back to the user's `ZDOTDIR` (their `.zlogin`, subshells): unset if it was home.
+/// The project's history last (after the user's files, which may set their own).
 const ZSH_RESTORE: &str = r#"if [ "$EDITOR_USER_ZDOTDIR" = "$HOME" ]; then unset ZDOTDIR; else ZDOTDIR="$EDITOR_USER_ZDOTDIR"; fi
 unset EDITOR_ZDOTDIR EDITOR_USER_ZDOTDIR
+[ -n "$EDITOR_SHELL_HISTORY" ] && HISTFILE="$EDITOR_SHELL_HISTORY"
 "#;
 
 /// bash: the login files as a login shell reads them (`.bashrc` through them, as usual),
-/// then the prompt.
+/// then the prompt, and the project's history last.
 const BASH_RC: &str = r#"[ -f /etc/profile ] && . /etc/profile
 if [ -f "$HOME/.bash_profile" ]; then . "$HOME/.bash_profile"
 elif [ -f "$HOME/.bash_login" ]; then . "$HOME/.bash_login"
@@ -144,6 +175,7 @@ elif [ -f "$HOME/.profile" ]; then . "$HOME/.profile"
 fi
 __editor_prompt_git() { local b; b=$(git symbolic-ref --short HEAD 2>/dev/null) && printf ' (%s)' "$b"; }
 PS1='\[\e[32m\]\u@\h\[\e[0m\] \[\e[34m\]\w\[\e[35m\]$(__editor_prompt_git)\[\e[0m\] \[\e[33m\]\$\[\e[0m\] '
+[ -n "$EDITOR_SHELL_HISTORY" ] && HISTFILE="$EDITOR_SHELL_HISTORY"
 "#;
 
 /// fish: after its configuration.

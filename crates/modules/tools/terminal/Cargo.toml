@@ -31,5 +31,9 @@ settings-model.workspace = true
 agents.workspace = true
 contracts.workspace = true
 
+[dev-dependencies]
+# The app's folders made in the test's own (never the user's).
+files.workspace = true
+
 [lints]
 workspace = true

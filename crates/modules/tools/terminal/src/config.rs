@@ -44,6 +44,8 @@ pub struct TerminalConfig {
     /// The prompt in the theme's colors (user@host, the directory, the branch), given to
     /// the shell at start; off: the shell's own.
     pub themed_prompt: bool,
+    /// Each project's shells keep their own command history (off: the user's usual one).
+    pub project_history: bool,
     pub colors: Colors,
     pub cursor: Cursor,
     pub blink: bool,
@@ -77,6 +79,7 @@ impl Default for TerminalConfig {
             shell: String::new(),
             custom: String::new(),
             themed_prompt: false,
+            project_history: true,
             colors: Colors::Theme,
             cursor: Cursor::Block,
             blink: true,
@@ -111,11 +114,13 @@ pub fn configure(config: TerminalConfig) {
     }
 }
 
-/// How a new tab starts its shell in `cwd`: the one chosen, or "Other…"'s command; with the
-/// themed prompt when chosen (a shell it knows).
+/// How a new tab starts its shell in `cwd`: the one chosen, or "Other…"'s command; the
+/// history of the project at `project` its own (when chosen); with the themed prompt when
+/// chosen (a shell it knows).
 pub fn profile(
     config: &TerminalConfig,
     cwd: Option<std::path::PathBuf>,
+    project: Option<&std::path::Path>,
 ) -> terminal_session::ShellProfile {
     let profile = match split_command(&config.custom).filter(|_| config.shell == CUSTOM) {
         Some((program, args)) => terminal_session::ShellProfile {
@@ -126,6 +131,10 @@ pub fn profile(
             env: Default::default(),
         },
         None => pty::profile(&config.shell, cwd),
+    };
+    let profile = match project.filter(|_| config.project_history) {
+        Some(root) => pty::project_history(&profile, root),
+        None => profile,
     };
     if config.themed_prompt { pty::themed_prompt(&profile) } else { profile }
 }

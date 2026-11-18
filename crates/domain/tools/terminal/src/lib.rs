@@ -7,6 +7,7 @@
 pub mod history;
 pub mod prompt;
 pub mod scroll;
+pub mod shell_history;
 pub mod shells;
 pub mod text;
 

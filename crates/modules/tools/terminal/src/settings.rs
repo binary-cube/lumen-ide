@@ -28,6 +28,8 @@ pub const SHELL: Setting<String> = Setting::new("terminal", "shell", String::new
 pub const CUSTOM_SHELL: Setting<String> = Setting::new("terminal", "custom_shell", String::new);
 /// The prompt in the theme's colors (off: the shell's own).
 pub const THEMED_PROMPT: Setting<bool> = Setting::new("terminal", "themed_prompt", || false);
+/// Each project's shells with their own command history (off: the user's usual one).
+pub const PROJECT_HISTORY: Setting<bool> = Setting::new("terminal", "project_history", || true);
 /// `theme`, `classic` or `contrast`.
 pub const COLORS: Setting<String> = Setting::new("terminal", "colors", || "theme".into())
     .valid(|v| matches!(v.as_str(), "theme" | "classic" | "contrast"));
@@ -85,6 +87,7 @@ pub fn read(settings: &SettingsService) -> TerminalConfig {
         shell: settings.get(&SHELL),
         custom: settings.get(&CUSTOM_SHELL),
         themed_prompt: settings.get(&THEMED_PROMPT),
+        project_history: settings.get(&PROJECT_HISTORY),
         colors: match settings.get(&COLORS).as_str() {
             "classic" => Colors::Classic,
             "contrast" => Colors::HighContrast,
@@ -201,6 +204,13 @@ impl SettingsContribution for ShellSettings {
             label: t("settings.terminal_themed_prompt"),
             on: scope.settings.get(&THEMED_PROMPT),
         });
+        rows.push(SettingsRow::Toggle {
+            key: "project_history",
+            detail: t("settings.terminal_project_history_detail"),
+            default: Some(PROJECT_HISTORY.default_value()),
+            label: t("settings.terminal_project_history"),
+            on: scope.settings.get(&PROJECT_HISTORY),
+        });
         // The keys that work differently in a terminal (each system's own).
         let keys = if cfg!(target_os = "macos") { "mac" } else { "other" };
         rows.push(SettingsRow::Notes(vec![
@@ -219,6 +229,10 @@ impl SettingsContribution for ShellSettings {
         let settings = scope.settings;
         if key == "themed_prompt" {
             save(settings, &THEMED_PROMPT, value != 0);
+            return;
+        }
+        if key == "project_history" {
+            save(settings, &PROJECT_HISTORY, value != 0);
             return;
         }
         if key != "shell" {

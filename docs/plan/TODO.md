@@ -5,7 +5,17 @@ făcute se șterg.
 
 ## Următorul (cerut)
 
-- **Terminalul: istoricul comenzilor pe proiect** (cerut 2026-11-18). Acum un shell deschis
+- **Terminalul: istoricul comenzilor pe proiect** — **făcut 2026-11-18**, cu setarea
+  „Istoricul comenzilor pe proiect” (implicit pornită): fișierul în
+  `<date>/terminal-history/<cheia proiectului>/` (cheia: hash-ul căii rădăcinii, `0600`);
+  zsh prin `ZDOTDIR`-ul aplicației (`/etc/zshrc` de pe macOS își pune `HISTFILE`: al nostru
+  e pus ultimul, după fișierele utilizatorului), bash prin `HISTFILE` (Git Bash: `/c/…`),
+  fish prin `fish_history`, PowerShell prin `Set-PSReadLineOption -HistorySavePath` după
+  profil, WSL prin `WSLENV` (`HISTFILE/p`), cmd neschimbat. Încercat cu zsh-ul real pe
+  macOS (test `--ignored`). **Rămas:** de încercat de mână pe Windows (PowerShell, Git Bash,
+  WSL) și pe Linux (bash), și un bash al cărui `.bashrc` își setează singur `HISTFILE`
+  (câștigă el, dacă promptul colorat e oprit). Planul de la început, pentru context:
+  Acum un shell deschis
   în editor folosește istoricul obișnuit al utilizatorului (`~/.zsh_history`,
   `~/.bash_history`…), amestecat cu ce a scris în alte terminale și în alte proiecte; ↑ și
   Ctrl+R aduc comenzi care n-au nimic de-a face cu proiectul. De făcut:

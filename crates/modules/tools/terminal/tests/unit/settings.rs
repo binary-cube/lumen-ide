@@ -74,11 +74,18 @@ fn a_shell_is_chosen_by_its_id_and_other_shows_its_command() {
     let SettingsRow::Choices { choices, current, .. } = &block.rows[0] else { panic!() };
     assert_eq!(choices.len(), pty::shells().len() + 1);
     assert_eq!(*current, 0, "the default");
-    assert_eq!(block.rows.len(), 3, "no command field: the shells, the prompt's switch, the keys");
-    assert!(matches!(&block.rows[2], SettingsRow::Notes(notes) if notes.len() == 3));
+    assert_eq!(
+        block.rows.len(),
+        4,
+        "no command field: the shells, the prompt's and the history's switches, the keys"
+    );
+    assert!(matches!(&block.rows[3], SettingsRow::Notes(notes) if notes.len() == 3));
     assert!(matches!(block.rows[1], SettingsRow::Toggle { key: "themed_prompt", on: false, .. }));
+    assert!(matches!(block.rows[2], SettingsRow::Toggle { key: "project_history", on: true, .. }));
     shell.choose(scope(&settings), "themed_prompt", 1);
     assert!(read(&settings).themed_prompt);
+    shell.choose(scope(&settings), "project_history", 0);
+    assert!(!read(&settings).project_history, "the user's usual history");
     shell.choose(scope(&settings), "shell", 0);
     assert_eq!(settings.get(&SHELL), pty::shells()[0].id);
     shell.choose(scope(&settings), "shell", CUSTOM_CHOICE);
@@ -87,7 +94,7 @@ fn a_shell_is_chosen_by_its_id_and_other_shows_its_command() {
     assert!(matches!(&block.rows[1], SettingsRow::Text { value, .. } if value == "/opt/shell -i"));
     let config = read(&settings);
     assert_eq!(config.shell, CUSTOM);
-    assert_eq!(crate::config::profile(&config, None).program.as_deref(), Some("/opt/shell"));
+    assert_eq!(crate::config::profile(&config, None, None).program.as_deref(), Some("/opt/shell"));
 }
 
 /// What programs' requests to erase the history get: keep it for running programs by
