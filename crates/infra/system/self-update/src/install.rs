@@ -215,13 +215,25 @@ fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 /// The app at `target` started again (the session `reopen` reopened by it), on its own.
+///
+/// An app bundle is opened by the system (`open -n`), not started by the helper: started
+/// by it, the helper — a lone copy of the program in the temporary folder, its signature
+/// not the app's — was the one macOS held responsible for what the app does, so every
+/// access to a protected folder (Documents…) asked again, the answer kept for no one.
 fn relaunch(target: &Path, reopen: Option<&str>) {
-    let program = if target.extension().is_some_and(|e| e == "app") {
-        target.join("Contents").join("MacOS").join(kernel::brand::ID)
+    let bundle = target.extension().is_some_and(|e| e == "app");
+    let mut command = if bundle && cfg!(target_os = "macos") {
+        let mut open = Command::new("/usr/bin/open");
+        open.arg("-n").arg(target);
+        if reopen.is_some() {
+            open.arg("--args");
+        }
+        open
+    } else if bundle {
+        Command::new(target.join("Contents").join("MacOS").join(kernel::brand::ID))
     } else {
-        target.to_path_buf()
+        Command::new(target)
     };
-    let mut command = Command::new(program);
     if let Some(id) = reopen {
         command.arg(REOPEN_ARG).arg(id);
     }

@@ -206,6 +206,14 @@ impl Viewer for NotesView {
     fn modal_buttons(&self) -> Vec<ui_components::ModalButton> {
         use ui_components::ModalButton;
         let (go, can_go) = self.go_label();
+        // Downloaded: only when to restart is left (now, or later — at the next start);
+        // skipping it means nothing any more.
+        if matches!(state::phase(), Phase::Ready { .. }) {
+            return vec![
+                ModalButton::main("go", go, can_go),
+                ModalButton::other("close", t("updates.notes_later")),
+            ];
+        }
         let mut skip = ModalButton::other("skip", t("updates.notes_skip"));
         skip.enabled = !matches!(state::phase(), Phase::Downloading { .. });
         vec![
