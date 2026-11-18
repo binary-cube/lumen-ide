@@ -49,7 +49,7 @@ fn its_buttons_close_or_choose() {
         None,
     );
     let mut view = opened(&mut text);
-    assert!(view.laid.is_some(), "laid out once");
+    assert!(view.read.content_height() > 0.0, "laid out");
     let buttons = view.modal_buttons();
     assert_eq!(buttons.iter().map(|b| b.id).collect::<Vec<_>>(), ["go", "skip", "close"]);
     assert!(!buttons[0].enabled && !buttons[1].enabled && buttons[2].enabled);

@@ -663,6 +663,12 @@ impl EdgeScrollbar {
         self.bar.as_mut().filter(|b| b.contains(p)).and_then(|b| b.begin_drag(p, m))
     }
 
+    /// `p` is on it, where a press takes it (something to scroll: it's there).
+    pub fn contains(&self, p: Point) -> bool {
+        let m = self.metrics;
+        m.content > m.viewport + 0.5 && self.bar.as_ref().is_some_and(|b| b.contains(p))
+    }
+
     /// The offset while its thumb is dragged.
     pub fn drag(&mut self, p: Point) -> Option<f32> {
         self.bar.as_ref().and_then(|b| b.drag_to(p, self.metrics))

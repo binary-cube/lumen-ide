@@ -32,6 +32,7 @@ pub mod painter;
 pub mod palette;
 pub mod picker;
 pub mod progress_ring;
+pub mod read_text;
 pub mod screen_widgets;
 pub mod scroll_state;
 pub mod scrollbar;
@@ -67,6 +68,7 @@ pub use metric_card::{CardAreas, CardForm, CardSeries, MetricCard, metric_card};
 pub use multiline::{MultilineField, MultilineSpec};
 pub use painter::{LayerPainter, Painter, ScenePainter};
 pub use palette::{Palette, SyntaxColors};
+pub use read_text::{Block, BlockKind, ReadText, TextPos};
 pub use scroll_state::ScrollState;
 pub use scrollbar::{
     AutoHide, EdgeScrollbar, ScrollMetrics, Scrollbar, ScrollbarHover, ScrollbarLook,
