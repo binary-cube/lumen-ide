@@ -132,10 +132,10 @@ pub const SCROLLBAR_VISIBILITY: Setting<String> =
     Setting::new("scrollbars", "visibility", || "view".to_owned())
         .valid(|s| ui_workbench::ScrollbarVisibility::parse(s).is_some());
 
-/// The icon set's style (`[appearance] icons`): Octicons by default (a pack missing — its
-/// module off — falls back to ours).
+/// The icon set's style (`[appearance] icons`): ours drawn as by hand (Sketch) by default;
+/// a pack missing — its module off — falls back to ours.
 pub const ICON_STYLE: Setting<String> =
-    Setting::new("appearance", "icons", || "octicons".to_owned())
+    Setting::new("appearance", "icons", || icons::IconStyle::Sketch.id().to_owned())
         // A style's id or a pack's (packs are known once their modules load; one not there
         // any more falls back to ours).
         .valid(|id| {
