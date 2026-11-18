@@ -120,8 +120,11 @@ Intel Macs have no build of their own: Lumen builds on them from source (below).
 > [!IMPORTANT]
 > **The builds aren't signed yet**, so the system warns the first time you open them:
 >
-> - **macOS** says it can't check the app: right-click **Lumen.app** › **Open** › **Open**
->   (once), or run `xattr -dr com.apple.quarantine /Applications/Lumen.app`.
+> - **macOS** says it "could not verify" the app: click **Done**, then **System Settings ›
+>   Privacy & Security ›** *"Lumen.app" was blocked* **› Open Anyway**, and **Open** once more
+>   (right-click › Open no longer does it on recent macOS). Or, in a terminal:
+>   `xattr -dr com.apple.quarantine /Applications/Lumen.app`. Once: the app's own updates
+>   don't ask again.
 > - **Windows** SmartScreen says it protected your PC: **More info** › **Run anyway**.
 >
 > Each release lists the files' SHA-256 in `SHA256SUMS`, and `latest.json` is signed with
