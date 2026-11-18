@@ -105,6 +105,11 @@ impl ProjectService for Announcer {
 
 /// `tell` shown: the update's own notification (one, updated as it goes), or a word.
 fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
+    // What's New open shows the download itself: no notification over it (told once it
+    // closes, if the download still goes on or is ready).
+    if state::is_notes_open() && matches!(tell, Tell::Progress | Tell::Ready) {
+        return;
+    }
     let app = kernel::brand::NAME;
     let phase = state::phase();
     let version = phase.available().map(|a| a.release.version.to_string()).unwrap_or_default();

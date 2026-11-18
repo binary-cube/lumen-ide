@@ -103,7 +103,12 @@ fn blocks(lines: &[Line]) -> Vec<Block> {
         .collect()
 }
 
-/// Logical sizes.
+/// Logical sizes: a block's row as the notes draw it, the window's least and most.
+const HEADING_ROW: f32 = 28.0;
+const BODY_ROW: f32 = 22.0;
+const GAP_ROW: f32 = 10.0;
+const MIN_HEIGHT: f32 = 240.0;
+const MAX_HEIGHT: f32 = 520.0;
 /// Room under the notes for the download's progress (the buttons are the window's footer).
 const FOOTER: f32 = 48.0;
 const HEADER: f32 = 40.0;
@@ -147,11 +152,21 @@ impl NotesView {
     }
 }
 
+/// Closed: the download's notification can show again.
+impl Drop for NotesView {
+    fn drop(&mut self) {
+        if self.notes.is_some() {
+            state::notes_open(false);
+        }
+    }
+}
+
 impl Viewer for NotesView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
         if let Some(notes) = data.downcast_ref::<Notes>() {
             self.read.set_blocks(blocks(&notes.lines));
             self.notes = Some(notes.clone());
+            state::notes_open(true);
         }
     }
 
@@ -165,8 +180,20 @@ impl Viewer for NotesView {
         ))
     }
 
+    /// As tall as its notes (unwrapped: a long line taking two rows scrolls a little),
+    /// between a short window and [`MAX_HEIGHT`]; past it, they scroll.
     fn modal_height(&self) -> Option<f32> {
-        Some(520.0)
+        let notes: f32 = self
+            .read
+            .blocks()
+            .iter()
+            .map(|b| match b.kind {
+                BlockKind::Heading => HEADING_ROW,
+                BlockKind::Gap => GAP_ROW,
+                _ => BODY_ROW,
+            })
+            .sum();
+        Some((notes + FOOTER + HEADER).clamp(MIN_HEIGHT, MAX_HEIGHT))
     }
 
     fn modal_icon(&self) -> Option<&'static str> {
@@ -188,16 +215,12 @@ impl Viewer for NotesView {
         ]
     }
 
-    /// The download's progress, ready, or why it failed.
+    /// Why the download failed (its progress is under the notes).
     fn modal_status(&self) -> Option<ui_components::ModalStatus> {
         use ui_components::ModalStatus;
         match state::phase() {
-            Phase::Downloading { received, total, .. } => Some(ModalStatus::Busy(i18n::tr!(
-                "updates.downloading_detail",
-                received = i18n::bytes(received),
-                total = i18n::bytes(total)
-            ))),
-            Phase::Ready { .. } => Some(ModalStatus::Done(t("updates.notes_ready"))),
+            // How far it went is under the notes: only a failure here.
+            Phase::Downloading { .. } | Phase::Ready { .. } => None,
             _ => state::download_failed().map(ModalStatus::Failed),
         }
     }

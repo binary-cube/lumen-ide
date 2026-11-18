@@ -83,6 +83,8 @@ struct State {
     later: Option<kernel::work::Later>,
     /// Why the last download failed (the user's words; gone when one begins again).
     failed: Option<String>,
+    /// What's New is open: it shows the download itself (its notifications wait).
+    notes_open: bool,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -250,6 +252,27 @@ pub fn progress(received: u64, total: u64) {
 /// Why the last download failed (`None`: it didn't, or another began since).
 pub fn download_failed() -> Option<String> {
     with(|s| s.failed.clone())
+}
+
+/// What's New opened or closed. Closed while the version found downloads or is ready: its
+/// notification told then (it follows the download from there).
+pub fn notes_open(open: bool) {
+    let tell = with(|s| {
+        s.notes_open = open;
+        match (&s.phase, open) {
+            (Phase::Downloading { .. }, false) => Some(Tell::Progress),
+            (Phase::Ready { .. }, false) => Some(Tell::Ready),
+            _ => None,
+        }
+    });
+    if let Some(tell) = tell {
+        self::tell(tell);
+    }
+}
+
+/// What's New is open (the download's notifications wait).
+pub fn is_notes_open() -> bool {
+    with(|s| s.notes_open)
 }
 
 /// What to tell, the first window to ask taking it.

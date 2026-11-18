@@ -66,3 +66,23 @@ fn a_version_let_go_while_downloading_never_becomes_ready() {
     assert!(matches!(phase(), Phase::Idle));
     assert_eq!(take_tell(), None);
 }
+
+/// What's New open: it shows the download, so its notifications wait; closed while the
+/// download goes on, its notification is told then.
+#[test]
+fn what_s_new_open_holds_the_download_s_notifications() {
+    let _serial = serial();
+    let available = crate::tests::found();
+    set(Phase::Downloading { available, received: 1, total: 4 }, None);
+    notes_open(true);
+    assert!(is_notes_open());
+    assert_eq!(take_tell(), None, "nothing told on opening");
+    notes_open(false);
+    assert!(!is_notes_open());
+    assert_eq!(take_tell(), Some(Tell::Progress), "its notification follows the download");
+    // Nothing going on: closing tells nothing.
+    set(Phase::Idle, None);
+    notes_open(true);
+    notes_open(false);
+    assert_eq!(take_tell(), None);
+}

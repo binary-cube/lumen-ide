@@ -53,7 +53,8 @@ fn its_buttons_close_or_choose() {
     let buttons = view.modal_buttons();
     assert_eq!(buttons.iter().map(|b| b.id).collect::<Vec<_>>(), ["go", "skip", "close"]);
     assert!(!buttons[0].enabled && !buttons[1].enabled && buttons[2].enabled);
-    assert!(matches!(view.modal_status(), Some(ui_components::ModalStatus::Busy(_))));
+    assert_eq!(view.modal_status(), None, "its progress under the notes, not twice");
+    assert!(state::is_notes_open(), "its notifications wait");
     assert!(view.is_loading(), "frames while it moves");
     assert!(view.command("go") && view.take_action().is_none(), "nothing to press");
     // Ready: the restart, handed to the host.
@@ -64,7 +65,7 @@ fn its_buttons_close_or_choose() {
     };
     state::set(Phase::Ready { available: found, staged }, None);
     let mut view = opened(&mut text);
-    assert!(matches!(view.modal_status(), Some(ui_components::ModalStatus::Done(_))));
+    assert_eq!(view.modal_status(), None);
     assert!(view.command("go"));
     assert!(matches!(view.take_action(), Some(ViewerAction::WithHost(_))));
     assert!(view.closed());
