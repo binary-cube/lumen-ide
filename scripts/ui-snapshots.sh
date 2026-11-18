@@ -8,7 +8,8 @@
 #   scripts/ui-snapshots.sh compare <dir> [group]   # after it: lists what differs, fails if any
 #
 # Groups: modals, editor, windows, modules, data, database, settings, chrome, themes (all when
-# omitted).
+# omitted), or one case: `case:<name>` (`case:agent-chat`). `SNAPSHOT_LANG=en`: in English
+# (the README's pictures; Romanian otherwise, as the references were made).
 # The sample project, a sample git repository (fixed author and dates: the same hashes every
 # run) and HOME live in a fixed scratch folder, so what's shown matches between runs;
 # nothing of the user's (recent projects, settings, repositories) is read or written.
@@ -464,6 +465,9 @@ cases=(
     # The Services window at the bottom: nothing contributed, then a sample contributor.
     "windows|services-empty|SERVICES=empty|src/Shop.php"
     "windows|services-fake|SERVICES=fake|src/Shop.php"
+    # The project's agent sessions (made up: Claude Code's files written in the scratch
+    # HOME, nothing of the user's read), the README's picture.
+    "modules|agent-sessions|PANEL=agent-sessions;SESSIONS_SAMPLE=1|src/Shop.php"
     "modules|canvas-1|CANVAS=1|src/Shop.php"
     "modules|canvas-2|CANVAS=2|src/Shop.php"
     "modules|canvas-3|CANVAS=3|src/Shop.php"
@@ -809,12 +813,18 @@ count=0
 for theme in default-dark default-light; do
     for case in "${cases[@]}"; do
         IFS='|' read -r group name vars file <<<"$case"
-        [[ -n "$only" && "$group" != "$only" ]] && continue
+        # A group, or one case (`case:<name>`).
+        if [[ "$only" == case:* ]]; then
+            [[ "$name" != "${only#case:}" ]] && continue
+        elif [[ -n "$only" && "$group" != "$only" ]]; then
+            continue
+        fi
         png="$out/$name-$theme.png"
         target="$png"
         [[ "$mode" == compare ]] && target="$work/$name-$theme.png"
-        # Romanian, as the references were made (the app itself starts in English).
-        env=(HOME="$work/home" EDITOR_LANG=ro EDITOR_SNAPSHOT_THEME="$theme")
+        # Romanian, as the references were made (the app itself starts in English);
+        # `SNAPSHOT_LANG=en` for the README's pictures.
+        env=(HOME="$work/home" EDITOR_LANG="${SNAPSHOT_LANG:-ro}" EDITOR_SNAPSHOT_THEME="$theme")
         IFS=';' read -ra assignments <<<"$vars"
         for v in ${assignments[@]+"${assignments[@]}"}; do
             [[ -z "$v" ]] && continue
@@ -827,6 +837,27 @@ for theme in default-dark default-light; do
             mkdir -p "$(dirname "$project/$file")"
             cp "$work/samples/${file##*/}" "$project/$file"
             placed="$project/$file"
+        fi
+        # Sample agent sessions of the project (Claude Code's files), this case only: a few
+        # titles, each last active at another time.
+        if [[ "$vars" == *SESSIONS_SAMPLE=1* ]]; then
+            real="$(cd "$project" && pwd -P)"
+            sessions="$work/home/.claude/projects/$(printf '%s' "$real" | sed 's/[^A-Za-z0-9]/-/g')"
+            mkdir -p "$sessions"
+            i=0
+            while IFS='|' read -r ago title asked; do
+                i=$((i + 1))
+                id="0000000$i-1111-4222-8333-44445555666$i"
+                printf '{"type":"user","sessionId":"%s","cwd":"%s","timestamp":"2026-11-1%dT09:00:00Z","message":{"role":"user","content":"%s"}}\n{"type":"ai-title","aiTitle":"%s","sessionId":"%s"}\n' \
+                    "$id" "$real" "$i" "$asked" "$title" "$id" > "$sessions/$id.jsonl"
+                touch -t "$(date -v-"$ago" +%Y%m%d%H%M.%S)" "$sessions/$id.jsonl"
+            done <<'SESSIONS'
+1M|Add a discount to the cart total|Add a percentage discount to Shop::total
+3H|Explain how Cart and Shop work together|How do Cart and Shop work together?
+1d|Write tests for Shop::items|Write PHPUnit tests for Shop::items
+4d|Rename Cart to Basket|Rename the Cart class to Basket everywhere
+12d|Fix the style.css colors in dark mode|The colors in style.css are wrong in dark mode
+SESSIONS
         fi
         # The project's own Node tools (46c): their packages in node_modules, this case only.
         if [[ "$vars" == *NODE_TOOLS=1* ]]; then
@@ -858,7 +889,7 @@ for theme in default-dark default-light; do
         rm -rf "$project/$project_dir/extractors"
         # And the language server's TypeScript file (43a).
         rm -f "$project/src/cart.ts" "$project/src/card.css" "$project/src/cart.html" "$project/src/shapes.cpp"
-        rm -rf "$project/node_modules"
+        rm -rf "$project/node_modules" "$work/home/.claude"
         if [[ "$mode" == compare ]]; then
             if [[ ! -f "$png" ]]; then
                 echo "no reference: $name ($theme)"

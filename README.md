@@ -82,13 +82,23 @@ start-up time and memory of a native app.
   </tr>
 </table>
 
+### AI agents
+
+- **Agent Sessions**, on the left beside the project: every session of the project's agents
+  (Claude Code, Cline), the most recent first, searched, starred, renamed; a new one
+  started, or one taken up again, in a terminal tab of the editor.
+- **An MCP server** (off until turned on): the agents on your machine use the editor —
+  the files open, the selection, a file's text — through tools the modules offer
+  ([docs](docs/mcp-server.md)).
+
+<img alt="The project's agent sessions beside the code" src="docs/screenshots/agent-sessions.png" width="100%">
+
 ### And around the code
 
 - **Git**: log and branches, commit, diff and merge, blame, a file's history.
 - **HTTP client**: `.http` files (the common request-file format) with environments,
   scripts and a visual editor.
-- **Terminal** in tabs or at the bottom, and **AI agents** (Claude Code) with their
-  sessions, plus an **MCP server** so agents can use the editor ([docs](docs/mcp-server.md)).
+- **Terminal** in tabs or at the bottom, each project with its own command history.
 - **Remote projects** over SFTP / FTP, **local history**, **diagrams** (draw.io files and
   class diagrams), **Markdown**, image and CSV viewers, a compare and merge view.
 - **Task Manager**: what each part of the app and each program it started costs, live.
