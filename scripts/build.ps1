@@ -8,8 +8,9 @@
 # -Installer: the installer too, dist\<id>-<version>-windows-x64-setup.exe (Inno Setup 6:
 # packaging\windows\installer.iss), beside the zip (both offered: the zip as it is, the
 # installer for the Start menu and Settings › Apps).
-# -Exe <path>: the program to package instead of building one (the release's, signed).
-param([switch]$WithServers, [switch]$Fast, [switch]$Installer, [string]$Exe)
+# -Program <path>: the program to package instead of building one (the release's, signed).
+# (Not `-Exe`: PowerShell's names ignore case, it would be the script's own `$exe`.)
+param([switch]$WithServers, [switch]$Fast, [switch]$Installer, [string]$Program)
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -24,8 +25,8 @@ $dist = Join-Path $root "dist"
 New-Item -ItemType Directory -Force -Path $dist | Out-Null
 
 $exe = Join-Path $root "target\$cargoProfile\$id.exe"
-if ($Exe) {
-    $exe = (Resolve-Path $Exe).Path
+if ($Program) {
+    $exe = (Resolve-Path $Program).Path
     Write-Host "$name $version - Windows x64, packaging $exe" -ForegroundColor Cyan
 } else {
     Write-Host "$name $version - build Windows x64 ($cargoProfile)" -ForegroundColor Cyan

@@ -148,7 +148,7 @@ jobs:
           if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
             choco install innosetup --no-progress -y
           }
-          ./scripts/build.ps1 -Installer -Exe $exe
+          ./scripts/build.ps1 -Installer -Program $exe
       - name: The installer to sign (Windows)
         id: unsigned-setup
         if: matrix.os == 'windows-latest' && env.HAS_SIGNPATH == 'true'
