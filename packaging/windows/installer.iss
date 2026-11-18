@@ -24,9 +24,12 @@ AppPublisher={#Publisher}
 AppPublisherURL={#Url}
 AppSupportURL={#Url}/issues
 AppUpdatesURL={#Url}/releases
+; Windows' version fields take numbers only: the whole version (a beta's too) as text.
 VersionInfoVersion={#NumericVersion}
 VersionInfoProductName={#AppName}
-VersionInfoProductVersion={#AppVersion}
+VersionInfoProductVersion={#NumericVersion}
+VersionInfoProductTextVersion={#AppVersion}
+VersionInfoTextVersion={#AppVersion}
 ; For this user only: no administrator, a folder the app can write to (its updates).
 PrivilegesRequired=lowest
 DefaultDirName={autopf}\{#AppName}
