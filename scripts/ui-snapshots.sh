@@ -8,8 +8,9 @@
 #   scripts/ui-snapshots.sh compare <dir> [group]   # after it: lists what differs, fails if any
 #
 # Groups: modals, editor, windows, modules, data, database, settings, chrome, themes (all when
-# omitted), or one case: `case:<name>` (`case:agent-chat`). `SNAPSHOT_LANG=en`: in English
-# (the README's pictures; Romanian otherwise, as the references were made).
+# omitted), or one case: `case:<name>` (`case:agent-sessions`). `SNAPSHOT_LANG=en`: in
+# English (the README's pictures; Romanian otherwise, as the references were made);
+# `SNAPSHOT_SIZE=1600x1000`: the window that large (logical pixels; 1200x700 otherwise).
 # The sample project, a sample git repository (fixed author and dates: the same hashes every
 # run) and HOME live in a fixed scratch folder, so what's shown matches between runs;
 # nothing of the user's (recent projects, settings, repositories) is read or written.
@@ -825,6 +826,8 @@ for theme in default-dark default-light; do
         # Romanian, as the references were made (the app itself starts in English);
         # `SNAPSHOT_LANG=en` for the README's pictures.
         env=(HOME="$work/home" EDITOR_LANG="${SNAPSHOT_LANG:-ro}" EDITOR_SNAPSHOT_THEME="$theme")
+        # `SNAPSHOT_SIZE=1600x1000`: a larger window (logical pixels; the README's pictures).
+        [[ -n "${SNAPSHOT_SIZE:-}" ]] && env+=(EDITOR_SNAPSHOT_SIZE="$SNAPSHOT_SIZE")
         IFS=';' read -ra assignments <<<"$vars"
         for v in ${assignments[@]+"${assignments[@]}"}; do
             [[ -z "$v" ]] && continue
