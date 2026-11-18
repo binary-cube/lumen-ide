@@ -56,6 +56,9 @@ jobs:
           - platform: Linux
             os: ubuntu-latest
     runs-on: ${{ matrix.os }}
+    env:
+      # Whether the project's signing certificate is there (a secret can't be asked in `if`).
+      HAS_MACOS_SIGNING: ${{ secrets.MACOS_SIGNING_P12 != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -69,6 +72,26 @@ jobs:
           # The release profile's settings (Cargo.toml): bumped with them.
           key: profile-v1
           save-if: false
+      # The project's signing certificate (MACOS_SIGNING_P12, base64, and its password) in a
+      # keychain of this run's: the app signed with it, so macOS knows it from one version
+      # to the next. Without the secret: signed ad hoc, as before.
+      - name: Signing certificate (macOS)
+        if: matrix.os == 'macos-latest' && env.HAS_MACOS_SIGNING == 'true'
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+        run: |
+          keychain="$RUNNER_TEMP/signing.keychain-db"
+          password="$(openssl rand -hex 16)"
+          echo "$MACOS_SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 3600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/signing.p12"
+          echo "MACOS_SIGN_IDENTITY=Binary Cube Code Signing" >> "$GITHUB_ENV"
       - name: Build (macOS, Apple Silicon)
         if: matrix.os == 'macos-latest'
         run: ./scripts/build.sh mac --full

@@ -184,7 +184,15 @@ build_mac() {
     ok "the language servers: $(du -sh "$app/Contents/Resources/lsp" | cut -f1)"
   fi
   # Ad-hoc signature: without it, macOS refuses arm64 apps copied from another Mac.
-  codesign --force --deep --sign - "$app" >/dev/null 2>&1 || info "ad-hoc signing failed (going on)"
+  # Signed with the project's own certificate when one is given (`MACOS_SIGN_IDENTITY`: the
+  # release workflow's): macOS then knows the app by it from one version to the next (the
+  # folders it was allowed stay allowed after an update). Else ad hoc (a local build).
+  if [[ -n "${MACOS_SIGN_IDENTITY:-}" ]]; then
+    codesign --force --deep --sign "$MACOS_SIGN_IDENTITY" "$app" || fail "the app couldn't be signed"
+    ok "signed: $(codesign -d -r- "$app" 2>&1 | sed -n 's/^designated => //p')"
+  else
+    codesign --force --deep --sign - "$app" >/dev/null 2>&1 || info "ad-hoc signing failed (going on)"
+  fi
 
   local zip="$DIST/$ID-$VERSION-macos-$arch.zip"
   rm -f "$zip"
