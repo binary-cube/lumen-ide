@@ -289,8 +289,15 @@ impl SearchView {
             whole_word: options.word,
         };
         match document::Matcher::new(&query) {
+            // Not a pattern, but a file name's (`*.png`, `src/*.php`): the files named so.
+            Err(_) if options.regex && looks_like_glob(&query.pattern) => {
+                self.panel.set_error(None);
+                self.panel.set_exact(None);
+                let files = files_named(&data.queries.file_list(), query.pattern.trim());
+                self.panel.set_named(files, Vec::new());
+            }
             Err(error) => {
-                self.panel.set_error(Some(error.to_string()));
+                self.panel.set_error(Some(readable_error(&error.to_string())));
                 self.panel.set_exact(None);
             }
             Ok(None) => {
@@ -775,6 +782,45 @@ impl Viewer for SearchView {
 
     fn is_animating(&self) -> bool {
         self.panel.is_animating()
+    }
+}
+
+/// The most files a file name's pattern lists.
+const NAMED_MOST: usize = 200;
+
+/// `pattern` reads as a file name's (a `*` or `?`, nothing else of a regular expression's):
+/// `*.png`, `src/*.php`, `test_??.rs`.
+fn looks_like_glob(pattern: &str) -> bool {
+    let pattern = pattern.trim();
+    !pattern.is_empty()
+        && pattern.contains(['*', '?'])
+        && !pattern.contains(['\\', '(', ')', '|', '^', '$', '+', '{', '}'])
+}
+
+/// The project's files matching `pattern`: by their name, or by their path when it has a
+/// `/` — their name lit, at most [`NAMED_MOST`].
+fn files_named(files: &[String], pattern: &str) -> Vec<FileMatch> {
+    let by_path = pattern.contains('/');
+    files
+        .iter()
+        .filter(|path| {
+            let name = path.rsplit('/').next().unwrap_or(path);
+            kernel::paths::glob_match(pattern, if by_path { path } else { name })
+        })
+        .take(NAMED_MOST)
+        .map(|path| FileMatch { path: path.clone(), score: 0, name_positions: Vec::new() })
+        .collect()
+}
+
+/// What's wrong with a pattern, on one line: a regular expression's error says it on its
+/// last (`error: repetition operator missing expression`), over the pattern and a caret.
+fn readable_error(error: &str) -> String {
+    let line = error.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or(error).trim();
+    let line = line.strip_prefix("error:").map_or(line, str::trim);
+    let mut chars = line.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 

@@ -56,7 +56,7 @@ impl ProjectQueries for Fake {
         PathBuf::from(self.0)
     }
     fn file_list(&self) -> Arc<Vec<String>> {
-        Arc::default()
+        Arc::new(vec!["src/a.php".into(), "assets/logo.png".into(), "assets/img/cat.png".into()])
     }
     fn symbol_index(&self) -> SymbolIndex {
         SymbolIndex::default()
@@ -274,6 +274,36 @@ fn an_option_finds_every_occurrence_or_says_what_s_wrong() {
     view.panel.input.set_text("");
     view.text_input("(");
     assert!(view.panel.error().is_some() && view.panel.result(0).is_none());
+    // Said on one line, as words (the regular expression's error is the pattern drawn over
+    // a caret, then what's wrong).
+    let said = view.panel.error().unwrap();
+    assert!(!said.contains('\n') && !said.starts_with("regex"), "{said}");
+}
+
+/// A regular expression that isn't one but a file name's pattern (`*.png`): the files
+/// named so, by their name (or their path, with a `/`); a pattern of neither: what's wrong.
+#[test]
+fn a_file_name_s_pattern_lists_the_files_named_so() {
+    let mut view = opened(kernel::ProjectId::new(), "/r", None);
+    view.act(ProjectSearchAction::Toggle(crate::search_panel::SearchOption::Regex));
+    view.text_input("*.png");
+    assert_eq!(view.panel.error(), None, "not an error");
+    let named: Vec<&str> =
+        (0..5).filter_map(|i| view.panel.named(i)).map(|f| f.path.as_str()).collect();
+    assert_eq!(named, ["assets/logo.png", "assets/img/cat.png"]);
+    view.panel.input.set_text("");
+    // (`assets/*.png` is a regular expression too — `s/*` — so its text is searched.)
+    view.text_input("*/logo.png");
+    let named: Vec<&str> =
+        (0..5).filter_map(|i| view.panel.named(i)).map(|f| f.path.as_str()).collect();
+    assert_eq!(named, ["assets/logo.png"], "by its path: `*` stays in a folder");
+    assert!(looks_like_glob("test_??.rs") && !looks_like_glob("(a|b)*") && !looks_like_glob("abc"));
+    assert_eq!(
+        readable_error(
+            "regex parse error:\n    *.png\n    ^\nerror: repetition operator missing expression"
+        ),
+        "Repetition operator missing expression"
+    );
 }
 
 /// Opened to replace: every occurrence is found (no option needed), what's typed in the
