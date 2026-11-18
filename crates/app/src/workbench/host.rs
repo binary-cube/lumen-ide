@@ -203,6 +203,10 @@ impl WorkbenchHost for Workbench {
         Workbench::dismiss_notification(self, id);
     }
 
+    fn shows_notification(&self, id: workbench_model::NotificationId) -> bool {
+        self.data.notifications.get(id).is_some_and(|t| !t.is_leaving())
+    }
+
     fn answers(&self) -> Option<Arc<workbench_model::AnswerBook>> {
         Some(Arc::clone(&self.support.answers))
     }

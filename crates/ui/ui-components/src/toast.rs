@@ -52,8 +52,11 @@ const ACTION_PAD: f32 = 12.0;
 pub const RING_STEPS: u16 = crate::progress_ring::STEPS;
 /// A spinner's step (its next dot lit).
 pub const SPINNER_STEP: std::time::Duration = std::time::Duration::from_millis(90);
-/// Frames for the stack never come faster than this (about 30 a second).
+/// Frames for the stack never come faster than this (about 30 a second): its rings.
 pub const MIN_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
+/// A progress bar sweeping (work in progress): about 60 a second, smooth to the eye — only
+/// while it shows.
+pub const PROGRESS_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 
 /// A kind's color, as the palette has it (green from the named colors, in the shade that
 /// reads on the theme).
@@ -187,6 +190,9 @@ pub fn layout_card(text: &mut TextSystem, ctx: &Ctx<'_>, toast: &Toast, width: f
         progress,
     }
 }
+
+/// How much what's under a card is blurred (logical pixels).
+const GLASS_BLUR: f32 = 18.0;
 
 /// The progress bar's thickness and the space over it (logical pixels).
 const PROGRESS: f32 = 3.0;
@@ -453,8 +459,11 @@ fn paint_card(
     let px = |v: f32| ctx.px(v);
     let color = kind_color(card.kind, p);
     let dark = crate::tag_colors::is_dark(p);
-    // The glass: a slightly translucent surface over a soft shadow.
-    let glass = p.popup_background.with_alpha(p.popup_background.a * 0.92);
+    // Frosted glass: what's under the card blurred, a translucent surface over it (the
+    // blur seen through), a soft shadow.
+    let corner = px(radius::LG);
+    layer.backdrop_blur_rounded(rect, px(GLASS_BLUR), ctx.opacity, corner);
+    let glass = p.popup_background.with_alpha(p.popup_background.a * 0.72);
     ds::surface_with(layer, ctx, rect, Elevation::Medium, radius::LG, glass);
     glow(layer, ctx, rect, color, if dark { 0.16 } else { 0.10 });
     // The icon in its tinted square (a spinner for work in progress).

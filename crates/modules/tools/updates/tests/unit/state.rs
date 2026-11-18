@@ -9,14 +9,14 @@ fn a_tell_is_taken_once_and_wakes_the_windows() {
     let w = Arc::clone(&woken);
     assert!(
         add_wake(
-            ProjectId::new(),
+            kernel::id::new_uuid(),
             Arc::new(move || {
                 w.fetch_add(1, Ordering::Relaxed);
             })
         ),
-        "the first project: the looks begin"
+        "the first window: the looks begin"
     );
-    assert!(!add_wake(ProjectId::new(), Arc::new(|| {})), "another: they had begun");
+    assert!(!add_wake(kernel::id::new_uuid(), Arc::new(|| {})), "another: they had begun");
     tell(Tell::UpToDate);
     assert!(woken.load(Ordering::Relaxed) >= 1);
     assert_eq!(take_tell(), Some(Tell::UpToDate));
@@ -85,4 +85,29 @@ fn what_s_new_open_holds_the_download_s_notifications() {
     notes_open(true);
     notes_open(false);
     assert_eq!(take_tell(), None);
+}
+
+/// A look the user asked for: its answer is told in the window showing the spinner, not
+/// the first window to ask; another one takes it only once the spinner has waited long.
+#[test]
+fn the_answer_goes_to_the_window_showing_the_spinner() {
+    let _serial = serial();
+    let (spinner, _) = notification();
+    spinning(spinner);
+    tell(Tell::UpToDate);
+    assert_eq!(take_tell_for(|_| false, true), None, "another window: not its answer");
+    assert_eq!(take_tell_for(|id| id == spinner, false), Some(Tell::UpToDate), "the asking one");
+    // Taken: the next tell goes to any window.
+    tell(Tell::Progress);
+    assert_eq!(take_tell_for(|_| false, true), Some(Tell::Progress));
+}
+
+/// Nothing asked for: the focused window tells it; an unfocused one only once it waited
+/// (the app in the background).
+#[test]
+fn what_s_found_is_told_in_the_focused_window() {
+    let _serial = serial();
+    tell(Tell::Available);
+    assert_eq!(take_tell_for(|_| false, false), None, "not the window the user is in");
+    assert_eq!(take_tell_for(|_| false, true), Some(Tell::Available), "the focused one");
 }

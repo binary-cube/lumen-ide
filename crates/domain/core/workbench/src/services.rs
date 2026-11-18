@@ -73,6 +73,13 @@ pub trait ProjectService: Send + Sync + std::fmt::Debug {
     /// Starts following the project. The subscriptions returned live as long as the project.
     fn attach(&self, project: &ProjectContext<'_>) -> Vec<Subscription>;
 
+    /// A window opened, a project in it or not (the start screen): `wake` wakes it, its
+    /// [`Self::poll`] following — for what a module does without any project (the app's
+    /// updates). The subscriptions returned live as long as the window.
+    fn window_opened(&self, _wake: &std::sync::Arc<dyn Fn() + Send + Sync>) -> Vec<Subscription> {
+        Vec::new()
+    }
+
     /// Back on the UI thread after a wake: what the background work found reaches the user
     /// (a message, a comparison). `true` if something changed (a redraw).
     fn poll(&self, _host: &mut dyn crate::WorkbenchHost) -> bool {

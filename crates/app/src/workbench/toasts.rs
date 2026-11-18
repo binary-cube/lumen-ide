@@ -205,8 +205,8 @@ impl Workbench {
             .shown()
             .filter(|t| !t.is_leaving())
             .filter_map(|t| match t.notification.kind {
-                // Its bar sweeping (or moving as it's told): at the stack's own pace.
-                NotificationKind::Progress => Some(ui_workbench::toast::MIN_FRAME),
+                // Its bar sweeping: smooth (about 60 a second, only while it shows).
+                NotificationKind::Progress => Some(ui_workbench::toast::PROGRESS_FRAME),
                 _ if paused => None,
                 _ => t
                     .notification
@@ -214,7 +214,7 @@ impl Workbench {
                     .map(|d| d / u32::from(ui_workbench::toast::RING_STEPS)),
             })
             .min()?;
-        Some(Instant::now() + step.max(ui_workbench::toast::MIN_FRAME))
+        Some(Instant::now() + step.max(ui_workbench::toast::PROGRESS_FRAME))
     }
 
     /// The notifications' history (newest first) in a list; a row chosen shows it again.

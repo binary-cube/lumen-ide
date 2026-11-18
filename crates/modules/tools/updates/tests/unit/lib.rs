@@ -18,6 +18,10 @@ impl WorkbenchHost for Host {
     fn project_root(&self) -> Option<PathBuf> {
         None
     }
+    /// The window the user is in (what's found is told there).
+    fn window_focused(&self) -> bool {
+        true
+    }
     fn active_file(&self) -> Option<workbench_model::ActiveFile> {
         None
     }

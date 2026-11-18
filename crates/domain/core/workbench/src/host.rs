@@ -233,6 +233,12 @@ pub trait WorkbenchHost:
     fn update_notification(&mut self, notification: crate::Notification) {
         self.notify(notification);
     }
+    /// Notification `id` is shown in this window (not leaving): what a module answers in
+    /// the window that asked (its work in progress there) rather than another one.
+    fn shows_notification(&self, id: crate::NotificationId) -> bool {
+        let _ = id;
+        false
+    }
     /// Closes notification `id`.
     fn dismiss_notification(&mut self, id: crate::NotificationId) {
         let _ = id;

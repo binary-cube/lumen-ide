@@ -82,22 +82,29 @@ impl Module for UpdatesModule {
     }
 }
 
-/// The open projects' windows, woken when there's something to tell (the first one to look
-/// tells it); the looks begin with the first project.
+/// The open windows (a project in them or not: the start screen too), woken when there's
+/// something to tell (the first one to look tells it); the looks begin with the first.
 #[derive(Debug)]
 struct Announcer;
 
 impl ProjectService for Announcer {
-    fn attach(&self, project: &ProjectContext<'_>) -> Vec<kernel::Subscription> {
-        if state::add_wake(project.id, Arc::clone(&project.wake)) {
+    fn attach(&self, _project: &ProjectContext<'_>) -> Vec<kernel::Subscription> {
+        Vec::new()
+    }
+
+    fn window_opened(&self, wake: &Arc<dyn Fn() + Send + Sync>) -> Vec<kernel::Subscription> {
+        let id = kernel::id::new_uuid();
+        if state::add_wake(id, Arc::clone(wake)) {
             checker::start();
         }
-        let id = project.id;
         vec![kernel::Subscription::on_end(move || state::remove_wake(id))]
     }
 
     fn poll(&self, host: &mut dyn WorkbenchHost) -> bool {
-        let Some(tell) = state::take_tell() else { return false };
+        let focused = host.window_focused();
+        let Some(tell) = state::take_tell_for(|id| host.shows_notification(id), focused) else {
+            return false;
+        };
         show(host, tell);
         true
     }
@@ -219,6 +226,8 @@ impl CommandHandler for Check {
         if !matches!(state::phase(), Phase::Downloading { .. } | Phase::Ready { .. }) {
             let (id, _) = state::notification();
             host.update_notification(Notification::progress(t("updates.checking")).with_id(id));
+            // The answer told here, where the spinner is (not in another window).
+            state::spinning(id);
         }
         checker::check(true);
         true

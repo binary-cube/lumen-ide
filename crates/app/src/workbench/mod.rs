@@ -748,6 +748,9 @@ pub struct Workbench {
     /// Opened projects are recorded in the recent list (but not in `--snapshot`).
     remember_projects: bool,
     waker: Option<Waker>,
+    /// What the modules' services follow of the window itself (a project in it or not):
+    /// let go with it.
+    window_subscriptions: Vec<kernel::Subscription>,
     /// The automatic saves being written on the worker.
     saving: saving::Saving,
     /// The document links' candidate files the disk was asked about, for one version of one
@@ -928,6 +931,7 @@ impl Workbench {
             completion_assist: None,
             remember_projects: true,
             waker: None,
+            window_subscriptions: Vec::new(),
             saving: saving::Saving::default(),
             reloads: std::sync::mpsc::channel(),
             files_checking: Arc::default(),
@@ -992,6 +996,14 @@ impl Workbench {
 
     /// Wakes the event loop when a background job finishes (indexing).
     pub fn set_waker(&mut self, waker: Arc<dyn Fn() + Send + Sync>) {
+        // The window's own, once: the modules' services follow it, a project or none.
+        if self.waker.is_none() {
+            let support = Arc::clone(&self.support);
+            for service in &support.project_services {
+                let subscriptions = service.window_opened(&waker);
+                self.window_subscriptions.extend(subscriptions);
+            }
+        }
         self.waker = Some(Waker(waker));
     }
 

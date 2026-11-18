@@ -8,7 +8,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
-use kernel::ProjectId;
 use self_update::check::Available;
 use self_update::install::Outcome;
 use self_update::stage::Staged;
@@ -75,8 +74,8 @@ struct State {
     tell: Option<Tell>,
     /// The notification standing for the update (updated as it goes, not shown again).
     notification: Option<NotificationId>,
-    /// Each open project's wake.
-    wakes: Vec<(ProjectId, Arc<dyn Fn() + Send + Sync>)>,
+    /// Each open window's wake.
+    wakes: Vec<(u128, Arc<dyn Fn() + Send + Sync>)>,
     /// Stops the download running.
     stop: Option<Arc<AtomicBool>>,
     /// The periodic look, waiting for its next time.
@@ -85,6 +84,13 @@ struct State {
     failed: Option<String>,
     /// What's New is open: it shows the download itself (its notifications wait).
     notes_open: bool,
+    /// A look the user asked for, its spinner shown (the notification, since when): the
+    /// answer is told in the window showing it.
+    spinner: Option<(NotificationId, std::time::Instant)>,
+    /// When what's to tell was given (an unfocused window takes it only after a while).
+    told_at: Option<std::time::Instant>,
+    /// A wake asked for later (the app in the background: no window took it then).
+    rewake: Option<kernel::work::Later>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -108,8 +114,14 @@ pub fn phase() -> Phase {
 
 /// `tell` told next, the phase as it is.
 pub fn tell(tell: Tell) {
-    with(|s| s.tell = Some(tell));
+    with(|s| set_tell(s, tell));
     wake_all();
+}
+
+/// `tell` the next to tell, from now.
+fn set_tell(s: &mut State, tell: Tell) {
+    s.tell = Some(tell);
+    s.told_at = Some(std::time::Instant::now());
 }
 
 /// A look begins (`manual`: the user asked): `false` if none should — one is going already
@@ -128,7 +140,7 @@ pub fn begin_look(manual: bool) -> bool {
         };
         if let Some(tell) = busy {
             if manual {
-                s.tell = Some(tell);
+                set_tell(s, tell);
             }
             return (false, manual);
         }
@@ -155,18 +167,18 @@ pub fn end_look(looked: Looked) {
                     s.phase.available().is_some_and(|a| a.release.version == found.release.version);
                 s.phase = Phase::Available(Arc::from(found));
                 if manual || !again {
-                    s.tell = Some(Tell::Available);
+                    set_tell(s, Tell::Available);
                 }
             }
             Looked::UpToDate => {
                 s.phase = Phase::Idle;
                 if manual {
-                    s.tell = Some(Tell::UpToDate);
+                    set_tell(s, Tell::UpToDate);
                 }
             }
             Looked::Offline(why) | Looked::Failed(why) => {
                 if manual {
-                    s.tell = Some(Tell::Failed(why));
+                    set_tell(s, Tell::Failed(why));
                 }
             }
         }
@@ -184,7 +196,7 @@ pub fn begin_download() -> Option<(Arc<Available>, Arc<AtomicBool>)> {
         s.failed = None;
         let total = available.file.size;
         s.phase = Phase::Downloading { available: Arc::clone(&available), received: 0, total };
-        s.tell = Some(Tell::Progress);
+        set_tell(s, Tell::Progress);
         Some((available, stop))
     });
     if begun.is_some() {
@@ -206,13 +218,13 @@ pub fn end_download(version: &app_updates::Version, ended: Result<Staged, String
         match ended {
             Ok(staged) => {
                 s.phase = Phase::Ready { available, staged };
-                s.tell = Some(Tell::Ready);
+                set_tell(s, Tell::Ready);
             }
             Err(why) => {
                 s.phase = Phase::Available(available);
                 if !stopped {
                     s.failed = Some(why.clone());
-                    s.tell = Some(Tell::Failed(why));
+                    set_tell(s, Tell::Failed(why));
                 }
             }
         }
@@ -238,7 +250,7 @@ pub fn progress(received: u64, total: u64) {
             let moved = percent(received, total) != percent(*r, *t);
             (*r, *t) = (received, total);
             if moved {
-                s.tell = Some(Tell::Progress);
+                set_tell(s, Tell::Progress);
             }
             moved
         }
@@ -275,9 +287,53 @@ pub fn is_notes_open() -> bool {
     with(|s| s.notes_open)
 }
 
-/// What to tell, the first window to ask taking it.
+/// How long the answer waits for the window showing the spinner (closed, or that window
+/// gone: then any window tells it).
+const SPINNER_HOLD: std::time::Duration = std::time::Duration::from_secs(10);
+/// How long what's to tell waits for the focused window (the app in the background: then
+/// any window tells it).
+const FOCUS_HOLD: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// The user asked for a look in a window showing notification `id` (its spinner).
+pub fn spinning(id: NotificationId) {
+    with(|s| s.spinner = Some((id, std::time::Instant::now())));
+}
+
+/// What to tell, taken by a window: the one showing the spinner if one was asked for (by
+/// `shows`: that window shows that notification), else the `focused` one — any once it
+/// waited ([`FOCUS_HOLD`]: the app in the background; a wake asked for then).
+pub fn take_tell_for(shows: impl Fn(NotificationId) -> bool, focused: bool) -> Option<Tell> {
+    let (spinner, told_at) = with(|s| (s.spinner, s.told_at));
+    if let Some((id, since)) = spinner
+        && since.elapsed() < SPINNER_HOLD
+    {
+        if !shows(id) {
+            return None;
+        }
+    } else if !focused && told_at.is_some_and(|at| at.elapsed() < FOCUS_HOLD) {
+        let waiting = with(|s| s.tell.is_some() && s.rewake.is_none());
+        if waiting {
+            let later = kernel::work::Later::run(crate::checker::WAITING, FOCUS_HOLD, || {
+                with(|s| s.rewake = None);
+                wake_all();
+            });
+            with(|s| s.rewake = later);
+        }
+        return None;
+    }
+    with(|s| {
+        let tell = s.tell.take();
+        if tell.is_some() {
+            s.spinner = None;
+        }
+        tell
+    })
+}
+
+/// What to tell, any window taking it (the tests').
+#[cfg(test)]
 pub fn take_tell() -> Option<Tell> {
-    with(|s| s.tell.take())
+    take_tell_for(|_| true, true)
 }
 
 /// The notification standing for the update: the one shown, or a new one (kept).
@@ -297,8 +353,9 @@ pub fn forget_notification() -> Option<NotificationId> {
     with(|s| s.notification.take())
 }
 
-/// Project `id`'s wake kept while it's open; `true` for the first one (the looks begin).
-pub fn add_wake(id: ProjectId, wake: Arc<dyn Fn() + Send + Sync>) -> bool {
+/// Window `id`'s wake kept while it's open (with a project or none); `true` for the first
+/// one (the looks begin).
+pub fn add_wake(id: u128, wake: Arc<dyn Fn() + Send + Sync>) -> bool {
     with(|s| {
         s.wakes.retain(|(p, _)| *p != id);
         s.wakes.push((id, wake));
@@ -306,7 +363,7 @@ pub fn add_wake(id: ProjectId, wake: Arc<dyn Fn() + Send + Sync>) -> bool {
     })
 }
 
-pub fn remove_wake(id: ProjectId) {
+pub fn remove_wake(id: u128) {
     with(|s| s.wakes.retain(|(p, _)| *p != id));
 }
 
