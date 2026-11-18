@@ -433,3 +433,24 @@ fn a_file_name_s_pattern_needs_no_option() {
     assert_eq!(named, ["assets/logo.png", "assets/img/cat.png"]);
     assert!(view.panel.result(0).is_none(), "no text searched");
 }
+
+/// A recent search forgotten (its ×, or ⌫ on it), then every one ("Clear all"): kept so
+/// for the project (the search opened again shows the same).
+#[test]
+fn recent_searches_are_forgotten_one_or_all() {
+    let project = kernel::ProjectId::new();
+    let mut view = opened(project, "/result", None);
+    for query in ["alpha", "beta", "gamma"] {
+        view.panel.input.set_text(query);
+        view.remember();
+    }
+    view.panel.input.set_text("");
+    assert_eq!(view.panel.recent_searches(), ["gamma", "beta", "alpha"]);
+    view.act(ProjectSearchAction::ForgetRecent(1));
+    assert_eq!(view.panel.recent_searches(), ["gamma", "alpha"]);
+    assert!(view.edit_key(ViewerKey::Backspace), "on the first one: forgotten");
+    assert_eq!(view.panel.recent_searches(), ["alpha"]);
+    assert_eq!(opened(project, "/result", None).panel.recent_searches(), ["alpha"]);
+    view.act(ProjectSearchAction::ClearRecent);
+    assert!(opened(project, "/result", None).panel.recent_searches().is_empty());
+}

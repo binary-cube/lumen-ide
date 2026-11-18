@@ -424,14 +424,20 @@ impl SearchView {
         self.action = Some(ViewerAction::ApplyRefactoring(plan));
     }
 
-    /// Keeps the search among the project's recent ones, and its folder among the recent
-    /// folders.
-    fn remember(&mut self) {
-        self.panel.remember();
+    /// The panel's recent searches kept as the project's (every window's search).
+    fn keep_recent(&self) {
         let Some(data) = &self.data else { return };
         if let Ok(mut all) = recent().lock() {
             all.insert(data.project, self.panel.recent_searches().to_vec());
         }
+    }
+
+    /// Keeps the search among the project's recent ones, and its folder among the recent
+    /// folders.
+    fn remember(&mut self) {
+        self.panel.remember();
+        self.keep_recent();
+        let Some(data) = &self.data else { return };
         if let Some(folder) = self.panel.scope_prefix()
             && let Ok(mut all) = recent_folders().lock()
         {
@@ -481,6 +487,14 @@ impl SearchView {
                 let Some(query) = self.panel.recent(i).map(str::to_owned) else { return };
                 self.panel.input.set_text(&query);
                 self.refresh();
+            }
+            ProjectSearchAction::ForgetRecent(i) => {
+                self.panel.forget_recent(i);
+                self.keep_recent();
+            }
+            ProjectSearchAction::ClearRecent => {
+                self.panel.clear_recent();
+                self.keep_recent();
             }
             ProjectSearchAction::EnableSemantic => {
                 if let Some(semantic) = self.data.as_ref().and_then(|d| d.semantic.as_ref()) {
@@ -624,6 +638,8 @@ impl Viewer for SearchView {
                 ProjectSearchAction::Open(_)
                     | ProjectSearchAction::OpenFolder(_)
                     | ProjectSearchAction::Recent(_)
+                    | ProjectSearchAction::ForgetRecent(_)
+                    | ProjectSearchAction::ClearRecent
                     | ProjectSearchAction::EnableSemantic
                     | ProjectSearchAction::Suggestion(_)
                     | ProjectSearchAction::Toggle(_)
@@ -722,6 +738,15 @@ impl Viewer for SearchView {
             ViewerKey::Right => self.panel.typing().move_right(reach.word, reach.extend),
             ViewerKey::Home => self.panel.typing().home(reach.extend),
             ViewerKey::End => self.panel.typing().end(reach.extend),
+            // On a recent search (the field empty): ⌫ / Delete forget it.
+            ViewerKey::Backspace | ViewerKey::Delete
+                if self.panel.showing_recent() && self.panel.input.text().is_empty() =>
+            {
+                let selected = self.panel.selected_action();
+                if let Some(ProjectSearchAction::Recent(i)) = selected {
+                    self.act(ProjectSearchAction::ForgetRecent(i));
+                }
+            }
             ViewerKey::Backspace => {
                 self.panel.typing().backspace(reach.word);
                 self.typed();

@@ -78,6 +78,9 @@ pub enum ProjectSearchAction {
     OpenFolder(usize),
     /// A recent search: it is put into the field.
     Recent(usize),
+    /// A recent search's ×: it's forgotten; the header's "Clear all": every one.
+    ForgetRecent(usize),
+    ClearRecent,
     /// Downloads the model for semantic search.
     EnableSemantic,
     /// The folder's button: its row shown (or hidden, when no folder is set).
@@ -166,6 +169,12 @@ pub struct ProjectSearch {
     hover: Option<usize>,
     /// Recent searches (those after which a result was opened), newest first.
     recent: Vec<String>,
+    /// The drawn × of the recent searches (where, which one) and the one under the mouse;
+    /// "Clear all" in their header and the mouse on it.
+    forget_buttons: Vec<(Rect, usize)>,
+    forget_hover: Option<usize>,
+    clear_all: Rect,
+    clear_hover: bool,
     /// The panel's appearance (fade and a slight slide), as in settings.
     appear: Option<ui_components::anim::Tween>,
     /// The scrolled rows' scrollbar (the app's: thin, wider under the mouse, dragged), and
@@ -282,6 +291,26 @@ impl ProjectSearch {
         self.recent.retain(|q| *q != query);
         self.recent.insert(0, query);
         self.recent.truncate(RECENT);
+    }
+
+    /// Recent search `index` forgotten (the selection kept in the list).
+    pub fn forget_recent(&mut self, index: usize) {
+        if index >= self.recent.len() {
+            return;
+        }
+        self.recent.remove(index);
+        self.selected = self.selected.min(self.recent.len().saturating_sub(1));
+        self.first = self.first.min(self.recent.len().saturating_sub(VISIBLE));
+        self.forget_hover = None;
+    }
+
+    /// Every recent search forgotten.
+    pub fn clear_recent(&mut self) {
+        self.recent.clear();
+        self.selected = 0;
+        self.first = 0;
+        self.forget_hover = None;
+        self.clear_hover = false;
     }
 
     /// The field is empty: recent searches are shown.
@@ -407,6 +436,14 @@ impl ProjectSearch {
         if self.enable.contains(p) {
             return Some(ProjectSearchAction::EnableSemantic);
         }
+        if self.showing_recent() {
+            if self.clear_all.contains(p) {
+                return Some(ProjectSearchAction::ClearRecent);
+            }
+            if let Some((_, i)) = self.forget_buttons.iter().find(|(r, _)| r.contains(p)) {
+                return Some(ProjectSearchAction::ForgetRecent(*i));
+            }
+        }
         let (_, i) = self.rows.iter().find(|(r, _)| r.contains(p))?;
         self.action(*i)
     }
@@ -419,13 +456,19 @@ impl ProjectSearch {
         let replace = self.replace_button.contains(p);
         let replace_all = self.replace_open && self.replace_all.contains(p);
         let bar = self.bar.hover(p);
+        let forget = self.forget_buttons.iter().find(|(r, _)| r.contains(p)).map(|(_, i)| *i);
+        let clear = self.clear_all.contains(p);
         let changed = bar
+            || forget != self.forget_hover
+            || clear != self.clear_hover
             || hover != self.hover
             || esc != self.esc_hover
             || scope != self.scope_hover
             || option != self.option_hover
             || replace != self.hover_replace
             || replace_all != self.hover_replace_all;
+        self.forget_hover = forget;
+        self.clear_hover = clear;
         self.hover_replace = replace;
         self.hover_replace_all = replace_all;
         self.option_hover = option;
@@ -486,6 +529,8 @@ impl ProjectSearch {
         let Painter { text, scene, palette, icons } = painter;
         self.rows.clear();
         self.tips.clear();
+        self.forget_buttons.clear();
+        self.clear_all = Rect::default();
         self.suggestion_rows.clear();
         self.option_buttons.clear();
         self.enable = Rect::default();
