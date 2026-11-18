@@ -560,10 +560,10 @@ impl DiagramWebView {
         // The progress.
         if let Status::Downloading { received, total } = self.status {
             let fraction = (total > 0).then(|| received as f32 / total as f32);
-            ds::progress_bar(layer, &ds, Rect::new(x, y, width, px(4.0)), fraction);
+            ds::ProgressBar::from(fraction).paint_bar(layer, &ds, Rect::new(x, y, width, px(4.0)));
             y += px(16.0);
         } else if matches!(self.status, Status::Unpacking | Status::Looking) {
-            ds::progress_bar(layer, &ds, Rect::new(x, y, width, px(4.0)), None);
+            ds::ProgressBar::unknown().paint_bar(layer, &ds, Rect::new(x, y, width, px(4.0)));
             y += px(16.0);
         }
         // The buttons.

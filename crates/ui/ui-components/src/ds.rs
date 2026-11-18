@@ -22,6 +22,7 @@ mod controls;
 mod dropdown;
 mod feedback;
 mod number;
+mod progress;
 mod scroll;
 mod text;
 pub use badges::*;
@@ -30,6 +31,7 @@ pub use controls::*;
 pub use dropdown::*;
 pub use feedback::*;
 pub use number::*;
+pub use progress::*;
 pub use scroll::*;
 pub use text::*;
 

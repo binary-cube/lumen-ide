@@ -689,7 +689,7 @@ impl TaskManager {
                 _ => 0.0,
             };
             let bar = Rect::new(x0, y + px(24.0), inner, px(3.0));
-            ds::progress_bar(pen.layer, ds, bar, Some(fraction));
+            ds::ProgressBar::of(fraction).paint_bar(pen.layer, ds, bar);
             y += px(36.0);
         }
         y + px(4.0)

@@ -278,31 +278,6 @@ pub fn loader(
     Rect::new(x, mid - size / 2.0, right - x, size)
 }
 
-/// A progress bar in `rect` (a thin track, rounded), `fraction` of it filled (0..=1);
-/// `None`: not known yet — a short piece sweeps across.
-pub fn progress_bar(layer: &mut Layer, ctx: &Ctx<'_>, rect: Rect, fraction: Option<f32>) {
-    let p = ctx.palette;
-    let r = rect.size.height / 2.0;
-    layer.quad(Quad::filled(rect, ctx.fade(p.text.with_alpha(0.08))).rounded(r));
-    let (x, w) = match fraction {
-        Some(f) => (rect.min_x(), rect.size.width * f.clamp(0.0, 1.0)),
-        None => {
-            let t = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis() % 1400) as f32
-                / 1400.0;
-            let w = rect.size.width * 0.3;
-            let x = rect.min_x() - w + (rect.size.width + w) * t;
-            let x0 = x.max(rect.min_x());
-            (x0, (x + w).min(rect.max_x()) - x0)
-        }
-    };
-    if w > 0.0 {
-        let fill = Rect::new(x, rect.min_y(), w.max(rect.size.height), rect.size.height);
-        layer.quad(Quad::filled(fill, ctx.fade(p.accent)).rounded(r));
-    }
-}
-
 /// An empty state: a title (and optionally an explanation), centered in `rect`.
 pub fn empty_state(
     layer: &mut Layer,

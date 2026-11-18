@@ -220,7 +220,7 @@ impl DataView {
         // The bar along the bottom (a sweep while the total isn't known).
         let fraction = request.total.filter(|t| *t > 0).map(|t| rows as f32 / t as f32);
         let bar = Rect::new(banner.min_x(), banner.max_y() - px(3.0), banner.size.width, px(3.0));
-        ds::progress_bar(layer, ds, bar, fraction);
+        ds::ProgressBar::from(fraction).paint_bar(layer, ds, bar);
     }
 
     fn paint_list(

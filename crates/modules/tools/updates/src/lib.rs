@@ -132,7 +132,12 @@ fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
                     "updates.downloading_detail",
                     received = i18n::bytes(received),
                     total = i18n::bytes(total)
-                )),
+                ))
+                .with_progress(if total > 0 {
+                    received as f32 / total as f32
+                } else {
+                    0.0
+                }),
             )
         }
         Tell::Ready => ours(

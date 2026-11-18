@@ -348,7 +348,7 @@ impl Viewer for RunningView {
                 );
                 if let Some(fraction) = work.progress.and_then(|w| w.fraction()) {
                     let bar = Rect::new(tx, row.max_y() - px(5.0), room, px(3.0));
-                    ds::progress_bar(layer, &ds, bar, Some(fraction));
+                    ds::ProgressBar::of(fraction).paint_bar(layer, &ds, bar);
                 }
                 y += px(ROW_H);
             }

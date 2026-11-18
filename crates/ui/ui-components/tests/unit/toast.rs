@@ -235,3 +235,28 @@ fn kinds_have_their_icon_and_a_color_that_reads() {
         kind_color(NotificationKind::Error, &dark)
     );
 }
+
+/// Work in progress has a bar under its texts (how far, else a sweep); a notification
+/// telling how far too; the others none. The card grows by it.
+#[test]
+fn work_in_progress_has_its_bar() {
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let place = place(ToastPosition::TopRight, 1200.0);
+    let card = |n: Notification, text: &mut TextSystem| {
+        let mut stack = ToastStack::default();
+        stack.layout(text, &palette, &stack_of(n), &place)[0].clone()
+    };
+    fn stack_of(n: Notification) -> Notifications {
+        stack(vec![n])
+    }
+    let plain = card(Notification::info("Saved"), &mut text);
+    let looking = card(Notification::progress("Looking for updates…"), &mut text);
+    let downloading = card(Notification::progress("Downloading").with_progress(0.4), &mut text);
+    assert_eq!(plain.progress, None);
+    assert_eq!(looking.progress, Some(None), "not known: it sweeps");
+    assert_eq!(downloading.progress, Some(Some(0.4)));
+    assert!(looking.height > plain.height, "room for the bar");
+    let done = card(Notification::success("Copied").with_progress(1.0), &mut text);
+    assert_eq!(done.progress, Some(Some(1.0)), "told how far, whatever its kind");
+}

@@ -94,8 +94,8 @@ pub struct NotesView {
 const ROW: f32 = 22.0;
 const TITLE_ROW: f32 = 28.0;
 const GAP: f32 = 10.0;
-/// Room under the notes (the buttons are the window's footer).
-const FOOTER: f32 = 16.0;
+/// Room under the notes for the download's progress (the buttons are the window's footer).
+const FOOTER: f32 = 48.0;
 const HEADER: f32 = 40.0;
 
 impl NotesView {
@@ -310,17 +310,26 @@ impl Viewer for NotesView {
         self.laid = Some((width, ds.scale, laid));
         self.bar.paint(scene, p, scale, notes_box, content, self.scroll);
         // Under the notes, while it downloads or once it's ready: how far.
-        let fraction = match state::phase() {
-            Phase::Downloading { received, total, .. } if total > 0 => {
-                Some(received as f32 / total as f32)
+        let progress = match state::phase() {
+            Phase::Downloading { received, total, .. } => Some((
+                ds::ProgressBar::counted(received, total),
+                i18n::tr!(
+                    "updates.downloading_detail",
+                    received = i18n::bytes(received),
+                    total = i18n::bytes(total)
+                ),
+            )),
+            Phase::Ready { .. } => {
+                Some((ds::ProgressBar::of(1.0).tone(ds::Tone::Success), t("updates.notes_ready")))
             }
-            Phase::Ready { .. } => Some(1.0),
             _ => None,
         };
-        if let Some(fraction) = fraction {
-            let bar =
-                Rect::new(notes_box.min_x(), b.max_y() - px(10.0), notes_box.size.width, px(4.0));
-            ds::progress_bar(scene.push_layer(Some(b)), &ds, bar, Some(fraction.clamp(0.0, 1.0)));
+        if let Some((bar, label)) = &progress {
+            let bar = bar.label(label).percent();
+            let h = bar.height(&ds);
+            let at =
+                Rect::new(notes_box.min_x(), b.max_y() - px(12.0) - h, notes_box.size.width, h);
+            bar.paint(scene.push_layer(Some(b)), text, &ds, at);
         }
     }
 

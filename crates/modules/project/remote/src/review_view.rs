@@ -1043,7 +1043,7 @@ impl TransferReview {
                 let label = ds::ellipsize(text, &label, &small, room - px(30.0));
                 ds::loader(layer, text, ds, x0, mid - px(9.0), &ds::Loader::with_text(&label));
                 let bar = Rect::new(x0, mid + px(9.0), (room - px(12.0)).max(0.0), px(4.0));
-                ds::progress_bar(layer, ds, bar, fraction);
+                ds::ProgressBar::from(fraction).paint_bar(layer, ds, bar);
             }
             Phase::Done { done, failed, stopped } => {
                 let (message, color) = if *stopped {

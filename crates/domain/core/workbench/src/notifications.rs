@@ -96,6 +96,9 @@ pub struct Notification {
     /// What makes two notifications the same one (a later one replaces the earlier, merged
     /// with it); `None`: the same kind, title and detail.
     pub key: Option<String>,
+    /// How far its work went, in thousandths (0..=1000: whole, comparable), shown as a bar;
+    /// work in progress without it: a bar that sweeps (how far isn't known).
+    pub progress: Option<u16>,
 }
 
 impl Notification {
@@ -108,6 +111,7 @@ impl Notification {
             actions: Vec::new(),
             timeout: Timeout::Default,
             key: None,
+            progress: None,
         }
     }
 
@@ -149,6 +153,17 @@ impl Notification {
     pub fn with_timeout(mut self, timeout: Timeout) -> Self {
         self.timeout = timeout;
         self
+    }
+
+    /// How far its work went (`fraction` of it, clamped to 0..=1): a bar under its texts.
+    pub fn with_progress(mut self, fraction: f32) -> Self {
+        self.progress = Some((fraction.clamp(0.0, 1.0) * 1000.0).round() as u16);
+        self
+    }
+
+    /// How far, as a fraction (`None`: not said).
+    pub fn progress_fraction(&self) -> Option<f32> {
+        self.progress.map(|p| f32::from(p) / 1000.0)
     }
 
     pub fn with_key(mut self, key: impl Into<String>) -> Self {

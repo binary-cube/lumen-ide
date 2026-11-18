@@ -502,7 +502,7 @@ impl EditorToolbar for DownloadBar {
         if let View::Downloading { received, total, waiting, .. } = view {
             let track = Rect::new(b.min_x(), b.max_y() - px(2.0), b.size.width, px(2.0));
             let fraction = (!waiting && total > 0).then(|| received as f32 / total as f32);
-            ds::progress_bar(layer, &ds, track, fraction);
+            ds::ProgressBar::from(fraction).paint_bar(layer, &ds, track);
         }
     }
 

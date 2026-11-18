@@ -100,6 +100,9 @@ pub struct CardLayout {
     /// Where the text starts, and how wide it may be.
     pub text_x: f32,
     pub text_width: f32,
+    /// Its progress bar (work in progress, or a notification telling how far): how far, or
+    /// `None` inside: not known (it sweeps).
+    pub progress: Option<Option<f32>>,
 }
 
 /// What the stack is laid out for.
@@ -162,6 +165,11 @@ pub fn layout_card(text: &mut TextSystem, ctx: &Ctx<'_>, toast: &Toast, width: f
     let body = px(TITLE_LINE) * title.len().max(1) as f32
         + if detail.is_empty() { 0.0 } else { px(3.0) + px(DETAIL_LINE) * detail.len() as f32 };
     let mut height = px(PAD_Y) * 2.0 + body.max(px(ICON_BOX));
+    let progress = (n.kind == NotificationKind::Progress || n.progress.is_some())
+        .then_some(n.progress_fraction());
+    if progress.is_some() {
+        height += px(PROGRESS_TOP) + ds::ProgressBar::from(None).thickness(PROGRESS).height(ctx);
+    }
     if !actions.is_empty() {
         height += px(ACTION_TOP + ACTION_HEIGHT);
     }
@@ -176,8 +184,13 @@ pub fn layout_card(text: &mut TextSystem, ctx: &Ctx<'_>, toast: &Toast, width: f
         actions,
         text_x,
         text_width,
+        progress,
     }
 }
+
+/// The progress bar's thickness and the space over it (logical pixels).
+const PROGRESS: f32 = 3.0;
+const PROGRESS_TOP: f32 = 8.0;
 
 /// `value` in at most `max` lines of `width`, by words; the last one cut with "…" when
 /// there's more.
@@ -496,6 +509,12 @@ fn paint_card(
         let base = ds::optical_baseline(y, px(DETAIL_LINE), &detail_font);
         draw_text(layer, line, tx, base, ctx.fade(p.text_muted));
         y += px(DETAIL_LINE);
+    }
+    // How far, under the texts (over the actions), in the kind's color.
+    if let Some(fraction) = card.progress {
+        let top = rect.min_y() + px(PAD_Y) + (y - rect.min_y() - px(PAD_Y)).max(px(ICON_BOX));
+        let bar = Rect::new(tx, top + px(PROGRESS_TOP), card.text_width, px(PROGRESS));
+        ds::ProgressBar::from(fraction).paint_bar(layer, ctx, bar);
     }
     // The actions, under the texts: the first tinted in the kind's color.
     let mut actions = [None, None];
