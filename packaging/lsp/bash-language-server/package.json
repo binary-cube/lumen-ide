@@ -1,0 +1,9 @@
+{
+  "name": "bundled-bash-language-server",
+  "private": true,
+  "description": "The Bash language server bundled with the app, installed by `cargo xtask lsp-bundle` with `npm ci` from the lockfile beside this file.",
+  "license": "MIT",
+  "dependencies": {
+    "bash-language-server": "5.8.1"
+  }
+}

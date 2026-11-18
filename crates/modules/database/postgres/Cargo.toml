@@ -1,0 +1,19 @@
+[package]
+name = "database-postgres"
+description = "The PostgreSQL driver, as a module: its factory for the data sources (one driver for servers 9.2 to the newest, TLS by sslmode). Nothing of PostgreSQL runs until a source connects."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+database.workspace = true
+db-postgres.workspace = true
+extensions.workspace = true
+
+[lints]
+workspace = true

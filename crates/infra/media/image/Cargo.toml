@@ -1,0 +1,20 @@
+[package]
+name = "image-decode"
+description = "Image decoding (PNG, JPEG, GIF, WebP, BMP, ICO, SVG) into RGBA8 pixels."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "ico"] }
+# Texts in an SVG set with the system's fonts (listed once, when an SVG first has a text):
+# ~1.4 MB of binary, ~2 MB of memory while listed.
+resvg = { workspace = true, features = ["text", "system-fonts", "memmap-fonts"] }
+
+[lints]
+workspace = true

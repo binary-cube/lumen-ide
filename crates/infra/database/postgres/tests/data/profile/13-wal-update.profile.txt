@@ -1,0 +1,14 @@
+-- actual · format 1
+ModifyTable on accounts  (cost=0.29..8.31 rows=1 width=103) (actual time=0.094..0.095 rows=0 loops=1)
+  Buffers: shared hit=8 read=0 dirtied=1 written=0
+  WAL: records=1 fpi=0 bytes=68
+  ->  Index Scan using accounts_pkey on accounts  (cost=0.29..8.31 rows=1 width=103) (actual time=0.020..0.021 rows=1 loops=1)
+        Role: member
+        Index Cond: (aid = 7)
+        Rows Removed by Index Recheck: 0
+        Buffers: shared hit=3
+        WAL: records=0 fpi=0 bytes=0
+Planning Buffers: shared hit=12 read=0 dirtied=0 written=0
+Planning Time: 0.087 ms
+Execution Time: 0.172 ms
+Trigger accounts_audit on accounts: time=0.041 calls=1

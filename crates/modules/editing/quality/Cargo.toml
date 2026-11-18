@@ -1,0 +1,27 @@
+[package]
+name = "quality"
+description = "Formatting and checking code with the project's tools (a formatter / checker its language's module knows, a binary, or the project's own script): on demand and on save, in the background."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+document.workspace = true
+workspace.workspace = true
+code-quality.workspace = true
+settings-model.workspace = true
+process.workspace = true
+files.workspace = true
+i18n.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

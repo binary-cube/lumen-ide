@@ -1,0 +1,17 @@
+[package]
+name = "remote"
+description = "Remote projects bounded context (FTP, FTPS, SFTP): connections, what changed on either side since the last transfer, pull / push / sync with conflicts, transfers in parallel; the server and the local copy are ports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+
+[lints]
+workspace = true

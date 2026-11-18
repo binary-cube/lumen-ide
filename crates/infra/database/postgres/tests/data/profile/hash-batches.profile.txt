@@ -1,0 +1,16 @@
+-- actual · format 1
+Left Hash Join  (cost=38259.00..92106.00 rows=1000000 width=72) (actual time=301.226..1102.334 rows=1000000 loops=1)
+  Hash Cond: (o.customer_id = c.id)
+  Buffers: shared hit=12000, temp read=9500 written=9500
+  Inner Unique: true
+  ->  Seq Scan on orders o  (cost=0.00..18334.00 rows=1000000 width=40) (actual time=0.010..95.110 rows=1000000 loops=1)
+        Buffers: shared hit=8334
+  ->  Hash  (cost=18334.00..18334.00 rows=500000 width=36) (actual time=300.870..300.871 rows=500000 loops=1)
+        Buckets: 65536  Batches: 16 (originally 8)
+        Peak Memory: 3156992 bytes
+        Spill: hash batches=16
+        Buffers: shared hit=3666, temp written=3100
+        ->  Seq Scan on customers c  (cost=0.00..8667.00 rows=500000 width=36) (actual time=0.007..48.551 rows=500000 loops=1)
+              Buffers: shared hit=3666
+Planning Time: 0.180 ms
+Execution Time: 1131.903 ms

@@ -1,0 +1,90 @@
+Third-party software bundled in `lsp/` (the language servers; plan 43)
+======================================================================
+
+Each component keeps its own licence file next to it (`node/<version>/LICENSE`,
+`servers/<server>/<version>/node_modules/<package>/LICENSE`). Versions and checksums:
+`packaging/lsp.toml` and the servers' lockfiles (`packaging/lsp/<server>/package-lock.json`).
+
+Node.js (https://nodejs.org) — MIT licence, with the licences of its own bundled
+dependencies listed in its LICENSE file.
+
+vtsls (@vtsls/language-server, @vtsls/language-service, @vtsls/vscode-fuzzy,
+https://github.com/yioneko/vtsls) — MIT licence.
+
+TypeScript (https://github.com/microsoft/TypeScript) — Apache License 2.0.
+
+vscode-languageserver, vscode-languageserver-protocol, vscode-languageserver-types,
+vscode-languageserver-textdocument, vscode-jsonrpc, vscode-uri, @vscode/l10n
+(https://github.com/microsoft/vscode-languageserver-node and related) — MIT licence.
+
+jsonc-parser (https://github.com/microsoft/node-jsonc-parser) — MIT licence.
+
+semver, lru-cache, yallist (https://github.com/npm) — ISC licence.
+
+vscode-langservers-extracted (https://github.com/hrsh7th/vscode-langservers-extracted: VS
+Code's HTML, CSS and JSON language servers, https://github.com/microsoft/vscode) — MIT
+licence. With them: vscode-html-languageservice, vscode-css-languageservice,
+vscode-json-languageservice, vscode-markdown-languageservice, vscode-nls, request-light,
+@vscode/l10n (https://github.com/microsoft) — MIT licence; TypeScript 4.9 (loaded by the
+HTML server; only its library kept) — Apache License 2.0; core-js, regenerator-runtime,
+node-html-parser, he, picomatch, dom-serializer, jsonc-parser — MIT licence; css-select,
+css-what, domelementtype, domhandler, domutils, entities, nth-check — BSD 2-Clause licence;
+boolbase, semver — ISC licence.
+
+JSON schemas (`servers/vscode-langservers-extracted/<version>/schemas/`): SchemaStore
+(https://github.com/SchemaStore/schemastore, at a pinned commit) — Apache License 2.0;
+Composer's schema (https://github.com/composer/composer, res/composer-schema.json) — MIT
+licence.
+
+clangd (https://github.com/clangd/clangd, built from LLVM, https://llvm.org) — Apache
+License 2.0 with LLVM Exceptions (`servers/clangd/<version>/LICENSE.TXT`), with clang's
+builtin headers (`lib/clang/<version>/include`) under the same licence.
+
+lua-language-server (https://github.com/LuaLS/lua-language-server) — MIT licence
+(`servers/lua-language-server/<version>/LICENSE`); its program embeds Lua and bee.lua (MIT),
+and the libraries' definitions it ships (`meta/3rd`, the LuaCATS projects) come with the
+release under its MIT licence.
+
+ZLS (https://github.com/zigtools/zls) — MIT licence (`servers/zls/<version>/LICENSE`).
+
+bash-language-server (https://github.com/bash-lsp/bash-language-server) — MIT licence. With
+it: web-tree-sitter and tree-sitter-bash (https://github.com/tree-sitter) — MIT licence;
+vscode-languageserver and related, fast-glob, micromatch, editorconfig, @one-ini/wasm, zod,
+turndown, commander and their dependencies — MIT licence; @mixmark-io/domino — BSD 2-Clause
+licence; fastq, fuzzy-search, glob-parent, semver — ISC licence; minimatch — Blue Oak Model
+Licence 1.0.0. ShellCheck (GPL-3.0) is NOT bundled: when the user has it in PATH, the
+server runs it as a separate program.
+
+yaml-language-server (https://github.com/redhat-developer/yaml-language-server) — MIT
+licence. With it: prettier, ajv, ajv-draft-04, ajv-i18n, jsonc-parser, request-light,
+vscode-languageserver and related, vscode-uri, @vscode/l10n, picomatch, fast-deep-equal,
+json-schema-traverse, require-from-string — MIT licence; yaml — ISC licence; fast-uri —
+BSD 3-Clause licence.
+
+YAML schemas (`servers/yaml-language-server/<version>/schemas/`): SchemaStore (at a pinned
+commit: GitHub workflows and actions, Dependabot, pre-commit) — Apache License 2.0; the
+Compose specification's schema (https://github.com/compose-spec/compose-go, at a tag) —
+Apache License 2.0.
+
+dockerfile-language-server-nodejs, dockerfile-language-service, dockerfile-ast,
+dockerfile-utils (https://github.com/rcjsuen) — MIT licence; vscode-languageserver and
+related — MIT licence.
+
+taplo (https://github.com/tamasfe/taplo) — MIT licence (its program embeds Rust libraries
+under MIT / Apache-2.0). TOML schemas (`servers/taplo/<version>/schemas/`: Cargo.toml,
+.cargo/config.toml, pyproject.toml and the tools' sections it refers to, rustfmt.toml):
+SchemaStore, at a pinned commit, made self-contained when bundled — Apache License 2.0.
+
+PHP (https://www.php.net) — The PHP License, version 3.01 (`php/<version>/LICENSE`): "This
+product includes PHP software, freely available from <http://www.php.net/software/>". The
+program is a static PHP CLI built by static-php-cli (https://github.com/crazywhalecc/
+static-php-cli) — MIT licence (`php/<version>/LICENSE.static-php-cli`); on macOS and Linux it
+links in GNU libiconv (https://www.gnu.org/software/libiconv/) — LGPL-2.1 (the program can be
+rebuilt or relinked from the public sources with static-php-cli) — and zlib — zlib licence.
+It runs only the bundled PHP language server, as a separate program.
+
+phpactor (https://github.com/phpactor/phpactor) — MIT licence (`servers/phpactor/<version>/
+LICENSE`). Its PHAR includes amphp, Symfony components, Twig, Monolog, webmozart, dantleech,
+phpactor's own libraries and their dependencies — MIT licence; sebastian/diff — BSD 3-Clause
+licence; JetBrains' PHP stubs (https://github.com/JetBrains/phpstorm-stubs) — Apache License
+2.0.

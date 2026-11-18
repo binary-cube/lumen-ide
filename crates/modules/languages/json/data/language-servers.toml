@@ -1,0 +1,49 @@
+# JSON's language server (plan 43): the JSON server of `vscode-langservers-extracted`,
+# bundled with the app (`lsp/servers/vscode-langservers-extracted/<version>`), run by the
+# app's Node. One per project (no root markers). The format: see the language servers
+# module (`lsp_client::spec`).
+#
+# Schemas are never downloaded: the server handles only `file:` itself
+# (`handledSchemaProtocols`) and asks the app for any other URL (`vscode/content`), which
+# answers from the schemas bundled beside it (`contents`: package.json, tsconfig.json,
+# composer.json… and every schema they refer to) and refuses the rest.
+
+[[language-servers]]
+name = "vscode-json"
+languages = ["json"]
+bundle = "vscode-langservers-extracted"
+command = "${node}"
+# Its heap capped at the memory limit chosen in the settings.
+args = [
+    "--max-old-space-size=${max-memory}",
+    "${server}/node_modules/vscode-langservers-extracted/lib/json-language-server/node/jsonServerMain.js",
+    "--stdio",
+]
+file-patterns = ["**/*.{json,jsonc}"]
+# JSON with comments, as editors usually read these files.
+extension-language-ids = { jsonc = "jsonc" }
+file-language-ids = { "tsconfig*.json" = "jsonc", "jsconfig*.json" = "jsonc", ".eslintrc" = "jsonc", ".eslintrc.json" = "jsonc", ".babelrc" = "jsonc", ".babelrc.json" = "jsonc", ".jshintrc" = "jsonc", ".swcrc" = "jsonc", "devcontainer.json" = "jsonc", ".devcontainer.json" = "jsonc" }
+
+[language-servers.contents]
+"https://json.schemastore.org/" = "${server}/schemas/schemastore"
+"https://www.schemastore.org/" = "${server}/schemas/schemastore"
+"https://getcomposer.org/" = "${server}/schemas/getcomposer.org"
+
+[language-servers.initialization-options]
+provideFormatter = true
+handledSchemaProtocols = ["file"]
+
+[language-servers.settings.json]
+validate = { enable = true }
+format = { enable = true }
+resultLimit = 5000
+schemas = [
+    { fileMatch = ["package.json"], url = "https://json.schemastore.org/package.json" },
+    { fileMatch = ["tsconfig.json", "tsconfig.*.json", "tsconfig-*.json"], url = "https://json.schemastore.org/tsconfig.json" },
+    { fileMatch = ["jsconfig.json", "jsconfig.*.json"], url = "https://json.schemastore.org/jsconfig.json" },
+    { fileMatch = ["composer.json"], url = "https://getcomposer.org/schema.json" },
+    { fileMatch = [".eslintrc", ".eslintrc.json"], url = "https://json.schemastore.org/eslintrc.json" },
+    { fileMatch = [".prettierrc", ".prettierrc.json"], url = "https://json.schemastore.org/prettierrc.json" },
+    { fileMatch = [".babelrc", ".babelrc.json", "babel.config.json"], url = "https://json.schemastore.org/babelrc.json" },
+    { fileMatch = [".stylelintrc", ".stylelintrc.json"], url = "https://json.schemastore.org/stylelintrc.json" },
+]

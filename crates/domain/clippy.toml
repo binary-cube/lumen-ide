@@ -1,0 +1,51 @@
+# The domain is pure (docs/plan/02-arhitectura-ddd.md): no files, threads, waiting, clock,
+# programs, connections or environment of its own — what it needs comes through its ports,
+# given by the app and the infrastructure. Clippy reads the nearest clippy.toml, so the root's settings are
+# repeated here.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+disallowed-methods = [
+    { path = "std::thread::spawn", reason = "the domain doesn't run threads: take a runner (a port)" },
+    { path = "std::thread::Builder::spawn", reason = "the domain doesn't run threads: take a runner (a port)" },
+    { path = "std::thread::Builder::spawn_scoped", reason = "the domain doesn't run threads: take a runner (a port)" },
+    { path = "std::thread::scope", reason = "the domain doesn't run threads: take a runner (a port)" },
+    { path = "std::thread::sleep", reason = "the domain doesn't wait: take a clock or a pause (a port)" },
+    { path = "std::env::var", reason = "the domain doesn't read the environment: the app passes what it needs" },
+    { path = "std::env::var_os", reason = "the domain doesn't read the environment: the app passes what it needs" },
+    { path = "std::fs::read", reason = "the domain doesn't touch the disk: use a port (FileSystem, DocumentStorage…)" },
+    { path = "std::fs::read_to_string", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::read_dir", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::write", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::create_dir_all", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::remove_file", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::remove_dir_all", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::rename", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::metadata", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::File::open", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::File::create", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::copy", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::create_dir", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::remove_dir", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::fs::canonicalize", reason = "the domain doesn't touch the disk: use a port (`FileSystem::canonical`)" },
+    { path = "std::fs::symlink_metadata", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::path::Path::exists", reason = "the domain doesn't ask the disk: use a port (`FileSystem::kind`)" },
+    { path = "std::path::Path::try_exists", reason = "the domain doesn't ask the disk: use a port (`FileSystem::kind`)" },
+    { path = "std::path::Path::is_dir", reason = "the domain doesn't ask the disk: use a port (`FileSystem::kind`)" },
+    { path = "std::path::Path::is_file", reason = "the domain doesn't ask the disk: use a port (`FileSystem::kind`)" },
+    { path = "std::path::Path::is_symlink", reason = "the domain doesn't ask the disk: use a port" },
+    { path = "std::path::Path::metadata", reason = "the domain doesn't ask the disk: use a port (`FileSystem::stamp`)" },
+    { path = "std::path::Path::symlink_metadata", reason = "the domain doesn't ask the disk: use a port" },
+    { path = "std::path::Path::canonicalize", reason = "the domain doesn't ask the disk: use a port (`FileSystem::canonical`)" },
+    { path = "std::path::Path::read_dir", reason = "the domain doesn't ask the disk: use a port" },
+    { path = "std::time::Instant::now", reason = "the domain doesn't read the clock: take one (`fn() -> Instant`) or the time from the caller" },
+    { path = "std::time::SystemTime::now", reason = "the domain doesn't read the clock: take one or the time from the caller" },
+]
+
+disallowed-types = [
+    { path = "std::fs::OpenOptions", reason = "the domain doesn't touch the disk: use a port" },
+    { path = "std::process::Command", reason = "the domain doesn't run programs: use a port (infra's `process`)" },
+    { path = "std::net::TcpStream", reason = "the domain doesn't open connections: use a port" },
+    { path = "std::net::TcpListener", reason = "the domain doesn't open connections: use a port" },
+    { path = "std::net::UdpSocket", reason = "the domain doesn't open connections: use a port" },
+]

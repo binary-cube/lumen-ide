@@ -1,0 +1,9 @@
+{
+  "name": "bundled-yaml-language-server",
+  "private": true,
+  "description": "The YAML language server bundled with the app (Red Hat's), installed by `cargo xtask lsp-bundle` with `npm ci` from the lockfile beside this file.",
+  "license": "MIT",
+  "dependencies": {
+    "yaml-language-server": "2.0.0"
+  }
+}

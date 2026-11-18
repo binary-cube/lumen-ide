@@ -1,0 +1,179 @@
+[package]
+name = "app"
+description = "Composition root: wires every context, module and driver together."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+# The binary is named after `brand.toml`'s `id` (checked by `cargo xtask check-deps`).
+[[bin]]
+name = "lumen"
+path = "src/main.rs"
+
+[dependencies]
+kernel.workspace = true
+# The app's updates: the helper that puts one in place as the app quits (plan 84f).
+self-update.workspace = true
+# The app's own folders (the web engine's data).
+files.workspace = true
+process-stats.workspace = true
+# The programs it starts, noted for after a crash (plan 83).
+process.workspace = true
+process-registry.workspace = true
+uuid.workspace = true
+interprocess.workspace = true
+project-tree.workspace = true
+indexing.workspace = true
+workspace.workspace = true
+document.workspace = true
+languages.workspace = true
+code-intelligence.workspace = true
+theming.workspace = true
+terminal-session.workspace = true
+workbench-model.workspace = true
+command-model.workspace = true
+settings-model.workspace = true
+code-quality.workspace = true
+extensions.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+render-wgpu.workspace = true
+render-software.workspace = true
+platform-api.workspace = true
+platform-winit.workspace = true
+ui-kit.workspace = true
+ui-workbench.workspace = true
+image-decode.workspace = true
+fs-local.workspace = true
+syntax-ts.workspace = true
+storage.workspace = true
+lang-php.workspace = true
+lang-html.workspace = true
+lang-javascript.workspace = true
+lang-css.workspace = true
+lang-scss.workspace = true
+lang-json.workspace = true
+lang-yaml.workspace = true
+lang-sql.workspace = true
+lang-cpp.workspace = true
+lang-lua.workspace = true
+lang-bash.workspace = true
+lang-toml.workspace = true
+lang-markdown.workspace = true
+lang-dockerfile.workspace = true
+lang-dotenv.workspace = true
+lang-http.workspace = true
+http-client.workspace = true
+lang-zig.workspace = true
+file-icons.workspace = true
+icon-packs.workspace = true
+terminal-panel.workspace = true
+text-search.workspace = true
+embed.workspace = true
+i18n.workspace = true
+viewer-image.workspace = true
+structure.workspace = true
+colors.workspace = true
+language-levels.workspace = true
+canvas.workspace = true
+compare.workspace = true
+theme-studio.workspace = true
+theme-decorations.workspace = true
+diff.workspace = true
+version-control.workspace = true
+vcs-git.workspace = true
+refactor.workspace = true
+refactoring.workspace = true
+binary-files.workspace = true
+diagram-editor.workspace = true
+diagram-files.workspace = true
+diagram-web.workspace = true
+diagrams.workspace = true
+local-history.workspace = true
+folder-sizes.workspace = true
+remote-projects.workspace = true
+database-explorer.workspace = true
+database-console.workspace = true
+data-extractors.workspace = true
+extractors.workspace = true
+database-sqlite.workspace = true
+database-postgres.workspace = true
+database-mysql.workspace = true
+database-csv.workspace = true
+database-external.workspace = true
+database-diagram.workspace = true
+database.workspace = true
+remote.workspace = true
+task-manager.workspace = true
+relax.workspace = true
+keep-awake.workspace = true
+updates.workspace = true
+agent-claude.workspace = true
+agent-cline.workspace = true
+agent-planned.workspace = true
+agent-sessions.workspace = true
+agent-chat.workspace = true
+mcp-server.workspace = true
+mcp.workspace = true
+secrets.workspace = true
+agents.workspace = true
+path-marks.workspace = true
+project-switcher.workspace = true
+focus-mode.workspace = true
+running-work.workspace = true
+services-panel.workspace = true
+language-servers.workspace = true
+# The fake language server the snapshots run (`--fake-language-server`).
+lsp-client = { workspace = true, optional = true }
+history-fs.workspace = true
+history.workspace = true
+viewer-markdown.workspace = true
+emmet.workspace = true
+lang-twig.workspace = true
+lang-blade.workspace = true
+icons.workspace = true
+toml.workspace = true
+serde.workspace = true
+themes-builtin.workspace = true
+quality.workspace = true
+fw-symfony.workspace = true
+fw-laravel.workspace = true
+fw-yii.workspace = true
+fw-htmx.workspace = true
+fw-react.workspace = true
+fw-vue.workspace = true
+anyhow.workspace = true
+dirs.workspace = true
+sysinfo.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+
+# `build.rs`: the icon and the version information inside the Windows executable.
+[build-dependencies]
+embed-resource = "3"
+
+[dev-dependencies]
+lsp-client = { workspace = true, features = ["fake"] }
+# The engines' comparison's probes and answers (`tools/lsp-compare`).
+serde_json.workspace = true
+# A module's request asked as another module would (an agent's session in a terminal tab).
+contracts.workspace = true
+
+[features]
+# `--snapshot`: the screens rendered into PNGs (visual checks, `scripts/ui-snapshots.sh`);
+# not in the builds handed out.
+snapshot = ["agent-chat/snapshot", "database-explorer/snapshot", "remote-projects/snapshot", "database-console/snapshot", "services-panel/snapshot", "task-manager/snapshot", "keep-awake/snapshot", "relax/snapshot", "dep:lsp-client", "lsp-client/fake"]
+# The system's allocator on Windows too, instead of mimalloc (to compare them).
+system-allocator = []
+
+# mimalloc on Windows only (see `main.rs`).
+[target.'cfg(windows)'.dependencies]
+mimalloc.workspace = true
+libmimalloc-sys.workspace = true
+
+[lints]
+workspace = true

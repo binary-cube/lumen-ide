@@ -1,0 +1,54 @@
+# HTML's language server (plan 43): the HTML server of `vscode-langservers-extracted`,
+# bundled with the app (`lsp/servers/vscode-langservers-extracted/<version>`), run by the
+# app's Node. One per project (no root markers). The format: see the language servers
+# module (`lsp_client::spec`).
+#
+# The CSS and JavaScript inside a page stay the built-in engine's (plan 43, principle 6):
+# the server's own modes for them are off. Its only diagnostics are about those (it has none
+# for HTML itself), so the built-in engine's stay shown (`built-in = ["diagnostics"]`: the
+# syntax errors, the deprecated elements). Where it has nothing to say (a class from the
+# project's CSS in `class="…"`, a class's rule), the built-in engine answers.
+
+[[language-servers]]
+name = "vscode-html"
+languages = ["html"]
+bundle = "vscode-langservers-extracted"
+command = "${node}"
+# Its heap capped at the memory limit chosen in the settings.
+args = [
+    "--max-old-space-size=${max-memory}",
+    "${server}/node_modules/vscode-langservers-extracted/lib/html-language-server/node/htmlServerMain.js",
+    "--stdio",
+]
+built-in = ["diagnostics"]
+file-patterns = ["**/*.{html,htm,xhtml}"]
+# Its kinds as the built-in engine shows the same things: its "properties" are tags, its
+# "values" attributes (its "functions" the event handlers: `onclick`), its "units" values.
+completion-kinds = { property = "tag", value = "attribute", function = "attribute", unit = "value" }
+
+[language-servers.initialization-options]
+provideFormatter = true
+[language-servers.initialization-options.embeddedLanguages]
+css = false
+javascript = false
+
+# The server's usual defaults, the embedded code's checks off (the built-in engine's).
+# Nothing here reads the network.
+[language-servers.settings.html]
+validate = { scripts = false, styles = false }
+[language-servers.settings.html.suggest]
+html5 = true
+[language-servers.settings.html.hover]
+documentation = true
+references = true
+[language-servers.settings.html.format]
+enable = true
+wrapLineLength = 120
+unformatted = "wbr"
+contentUnformatted = "pre,code,textarea"
+indentInnerHtml = false
+preserveNewLines = true
+indentHandlebars = false
+endWithNewline = false
+extraLiners = "head, body, /html"
+wrapAttributes = "auto"

@@ -1,0 +1,24 @@
+# Lua's language server (plan 43): lua-language-server (LuaLS), bundled with the app
+# (`lsp/servers/lua-language-server/<version>`). Its format: see the language servers
+# module (`lsp_client::spec`).
+#
+# One per project (or per folder holding a `.luarc.json`, LuaLS's own configuration, which
+# it reads too). What it writes goes to its folder in the project's data folder (`${cache}`):
+# its log, and the definitions of Lua's standard library it makes for the version chosen
+# (`--metapath`) — never inside the app's bundle, which is read-only.
+
+[[language-servers]]
+name = "lua-language-server"
+languages = ["lua"]
+bundle = "lua-language-server"
+command = "${server}/bin/lua-language-server"
+args = ["--logpath=${cache}/log", "--metapath=${cache}/meta", "--loglevel=error"]
+root-markers = [".luarc.json", ".luarc.jsonc"]
+file-patterns = ["**/*.lua", "**/.luarc.json", "**/.luarc.jsonc"]
+
+[language-servers.settings.Lua]
+# No data sent anywhere, no question about third-party libraries' definitions.
+telemetry = { enable = false }
+workspace = { checkThirdParty = false, maxPreload = 2000, preloadFileSize = 500 }
+completion = { callSnippet = "Replace", keywordSnippet = "Replace" }
+hint = { enable = false }

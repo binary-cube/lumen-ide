@@ -1,0 +1,189 @@
+{
+  "query_block": {
+    "select_id": 1,
+    "cost_info": {
+      "query_cost": "2221.95"
+    },
+    "ordering_operation": {
+      "using_temporary_table": true,
+      "using_filesort": true,
+      "cost_info": {
+        "sort_cost": "799.50"
+      },
+      "nested_loop": [
+        {
+          "table": {
+            "table_name": "x",
+            "access_type": "ALL",
+            "rows_examined_per_scan": 533,
+            "rows_produced_per_join": 533,
+            "filtered": "100.00",
+            "cost_info": {
+              "read_cost": "36.65",
+              "eval_cost": "106.60",
+              "prefix_cost": "143.25",
+              "data_read_per_join": "8K"
+            },
+            "used_columns": [
+              "id"
+            ],
+            "materialized_from_subquery": {
+              "using_temporary_table": true,
+              "dependent": false,
+              "cacheable": true,
+              "query_block": {
+                "union_result": {
+                  "using_temporary_table": true,
+                  "table_name": "<union3,4>",
+                  "access_type": "ALL",
+                  "query_specifications": [
+                    {
+                      "dependent": false,
+                      "cacheable": true,
+                      "query_block": {
+                        "select_id": 3,
+                        "cost_info": {
+                          "query_cost": "68.13"
+                        },
+                        "table": {
+                          "table_name": "customers",
+                          "access_type": "ref",
+                          "possible_keys": [
+                            "customers_country"
+                          ],
+                          "key": "customers_country",
+                          "used_key_parts": [
+                            "country"
+                          ],
+                          "key_length": "9",
+                          "ref": [
+                            "const"
+                          ],
+                          "rows_examined_per_scan": 333,
+                          "rows_produced_per_join": 333,
+                          "filtered": "100.00",
+                          "using_index": true,
+                          "cost_info": {
+                            "read_cost": "1.53",
+                            "eval_cost": "66.60",
+                            "prefix_cost": "68.13",
+                            "data_read_per_join": "533K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "country"
+                          ]
+                        }
+                      }
+                    },
+                    {
+                      "dependent": false,
+                      "cacheable": true,
+                      "query_block": {
+                        "select_id": 4,
+                        "cost_info": {
+                          "query_cost": "416.00"
+                        },
+                        "table": {
+                          "table_name": "customers",
+                          "access_type": "ALL",
+                          "rows_examined_per_scan": 2000,
+                          "rows_produced_per_join": 200,
+                          "filtered": "10.00",
+                          "cost_info": {
+                            "read_cost": "376.00",
+                            "eval_cost": "40.00",
+                            "prefix_cost": "416.00",
+                            "data_read_per_join": "320K"
+                          },
+                          "used_columns": [
+                            "id",
+                            "vip"
+                          ],
+                          "attached_condition": "(`shop`.`customers`.`vip` = 1)"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "table": {
+            "table_name": "o",
+            "access_type": "ref",
+            "possible_keys": [
+              "orders_customer"
+            ],
+            "key": "orders_customer",
+            "used_key_parts": [
+              "customer_id"
+            ],
+            "key_length": "4",
+            "ref": [
+              "x.id"
+            ],
+            "rows_examined_per_scan": 2,
+            "rows_produced_per_join": 799,
+            "filtered": "75.00",
+            "cost_info": {
+              "read_cost": "1066.00",
+              "eval_cost": "159.90",
+              "prefix_cost": "1422.45",
+              "data_read_per_join": "24K"
+            },
+            "used_columns": [
+              "id",
+              "customer_id",
+              "status",
+              "ordered_at"
+            ],
+            "attached_condition": "(`shop`.`o`.`status` <> 'new')"
+          }
+        }
+      ],
+      "select_list_subqueries": [
+        {
+          "dependent": true,
+          "cacheable": false,
+          "query_block": {
+            "select_id": 2,
+            "cost_info": {
+              "query_cost": "1.20"
+            },
+            "table": {
+              "table_name": "l",
+              "access_type": "ref",
+              "possible_keys": [
+                "PRIMARY"
+              ],
+              "key": "PRIMARY",
+              "used_key_parts": [
+                "order_id"
+              ],
+              "key_length": "8",
+              "ref": [
+                "shop.o.id"
+              ],
+              "rows_examined_per_scan": 1,
+              "rows_produced_per_join": 1,
+              "filtered": "100.00",
+              "using_index": true,
+              "cost_info": {
+                "read_cost": "1.00",
+                "eval_cost": "0.20",
+                "prefix_cost": "1.20",
+                "data_read_per_join": "32"
+              },
+              "used_columns": [
+                "order_id"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

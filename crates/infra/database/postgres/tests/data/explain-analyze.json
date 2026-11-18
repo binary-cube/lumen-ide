@@ -1,0 +1,74 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Hash Join",
+      "Parallel Aware": false,
+      "Join Type": "Left",
+      "Startup Cost": 1.07,
+      "Total Cost": 2.21,
+      "Plan Rows": 5,
+      "Plan Width": 68,
+      "Actual Startup Time": 0.031,
+      "Actual Total Time": 0.04,
+      "Actual Rows": 5,
+      "Actual Loops": 1,
+      "Inner Unique": true,
+      "Hash Cond": "(o.customer_id = c.id)",
+      "Shared Hit Blocks": 2,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Relation Name": "orders",
+          "Alias": "o",
+          "Startup Cost": 0.0,
+          "Total Cost": 1.05,
+          "Plan Rows": 5,
+          "Plan Width": 40,
+          "Actual Startup Time": 0.008,
+          "Actual Total Time": 0.01,
+          "Actual Rows": 5,
+          "Actual Loops": 1,
+          "Filter": "(total > '0'::numeric)",
+          "Rows Removed by Filter": 0
+        },
+        {
+          "Node Type": "Hash",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Startup Cost": 1.03,
+          "Total Cost": 1.03,
+          "Plan Rows": 3,
+          "Plan Width": 36,
+          "Actual Startup Time": 0.012,
+          "Actual Total Time": 0.012,
+          "Actual Rows": 3,
+          "Actual Loops": 1,
+          "Plans": [
+            {
+              "Node Type": "Index Scan",
+              "Parent Relationship": "Outer",
+              "Scan Direction": "Forward",
+              "Index Name": "customers_pkey",
+              "Relation Name": "customers",
+              "Alias": "c",
+              "Startup Cost": 0.15,
+              "Total Cost": 1.03,
+              "Plan Rows": 3,
+              "Plan Width": 36,
+              "Actual Startup Time": 0.004,
+              "Actual Total Time": 0.006,
+              "Actual Rows": 3,
+              "Actual Loops": 1,
+              "Index Cond": "(id > 0)"
+            }
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.154,
+    "Triggers": [],
+    "Execution Time": 0.071
+  }
+]

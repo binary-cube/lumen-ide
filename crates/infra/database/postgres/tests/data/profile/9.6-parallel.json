@@ -1,0 +1,100 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Aggregate",
+      "Strategy": "Plain",
+      "Partial Mode": "Finalize",
+      "Parallel Aware": false,
+      "Startup Cost": 12165.57,
+      "Total Cost": 12165.58,
+      "Plan Rows": 1,
+      "Plan Width": 8,
+      "Actual Startup Time": 61.284,
+      "Actual Total Time": 61.284,
+      "Actual Rows": 1,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 4425,
+      "Shared Read Blocks": 0,
+      "Plans": [
+        {
+          "Node Type": "Gather",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Startup Cost": 12165.35,
+          "Total Cost": 12165.56,
+          "Plan Rows": 2,
+          "Plan Width": 8,
+          "Actual Startup Time": 61.120,
+          "Actual Total Time": 61.276,
+          "Actual Rows": 3,
+          "Actual Loops": 1,
+          "Workers Planned": 2,
+          "Workers Launched": 2,
+          "Single Copy": false,
+          "Shared Hit Blocks": 4425,
+          "Shared Read Blocks": 0,
+          "Plans": [
+            {
+              "Node Type": "Aggregate",
+              "Strategy": "Plain",
+              "Partial Mode": "Partial",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Startup Cost": 11165.35,
+              "Total Cost": 11165.36,
+              "Plan Rows": 1,
+              "Plan Width": 8,
+              "Actual Startup Time": 58.533,
+              "Actual Total Time": 58.534,
+              "Actual Rows": 1,
+              "Actual Loops": 3,
+              "Shared Hit Blocks": 4425,
+              "Shared Read Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Seq Scan",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": true,
+                  "Relation Name": "pgbench_accounts",
+                  "Alias": "pgbench_accounts",
+                  "Startup Cost": 0.00,
+                  "Total Cost": 10123.67,
+                  "Plan Rows": 416667,
+                  "Plan Width": 0,
+                  "Actual Startup Time": 0.019,
+                  "Actual Total Time": 37.906,
+                  "Actual Rows": 333333,
+                  "Actual Loops": 3,
+                  "Shared Hit Blocks": 4425,
+                  "Shared Read Blocks": 0,
+                  "Workers": [
+                    {
+                      "Worker Number": 0,
+                      "Actual Startup Time": 0.025,
+                      "Actual Total Time": 37.511,
+                      "Actual Rows": 328880,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 1455
+                    },
+                    {
+                      "Worker Number": 1,
+                      "Actual Startup Time": 0.021,
+                      "Actual Total Time": 37.725,
+                      "Actual Rows": 336720,
+                      "Actual Loops": 1,
+                      "Shared Hit Blocks": 1488
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.088,
+    "Triggers": [
+    ],
+    "Execution Time": 62.399
+  }
+]

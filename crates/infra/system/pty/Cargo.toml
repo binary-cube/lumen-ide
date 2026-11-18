@@ -1,0 +1,29 @@
+[package]
+name = "pty"
+description = "Terminal adapters: the PTY (openpty / ConPTY) and VT emulation, from alacritty_terminal; the shells the system has."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+terminal-session.workspace = true
+alacritty_terminal.workspace = true
+tracing.workspace = true
+files.workspace = true
+# alacritty's PTY trait names its poller's types.
+polling = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,559 @@
+# The language servers bundled with the app (plan 43): Node and the servers, each pinned,
+# downloaded only from their official sources and checked, at build time — never at run
+# time — by `cargo xtask lsp-bundle` (into `target/lsp/` while developing; `scripts/build.sh`
+# puts them beside the app: `<App>.app/Contents/Resources/lsp`, `lsp\` beside the `.exe`).
+#
+# Layout made:  lsp/manifest.toml · lsp/node/<version>/ · lsp/servers/<server>/<version>/
+#
+# Node: the official build of an LTS release (nodejs.org/dist), its SHA-256 from that
+# release's SHASUMS256.txt; only its program and its licence are kept.
+[node]
+version = "26.13.0"
+license = "MIT"
+
+[node.platforms.macos-arm64]
+url = "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-arm64.tar.xz"
+sha256 = "6f5b3187d9df9fc007e881167905bc7d69ad26450ddc377c83d63256a2495b6e"
+
+[node.platforms.macos-x64]
+url = "https://nodejs.org/dist/v26.13.0/node-v26.13.0-darwin-x64.tar.xz"
+sha256 = "8bd636bc981a92e1ab930c02340eece2076eb1aaf94d14e421cdeeddc1292298"
+
+[node.platforms.linux-x64]
+url = "https://nodejs.org/dist/v26.13.0/node-v26.13.0-linux-x64.tar.xz"
+sha256 = "d28a96af6c38596f6d9d97c0ee531c13d238d757742387d1928de822d959e997"
+
+[node.platforms.windows-x64]
+url = "https://nodejs.org/dist/v26.13.0/node-v26.13.0-win-x64.zip"
+sha256 = "dcc60d59a0746999f99064a01c020445d54d84228c691cdbf25b49ac3b59150a"
+
+# PHP, for the PHP servers (phpactor): a static PHP CLI per platform from static-php-cli's
+# builds (MIT; PHP under the PHP License 3.01) — its project's distribution server
+# (dl.static-php.dev: its GitHub releases have only its `spc` tool), a version's file, its
+# SHA-256 pinned (computed when it was chosen: the server publishes none). The `minimal`
+# set on macOS / Linux (iconv mbstring pcntl posix filter tokenizer zlib phar; libiconv
+# LGPL-2.1 and zlib linked in), `spc-min` on Windows (ctype fileinfo filter iconv mbstring
+# tokenizer phar): what phpactor needs, no openssl / curl (nothing of the network).
+[php]
+version = "8.4.22"
+license = "PHP-3.01 (PHP), MIT (static-php-cli), LGPL-2.1 (libiconv), Zlib"
+
+[php.platforms.macos-arm64]
+url = "https://dl.static-php.dev/static-php-cli/minimal/php-8.4.22-cli-macos-aarch64.tar.gz"
+sha256 = "368815903678dce5264f916bd719489b0e1a728709b2d3eebcd1f71915f26a13"
+
+[php.platforms.macos-x64]
+url = "https://dl.static-php.dev/static-php-cli/minimal/php-8.4.22-cli-macos-x86_64.tar.gz"
+sha256 = "5064176509addece1b40bde8dfb3e9f0b0d5425f5d673484a786ee05caf640a0"
+
+[php.platforms.linux-x64]
+url = "https://dl.static-php.dev/static-php-cli/minimal/php-8.4.22-cli-linux-x86_64.tar.gz"
+sha256 = "8318c6b9073aff0e0a6f127806d7769b190d1af4486ed2b042651f224f061d41"
+
+[php.platforms.windows-x64]
+url = "https://dl.static-php.dev/static-php-cli/windows/spc-min/php-8.4.22-cli-win.zip"
+sha256 = "eef4955ed7832bce00969595add4bded7ec154858c8f8be6ca83651aa9ebb269"
+
+# Its licences, beside it.
+[[php.files]]
+url = "https://raw.githubusercontent.com/php/php-src/php-8.4.22/LICENSE"
+sha256 = "b42e4df5e50e6ecda1047d503d6d91d71032d09ed1027ba1ef29eed26f890c5a"
+path = "LICENSE"
+
+[[php.files]]
+url = "https://raw.githubusercontent.com/crazywhalecc/static-php-cli/2.8.5/LICENSE"
+sha256 = "feb73706d9700944d2522ee064283e4cb96fe73a337125b9b3952952f15724d0"
+path = "LICENSE.static-php-cli"
+
+# The Node servers: installed with `npm ci` from the lockfile in `packages` (every package's
+# version and SHA-512 pinned there, from registry.npmjs.org), install scripts off. They're
+# JavaScript: the same files for every platform.
+[[servers]]
+name = "vtsls"
+version = "0.3.0"
+license = "MIT (vtsls), Apache-2.0 (TypeScript)"
+packages = "packaging/lsp/vtsls"
+
+# HTML, CSS / SCSS and JSON: `vscode-langservers-extracted` (one package, three servers).
+# The HTML server loads TypeScript for `<script>` (off here: code embedded in HTML stays the
+# built-in engine's), so only what that load reads is kept of it (`prune`: paths relative to
+# the server's folder, `*` any name).
+[[servers]]
+name = "vscode-langservers-extracted"
+version = "4.10.0"
+license = "MIT (the servers), Apache-2.0 (TypeScript, SchemaStore's schemas), BSD-2-Clause, ISC"
+packages = "packaging/lsp/vscode-langservers-extracted"
+prune = [
+    "node_modules/typescript/bin",
+    "node_modules/typescript/lib/*/diagnosticMessages.generated.json",
+    "node_modules/typescript/lib/tsc.js",
+    "node_modules/typescript/lib/tsserver.js",
+    "node_modules/typescript/lib/tsserverlibrary.js",
+    "node_modules/typescript/lib/tsserverlibrary.d.ts",
+    "node_modules/typescript/lib/typescriptServices.js",
+    "node_modules/typescript/lib/typescriptServices.d.ts",
+    "node_modules/typescript/lib/typingsInstaller.js",
+    "node_modules/typescript/lib/watchGuard.js",
+    "node_modules/vscode-langservers-extracted/lib/*/test",
+]
+
+# The JSON schemas the JSON server is given for the files everybody has (package.json,
+# tsconfig.json, composer.json…) and every schema they refer to: never downloaded at run
+# time (the client answers the server's `vscode/content` from these). SchemaStore's at a
+# pinned commit (Apache-2.0), Composer's at a tag (MIT); each file's SHA-256 checked.
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/ava.json"
+sha256 = "3c02652299c240b152d8d30bc476dfa4bda7854132632dc9595afe53ac12ee0a"
+path = "schemas/schemastore/ava.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/babelrc.json"
+sha256 = "2e4ff24f430107befd518a87bbc6fbbbe35f8e23de1cb7994775939df8fd492c"
+path = "schemas/schemastore/babelrc.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/eslintrc.json"
+sha256 = "2e7bf9df71bef201db128b6287c9d8b89bad4e7f8aa839d224e9c42141bb4e09"
+path = "schemas/schemastore/eslintrc.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/jsconfig.json"
+sha256 = "586309622e0a5651303183e893f3bcee46192f27f0817ad78d0b2ae6e04c0e38"
+path = "schemas/schemastore/jsconfig.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/jscpd.json"
+sha256 = "c4451c972dd7c5040375d01279d1e777f1cf672f0e227e2ea92e3ac4b106cfd7"
+path = "schemas/schemastore/jscpd.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/madge.json"
+sha256 = "b6e5ae0126cdfd73dcc1592bc91de0a8f246fde16fe9b7d0c0ad9c8b46b4a034"
+path = "schemas/schemastore/madge.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/nodemon.json"
+sha256 = "cc1c775543f377b9561fbf56e7a30a64dea18c0d7bff993ad1ad15ec8c3eaf04"
+path = "schemas/schemastore/nodemon.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/package.json"
+sha256 = "76767b4e0b941f048f20d6de3eef2b8dd5f2b09816913a26b4bbf1afbd31fd79"
+path = "schemas/schemastore/package.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-eslint-plugins.json"
+sha256 = "64cb0d70799fccd67e24ae1befd7643a4808c78e383f361b820932aa80a5cf16"
+path = "schemas/schemastore/partial-eslint-plugins.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/prettierrc.json"
+sha256 = "a5f9c7ed250e12c1b5fb7f0a2ae1b03e064513b40be96688cd2517925f42a6f0"
+path = "schemas/schemastore/prettierrc.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/quikrun.json"
+sha256 = "67cf4391e674bd17b77e893e97860d6d0c12f815a777251b65563c72e522b646"
+path = "schemas/schemastore/quikrun.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/semantic-release.json"
+sha256 = "0a471bd80eafbed9d250da67c2d6fbf2b6fab93d3cd1d627193875bf6a2c2168"
+path = "schemas/schemastore/semantic-release.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/stylelintrc.json"
+sha256 = "bbd2ced672f359a43a38f59d5cb380d6938e52f6cdf5058e9cea0870c9886efb"
+path = "schemas/schemastore/stylelintrc.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/tsconfig.json"
+sha256 = "9e9599c2e6021574483e3a802eb075c872be1f5b4185ad45da03d33edce3c2b1"
+path = "schemas/schemastore/tsconfig.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/composer/composer/2.9.8/res/composer-schema.json"
+sha256 = "7bdaafba7d0b1718fc799120519db6e35f87c6379b766aed2a1d7cce6e0cbdbb"
+path = "schemas/getcomposer.org/schema.json"
+
+# The native servers: each one's official release for the platform, from its GitHub
+# releases, its SHA-256 pinned (GitHub's own digest of the file). `strip`: the archive's top
+# folder; `prune` as above; `universal`: macOS programs built for both architectures, of
+# which only the platform's is kept (the dist's universal build joins the two again);
+# `strip-debug`: per platform, programs whose debug information is left out (with the
+# platform's `strip`, if one is at hand: else kept, and said).
+
+# C / C++. Kept: the program and clang's builtin headers (`stddef.h`, the intrinsics…),
+# which it needs to read any code; left out: clang's runtime libraries (compiler-rt, for
+# linking sanitizers and profiles: 190 MB on macOS), never read by clangd.
+[[servers]]
+name = "clangd"
+version = "23.1.0"
+license = "Apache-2.0 WITH LLVM-exception"
+strip = "clangd_23.1.0"
+prune = ["lib/clang/*/lib", "lib/clang/*/share"]
+universal = ["bin/clangd"]
+# Linux's release keeps its debug information (142 → 72 MB without it).
+strip-debug = { linux-x64 = ["bin/clangd"] }
+
+[servers.platforms.macos-arm64]
+url = "https://github.com/clangd/clangd/releases/download/23.1.0/clangd-mac-23.1.0.zip"
+sha256 = "1082e6638223b785ca2daf0939f13afcd0bb95c84ee9a4bbaff4745365159253"
+
+[servers.platforms.macos-x64]
+url = "https://github.com/clangd/clangd/releases/download/23.1.0/clangd-mac-23.1.0.zip"
+sha256 = "1082e6638223b785ca2daf0939f13afcd0bb95c84ee9a4bbaff4745365159253"
+
+[servers.platforms.linux-x64]
+url = "https://github.com/clangd/clangd/releases/download/23.1.0/clangd-linux-23.1.0.zip"
+sha256 = "e53b1a96196095faedb7642cf64964f7fb9ad4a0c1f00dd2c172a3d9dcbafdfd"
+
+[servers.platforms.windows-x64]
+url = "https://github.com/clangd/clangd/releases/download/23.1.0/clangd-windows-23.1.0.zip"
+sha256 = "23412a240756a162e7b98a282f36aa2a23a88db5ce16a0cbc4fef7253768c810"
+
+# Lua. Its standard library's definitions are made at run time in the project's cache
+# (`--metapath`), from `meta/template`: the copies made by the release's own test run are
+# left out.
+[[servers]]
+name = "lua-language-server"
+version = "3.19.2"
+license = "MIT"
+prune = [
+    "log",
+    "meta/default utf8",
+    "meta/Lua 5.4 zh-cn utf8",
+    "meta/LuaJIT zh-cn utf8",
+    "meta/6b22342a",
+    "changelog.md",
+]
+
+[servers.platforms.macos-arm64]
+url = "https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-darwin-arm64.tar.gz"
+sha256 = "79149584320a23bd5fcd5bc31f47a1975acd8a4560a0e89036bb1016fa61687f"
+
+[servers.platforms.macos-x64]
+url = "https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-darwin-x64.tar.gz"
+sha256 = "6f2174ece5ec63bcd9d5b22b2c902445c1cd9045fafe48c62602448ebf4c09cc"
+
+[servers.platforms.linux-x64]
+url = "https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-linux-x64.tar.gz"
+sha256 = "93ad326b10f6c00911dd8c450fa098332dbd8f9f45d1052f5636a2d54479b947"
+
+[servers.platforms.windows-x64]
+url = "https://github.com/LuaLS/lua-language-server/releases/download/3.19.2/lua-language-server-3.19.2-win32-x64.zip"
+sha256 = "4a3dc851b3b31e7b75a23f645d1ba4a2137579a55f5fa4edbb17a3e2a6254044"
+
+# Zig. Zig itself isn't bundled: zls finds `zig` in PATH (the standard library's
+# completions, build-on-save); without it, it reads the project's own files.
+[[servers]]
+name = "zls"
+version = "0.17.0"
+license = "MIT"
+# Linux's release keeps its debug information (19 → 3.7 MB without it), Windows' beside it
+# (`zls.pdb`, 13 MB: left out).
+strip-debug = { linux-x64 = ["zls"] }
+prune = ["zls.pdb"]
+
+[servers.platforms.macos-arm64]
+url = "https://github.com/zigtools/zls/releases/download/0.17.0/zls-aarch64-macos.tar.xz"
+sha256 = "2e451358b4f7e2d4b1fccb65db177dbb321c5a98e95f67e09aa72d6ecfb39d20"
+
+[servers.platforms.macos-x64]
+url = "https://github.com/zigtools/zls/releases/download/0.17.0/zls-x86_64-macos.tar.xz"
+sha256 = "0801481ebf0027620db6729968c069401c7b80f376d35f9f91f480d72c393523"
+
+[servers.platforms.linux-x64]
+url = "https://github.com/zigtools/zls/releases/download/0.17.0/zls-x86_64-linux.tar.xz"
+sha256 = "dfa4514e1868803fdf2ae56832c88b9d400094d70ea6bb136b57bcc91af10258"
+
+[servers.platforms.windows-x64]
+url = "https://github.com/zigtools/zls/releases/download/0.17.0/zls-x86_64-windows.zip"
+sha256 = "b0e557b13032322f530a818ea4eb899a51a2e738808397a8cf3868fd56b73972"
+
+# Shell scripts: bash-language-server (MIT). ShellCheck (GPL-3.0) is not bundled: the server
+# runs it as a separate program when the user has it in PATH (never linked, never shipped).
+# The debug build of its parser's runtime (web-tree-sitter's `debug/`) is left out.
+[[servers]]
+name = "bash-language-server"
+version = "5.8.1"
+license = "MIT; dependencies MIT, ISC, BSD-2-Clause, BlueOak-1.0.0"
+packages = "packaging/lsp/bash-language-server"
+prune = ["node_modules/web-tree-sitter/debug"]
+
+# YAML: Red Hat's yaml-language-server (MIT), with the schemas of the files most projects
+# have — never downloaded at run time (the client answers its `vscode/content` from these):
+# SchemaStore's at the pinned commit (Apache-2.0), the Compose specification's from
+# compose-go at a tag (Apache-2.0); each file's SHA-256 checked.
+[[servers]]
+name = "yaml-language-server"
+version = "2.0.0"
+license = "MIT; dependencies MIT, ISC, BSD-3-Clause; schemas Apache-2.0"
+packages = "packaging/lsp/yaml-language-server"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/dependabot-2.0.json"
+sha256 = "f310bfb4960eea6a5fb7d75de54ab49ba36f947757c8f4d5de88d3ea8ac51d3f"
+path = "schemas/schemastore/dependabot-2.0.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/github-action.json"
+sha256 = "224326cc5a334bdb97b56b6fc320cd4381ba7d61b477b425ed506e6a420b52ba"
+path = "schemas/schemastore/github-action.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/github-workflow.json"
+sha256 = "d10c9f4656e1bd5bc6727e9b35080e017dc167154726fca93da33c7a6bd1c4f3"
+path = "schemas/schemastore/github-workflow.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/pre-commit-config.json"
+sha256 = "a51940e5cdb07517fd7b7401dd94c41c496b6f114109bf25e545d6021894a9d4"
+path = "schemas/schemastore/pre-commit-config.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/compose-spec/compose-go/v2.16.2/schema/compose-spec.json"
+sha256 = "f266dcbb043229405d7cedd5aec918f9102c2b3d5e3850808fdd8edd564a43ff"
+path = "schemas/compose-spec/compose-spec.json"
+
+# The Dockerfile: dockerfile-language-server-nodejs (MIT).
+[[servers]]
+name = "dockerfile-language-server-nodejs"
+version = "0.15.0"
+license = "MIT"
+packages = "packaging/lsp/dockerfile-language-server-nodejs"
+
+# TOML: taplo (MIT), one program per platform (gzipped, or zipped on Windows). Its schemas
+# (SchemaStore's, at the pinned commit) are made self-contained here (`[[servers.inline]]`:
+# what they refer to put inside them — taplo fetches referred schemas itself, and must
+# never reach the network); the parts are left out afterwards.
+[[servers]]
+name = "taplo"
+version = "0.10.0"
+license = "MIT; schemas Apache-2.0"
+
+[servers.platforms.macos-arm64]
+url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-darwin-aarch64.gz"
+sha256 = "713734314c3e71894b9e77513c5349835eefbd52908445a0d73b0c7dc469347d"
+program = "taplo"
+
+[servers.platforms.macos-x64]
+url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-darwin-x86_64.gz"
+sha256 = "898122cde3a0b1cd1cbc2d52d3624f23338218c91b5ddb71518236a4c2c10ef2"
+program = "taplo"
+
+[servers.platforms.linux-x64]
+url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz"
+sha256 = "8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156"
+program = "taplo"
+
+[servers.platforms.windows-x64]
+url = "https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-windows-x86_64.zip"
+sha256 = "1615eed140039bd58e7089109883b1c434de5d6de8f64a993e6e8c80ca57bdf9"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/cargo-config.json"
+sha256 = "e3c2fded07bbf9fe5e6a2acad579e939df0725651e5aa6a251e0dd64de146cab"
+path = "schemas/cargo-config.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/rustfmt.json"
+sha256 = "72bc3e87afbbfcd24a21894d7019c2968ef9ea09dbd3436f7f4f0bfcd8ba805b"
+path = "schemas/rustfmt.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/cargo-lints-cargo.json"
+sha256 = "e4c740358d80c1b55813f46f1c2efb2be3b2d601faf225eb84fb967602bb878f"
+path = "schemas/parts/cargo-lints-cargo.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/cargo-lints-clippy.json"
+sha256 = "23d40eee1e800ef7b992d5f6465e3287bfda03752789f0d75404faa06634d49b"
+path = "schemas/parts/cargo-lints-clippy.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/cargo-lints-rust.json"
+sha256 = "c2e8166fa1963cb4a003902d943f7dfa6aca4e3d509599a786f123c93f51d433"
+path = "schemas/parts/cargo-lints-rust.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/cargo-lints-rustdoc.json"
+sha256 = "afbdec4e0c762fc72a0100923ed0f7a6bcc618acba15b7bbcbe600be55a9d31d"
+path = "schemas/parts/cargo-lints-rustdoc.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/cargo.json"
+sha256 = "87aa9556ae57ddec7ce9dc405a0e1b53eabd6d533a1fc385c5175028016d5afa"
+path = "schemas/parts/cargo.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/quikrun.json"
+sha256 = "67cf4391e674bd17b77e893e97860d6d0c12f815a777251b65563c72e522b646"
+path = "schemas/parts/quikrun.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/complexipy.json"
+sha256 = "0c4a935c5e2e0ce4107c68b513f409c13bac47de0ca656c670f435f367ca24d4"
+path = "schemas/parts/complexipy.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/hatch.json"
+sha256 = "bfcd4ca0262a7e66eb9b95d7f3f4b611b17f38a846eb83de638f673a451e0356"
+path = "schemas/parts/hatch.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/maturin.json"
+sha256 = "a7cb59f7dd34e953d18840a094c3ce6f0991972f3f62005e4e0f4392edd947c9"
+path = "schemas/parts/maturin.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-black.json"
+sha256 = "213d4de1b8ebe279865b06560b1d5d0d4244260d7f60ff331e815a61a986019b"
+path = "schemas/parts/partial-black.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-cibuildwheel.json"
+sha256 = "6d9833b19682eb5d60958a37a0e6effe6f97b47f684c35d36f0085477723a5e6"
+path = "schemas/parts/partial-cibuildwheel.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-dfc.json"
+sha256 = "f6f2eaa18662960fac3041813e1e297e5f651c76b584c235772b776ff84899e3"
+path = "schemas/parts/partial-dfc.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-fastapi.json"
+sha256 = "6d4cd6eba604582362aa05a711c64252627f99bbe3c8749ba1295629e7ab92e6"
+path = "schemas/parts/partial-fastapi.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-inwards.json"
+sha256 = "a24f78d3049dbda6cc23aacb38ed7a92911acc64d836376f1fc47742fc287211"
+path = "schemas/parts/partial-inwards.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-mypy.json"
+sha256 = "5a7c3769bebd74d61d3348b6040f5e392e2a904c1b4383554ddd0ae03d3388ce"
+path = "schemas/parts/partial-mypy.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-pdm-dockerize.json"
+sha256 = "029401381fcd559ec60561515e9bc3d83b6c102f06d0b75d61bf01458f4d65e7"
+path = "schemas/parts/partial-pdm-dockerize.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-pdm.json"
+sha256 = "babe12d076602110e52cf76a41444b59e860df916c6dc70d85d30720c5e2d209"
+path = "schemas/parts/partial-pdm.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-pixi.json"
+sha256 = "41b5e78e1484e1fd65e8e593e4ee22d7720a073397ac9f7163eb83227c35da8c"
+path = "schemas/parts/partial-pixi.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-poe.json"
+sha256 = "6865c6aea3dd45fce22dcc2adf63d30af1e98381d2259c7c564c76893b2edae7"
+path = "schemas/parts/partial-poe.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-poetry.json"
+sha256 = "530ef9ebeafc508be192024ac08fdfacaa2ef68bc33294f1a693238728df6e50"
+path = "schemas/parts/partial-poetry.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-pyright.json"
+sha256 = "14384316b2b5d9892c771133fa9a0f925f08862eb4944ec5be9d5c7871c7ed69"
+path = "schemas/parts/partial-pyright.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-pytest.json"
+sha256 = "15894b3b37e0ae60b79869da43b9e26790bc1198d645586ca8447246c23f9ac4"
+path = "schemas/parts/partial-pytest.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-repo-review.json"
+sha256 = "feca8050cacdb3fb5c7df79eafc81acbb71223e6ea9fa9ef360a491151f98677"
+path = "schemas/parts/partial-repo-review.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-scheduled.json"
+sha256 = "f560f9b2c59e8482e965f461fcb2004778892b84b1a60500fbadab03868488b6"
+path = "schemas/parts/partial-scheduled.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-scikit-build.json"
+sha256 = "409579f8dc8c752819beb2418d8d3baf617da515b656514f48a0d07789e453eb"
+path = "schemas/parts/partial-scikit-build.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-setuptools-scm.json"
+sha256 = "a476e542b199405d0149a5c6c62de5baf355af09f1ec32d72570abef40346561"
+path = "schemas/parts/partial-setuptools-scm.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-setuptools.json"
+sha256 = "75dc49c82aba11d2e27110d315fb4e79984941c34582458bc64cfa8237c0ca1b"
+path = "schemas/parts/partial-setuptools.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/partial-taskipy.json"
+sha256 = "bb10884869742046f2f89c04df989c808163d07cd27f94a14f073f58af4f050e"
+path = "schemas/parts/partial-taskipy.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/pyproject.json"
+sha256 = "82f021a77e8145047c2ad502909734c0786e6ab41fbeaa2a1bcee63a9fd538db"
+path = "schemas/parts/pyproject.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/ruff.json"
+sha256 = "d543216c52a7bd33325de767ebba8b410162302bce2cdc8980662e0bc06984be"
+path = "schemas/parts/ruff.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/tombi.json"
+sha256 = "8a5fdf5254eaaa79e6a59c0c4ac0ace5cbc337201c06bd07813b27276432119c"
+path = "schemas/parts/tombi.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/tox.json"
+sha256 = "838187e7bef25fc54e6d761f3f20df263473e1fa7edfd3c46e4026b1eb00c072"
+path = "schemas/parts/tox.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/ty.json"
+sha256 = "38341057bf30b3c78954b0fe97c9a9d38163fb21de3afef11dc466b3a67e1098"
+path = "schemas/parts/ty.json"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/SchemaStore/schemastore/1f9ebc8379f842319663f776f9767fdf6ca5e4a5/src/schemas/json/uv.json"
+sha256 = "accd72042015703861297d12c682e0d9c35f435506acf942874927bb367ccdf7"
+path = "schemas/parts/uv.json"
+
+[[servers.inline]]
+schema = "schemas/parts/cargo.json"
+out = "schemas/cargo.json"
+urls = { "https://json.schemastore.org/" = "schemas/parts", "https://www.schemastore.org/" = "schemas/parts" }
+
+[[servers.inline]]
+schema = "schemas/parts/pyproject.json"
+out = "schemas/pyproject.json"
+urls = { "https://json.schemastore.org/" = "schemas/parts", "https://www.schemastore.org/" = "schemas/parts" }
+
+# PHP: phpactor (MIT), its release's PHAR (everything in one file, the same for every
+# platform), run by the bundled PHP; its SHA-256 is GitHub's digest of the file.
+[[servers]]
+name = "phpactor"
+version = "2026.10.07.0"
+license = "MIT; dependencies MIT, BSD-3-Clause, Apache-2.0 (JetBrains' PHP stubs)"
+
+[[servers.files]]
+url = "https://github.com/phpactor/phpactor/releases/download/2026.10.07.0/phpactor.phar"
+sha256 = "b28bf6166e016d539fc2f2aec18ef918b12590e436a6f1ccbdf30b5bbdbdb16b"
+path = "phpactor.phar"
+
+[[servers.files]]
+url = "https://raw.githubusercontent.com/phpactor/phpactor/2026.10.07.0/LICENSE"
+sha256 = "4287c3b7c293133dc59e92cb32a1aae899c4441ac6d64455c537c82070c84caa"
+path = "LICENSE"

@@ -1,0 +1,19 @@
+[package]
+name = "kernel"
+description = "Shared kernel: identifiers, text positions, secrets and the event bus, common to every context."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+miniz_oxide.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+-- actual · format 1
+Hash Join  (cost=54.38..76.48 rows=200 width=48) (actual time=2.917..3.402 rows=120 loops=1)
+  Hash Cond: (a.customer_id = b.customer_id)
+  CTE totals
+  ->  Aggregate  (cost=44.38..46.38 rows=200 width=40) (actual time=2.601..2.688 rows=120 loops=1)
+        Role: init_plan
+        Group Key: orders.customer_id
+        Peak Memory: 49152 bytes
+        Partial Mode: Simple
+        Planned Partitions: 0
+        HashAgg Batches: 1
+        ->  Seq Scan on orders  (cost=0.00..32.00 rows=2200 width=40) (actual time=0.007..0.611 rows=2200 loops=1)
+  ->  CTE Scan on totals a  (cost=0.00..4.00 rows=200 width=40) (actual time=2.604..2.741 rows=120 loops=1)
+  ->  Hash  (cost=4.00..4.00 rows=200 width=8) (actual time=0.081..0.081 rows=120 loops=1)
+        Buckets: 1024  Batches: 1
+        Peak Memory: 13312 bytes
+        ->  CTE Scan on totals b  (cost=0.00..4.00 rows=200 width=8) (actual time=0.001..0.034 rows=120 loops=1)
+Planning Time: 0.144 ms
+Execution Time: 3.520 ms

@@ -1,0 +1,37 @@
+# The JavaScript family's language server (plan 43): vtsls — TypeScript's own tsserver behind
+# LSP — bundled with the app (`lsp/servers/vtsls/<version>`), run by the app's Node. One
+# server per project for JavaScript, TypeScript and TSX (no root markers: the project's
+# root). The format: see the language servers module (`lsp_client::spec`).
+
+[[language-servers]]
+name = "vtsls"
+languages = ["javascript", "typescript", "tsx"]
+bundle = "vtsls"
+command = "${node}"
+args = ["${server}/node_modules/@vtsls/language-server/bin/vtsls.js", "--stdio"]
+file-patterns = [
+    "**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}",
+    "**/{tsconfig,jsconfig}*.json",
+    "**/package.json",
+]
+language-ids = { tsx = "typescriptreact" }
+extension-language-ids = { jsx = "javascriptreact" }
+
+# The usual settings: the bundled TypeScript (not the project's), tsserver's memory
+# capped (`--max-old-space-size`, the setting), at most 200 suggestions per list, nothing
+# downloaded (no automatic type acquisition).
+[language-servers.settings.vtsls]
+autoUseWorkspaceTsdk = false
+[language-servers.settings.vtsls.experimental.completion]
+enableServerSideFuzzyMatch = true
+entriesLimit = 200
+[language-servers.settings.typescript]
+# No types downloaded from npm behind the user's back (the project's own `node_modules`
+# only).
+disableAutomaticTypeAcquisition = true
+[language-servers.settings.typescript.tsserver]
+maxTsServerMemory = "${max-memory}"
+[language-servers.settings.typescript.preferences]
+includePackageJsonAutoImports = "auto"
+[language-servers.settings.javascript.preferences]
+includePackageJsonAutoImports = "auto"

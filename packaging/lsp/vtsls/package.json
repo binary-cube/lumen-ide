@@ -1,0 +1,10 @@
+{
+  "name": "bundled-vtsls",
+  "private": true,
+  "description": "The JavaScript / TypeScript language server bundled with the app (vtsls and the TypeScript it runs), installed by `cargo xtask lsp-bundle` with `npm ci` from the lockfile beside this file.",
+  "license": "MIT",
+  "dependencies": {
+    "@vtsls/language-server": "0.3.0",
+    "typescript": "5.9.3"
+  }
+}

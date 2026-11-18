@@ -1,0 +1,28 @@
+[package]
+name = "viewer-image"
+description = "The image viewer: PNG, JPEG, GIF, WebP, BMP, ICO, SVG, rendered on the GPU, with zoom."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+i18n.workspace = true
+extensions.workspace = true
+image-decode.workspace = true
+languages.workspace = true
+icons.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+ui-kit.workspace = true
+ui-components.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+
+[lints]
+workspace = true

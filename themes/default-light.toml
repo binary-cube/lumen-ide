@@ -1,0 +1,175 @@
+# Default Light: a white card on a light grey background, an indigo accent.
+
+id = "default-light"
+name = "Default Light"
+appearance = "light"
+
+[palette]
+base      = "#f2f2f4"
+card      = "#ffffff"
+panel     = "#f8f8fa"
+line      = "#e7e7ec"
+fg        = "#1f2329"
+muted     = "#6b7079"
+code      = "#24292f"
+accent    = "#4f46e5"
+red       = "#d92d20"
+navy      = "#0033b3"
+green     = "#067d17"
+blue      = "#1750eb"
+teal      = "#00627a"
+purple    = "#871094"
+grey      = "#8c8c8c"
+
+[ui]
+"window.background"                = "$base"
+"card.border"                      = "#e3e3e8"
+"panel.background"                 = "$panel"
+"border"                           = "$line"
+"text"                             = "$fg"
+"text.muted"                       = "$muted"
+"accent"                           = "$accent"
+"danger"                           = "$red"
+
+"editor.background"                = "$card"
+"editor.foreground"                = "$code"
+"editor.gutter.foreground"         = "#b0b4bb"
+"editor.gutter.foreground.active"  = "#50555e"
+"editor.line.current"              = "#f6f7fb"
+"editor.selection"                 = "#dde3ff"
+"editor.selection.inactive"        = "#eceef4"
+"editor.cursor"                    = "$fg"
+"editor.match"                     = "#f5b40040"
+"editor.match.current"             = "#f5b4008c"
+
+"tab.hover"                        = "#e7e8ed"
+"input.background"                 = "$card"
+"input.border"                     = "#d9dbe1"
+"popup.background"                 = "$card"
+"popup.border"                     = "#e3e3e8"
+"shadow"                           = "#00000014"
+"toggle.active"                    = "#4f46e524"
+
+"tree.selection"                   = "#e6e6eb"
+"tree.hover"                       = "#ebebef"
+"tree.indentGuide"                 = "#dedee4"
+
+# The side panels and the tool strip on the left
+"sidebar.background"                 = "#fafafb"
+"toolStrip.foreground"               = "#5e636d"
+"toolStrip.hover"                    = "#e6e6eb"
+"toolStrip.active.background"        = "$accent"
+"toolStrip.active.foreground"        = "#ffffff"
+
+# The project panel's search field
+"searchField.background"             = "#ffffff"
+"searchField.border"                 = "#dcdde3"
+"searchField.border.focused"         = "#9aa5e8"
+
+# The terminal: background, text, cursor and the ANSI palette (16 colors)
+"terminal.background"                = "#ffffff"
+"terminal.foreground"                = "#24292f"
+"terminal.cursor"                    = "#1f2329"
+"terminal.ansi.black"                = "#000000"
+"terminal.ansi.red"                  = "#c91b00"
+"terminal.ansi.green"                = "#00a600"
+"terminal.ansi.yellow"               = "#a68a00"
+"terminal.ansi.blue"                 = "#0225c7"
+"terminal.ansi.magenta"              = "#c930c7"
+"terminal.ansi.cyan"                 = "#00a5b2"
+"terminal.ansi.white"                = "#c7c7c7"
+"terminal.ansi.brightBlack"          = "#686868"
+"terminal.ansi.brightRed"            = "#ff6e67"
+"terminal.ansi.brightGreen"          = "#2ec92e"
+"terminal.ansi.brightYellow"         = "#b8a000"
+"terminal.ansi.brightBlue"           = "#5c6dff"
+"terminal.ansi.brightMagenta"        = "#ff77ff"
+"terminal.ansi.brightCyan"           = "#00b8c2"
+"terminal.ansi.brightWhite"          = "#ffffff"
+
+# The scrollbars (a track always shown, and the thumb)
+"scrollbar.track"                    = "#ececf0"
+"scrollbar.thumb"                    = "#c6c8cf"
+"scrollbar.thumb.active"             = "#9fa3ad"
+
+# The tab bar: its background and the active tab (joined to the editor)
+"tabBar.background"                  = "#f6f6f8"
+"tab.active.background"              = "#ffffff"
+"tab.hover.background"               = "#ebebef"
+"tab.active.indicator"               = "$accent"
+
+# The panels' resizable separator (line, handle, dots, accent on hover)
+"splitter.line"                      = "#e3e3e8"
+"splitter.handle.background"         = "#ffffff"
+"splitter.handle.border"             = "#d5d6dc"
+"splitter.grip"                      = "#9a9ea7"
+"splitter.active"                    = "#5b5bd6"
+
+# Icons: the folders and the files by language (`icon.<language id>`)
+"icon.folder"                         = "#7c8290"
+"icon.php"                            = "#5b6bd6"
+"icon.html"                           = "#d2632f"
+"icon.javascript"                     = "#c99a06"
+"icon.css"                            = "#2f7fcf"
+"icon.scss"                           = "#c0558b"
+"icon.json"                           = "#b9801f"
+"icon.yaml"                           = "#c94450"
+# Icons by file type (the file-icons module)
+"icon.env"                           = "#b8900a"
+"icon.git"                           = "#d0502f"
+"icon.composer"                      = "#9a7230"
+"icon.npm"                           = "#c03a3a"
+"icon.lock"                          = "#7c8290"
+"icon.docker"                        = "#1f7fd0"
+"icon.config"                        = "#6f7787"
+"icon.xml"                           = "#d2632f"
+"icon.markdown"                      = "#3d6fc0"
+"icon.text"                          = "#6f7787"
+"icon.twig"                          = "#5f9a1e"
+"icon.vue"                           = "#2a9a63"
+"icon.react"                         = "#1b9bb8"
+"icon.typescript"                    = "#2f6fc5"
+"icon.c"                             = "#2f6fc5"
+"icon.cpp"                           = "#c0558b"
+"icon.lua"                           = "#2f7fcf"
+"icon.zig"                           = "#d2632f"
+"icon.bash"                          = "#3f8f3f"
+"icon.toml"                          = "#6f7787"
+"icon.dockerfile"                    = "#1f7fd0"
+"icon.database"                      = "#8a54b8"
+"icon.shell"                         = "#3f8f3f"
+"icon.archive"                       = "#8a6a3e"
+"icon.image"                         = "#8a54b8"
+"icon.svg"                           = "#c4741d"
+"icon.file"                          = "#7c8290"
+
+[syntax]
+"comment"            = { fg = "$grey", italic = true }
+"keyword"            = "$navy"
+"operator"           = "$code"
+"string"             = "$green"
+"string.escape"      = "$navy"
+"number"             = "$blue"
+"constant"           = { fg = "$purple", italic = true }
+"constant.builtin"   = "$navy"
+"variable"           = "$code"
+"variable.php"       = "$purple"
+"property"           = "$purple"
+"function"           = "$teal"
+"function.method"    = "$teal"
+"type"               = "$code"
+"tag"                = "$navy"
+"attribute"          = "#174ad4"
+"punctuation"        = "$code"
+# Language-specific: `<scope>.<language>` (looked up before the general one)
+"property.json"      = "$purple"
+"property.yaml"      = "$navy"
+"boolean"            = "$navy"
+"null"               = "$navy"
+
+# The windows over the editor and the menu's panel: frosted glass, gently (plan 55k).
+[backdrop]
+style = "glass"
+
+[floating]
+style = "glass"

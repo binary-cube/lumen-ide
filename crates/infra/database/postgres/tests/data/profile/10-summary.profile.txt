@@ -1,0 +1,8 @@
+-- estimated · format 1
+Hash Join  (cost=226.23..709.73 rows=10000 width=488)
+  Hash Cond: (t1.unique2 = t2.unique2)
+  Inner Unique: true
+  ->  Seq Scan on tenk1 t1  (cost=0.00..458.00 rows=10000 width=244)
+  ->  Hash  (cost=101.10..101.10 rows=10010 width=244)
+        ->  Seq Scan on tenk2 t2  (cost=0.00..101.10 rows=10010 width=244)
+Planning Time: 0.214 ms

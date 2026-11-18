@@ -1,0 +1,30 @@
+# The package's manifest.
+[package]
+name = "shop"
+version = "0.3.1"
+edition = "2024"
+authors = [
+    "Ana <ana@example.com>",
+    'Ion',
+]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+tokio.workspace = true
+"quoted-key" = 'literal'
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[[bin]]
+name = "shop-cli"
+path = "src/main.rs"
+test = false
+
+[profile.release]
+opt-level = 3
+lto = 0.5
+built = 2026-11-02T07:00:00Z
+note = """
+Two lines\tand an escape.
+"""

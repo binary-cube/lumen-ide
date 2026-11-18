@@ -1,0 +1,16 @@
+{
+    "name": "probes/features",
+    "description": "The language engines' comparison: a small project with the features probed.",
+    "type": "project",
+    "require": {
+        "php": "^8.3"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        },
+        "files": [
+            "src/Support/helpers.php"
+        ]
+    }
+}

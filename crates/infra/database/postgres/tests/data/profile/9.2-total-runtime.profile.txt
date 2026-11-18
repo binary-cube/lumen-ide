@@ -1,0 +1,7 @@
+-- actual · format 1
+Index Scan using tenk1_unique1 on tenk1  (cost=0.00..8.27 rows=1 width=244) (actual time=0.017..0.018 rows=1 loops=1)
+  Index Cond: (unique1 = 42)
+  Rows Removed by Index Recheck: 0
+  Buffers: shared hit=3 read=0 dirtied=0 written=0, local hit=0 read=0 dirtied=0 written=0, temp read=0 written=0
+  I/O Timings: shared read=0.000 shared write=0.000
+Execution Time: 0.061 ms

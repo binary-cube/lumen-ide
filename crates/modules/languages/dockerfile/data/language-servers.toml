@@ -1,0 +1,34 @@
+# The Dockerfile's language server (plan 43): dockerfile-language-server-nodejs (Remy Suen's),
+# bundled with the app (`lsp/servers/
+# dockerfile-language-server-nodejs/<version>`), run by the app's Node. One per project (no
+# root markers). The format: see the language servers module (`lsp_client::spec`). It reads
+# nothing from the network: its completion and hover know the instructions, their flags and
+# the file's own stages, arguments and variables.
+
+[[language-servers]]
+name = "dockerfile-language-server"
+languages = ["dockerfile"]
+bundle = "dockerfile-language-server-nodejs"
+command = "${node}"
+# Its heap capped at the memory limit chosen in the settings.
+args = [
+    "--max-old-space-size=${max-memory}",
+    "${server}/node_modules/dockerfile-language-server-nodejs/lib/server.js",
+    "--stdio",
+]
+file-patterns = ["**/{Dockerfile,Containerfile,*.dockerfile,Dockerfile.*,Containerfile.*}"]
+
+# Its checks, at the server's usual defaults.
+[language-servers.settings.docker.languageserver.diagnostics]
+deprecatedMaintainer = "warning"
+directiveCasing = "warning"
+emptyContinuationLine = "warning"
+instructionCasing = "warning"
+instructionCmdMultiple = "warning"
+instructionEntrypointMultiple = "warning"
+instructionHealthcheckMultiple = "warning"
+instructionJSONInSingleQuotes = "warning"
+instructionWorkdirRelative = "warning"
+
+[language-servers.settings.docker.languageserver.formatter]
+ignoreMultilineInstructions = false

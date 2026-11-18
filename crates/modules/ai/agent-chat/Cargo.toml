@@ -1,0 +1,35 @@
+[package]
+name = "agent-chat"
+description = "An AI agent's session as a graphical conversation (the Agent Client Protocol): what it says, the tools it uses, its changes compared, its permissions answered."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+agents.workspace = true
+acp.workspace = true
+acp-client.workspace = true
+contracts.workspace = true
+diff.workspace = true
+extensions.workspace = true
+i18n.workspace = true
+icons.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+ui-kit.workspace = true
+ui-components.workspace = true
+workbench-model.workspace = true
+serde_json.workspace = true
+
+[features]
+# A made-up conversation for the snapshots.
+snapshot = []
+
+[lints]
+workspace = true

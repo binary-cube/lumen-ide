@@ -1,0 +1,10 @@
+-- actual · format 1
+Aggregate  (cost=17906.00..17906.01 rows=1 width=8) (actual time=145.330..145.331 rows=1 loops=1)
+  Partial Mode: Simple
+  ->  Seq Scan on events  (cost=0.00..15406.00 rows=1000000 width=4) (actual time=6.501..101.442 rows=1000000 loops=1)
+        Filter: (kind > 0)
+        Rows Removed by Filter: 0
+Planning Time: 0.061 ms
+Execution Time: 146.123 ms
+JIT: functions=4 generation=0.672 optimization=0.367 emission=5.712 total=6.751
+JIT › Options: {Deforming: true, Expressions: true, Inlining: false, Optimization: false}

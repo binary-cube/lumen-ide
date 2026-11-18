@@ -1,0 +1,26 @@
+[package]
+name = "refactoring"
+description = "Refactoring: rename a symbol everywhere it's used (PHP, JS, CSS, HTML), with a preview of every place before applying, and undo."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+i18n.workspace = true
+ui-components.workspace = true
+ui-kit.workspace = true
+text-layout.workspace = true
+render-api.workspace = true
+refactor.workspace = true
+
+[lints]
+workspace = true

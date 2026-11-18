@@ -1,0 +1,16 @@
+# The product's name, in one place: change it here to rename the app. Read by the code at
+# build time (`kernel::brand`), by `scripts/build.sh` and the packaging templates.
+# The crates have plain technical names (no brand in them); the binary's name (`[[bin]]` in
+# `crates/app/Cargo.toml`) must equal `id` (checked by `cargo xtask check-deps`).
+
+# Shown to people: windows, menus, About, packages.
+name = "Lumen"
+# Lowercase: the binary, the config directory (`~/.config/<id>`), file prefixes.
+id = "lumen"
+# The directory a project's data is kept in (caches, index, session).
+project_dir = ".lumen"
+# The macOS bundle identifier.
+bundle_id = "dev.lumen.editor"
+# Where the code and the releases are (`owner/name` on GitHub): the app's updates come
+# from its releases.
+repository = "binary-cube/lumen-ide"

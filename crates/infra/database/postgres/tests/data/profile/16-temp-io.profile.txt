@@ -1,0 +1,13 @@
+-- actual · format 1
+Sort  (cost=132154.34..134654.34 rows=1000000 width=36) (actual time=612.442..741.308 rows=1000000 loops=1)
+  Sort Key: payload
+  Sort Method: external merge  disk: 45015040 bytes
+  Spill: sort disk=45015040 bytes
+  Buffers: shared hit=8334 read=0, temp read=5495 written=5511
+  I/O Timings: shared read=0.000 shared write=0.000 temp read=8.912 temp write=21.370
+  ->  Seq Scan on blobs  (cost=0.00..18334.00 rows=1000000 width=36) (actual time=0.009..72.950 rows=1000000 loops=1)
+        Buffers: shared hit=8334 read=0
+        I/O Timings: shared read=0.000 shared write=0.000
+Planning Buffers: shared hit=0 read=0
+Planning Time: 0.051 ms
+Execution Time: 778.604 ms

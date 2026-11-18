@@ -1,0 +1,186 @@
+{
+  "query_optimization": {
+    "r_total_time_ms": 0.803207862
+  },
+  "query_block": {
+    "select_id": 1,
+    "cost": 1.073525241,
+    "r_loops": 1,
+    "r_total_time_ms": 4.338906772,
+    "filesort": {
+      "sort_key": "o.ordered_at desc",
+      "r_loops": 1,
+      "r_total_time_ms": 0.099103301,
+      "r_limit": 20,
+      "r_used_priority_queue": true,
+      "r_output_rows": 21,
+      "r_sort_mode": "sort_key,rowid",
+      "temporary_table": {
+        "nested_loop": [
+          {
+            "table": {
+              "table_name": "<derived3>",
+              "access_type": "ALL",
+              "possible_keys": ["distinct_key"],
+              "loops": 1,
+              "r_loops": 1,
+              "rows": 252,
+              "r_rows": 467,
+              "cost": 0.021260519,
+              "r_table_time_ms": 0.0433603,
+              "r_other_time_ms": 0.044777848,
+              "filtered": 100,
+              "r_total_filtered": 100,
+              "r_filtered": 100,
+              "materialized": {
+                "query_block": {
+                  "union_result": {
+                    "table_name": "<union3,4>",
+                    "access_type": "ALL",
+                    "r_loops": 1,
+                    "r_rows": 467,
+                    "query_specifications": [
+                      {
+                        "query_block": {
+                          "select_id": 3,
+                          "cost": 0.02012823,
+                          "r_loops": 1,
+                          "r_total_time_ms": 0.110193531,
+                          "nested_loop": [
+                            {
+                              "table": {
+                                "table_name": "customers",
+                                "access_type": "ref",
+                                "possible_keys": ["customers_country"],
+                                "key": "customers_country",
+                                "key_length": "9",
+                                "used_key_parts": ["country"],
+                                "ref": ["const"],
+                                "loops": 1,
+                                "r_loops": 1,
+                                "rows": 126,
+                                "r_rows": 333,
+                                "cost": 0.02012823,
+                                "r_table_time_ms": 0.050322963,
+                                "r_other_time_ms": 0.050448041,
+                                "r_engine_stats": {
+                                  "pages_accessed": 4
+                                },
+                                "filtered": 100,
+                                "r_total_filtered": 100,
+                                "attached_condition": "customers.country = 'RO'",
+                                "r_filtered": 100,
+                                "using_index": true
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "query_block": {
+                          "select_id": 4,
+                          "operation": "UNION",
+                          "cost": 0.0313928,
+                          "r_loops": 1,
+                          "r_total_time_ms": 0.354095218,
+                          "nested_loop": [
+                            {
+                              "table": {
+                                "table_name": "customers",
+                                "access_type": "ALL",
+                                "loops": 1,
+                                "r_loops": 1,
+                                "rows": 126,
+                                "r_rows": 2000,
+                                "cost": 0.0313928,
+                                "r_table_time_ms": 0.293515876,
+                                "r_other_time_ms": 0.058995023,
+                                "r_engine_stats": {
+                                  "pages_accessed": 16
+                                },
+                                "filtered": 100,
+                                "r_total_filtered": 10,
+                                "attached_condition": "customers.vip = 1",
+                                "r_filtered": 10
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          {
+            "table": {
+              "table_name": "o",
+              "access_type": "ref",
+              "possible_keys": ["orders_customer"],
+              "key": "orders_customer",
+              "key_length": "4",
+              "used_key_parts": ["customer_id"],
+              "ref": ["x.id"],
+              "loops": 252,
+              "r_loops": 467,
+              "rows": 2,
+              "r_rows": 2,
+              "cost": 0.7237728,
+              "r_table_time_ms": 0.880339164,
+              "r_other_time_ms": 0.156013694,
+              "r_engine_stats": {
+                "pages_accessed": 2805
+              },
+              "filtered": 100,
+              "r_total_filtered": 100,
+              "attached_condition": "o.`status` <> 'new'",
+              "r_filtered": 100
+            }
+          }
+        ],
+        "subqueries": [
+          {
+            "subquery_cache": {
+              "state": "disabled",
+              "r_loops": 200,
+              "r_hit_ratio": 0,
+              "query_block": {
+                "select_id": 2,
+                "cost": 0.00194677,
+                "r_loops": 934,
+                "r_total_time_ms": 0.715736795,
+                "nested_loop": [
+                  {
+                    "table": {
+                      "table_name": "l",
+                      "access_type": "ref",
+                      "possible_keys": ["PRIMARY"],
+                      "key": "PRIMARY",
+                      "key_length": "8",
+                      "used_key_parts": ["order_id"],
+                      "ref": ["shop.o.id"],
+                      "loops": 1,
+                      "r_loops": 934,
+                      "rows": 2,
+                      "r_rows": 2,
+                      "cost": 0.00194677,
+                      "r_table_time_ms": 0.538126336,
+                      "r_other_time_ms": 0.095184197,
+                      "r_engine_stats": {
+                        "pages_accessed": 1870
+                      },
+                      "filtered": 100,
+                      "r_total_filtered": 100,
+                      "r_filtered": 100
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

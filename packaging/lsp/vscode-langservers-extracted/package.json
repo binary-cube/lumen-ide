@@ -1,0 +1,9 @@
+{
+  "name": "bundled-vscode-langservers-extracted",
+  "private": true,
+  "description": "The HTML, CSS / SCSS and JSON language servers bundled with the app, installed by `cargo xtask lsp-bundle` with `npm ci` from the lockfile beside this file.",
+  "license": "MIT",
+  "dependencies": {
+    "vscode-langservers-extracted": "4.10.0"
+  }
+}

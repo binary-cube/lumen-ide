@@ -1,0 +1,16 @@
+[package]
+name = "http-environments"
+description = "A request file's environments read from the disk (plan 77): the files beside it (`http-client.env.json`, the private and local ones), from the nearest folder up to the project's root."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+http-requests.workspace = true
+
+[lints]
+workspace = true

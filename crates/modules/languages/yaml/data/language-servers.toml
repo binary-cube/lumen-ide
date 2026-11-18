@@ -1,0 +1,55 @@
+# YAML's language server (plan 43): Red Hat's yaml-language-server, bundled with the app
+# (`lsp/servers/yaml-language-server/<version>`), run by the app's Node. One per project (no
+# root markers). The format: see the language servers module (`lsp_client::spec`).
+#
+# Schemas are never downloaded: SchemaStore's catalog and the Kubernetes CRD catalog are off,
+# the server is told to ask the app for any http(s) schema (`yaml/registerContentRequest`,
+# then `vscode/content`), which answers from the schemas bundled beside it (`contents`:
+# GitHub's workflows and actions, Dependabot, Docker Compose, pre-commit) and refuses the
+# rest — a `# yaml-language-server: $schema=…` line pointing elsewhere gets the server's
+# "can't load" warning. Its own requests go through a closed local port (`http.proxy`).
+
+[[language-servers]]
+name = "yaml-language-server"
+languages = ["yaml"]
+bundle = "yaml-language-server"
+command = "${node}"
+# Its heap capped at the memory limit chosen in the settings.
+args = [
+    "--max-old-space-size=${max-memory}",
+    "${server}/node_modules/yaml-language-server/bin/yaml-language-server",
+    "--stdio",
+]
+file-patterns = ["**/*.{yml,yaml}"]
+on-initialized = ["yaml/registerContentRequest"]
+
+[language-servers.contents]
+"https://json.schemastore.org/" = "${server}/schemas/schemastore"
+"https://www.schemastore.org/" = "${server}/schemas/schemastore"
+"https://raw.githubusercontent.com/compose-spec/compose-go/master/schema/" = "${server}/schemas/compose-spec"
+
+[language-servers.settings.yaml]
+validate = true
+hover = true
+completion = true
+format = { enable = true, singleQuote = false, proseWrap = "preserve", printWidth = 100 }
+schemaStore = { enable = false, url = "" }
+kubernetesCRDStore = { enable = false }
+maxItemsComputed = 5000
+# By the end of the file's path (yaml-language-server's patterns: `*` any characters, the
+# rest as written — no `{a,b}`).
+[language-servers.settings.yaml.schemas]
+"https://json.schemastore.org/github-workflow.json" = ["/.github/workflows/*.yml", "/.github/workflows/*.yaml", "/.gitea/workflows/*.yml", "/.gitea/workflows/*.yaml", "/.forgejo/workflows/*.yml", "/.forgejo/workflows/*.yaml"]
+"https://json.schemastore.org/github-action.json" = ["/action.yml", "/action.yaml"]
+"https://json.schemastore.org/dependabot-2.0.json" = ["/.github/dependabot.yml", "/.github/dependabot.yaml"]
+"https://json.schemastore.org/pre-commit-config.json" = ["/.pre-commit-config.yml", "/.pre-commit-config.yaml"]
+"https://raw.githubusercontent.com/compose-spec/compose-go/master/schema/compose-spec.json" = ["/docker-compose.yml", "/docker-compose.yaml", "/docker-compose.*.yml", "/docker-compose.*.yaml", "/compose.yml", "/compose.yaml", "/compose.*.yml", "/compose.*.yaml"]
+
+# Nothing fetched by the server itself.
+[language-servers.settings.http]
+proxy = "http://127.0.0.1:9"
+proxyStrictSSL = true
+
+[language-servers.settings."[yaml]"]
+"editor.tabSize" = 2
+"editor.insertSpaces" = true

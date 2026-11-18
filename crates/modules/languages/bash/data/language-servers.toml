@@ -1,0 +1,37 @@
+# Bash's language server (plan 43): bash-language-server, bundled with the app
+# (`lsp/servers/bash-language-server/<version>`), run by the app's Node. One per project (no
+# root markers). The format: see the language servers module (`lsp_client::spec`).
+#
+# ShellCheck (GPL-3.0) isn't bundled: the server runs `shellcheck` as a separate program
+# when it's in PATH (its warnings then show as diagnostics). The server reports no syntax
+# errors of its own: the built-in engine's (the same grammar's) stay (`built-in`).
+# Formatting likewise runs `shfmt` from PATH, if it's there. Nothing is read from the
+# network (`explainshellEndpoint` stays empty).
+
+[[language-servers]]
+name = "bash-language-server"
+languages = ["bash"]
+bundle = "bash-language-server"
+command = "${node}"
+# Its heap capped at the memory limit chosen in the settings.
+args = [
+    "--max-old-space-size=${max-memory}",
+    "${server}/node_modules/bash-language-server/out/cli.js",
+    "start",
+]
+file-patterns = ["**/*.{sh,bash,zsh,ksh,command}"]
+built-in = ["diagnostics"]
+# The language id the servers expect for shell scripts.
+language-ids = { bash = "shellscript" }
+
+[language-servers.settings.bashIde]
+# The project's scripts read in the background (definitions, references across files),
+# at most this many.
+backgroundAnalysisMaxFiles = 500
+backgroundAnalysisIgnore = ["**/node_modules/**", "**/.git/**", "**/vendor/**"]
+globPattern = "**/*@(.sh|.inc|.bash|.command|.zsh|.ksh)"
+# No "source command could not be analyzed" notes on every dynamic `source`.
+enableSourceErrorDiagnostics = false
+explainshellEndpoint = ""
+shellcheckPath = "shellcheck"
+logLevel = "warning"

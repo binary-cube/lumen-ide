@@ -1,0 +1,14 @@
+# Modules run their background work on pools (`kernel::work::run`, a `Pool`, `kernel::Latest`):
+# bounded, named, their threads ending when idle — never a thread per request. A thread that
+# must live on its own (a connection's, a queue's waiting) says why where it's made, with
+# `#[allow(clippy::disallowed_methods)]`. Clippy reads the nearest clippy.toml, so the
+# root's settings are repeated here.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+
+disallowed-methods = [
+    { path = "std::thread::spawn", reason = "use a pool (`kernel::work::run`, `Pool`, `kernel::Latest`)" },
+    { path = "std::thread::Builder::spawn", reason = "use a pool (`kernel::work::run`, `Pool`, `kernel::Latest`)" },
+    { path = "std::thread::Builder::spawn_scoped", reason = "use a pool (`kernel::work::run`, `Pool`, `kernel::Latest`)" },
+    { path = "std::thread::scope", reason = "use a pool (`kernel::work::run`, `Pool`, `kernel::Latest`)" },
+]

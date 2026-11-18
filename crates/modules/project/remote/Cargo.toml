@@ -1,0 +1,53 @@
+[package]
+name = "remote-projects"
+description = "Remote projects (SFTP, FTP, FTPS): opening one into a local copy, keeping it in step with the server (a save goes up after checking the server's copy), the transfers' log in a tool window. Nothing runs for a local project."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+files.workspace = true
+uuid.workspace = true
+kernel.workspace = true
+i18n.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+settings-model.workspace = true
+code-quality.workspace = true
+workspace.workspace = true
+document.workspace = true
+diff.workspace = true
+ui-kit.workspace = true
+ui-components.workspace = true
+icons.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+remote.workspace = true
+remote-sftp.workspace = true
+remote-ftp.workspace = true
+secrets.workspace = true
+fs-local.workspace = true
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true
+dirs.workspace = true
+tracing.workspace = true
+chrono.workspace = true
+# The checksums computed here (when the server can't): the same crates SSH already brings.
+sha2 = "0.11"
+sha1 = "0.11"
+md-5 = "0.11"
+
+[features]
+# The app's `--snapshot`: the properties dialog over made-up files (`REMOTE_PROPS`).
+snapshot = []
+
+[dev-dependencies]
+version-control.workspace = true
+
+[lints]
+workspace = true

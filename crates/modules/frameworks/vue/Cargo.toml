@@ -1,0 +1,21 @@
+[package]
+name = "fw-vue"
+description = "Vue: template directives (v-if, v-for, v-model…) and the Composition API — completion, hover, parameter help."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+languages.workspace = true
+syntax-ts.workspace = true
+extensions.workspace = true
+code-intelligence.workspace = true
+kernel.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,20 @@
+-- actual · format 1
+Seq Scan on customers c  (cost=0.00..8432.50 rows=1000 width=44) (actual time=0.041..61.207 rows=1000 loops=1)
+  Filter: ((SubPlan 1) > 2)
+  Rows Removed by Filter: 812
+  SubPlan 1
+  ->  Aggregate  (cost=8.38..8.39 rows=1 width=8) (actual time=0.058..0.058 rows=1 loops=1000)
+        Role: sub_plan
+        Partial Mode: Simple
+        ->  Index Only Scan using orders_customer_id on orders o  (cost=0.29..8.36 rows=9 width=0) (actual time=0.012..0.051 rows=10 loops=1000)
+              Index Cond: (customer_id = c.id)
+              Rows Removed by Index Recheck: 0
+              Heap Fetches: 1200
+  InitPlan 2 (returns $1)
+  ->  Result  (cost=0.00..0.01 rows=1 width=4) (actual time=0.001..0.001 rows=1 loops=1)
+        Role: init_plan
+  SubPlan 3
+  ->  Seq Scan on blocked b  (cost=0.00..35.50 rows=2550 width=4) (never executed)
+        Role: sub_plan
+Planning Time: 0.211 ms
+Execution Time: 61.402 ms

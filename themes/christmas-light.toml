@@ -1,0 +1,264 @@
+# Christmas (light): fresh snow and linen — warm ivory backgrounds, deep pine text
+# accents, a cranberry accent, gold kept dark enough to read. The garland and its
+# lights, lighter glow, and soft blue-grey snow behind the content.
+
+id = "christmas-light"
+name = "Christmas Light"
+appearance = "light"
+
+[palette]
+base      = "#f1efe9"
+card      = "#fffdf8"
+panel     = "#f8f6f0"
+line      = "#e6e2d8"
+fg        = "#22261f"
+muted     = "#6c7068"
+code      = "#262a24"
+accent    = "#b3303d"
+red       = "#c7242f"
+cinnamon  = "#a8442a"
+pine      = "#2f7a3a"
+ice       = "#1f6c9a"
+gold      = "#8a6200"
+rose      = "#9a2f68"
+teal      = "#00676f"
+grey      = "#8a8c84"
+wire      = "#2e6440"
+berry     = "#b3263a"
+ivory     = "#f1d38a"
+amber     = "#e9a93f"
+light1    = "#e9a93f"
+light2    = "#b3263a"
+light3    = "#f1d38a"
+snow      = "#8fa6bd"
+
+[ui]
+"window.background"                = "$base"
+"card.border"                      = "#e4e0d5"
+"panel.background"                 = "$panel"
+"border"                           = "$line"
+"text"                             = "$fg"
+"text.muted"                       = "$muted"
+"accent"                           = "$accent"
+"danger"                           = "$red"
+
+"editor.background"                = "$card"
+"editor.foreground"                = "$code"
+"editor.gutter.foreground"         = "#b3b2a8"
+"editor.gutter.foreground.active"  = "#53574f"
+"editor.line.current"              = "#faf6ec"
+"editor.selection"                 = "#f6d9d6"
+"editor.selection.inactive"        = "#efebe1"
+"editor.cursor"                    = "$fg"
+"editor.match"                     = "#e9a93f40"
+"editor.match.current"             = "#e9a93f8c"
+
+"tab.hover"                        = "#e9e5dc"
+"input.background"                 = "$card"
+"input.border"                     = "#dad6cb"
+"popup.background"                 = "$card"
+"popup.border"                     = "#e4e0d5"
+"shadow"                           = "#00000014"
+"toggle.active"                    = "#b3303d24"
+
+"tree.selection"                   = "#e9e5dc"
+"tree.hover"                       = "#eeebe3"
+"tree.indentGuide"                 = "#e1ddd2"
+
+# The side panels and the tool strip on the left
+"sidebar.background"                 = "#fbf9f4"
+"toolStrip.foreground"               = "#5f645b"
+"toolStrip.hover"                    = "#e7e3da"
+"toolStrip.active.background"        = "$accent"
+"toolStrip.active.foreground"        = "#ffffff"
+
+# The project panel's search field
+"searchField.background"             = "#fffdf8"
+"searchField.border"                 = "#ddd9ce"
+"searchField.border.focused"         = "#d79aa0"
+
+# The terminal: background, text, cursor and the ANSI palette (16 colors)
+"terminal.background"                = "#ffffff"
+"terminal.foreground"                = "#24292f"
+"terminal.cursor"                    = "#1f2329"
+"terminal.ansi.black"                = "#000000"
+"terminal.ansi.red"                  = "#c91b00"
+"terminal.ansi.green"                = "#00a600"
+"terminal.ansi.yellow"               = "#a68a00"
+"terminal.ansi.blue"                 = "#0225c7"
+"terminal.ansi.magenta"              = "#c930c7"
+"terminal.ansi.cyan"                 = "#00a5b2"
+"terminal.ansi.white"                = "#c7c7c7"
+"terminal.ansi.brightBlack"          = "#686868"
+"terminal.ansi.brightRed"            = "#ff6e67"
+"terminal.ansi.brightGreen"          = "#2ec92e"
+"terminal.ansi.brightYellow"         = "#b8a000"
+"terminal.ansi.brightBlue"           = "#5c6dff"
+"terminal.ansi.brightMagenta"        = "#ff77ff"
+"terminal.ansi.brightCyan"           = "#00b8c2"
+"terminal.ansi.brightWhite"          = "#ffffff"
+
+# The scrollbars (a track always shown, and the thumb)
+"scrollbar.track"                    = "#ece9e1"
+"scrollbar.thumb"                    = "#c9c6bb"
+"scrollbar.thumb.active"             = "#a29f94"
+
+# The tab bar: its background and the active tab (joined to the editor)
+"tabBar.background"                  = "#f6f4ee"
+"tab.active.background"              = "#fffdf8"
+"tab.hover.background"               = "#eeebe3"
+"tab.active.indicator"               = "$accent"
+
+# The panels' resizable separator (line, handle, dots, accent on hover)
+"splitter.line"                      = "#e4e0d5"
+"splitter.handle.background"         = "#fffdf8"
+"splitter.handle.border"             = "#d8d4c9"
+"splitter.grip"                      = "#9c9a90"
+"splitter.active"                    = "$accent"
+
+# Icons: the folders and the files by language (`icon.<language id>`)
+"icon.folder"                         = "#7c8290"
+"icon.php"                            = "#5b6bd6"
+"icon.html"                           = "#d2632f"
+"icon.javascript"                     = "#c99a06"
+"icon.css"                            = "#2f7fcf"
+"icon.scss"                           = "#c0558b"
+"icon.json"                           = "#b9801f"
+"icon.yaml"                           = "#c94450"
+# Icons by file type (the file-icons module)
+"icon.env"                           = "#b8900a"
+"icon.git"                           = "#d0502f"
+"icon.composer"                      = "#9a7230"
+"icon.npm"                           = "#c03a3a"
+"icon.lock"                          = "#7c8290"
+"icon.docker"                        = "#1f7fd0"
+"icon.config"                        = "#6f7787"
+"icon.xml"                           = "#d2632f"
+"icon.markdown"                      = "#3d6fc0"
+"icon.text"                          = "#6f7787"
+"icon.twig"                          = "#5f9a1e"
+"icon.vue"                           = "#2a9a63"
+"icon.react"                         = "#1b9bb8"
+"icon.typescript"                    = "#2f6fc5"
+"icon.c"                             = "#2f6fc5"
+"icon.cpp"                           = "#c0558b"
+"icon.lua"                           = "#2f7fcf"
+"icon.zig"                           = "#d2632f"
+"icon.bash"                          = "#3f8f3f"
+"icon.toml"                          = "#6f7787"
+"icon.dockerfile"                    = "#1f7fd0"
+"icon.database"                      = "#8a54b8"
+"icon.shell"                         = "#3f8f3f"
+"icon.archive"                       = "#8a6a3e"
+"icon.image"                         = "#8a54b8"
+"icon.svg"                           = "#c4741d"
+"icon.file"                          = "#7c8290"
+
+[syntax]
+"comment"            = { fg = "$grey", italic = true }
+"keyword"            = "$cinnamon"
+"operator"           = "$code"
+"string"             = "$pine"
+"string.escape"      = "$cinnamon"
+"number"             = "$ice"
+"constant"           = { fg = "$rose", italic = true }
+"constant.builtin"   = "$cinnamon"
+"variable"           = "$code"
+"variable.php"       = "$rose"
+"property"           = "$rose"
+"function"           = "$gold"
+"function.method"    = "$gold"
+"type"               = "$teal"
+"tag"                = "$gold"
+"attribute"          = "$code"
+"punctuation"        = "$code"
+# Language-specific: `<scope>.<language>` (looked up before the general one)
+"property.json"      = "$rose"
+"property.yaml"      = "$cinnamon"
+"boolean"            = "$cinnamon"
+"null"               = "$cinnamon"
+
+# The theme's own settings (Settings → Appearance while it's in use, and the studio).
+[[options]]
+id       = "lights"
+kind     = "choice"
+label.en = "Lights"
+label.ro = "Luminițe"
+default  = "warm"
+
+[[options.choices]]
+id            = "warm"
+label.en      = "Warm"
+label.ro      = "Calde"
+palette.light1 = "#e9a93f"
+palette.light2 = "#b3263a"
+palette.light3 = "#f1d38a"
+
+[[options.choices]]
+id            = "colorful"
+label.en      = "Colorful"
+label.ro      = "Colorate"
+palette.light1 = "#d0343d"
+palette.light2 = "#2f8f46"
+palette.light3 = "#2f6fd0"
+
+[[options.choices]]
+id            = "icy"
+label.en      = "Icy"
+label.ro      = "Reci"
+palette.light1 = "#5f9fd6"
+palette.light2 = "#8fb8dc"
+palette.light3 = "#3d7ab8"
+
+[[options]]
+id       = "snow"
+kind     = "slider"
+label.en = "Snow"
+label.ro = "Zăpadă"
+min      = 0
+max      = 0.8
+step     = 0.1
+default  = 0.5
+
+[[options]]
+id       = "bows"
+kind     = "toggle"
+label.en = "Bows in the corners"
+label.ro = "Funde în colțuri"
+default  = true
+
+[[decorations.layers]]
+kind      = "garland"
+strand    = "evergreen"
+items     = "bulbs"
+edges     = "top-sides"
+lights    = 0.55
+twinkle   = 0.35
+glow      = 0.3
+colors    = ["$light1", "$light2", "$light3", "$light1", "$light2"]
+ornaments = ["$berry", "#c99a2e", "#8e1f30"]
+wire      = "$wire"
+drop      = 0.42
+opacity   = 0.95
+
+[[decorations.layers]]
+kind    = "corners"
+when    = "bows"
+style   = "bow"
+colors  = ["$berry", "$wire"]
+opacity = 0.95
+
+[[decorations.layers]]
+kind    = "particles"
+shape   = "snow"
+density = "@snow"
+speed   = 0.25
+colors  = ["$snow"]
+opacity = 0.35
+
+# The windows over the editor and the menu's panel: frosted glass, gently (plan 55k).
+[backdrop]
+style = "glass"
+
+[floating]
+style = "glass"

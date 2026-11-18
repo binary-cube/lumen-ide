@@ -1,0 +1,51 @@
+# C and C++'s language server (plan 43): clangd, the LLVM project's own, bundled with the
+# app (`lsp/servers/clangd/<version>`, the program and clang's builtin headers). Its format:
+# see the language servers module (`lsp_client::spec`).
+#
+# It reads how each file is compiled from the project's compilation database
+# (`compile_commands.json` — CMake's `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`, Bear, Meson… — in
+# a folder above the file or its `build/`) or `compile_flags.txt`; without one, a file is
+# read with clangd's own default flags (its language by its extension).
+#
+# Started at the nearest folder holding one of the root markers (else the project's root):
+# CMakeLists.txt isn't one — a project has one in most folders, and one clangd per folder
+# would index the same headers again and again; one clangd reads every database it finds.
+#
+# The arguments, chosen for the budgets (RAM / CPU matter):
+# - `--background-index`: the whole project is indexed once, in the background (references
+#   and declarations in files never opened), then kept up to date incrementally. Its index
+#   is clangd's usual one, `.cache/clangd/index` beside the compilation database (or in the
+#   user's cache folder without one), read again at the next start instead of rebuilt.
+# - `-j=2`: two workers, for the open files and the indexing: the first index of a large
+#   project takes longer, but never takes the whole machine.
+# - `--background-index-priority=low`: below the editor and the open files' work.
+# - `--pch-storage=disk`: the open files' preambles (their headers, parsed once) in
+#   temporary files, mapped when used, not held in RAM (`memory` is a little faster and
+#   tens of MB more per open file).
+# - `--malloc-trim` (Linux, clangd's default) gives freed memory back to the system.
+# - `--limit-results=200`: as many suggestions as the other servers give.
+# - `--log=error`: its log (in the app's server log) only says what went wrong.
+
+[[language-servers]]
+name = "clangd"
+languages = ["c", "cpp"]
+bundle = "clangd"
+command = "${server}/bin/clangd"
+args = [
+    "--background-index",
+    "-j=2",
+    "--background-index-priority=low",
+    "--pch-storage=disk",
+    "--limit-results=200",
+    "--log=error",
+]
+root-markers = ["compile_commands.json", "compile_flags.txt", ".clangd"]
+# The compilation database changes (a new CMake configure): clangd reads it again.
+file-patterns = ["**/compile_commands.json", "**/compile_flags.txt", "**/.clangd"]
+# Its index without a compilation database goes to the project's own folder for it, not the
+# user's cache (Linux and the BSDs read XDG_CACHE_HOME; macOS and Windows keep their own).
+env = { XDG_CACHE_HOME = "${cache}" }
+
+[language-servers.initialization-options]
+# Which file it's reading, as it goes (`textDocument/clangd.fileStatus`): not shown, off.
+clangdFileStatus = false

@@ -1,0 +1,12 @@
+/target
+.DS_Store
+/dist
+# Each project's own data (caches, index, session), the code index and the agents' local
+# files: never in the repository (the agents' rules are).
+.lumen/
+.codegraph/
+.claude/*
+!.claude/rules/
+
+# The user's own screenshots for the plans: kept on their machine, never published.
+docs/plan/img/

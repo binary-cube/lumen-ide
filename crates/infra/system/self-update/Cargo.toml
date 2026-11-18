@@ -1,0 +1,30 @@
+[package]
+name = "self-update"
+description = "The app's own updates, done: the newest release asked of GitHub, its manifest's signature checked with the project's key, this system's file downloaded and checked, unpacked beside the app; then, the app closed, a helper puts it in the app's place (the old one kept until it worked) and starts it again."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+app-updates.workspace = true
+pinned-downloads.workspace = true
+files.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+# The manifest's signature (the release workflow's Ed25519 key).
+ed25519-dalek = "3"
+# An archive downloaded before checked again, read in pieces.
+ring = "0.17"
+
+[dev-dependencies]
+pinned-downloads = { workspace = true, features = ["fake"] }
+
+[lints]
+workspace = true

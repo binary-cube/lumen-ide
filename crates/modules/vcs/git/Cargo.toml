@@ -1,0 +1,41 @@
+[package]
+name = "vcs-git"
+description = "Git: the project's repository (read with gitoxide, no git installed needed), comparisons with revisions / branches, blame, commits."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+version-control.workspace = true
+mcp.workspace = true
+serde_json.workspace = true
+git.workspace = true
+i18n.workspace = true
+ui-components.workspace = true
+ui-kit.workspace = true
+icons.workspace = true
+text-layout.workspace = true
+render-api.workspace = true
+document.workspace = true
+workspace.workspace = true
+tracing.workspace = true
+# The Date filter's days and the dates shown, in the user's time zone.
+chrono.workspace = true
+
+# A conflicted file's three-part merge (opened in the compare view).
+diff.workspace = true
+
+[dev-dependencies]
+refactor.workspace = true
+
+[lints]
+workspace = true

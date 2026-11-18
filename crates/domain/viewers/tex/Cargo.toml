@@ -1,0 +1,13 @@
+[package]
+name = "tex"
+description = "TeX math (the subset Markdown documents use: GitHub's, KaTeX's) parsed into a tree of atoms. No layout, no fonts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[lints]
+workspace = true

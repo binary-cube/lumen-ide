@@ -1,0 +1,25 @@
+[package]
+name = "db-mysql"
+description = "MySQL and MariaDB for the `database` domain (mysql_async, pure Rust, rustls): sessions on a small runtime of their own, rows streamed through the text protocol, statements stopped by `KILL QUERY` from a second connection; databases (its schemas) / tables / columns / indexes / keys from information_schema, pages by key, the transaction's state as the server says it; for the console, warnings as notices, errors with their place (`near … at line N`), plans from `EXPLAIN FORMAT=JSON` and profiles from MySQL 8.0.18's `EXPLAIN ANALYZE` and MariaDB's `ANALYZE FORMAT=JSON` (every key kept), run in a read-only transaction of its own or a savepoint and rolled back, with the session's counters, the tables' statistics, and the catalog read in bulk, for MySQL 5.7 and MariaDB 10.2 to the newest."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+database.workspace = true
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros"] }
+# Pure Rust, MIT / Apache-2.0: caching_sha2_password (RSA over a plain connection) and
+# mysql_native_password, TLS through rustls with ring (as tokio-postgres), no C library.
+mysql_async = { version = "0.37", default-features = false, features = ["minimal-rust", "rustls-tls", "ring", "tls12"] }
+futures-util = { version = "0.3", default-features = false }
+# `EXPLAIN FORMAT=JSON` / `ANALYZE FORMAT=JSON` read as a profile.
+serde_json.workspace = true
+# An auxiliary query that fails (warnings, counters, statistics) is only logged.
+tracing.workspace = true
+
+[lints]
+workspace = true

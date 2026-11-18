@@ -1,0 +1,46 @@
+# CSS and SCSS's language server (plan 43): the CSS server of
+# `vscode-langservers-extracted`, bundled with the app (`lsp/servers/
+# vscode-langservers-extracted/<version>`), run by the app's Node. One per project for both
+# (no root markers). The format: see the language servers module (`lsp_client::spec`).
+
+[[language-servers]]
+name = "vscode-css"
+languages = ["css", "scss"]
+bundle = "vscode-langservers-extracted"
+command = "${node}"
+# Its heap capped at the memory limit chosen in the settings.
+args = [
+    "--max-old-space-size=${max-memory}",
+    "${server}/node_modules/vscode-langservers-extracted/lib/css-language-server/node/cssServerMain.js",
+    "--stdio",
+]
+file-patterns = ["**/*.{css,scss}"]
+# The built-in engine keeps flagging deprecated properties (the server doesn't) and does
+# Rename / Find Usages: it finds a class, an id or a variable in the HTML, PHP, Blade and
+# Twig files too (the server only in the stylesheet).
+built-in = ["deprecated", "rename"]
+# Its properties are CSS properties: shown as the built-in engine shows them.
+completion-kinds = { property = "attribute" }
+
+# Formatting answered (the module's "Format with Language Server").
+[language-servers.initialization-options]
+provideFormatter = true
+
+# The server's usual defaults: its checks on, a property completed with its `;`. Nothing
+# here reads the network.
+[language-servers.settings.css]
+validate = true
+[language-servers.settings.css.completion]
+triggerPropertyValueCompletion = true
+completePropertyWithSemicolon = true
+[language-servers.settings.css.hover]
+documentation = true
+references = true
+[language-servers.settings.scss]
+validate = true
+[language-servers.settings.scss.completion]
+triggerPropertyValueCompletion = true
+completePropertyWithSemicolon = true
+[language-servers.settings.scss.hover]
+documentation = true
+references = true

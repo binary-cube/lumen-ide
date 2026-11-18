@@ -1,0 +1,22 @@
+# Zig's language server (plan 43): ZLS, bundled with the app (`lsp/servers/zls/<version>`).
+# Its format: see the language servers module (`lsp_client::spec`).
+#
+# Zig itself isn't bundled: ZLS finds `zig` in PATH by itself (Zig's standard library —
+# `std.` — and the build's packages, and the build's errors on save, come from it); without
+# it, ZLS reads the project's own files (their declarations, completion, references,
+# syntax errors). Its own cache and log go to its folder in the project's data folder.
+
+[[language-servers]]
+name = "zls"
+languages = ["zig"]
+bundle = "zls"
+command = "${server}/zls"
+args = ["--log-file", "${cache}/zls.log", "--log-level", "warn"]
+root-markers = ["build.zig"]
+file-patterns = ["**/build.zig", "**/build.zig.zon"]
+
+[language-servers.settings.zls]
+global_cache_path = "${cache}"
+# Its semantic colors aren't asked for (the editor colors by its grammar).
+semantic_tokens = "none"
+warn_style = false

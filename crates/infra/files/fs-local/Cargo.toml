@@ -1,0 +1,29 @@
+[package]
+name = "fs-local"
+description = "Local file system adapter (read, write, move, watch)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+files.workspace = true
+kernel.workspace = true
+workspace.workspace = true
+document.workspace = true
+settings-model.workspace = true
+remote.workspace = true
+refactor.workspace = true
+notify.workspace = true
+tracing.workspace = true
+trash = "5.2"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true

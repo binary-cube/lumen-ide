@@ -1,0 +1,33 @@
+[package]
+name = "lang-dotenv"
+description = "The .env module: the language (`.env`, `.env.*`, `*.env`), its grammar (vendored pnx tree-sitter-dotenv), colors, secrets hidden until hovered (a setting), sections and keys in Structure, folding, and the keys followed through the code (usages, definitions, hover, rename, checks) by the reading patterns other modules contribute."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+extensions.workspace = true
+languages.workspace = true
+syntax-ts.workspace = true
+code-intelligence.workspace = true
+kernel.workspace = true
+workspace.workspace = true
+document.workspace = true
+refactor.workspace = true
+workbench-model.workspace = true
+settings-model.workspace = true
+i18n.workspace = true
+tracing.workspace = true
+tree-sitter-dotenv.workspace = true
+
+[lints]
+workspace = true
+
+
+[dev-dependencies]
+text-search.workspace = true

@@ -1,0 +1,125 @@
+# The local database test matrix: our own throwaway servers, one per version, each seeded
+# with the same data (docker/databases/{postgres,mysql}/seed.sh, run at first start and by
+# `scripts/test-databases.sh seed`). Nothing here is ever a real server: the passwords are
+# throwaway ones, the data is made up, the data directories live in the containers (gone
+# with `scripts/test-databases.sh down`).
+#
+# Every container is named `editor-test-*` and listens on 127.0.0.1 only, ports 55400–55419,
+# so nothing else on the machine is touched. See README.md.
+#
+#   scripts/test-databases.sh up       start them (waits until each is seeded)
+#   scripts/test-databases.sh urls     the EDITOR_TEST_*_URLS exports for the tests
+#   scripts/test-databases.sh down     stop and remove them
+name: editor-test-db
+
+x-postgres: &postgres
+  environment:
+    POSTGRES_PASSWORD: editor-test-root
+    # The seed's own settings (the roles' passwords below are the same throwaway ones).
+    EDITOR_SEED_PASSWORD: editor-test
+  volumes:
+    - ./postgres:/seed:ro
+    - ./postgres/initdb.sh:/docker-entrypoint-initdb.d/initdb.sh:ro
+  healthcheck:
+    # Over TCP (the server the image starts while seeding listens on its socket only) and
+    # only once the seed wrote its last table.
+    test: ["CMD-SHELL", "PGPASSWORD=editor-test-root psql -h 127.0.0.1 -U postgres -d shop -tAc 'SELECT 1 FROM public.seed_info' | grep -q 1"]
+    interval: 2s
+    timeout: 5s
+    retries: 120
+    start_period: 10s
+
+x-mysql: &mysql
+  environment:
+    MYSQL_ROOT_PASSWORD: editor-test-root
+    MARIADB_ROOT_PASSWORD: editor-test-root
+    EDITOR_SEED_PASSWORD: editor-test
+  volumes:
+    - ./mysql:/seed:ro
+    - ./mysql/initdb.sh:/docker-entrypoint-initdb.d/initdb.sh:ro
+  healthcheck:
+    test: ["CMD-SHELL", "sh /seed/ready.sh"]
+    interval: 2s
+    timeout: 5s
+    retries: 180
+    start_period: 20s
+
+services:
+  # ─── PostgreSQL ───
+  # 9.2 has no arm64 image: on an arm64 machine it runs emulated (amd64), as `platform`
+  # says (Docker Desktop / OrbStack run it through Rosetta or QEMU).
+  pg92:
+    <<: *postgres
+    image: postgres:9.2
+    platform: linux/amd64
+    container_name: editor-test-pg92
+    ports: ["127.0.0.1:55400:5432"]
+  pg94:
+    <<: *postgres
+    image: postgres:9.4-alpine
+    container_name: editor-test-pg94
+    ports: ["127.0.0.1:55401:5432"]
+  pg96:
+    <<: *postgres
+    image: postgres:9.6-alpine
+    container_name: editor-test-pg96
+    ports: ["127.0.0.1:55402:5432"]
+  pg12:
+    <<: *postgres
+    image: postgres:12-alpine
+    container_name: editor-test-pg12
+    ports: ["127.0.0.1:55403:5432"]
+  pg14:
+    <<: *postgres
+    image: postgres:14-alpine
+    container_name: editor-test-pg14
+    ports: ["127.0.0.1:55404:5432"]
+  pg16:
+    <<: *postgres
+    image: postgres:16-alpine
+    container_name: editor-test-pg16
+    ports: ["127.0.0.1:55405:5432"]
+  pg17:
+    <<: *postgres
+    image: postgres:17-alpine
+    container_name: editor-test-pg17
+    ports: ["127.0.0.1:55406:5432"]
+  pg18:
+    <<: *postgres
+    image: postgres:18-alpine
+    container_name: editor-test-pg18
+    ports: ["127.0.0.1:55407:5432"]
+
+  # ─── MySQL / MariaDB (db-mysql's matrix: crates/infra/database/mysql/tests/matrix.rs) ───
+  # MySQL 5.7 has no arm64 image: emulated (amd64) on an arm64 machine.
+  mysql57:
+    <<: *mysql
+    image: mysql:5.7
+    platform: linux/amd64
+    container_name: editor-test-mysql57
+    ports: ["127.0.0.1:55410:3306"]
+  mysql80:
+    <<: *mysql
+    image: mysql:8.0
+    container_name: editor-test-mysql80
+    ports: ["127.0.0.1:55411:3306"]
+  mysql84:
+    <<: *mysql
+    image: mysql:8.4
+    container_name: editor-test-mysql84
+    ports: ["127.0.0.1:55412:3306"]
+  mariadb1011:
+    <<: *mysql
+    image: mariadb:10.11
+    container_name: editor-test-mariadb1011
+    ports: ["127.0.0.1:55413:3306"]
+  mariadb114:
+    <<: *mysql
+    image: mariadb:11.4
+    container_name: editor-test-mariadb114
+    ports: ["127.0.0.1:55414:3306"]
+  mariadb118:
+    <<: *mysql
+    image: mariadb:11.8
+    container_name: editor-test-mariadb118
+    ports: ["127.0.0.1:55415:3306"]

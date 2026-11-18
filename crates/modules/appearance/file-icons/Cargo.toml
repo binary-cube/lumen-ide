@@ -1,0 +1,18 @@
+[package]
+name = "file-icons"
+description = "File icons in the tree and tabs, by name, glob or extension."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+extensions.workspace = true
+languages.workspace = true
+
+[lints]
+workspace = true

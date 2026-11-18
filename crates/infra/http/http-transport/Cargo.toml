@@ -1,0 +1,31 @@
+[package]
+name = "http-transport"
+description = "The HTTP requests' transport (plan 77): `http-requests`' port implemented with ureq — any method, headers, a body of bytes and files sent as they're read, redirects followed one by one (each seen), the project's cookies, TLS (verified unless asked not to), timeouts, a large body spilled to a file, cancellable between reads."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+http-requests.workspace = true
+ureq = "3"
+# WebSocket requests (`WEBSOCKET ws://…`), over the same rustls and webpki roots as ureq.
+tungstenite = { version = "=0.30.0", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }
+# A WebSocket's own TLS (the environment's `SSLConfiguration`): the same rustls, ring and
+# roots ureq and tungstenite already bring.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+# HTTP/2 (`GET … HTTP/2`): h2 on a one-thread tokio runtime of the request's own, TLS by
+# tokio-rustls (tokio, tokio-rustls and http are already in the tree).
+h2 = "0.4"
+http = "1"
+bytes = "1"
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+
+[lints]
+workspace = true

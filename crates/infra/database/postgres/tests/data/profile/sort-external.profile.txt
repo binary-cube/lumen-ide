@@ -1,0 +1,10 @@
+-- actual · format 1
+Sort  (cost=1048.74..1073.74 rows=10000 width=244) (actual time=21.336..24.978 rows=10000 loops=1)
+  Sort Key: tenk1.stringu1 DESC
+  Sort Method: external merge  disk: 2760704 bytes
+  Spill: sort disk=2760704 bytes
+  Buffers: shared hit=345, temp read=337 written=338
+  ->  Seq Scan on tenk1  (cost=0.00..445.00 rows=10000 width=244) (actual time=0.008..1.752 rows=10000 loops=1)
+        Buffers: shared hit=345
+Planning Time: 0.093 ms
+Execution Time: 25.766 ms

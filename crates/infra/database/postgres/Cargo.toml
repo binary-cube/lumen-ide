@@ -1,0 +1,26 @@
+[package]
+name = "db-postgres"
+description = "PostgreSQL for the `database` domain (tokio-postgres, rustls): sessions on a small runtime of their own, rows streamed, queries cancelled through the protocol, schemas / tables / columns / indexes for the explorer; for the console, results read a page at a time from server-side cursors, notices, profiles (and plans, their projection) from `EXPLAIN (…, FORMAT JSON)` with each version's options from 9.2 to 18, every key kept (unknown ones as typed extras), run in a read-only transaction of its own or a savepoint with a local `statement_timeout`, transactions with their isolation, `search_path`, errors with their place and SQLSTATE, the tables' statistics (pg_stat_user_tables / pg_stat_user_indexes, their sizes) and the query's history from pg_stat_statements when installed (matched by queryid from 14, never installed by us), and the catalog read in bulk, for every server from 9.2."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+database.workspace = true
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "sync", "macros"] }
+tokio-postgres = { version = "0.7", default-features = false, features = ["runtime"] }
+tokio-postgres-rustls = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+futures-util = { version = "0.3", default-features = false }
+# `EXPLAIN (FORMAT JSON)` read as a profile.
+serde_json.workspace = true
+# An auxiliary query that fails (statistics, the query's history) is only logged.
+tracing.workspace = true
+
+[lints]
+workspace = true

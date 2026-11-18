@@ -1,0 +1,168 @@
+# The project's architecture, checked by `cargo xtask check-deps` (run by `scripts/check.sh`):
+# which crate is in which layer and what each layer may depend on, as deptrac.yaml does for
+# PHP. A crate in no layer, or a dependency a layer doesn't allow, fails the check.
+#
+# Beyond this file the check refuses what would make modules know each other, in their sources
+# (see `xtask/src/module_coupling.rs` and `docs/plan/69-comunicare-module.md`): a `depends_on`,
+# reading another module's files, naming another module's commands, views or windows.
+#
+# `paths`: `*` is one folder; the first layer that matches a crate wins.
+# `may_use`: the workspace's layers it may depend on (left out: any).
+# `external`: the crates.io crates it may depend on (left out: any).
+
+[[layer]]
+name = "kernel"
+paths = ["crates/kernel"]
+may_use = []
+# `uuid`: identities are UUID v4, made in one place for every layer.
+# `zeroize`: a `Secret`'s text is wiped from memory once dropped.
+# `miniz_oxide`: `cache::Packed` data kept compressed in memory (pure Rust deflate).
+external = ["serde", "thiserror", "smallvec", "uuid", "zeroize", "miniz_oxide"]
+
+[[layer]]
+name = "domain"
+paths = ["crates/domain/*/*"]
+may_use = ["kernel", "domain"]
+external = [
+    "ropey",
+    "smallvec",
+    "semver",
+    "serde",
+    "thiserror",
+    "async-trait",
+    "futures",
+    "unicode-segmentation",
+    "regex",
+    # JSON is a format the domain reads as data: `.http` environment files, a response's
+    # body for JSONPath (plan 77).
+    "serde_json",
+    # Hashes and HMACs as pure functions (plan 77: Digest authentication, the scripts'
+    # `crypto`, OAuth's PKCE); XML read as data (XPath over a response's body).
+    "sha1",
+    "sha2",
+    "sha3",
+    "md-5",
+    "hmac",
+    "roxmltree",
+    # YAML read as data (an OpenAPI description).
+    "yaml-rust2",
+    # Deflate as data, pure Rust: a `.drawio` file's pages draw.io kept compressed (plan 80).
+    "miniz_oxide",
+]
+
+[[layer]]
+name = "render-api"
+paths = ["crates/render/render-api"]
+may_use = ["kernel"]
+external = ["serde", "thiserror", "smallvec", "bytemuck", "raw-window-handle"]
+
+[[layer]]
+name = "text"
+paths = ["crates/render/text", "crates/render/icons"]
+may_use = ["kernel", "render-api"]
+
+[[layer]]
+name = "render-driver"
+paths = ["crates/render/*"]
+may_use = ["kernel", "render-api", "text"]
+
+[[layer]]
+name = "platform-api"
+paths = ["crates/platform/platform-api"]
+may_use = ["kernel"]
+external = ["serde", "thiserror", "raw-window-handle"]
+
+[[layer]]
+name = "platform-impl"
+paths = ["crates/platform/*"]
+may_use = ["kernel", "platform-api"]
+
+[[layer]]
+name = "ui"
+paths = ["crates/ui/*"]
+may_use = ["kernel", "domain", "render-api", "platform-api", "text", "ui"]
+
+# Shared infrastructure tools (running a program, safe file writes, checked downloads): any
+# adapter may use them.
+[[layer]]
+name = "infra-shared"
+paths = [
+    "crates/infra/system/process",
+    "crates/infra/files/files",
+    "crates/infra/files/pinned-downloads",
+    "crates/infra/code/lsp-protocol",
+]
+may_use = ["kernel"]
+
+[[layer]]
+name = "infra"
+paths = ["crates/infra/*/*"]
+may_use = ["kernel", "domain", "infra-shared"]
+
+# Never "module": modules don't know each other.
+[[layer]]
+name = "module"
+# Three deep for a group's own families (`modules/ai/agents/claude`: one agent each).
+paths = ["crates/modules/*", "crates/modules/*/*", "crates/modules/*/*/*"]
+may_use = ["kernel", "domain", "render-api", "text", "ui", "infra", "infra-shared"]
+
+[[layer]]
+name = "app"
+paths = ["crates/app"]
+
+# The engines as a program for other editors: like the app, it puts modules together.
+[[layer]]
+name = "server"
+paths = ["crates/language-server"]
+
+[[layer]]
+name = "tool"
+paths = ["xtask"]
+
+# The app's own screens change often: only these layers build on them, so that changing a
+# screen recompiles only the app (modules use `ui-components`).
+[app_screens]
+crate = "ui-workbench"
+used_by = ["app", "tool"]
+
+# Which infrastructure crates modules may use.
+[module_infra]
+# Any module: the local disk, the app's own files, the syntax trees, the image decoder.
+any = ["fs-local", "storage", "syntax-ts", "image-decode"]
+
+# One feature's adapters: only that feature's module uses them. An adapter in neither list is
+# the app's until it's added here.
+[module_infra.owned]
+db-sqlite = ["database-sqlite"]
+db-csv = ["database-csv"]
+db-postgres = ["database-postgres"]
+db-mysql = ["database-mysql"]
+db-protocol = ["database-external"]
+embed = ["indexing"]
+indexer = ["indexing"]
+git = ["vcs-git"]
+history-fs = ["local-history"]
+lsp-client = ["language-servers"]
+web-fetch = ["viewer-markdown"]
+process-stats = ["task-manager"]
+power-system = ["keep-awake"]
+pty = ["terminal-panel"]
+# An agent talked to as a graphical conversation: the conversation's.
+acp-client = ["agent-chat"]
+# What every agent's module reads on disk alike (its program, its sessions' files): theirs.
+agent-files = ["agent-claude", "agent-cline"]
+# The editor's MCP server on the loopback: the server module's.
+mcp-transport = ["mcp-server"]
+remote-ftp = ["remote-projects"]
+remote-sftp = ["remote-projects"]
+secrets = ["remote-projects", "database-explorer", "language-servers", "mcp-server"]
+# Requests sent: the HTTP client's.
+http-transport = ["http-client"]
+# The request files' environments read: the HTTP client's (runs, its bar) and the language's
+# (completion, hover).
+http-environments = ["http-client", "lang-http"]
+# A request's JavaScript run: the HTTP client's.
+http-scripts = ["http-client"]
+# The app's own updates, checked, downloaded and put in place: the updates' module (and
+# the app, which starts the helper as it quits).
+self-update = ["updates"]

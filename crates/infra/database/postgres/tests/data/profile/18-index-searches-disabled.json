@@ -1,0 +1,78 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Nested Loop",
+      "Parallel Aware": false,
+      "Async Capable": false,
+      "Join Type": "Inner",
+      "Disabled": false,
+      "Startup Cost": 0.42,
+      "Total Cost": 2061.25,
+      "Plan Rows": 48.5,
+      "Plan Width": 76,
+      "Actual Startup Time": 0.040,
+      "Actual Total Time": 10.912,
+      "Actual Rows": 50.00,
+      "Actual Loops": 1,
+      "Inner Unique": true,
+      "Shared Hit Blocks": 984,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "orders",
+          "Alias": "o",
+          "Disabled": true,
+          "Startup Cost": 0.00,
+          "Total Cost": 1834.00,
+          "Plan Rows": 48.5,
+          "Plan Width": 40,
+          "Actual Startup Time": 0.020,
+          "Actual Total Time": 9.871,
+          "Actual Rows": 50.00,
+          "Actual Loops": 1,
+          "Filter": "(status = ANY ('{new,paid}'::text[]))",
+          "Rows Removed by Filter": 99950,
+          "Shared Hit Blocks": 834
+        },
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "customers_pkey",
+          "Relation Name": "customers",
+          "Alias": "c",
+          "Disabled": false,
+          "Startup Cost": 0.42,
+          "Total Cost": 4.68,
+          "Plan Rows": 1,
+          "Plan Width": 36,
+          "Actual Startup Time": 0.018,
+          "Actual Total Time": 0.018,
+          "Actual Rows": 1.00,
+          "Actual Loops": 50,
+          "Index Cond": "(id = o.customer_id)",
+          "Rows Removed by Index Recheck": 0,
+          "Index Searches": 50,
+          "Shared Hit Blocks": 150
+        }
+      ]
+    },
+    "Settings": {
+      "enable_seqscan": "off"
+    },
+    "Planning": {
+      "Shared Hit Blocks": 3,
+      "Memory Used": 31,
+      "Memory Allocated": 64
+    },
+    "Planning Time": 0.142,
+    "Triggers": [
+    ],
+    "Execution Time": 10.955
+  }
+]

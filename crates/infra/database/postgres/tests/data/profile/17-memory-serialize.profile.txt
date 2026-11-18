@@ -1,0 +1,10 @@
+-- actual · format 1
+Seq Scan on customers  (cost=0.00..22.70 rows=1270 width=36) (actual time=0.008..0.162 rows=1270 loops=1)
+  Buffers: shared hit=10 read=0
+  I/O Timings: shared read=0.000 shared write=0.000 local read=0.000 local write=0.000
+Planning Buffers: shared hit=6 read=0
+Planning Memory: used=23552 bytes allocated=32768 bytes
+Planning Time: 0.041 ms
+Execution Time: 0.711 ms
+Serialization: time=0.412 ms output=59392 bytes format=text
+Serialization › Shared Hit Blocks: 0

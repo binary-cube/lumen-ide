@@ -1,0 +1,16 @@
+[package]
+name = "agents"
+description = "AI agents on the machine as the editor hosts them: their sessions, how they're started or resumed, the port each agent's module implements."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+
+[lints]
+workspace = true

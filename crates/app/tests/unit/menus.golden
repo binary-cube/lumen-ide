@@ -1,0 +1,638 @@
+= MacOs =
+# Lumen | info
+  app.about | About Lumen | 
+  updates.check | Check for Updates… | 
+  ---
+  app.settings | Settings… | CmdOrCtrl+,
+  ---
+  [Services] Services
+  ---
+  [Hide] Hide Lumen
+  [HideOthers] Hide Others
+  [ShowAll] Show All
+  ---
+  app.quit | Quit Lumen | CmdOrCtrl+Q
+# File | folder
+  file.new | New File | CmdOrCtrl+N
+  window.new | New Window | CmdOrCtrl+Shift+N
+  ---
+  file.open | Open File… | CmdOrCtrl+O
+  project.open | Open Project… | CmdOrCtrl+Shift+O
+  remote.open | Open Remote Project… | 
+  Open Recent › | clock
+    file.clear_recent | Clear Recent | 
+  project.close | Close Project | 
+  ---
+  file.save | Save | CmdOrCtrl+S
+  file.save_as | Save As… | CmdOrCtrl+Shift+S
+  file.toggle_read_only | Toggle Read-only Mode | 
+  ---
+  tab.close | Close Tab | CmdOrCtrl+W
+  tab.reopen_closed | Reopen Closed Tab | CmdOrCtrl+Shift+T
+  ---
+  history.show | Show Local History | 
+# Edit | file-pen
+  edit.undo | Undo | CmdOrCtrl+Z
+  edit.redo | Redo | CmdOrCtrl+Shift+Z
+  ---
+  edit.cut | Cut | CmdOrCtrl+X
+  edit.copy | Copy | CmdOrCtrl+C
+  edit.paste | Paste | CmdOrCtrl+V
+  file.copy_path_menu | Copy Path / Reference… | CmdOrCtrl+Alt+C
+  compare.clipboard | Compare with Clipboard | 
+  ---
+  edit.select_all | Select All | CmdOrCtrl+A
+  Selection › | text-cursor
+    edit.extend_selection | Extend Selection | Alt+Up
+    edit.shrink_selection | Shrink Selection | Alt+Down
+    ---
+    edit.select_next_occurrence | Add Selection for Next Occurrence | Ctrl+G
+    edit.unselect_occurrence | Unselect Occurrence | Ctrl+Shift+G
+    edit.select_all_occurrences | Select All Occurrences | CmdOrCtrl+Shift+L
+    ---
+    edit.add_cursor_up | Add Caret Above | CmdOrCtrl+Alt+Up
+    edit.add_cursor_down | Add Caret Below | CmdOrCtrl+Alt+Down
+  ---
+  edit.duplicate | Duplicate Line or Selection | CmdOrCtrl+D
+  edit.delete_line | Delete Line | CmdOrCtrl+Backspace
+  code.move_line_up | Move Line Up | Alt+Shift+Up
+  code.move_line_down | Move Line Down | Alt+Shift+Down
+# View | eye
+  Tool Windows › | panel-right
+    view.toggle_project | Project | CmdOrCtrl+1
+    tool-window:agent-sessions | Agent Sessions | 
+    ---
+    view.toggle_services | Services | CmdOrCtrl+8
+    view.toggle_terminal | Terminal | Alt+F12
+    tool-window:local-history | Local History | 
+    tool-window:remote | Remote | 
+    tool-window:git | Git | 
+    ---
+    view.toggle_structure | Structure | CmdOrCtrl+7
+    view.toggle_http | HTTP Client | 
+    database.window | Database | 
+    tool-window:diagram-files | Diagrams | 
+    ---
+    projects.switcher | Open projects | CmdOrCtrl+Alt+P
+    keep_awake.toggle | Keep awake | 
+    focus.toggle | Focus mode | 
+    relax.start | Relax mode | 
+    tasks.open | Task Manager | 
+  ---
+  Appearance › | palette
+    view.switch_theme | Switch Theme | CmdOrCtrl+Alt+T
+    app.theme_studio | Theme Studio… | 
+  ---
+  view.zoom_in | Zoom In | CmdOrCtrl+Shift+=
+  view.zoom_out | Zoom Out | CmdOrCtrl+Shift+-
+  view.zoom_reset | Actual Size (100%) | CmdOrCtrl+Shift+0
+  ---
+  view.full_screen | Full Screen | F11
+  view.editor_full | Editor Area: All the Window | CmdOrCtrl+Shift+F12
+  view.editor_full_width | Editor Area: All the Width | 
+  view.editor_full_height | Editor Area: All the Height | 
+  ---
+  notifications.recent | Show Recent Notifications | 
+  notifications.close | Close Notifications | 
+# Find | search
+  find.open | Find… | CmdOrCtrl+F
+  find.replace | Replace… | CmdOrCtrl+R
+  ---
+  find.next | Find Next | CmdOrCtrl+G
+  find.prev | Find Previous | CmdOrCtrl+Shift+G
+  ---
+  project.search | Search in Project… | CmdOrCtrl+Shift+F
+  project.replace_in_files | Replace in Files… | CmdOrCtrl+Shift+R
+  refactor.find_usages | Find Usages | Alt+F7
+# Navigate | compass
+  navigate.back | Back | CmdOrCtrl+[
+  navigate.forward | Forward | CmdOrCtrl+]
+  ---
+  project.search_files | Go to File… | CmdOrCtrl+P
+  navigate.line | Go to Line… | CmdOrCtrl+L
+  ---
+  navigate.definition | Go to Declaration | CmdOrCtrl+B
+  navigate.implementation | Go to Implementation | CmdOrCtrl+Alt+B
+  navigate.type_declaration | Go to Type Declaration | CmdOrCtrl+Shift+B
+  ---
+  navigate.type_hierarchy | Type Hierarchy | Ctrl+H
+  diagram.show | Show Diagram | CmdOrCtrl+Alt+Shift+U
+  view.canvas | Dependency Canvas | CmdOrCtrl+Shift+D
+  ---
+  file.reveal_in_project | Select in Project View | Alt+F1
+# Code | braces
+  code.complete | Complete Code | Ctrl+Space
+  code.show_actions | Show Context Actions | Alt+Enter
+  ---
+  code.comment | Comment with Line Comment | CmdOrCtrl+/
+  code.move_statement_up | Move Statement Up | CmdOrCtrl+Shift+Up
+  code.move_statement_down | Move Statement Down | CmdOrCtrl+Shift+Down
+  ---
+  Folding › | chevrons-collapse
+    code.fold | Collapse | CmdOrCtrl+-
+    code.unfold | Expand | CmdOrCtrl+=
+    ---
+    code.fold_all | Collapse All | CmdOrCtrl+Shift+NumpadSubtract
+    code.unfold_all | Expand All | CmdOrCtrl+Shift+NumpadAdd
+  ---
+  quality.format_file | Reformat File | CmdOrCtrl+Alt+L
+  sql.format_statement | Reformat SQL Statement | 
+  lsp.format | Reformat with Language Server | Shift+Alt+F
+  quality.format_project | Reformat Project | 
+  ---
+  quality.check_file | Check File | 
+  quality.check_project | Check Project | 
+# Refactor | wand
+  refactor.rename | Rename… | Shift+F6
+  refactor.change_signature | Change Signature… | CmdOrCtrl+F6
+  refactor.move | Move… | F6
+  ---
+  refactor.undo | Undo Last Refactoring | 
+# Git | git-branch
+  git.commit | Commit… | 
+  git.changes | Show Changes | 
+  git.log | Show Git Log | Alt+9
+  Branches and Tags › | git-branch
+    git.new_branch | New Branch… | 
+    git.rename_branch | Rename Branch… | 
+    git.new_tag | New Tag… | 
+    git.push_to | Push… | 
+  In Progress › | compare
+    git.conflicts | Resolve Conflicts… | 
+    git.continue_operation | Continue | 
+    git.skip_operation | Skip Commit | 
+    git.abort_operation | Abort | 
+  ---
+  git.pull | Pull | CmdOrCtrl+T
+  git.push | Push | CmdOrCtrl+Shift+K
+  git.fetch | Fetch | 
+  ---
+  git.annotate | Annotate with Git Blame | 
+  git.file_history | Show File History | 
+  Compare With › | compare
+    git.compare_head | Last Commit | 
+    git.compare_revision | Revision… | 
+    git.compare_branch | Branch… | 
+  git.rollback | Rollback… | CmdOrCtrl+Alt+Shift+Z
+  ---
+  git.revert_change | Revert Change | CmdOrCtrl+Alt+Z
+  git.change_actions | Change Actions… | 
+  git.annotated_commit | Show Annotated Commit | 
+# Tools | wrench
+  database.data_sources | Data Sources and Drivers… | 
+  terminal.new | New Terminal Tab | 
+  ---
+  Language Servers › | server
+    lsp.choose_engine | Choose Language Engine… | 
+    lsp.use_built_in | Use Built-in Engine | 
+    ---
+    lsp.download | Download Language Server | 
+    ---
+    lsp.restart | Restart Language Servers | 
+    lsp.show_log | Show Language Server Log | 
+  ---
+  project.reindex | Reindex Project | 
+  app.clear_caches | Clear and Rebuild Caches… | 
+  ---
+  Remote › | server
+    remote.pull_project | Pull the Project | 
+    remote.push_project | Push the Project | 
+    remote.sync_project | Sync the Project | 
+    ---
+    remote.connection | Connection Settings… | 
+# Window | app-window | windows
+  [Minimize] Minimize
+  [Zoom] Zoom
+  ---
+  tab.next | Next Tab | CmdOrCtrl+Shift+]
+  tab.prev | Previous Tab | CmdOrCtrl+Shift+[
+  view.next_group | Next Group | CmdOrCtrl+Alt+Shift+PageDown
+  view.prev_group | Previous Group | CmdOrCtrl+Alt+Shift+PageUp
+  ---
+  tab.close_others | Close Other Tabs | 
+  tab.close_saved | Close Saved Tabs | 
+  tab.close_all | Close All Tabs | 
+  ---
+  [BringAllToFront] Bring All to Front
+# Help | circle-help | help
+  help.keyboard_shortcuts | Keyboard Shortcuts… | 
+  ---
+  view.debug_overlay | Diagnostic Overlay | F12
+= Windows =
+# File | folder
+  file.new | New File | CmdOrCtrl+N
+  window.new | New Window | CmdOrCtrl+Shift+N
+  ---
+  file.open | Open File… | CmdOrCtrl+O
+  project.open | Open Project… | CmdOrCtrl+Shift+O
+  remote.open | Open Remote Project… | 
+  Open Recent › | clock
+    file.clear_recent | Clear Recent | 
+  project.close | Close Project | 
+  ---
+  file.save | Save | CmdOrCtrl+S
+  file.save_as | Save As… | CmdOrCtrl+Shift+S
+  file.toggle_read_only | Toggle Read-only Mode | 
+  ---
+  tab.close | Close Tab | CmdOrCtrl+W
+  tab.reopen_closed | Reopen Closed Tab | CmdOrCtrl+Shift+T
+  ---
+  history.show | Show Local History | 
+  ---
+  app.settings | Settings… | CmdOrCtrl+,
+  ---
+  app.quit | Exit | CmdOrCtrl+Q
+# Edit | file-pen
+  edit.undo | Undo | CmdOrCtrl+Z
+  edit.redo | Redo | CmdOrCtrl+Shift+Z
+  ---
+  edit.cut | Cut | CmdOrCtrl+X
+  edit.copy | Copy | CmdOrCtrl+C
+  edit.paste | Paste | CmdOrCtrl+V
+  file.copy_path_menu | Copy Path / Reference… | CmdOrCtrl+Alt+C
+  compare.clipboard | Compare with Clipboard | 
+  ---
+  edit.select_all | Select All | CmdOrCtrl+A
+  Selection › | text-cursor
+    edit.extend_selection | Extend Selection | Alt+Up
+    edit.shrink_selection | Shrink Selection | Alt+Down
+    ---
+    edit.select_next_occurrence | Add Selection for Next Occurrence | Alt+J
+    edit.unselect_occurrence | Unselect Occurrence | Alt+Shift+J
+    edit.select_all_occurrences | Select All Occurrences | CmdOrCtrl+Shift+L
+    ---
+    edit.add_cursor_up | Add Caret Above | CmdOrCtrl+Alt+Up
+    edit.add_cursor_down | Add Caret Below | CmdOrCtrl+Alt+Down
+  ---
+  edit.duplicate | Duplicate Line or Selection | CmdOrCtrl+D
+  edit.delete_line | Delete Line | CmdOrCtrl+Backspace
+  code.move_line_up | Move Line Up | Alt+Shift+Up
+  code.move_line_down | Move Line Down | Alt+Shift+Down
+# View | eye
+  Tool Windows › | panel-right
+    view.toggle_project | Project | CmdOrCtrl+1
+    tool-window:agent-sessions | Agent Sessions | 
+    ---
+    view.toggle_services | Services | CmdOrCtrl+8
+    view.toggle_terminal | Terminal | Alt+F12
+    tool-window:local-history | Local History | 
+    tool-window:remote | Remote | 
+    tool-window:git | Git | 
+    ---
+    view.toggle_structure | Structure | CmdOrCtrl+7
+    view.toggle_http | HTTP Client | 
+    database.window | Database | 
+    tool-window:diagram-files | Diagrams | 
+    ---
+    projects.switcher | Open projects | CmdOrCtrl+Alt+P
+    keep_awake.toggle | Keep awake | 
+    focus.toggle | Focus mode | 
+    relax.start | Relax mode | 
+    tasks.open | Task Manager | 
+  ---
+  Appearance › | palette
+    view.switch_theme | Switch Theme | CmdOrCtrl+Alt+T
+    app.theme_studio | Theme Studio… | 
+  ---
+  view.zoom_in | Zoom In | CmdOrCtrl+Shift+=
+  view.zoom_out | Zoom Out | CmdOrCtrl+Shift+-
+  view.zoom_reset | Actual Size (100%) | CmdOrCtrl+Shift+0
+  ---
+  view.full_screen | Full Screen | F11
+  view.editor_full | Editor Area: All the Window | CmdOrCtrl+Shift+F12
+  view.editor_full_width | Editor Area: All the Width | 
+  view.editor_full_height | Editor Area: All the Height | 
+  ---
+  notifications.recent | Show Recent Notifications | 
+  notifications.close | Close Notifications | 
+# Find | search
+  find.open | Find… | CmdOrCtrl+F
+  find.replace | Replace… | CmdOrCtrl+R
+  ---
+  find.next | Find Next | CmdOrCtrl+G
+  find.prev | Find Previous | CmdOrCtrl+Shift+G
+  ---
+  project.search | Search in Project… | CmdOrCtrl+Shift+F
+  project.replace_in_files | Replace in Files… | CmdOrCtrl+Shift+R
+  refactor.find_usages | Find Usages | Alt+F7
+# Navigate | compass
+  navigate.back | Back | CmdOrCtrl+[
+  navigate.forward | Forward | CmdOrCtrl+]
+  ---
+  project.search_files | Go to File… | CmdOrCtrl+P
+  navigate.line | Go to Line… | CmdOrCtrl+L
+  ---
+  navigate.definition | Go to Declaration | CmdOrCtrl+B
+  navigate.implementation | Go to Implementation | CmdOrCtrl+Alt+B
+  navigate.type_declaration | Go to Type Declaration | CmdOrCtrl+Shift+B
+  ---
+  navigate.type_hierarchy | Type Hierarchy | Ctrl+H
+  diagram.show | Show Diagram | CmdOrCtrl+Alt+Shift+U
+  view.canvas | Dependency Canvas | CmdOrCtrl+Shift+D
+  ---
+  file.reveal_in_project | Select in Project View | Alt+F1
+# Code | braces
+  code.complete | Complete Code | Ctrl+Space
+  code.show_actions | Show Context Actions | Alt+Enter
+  ---
+  code.comment | Comment with Line Comment | CmdOrCtrl+/
+  code.move_statement_up | Move Statement Up | CmdOrCtrl+Shift+Up
+  code.move_statement_down | Move Statement Down | CmdOrCtrl+Shift+Down
+  ---
+  Folding › | chevrons-collapse
+    code.fold | Collapse | CmdOrCtrl+-
+    code.unfold | Expand | CmdOrCtrl+=
+    ---
+    code.fold_all | Collapse All | CmdOrCtrl+Shift+NumpadSubtract
+    code.unfold_all | Expand All | CmdOrCtrl+Shift+NumpadAdd
+  ---
+  quality.format_file | Reformat File | CmdOrCtrl+Alt+L
+  sql.format_statement | Reformat SQL Statement | 
+  lsp.format | Reformat with Language Server | Shift+Alt+F
+  quality.format_project | Reformat Project | 
+  ---
+  quality.check_file | Check File | 
+  quality.check_project | Check Project | 
+# Refactor | wand
+  refactor.rename | Rename… | Shift+F6
+  refactor.change_signature | Change Signature… | CmdOrCtrl+F6
+  refactor.move | Move… | F6
+  ---
+  refactor.undo | Undo Last Refactoring | 
+# Git | git-branch
+  git.commit | Commit… | 
+  git.changes | Show Changes | 
+  git.log | Show Git Log | Alt+9
+  Branches and Tags › | git-branch
+    git.new_branch | New Branch… | 
+    git.rename_branch | Rename Branch… | 
+    git.new_tag | New Tag… | 
+    git.push_to | Push… | 
+  In Progress › | compare
+    git.conflicts | Resolve Conflicts… | 
+    git.continue_operation | Continue | 
+    git.skip_operation | Skip Commit | 
+    git.abort_operation | Abort | 
+  ---
+  git.pull | Pull | CmdOrCtrl+T
+  git.push | Push | CmdOrCtrl+Shift+K
+  git.fetch | Fetch | 
+  ---
+  git.annotate | Annotate with Git Blame | 
+  git.file_history | Show File History | 
+  Compare With › | compare
+    git.compare_head | Last Commit | 
+    git.compare_revision | Revision… | 
+    git.compare_branch | Branch… | 
+  git.rollback | Rollback… | CmdOrCtrl+Alt+Shift+Z
+  ---
+  git.revert_change | Revert Change | CmdOrCtrl+Alt+Z
+  git.change_actions | Change Actions… | 
+  git.annotated_commit | Show Annotated Commit | 
+# Tools | wrench
+  database.data_sources | Data Sources and Drivers… | 
+  terminal.new | New Terminal Tab | 
+  ---
+  Language Servers › | server
+    lsp.choose_engine | Choose Language Engine… | 
+    lsp.use_built_in | Use Built-in Engine | 
+    ---
+    lsp.download | Download Language Server | 
+    ---
+    lsp.restart | Restart Language Servers | 
+    lsp.show_log | Show Language Server Log | 
+  ---
+  project.reindex | Reindex Project | 
+  app.clear_caches | Clear and Rebuild Caches… | 
+  ---
+  Remote › | server
+    remote.pull_project | Pull the Project | 
+    remote.push_project | Push the Project | 
+    remote.sync_project | Sync the Project | 
+    ---
+    remote.connection | Connection Settings… | 
+# Window | app-window | windows
+  tab.next | Next Tab | CmdOrCtrl+Shift+]
+  tab.prev | Previous Tab | CmdOrCtrl+Shift+[
+  view.next_group | Next Group | CmdOrCtrl+Alt+Shift+PageDown
+  view.prev_group | Previous Group | CmdOrCtrl+Alt+Shift+PageUp
+  ---
+  tab.close_others | Close Other Tabs | 
+  tab.close_saved | Close Saved Tabs | 
+  tab.close_all | Close All Tabs | 
+# Help | circle-help | help
+  help.keyboard_shortcuts | Keyboard Shortcuts… | 
+  ---
+  view.debug_overlay | Diagnostic Overlay | F12
+  ---
+  app.about | About Lumen | 
+  updates.check | Check for Updates… | 
+= Linux =
+# File | folder
+  file.new | New File | CmdOrCtrl+N
+  window.new | New Window | CmdOrCtrl+Shift+N
+  ---
+  file.open | Open File… | CmdOrCtrl+O
+  project.open | Open Project… | CmdOrCtrl+Shift+O
+  remote.open | Open Remote Project… | 
+  Open Recent › | clock
+    file.clear_recent | Clear Recent | 
+  project.close | Close Project | 
+  ---
+  file.save | Save | CmdOrCtrl+S
+  file.save_as | Save As… | CmdOrCtrl+Shift+S
+  file.toggle_read_only | Toggle Read-only Mode | 
+  ---
+  tab.close | Close Tab | CmdOrCtrl+W
+  tab.reopen_closed | Reopen Closed Tab | CmdOrCtrl+Shift+T
+  ---
+  history.show | Show Local History | 
+  ---
+  app.settings | Settings… | CmdOrCtrl+,
+  ---
+  app.quit | Quit Lumen | CmdOrCtrl+Q
+# Edit | file-pen
+  edit.undo | Undo | CmdOrCtrl+Z
+  edit.redo | Redo | CmdOrCtrl+Shift+Z
+  ---
+  edit.cut | Cut | CmdOrCtrl+X
+  edit.copy | Copy | CmdOrCtrl+C
+  edit.paste | Paste | CmdOrCtrl+V
+  file.copy_path_menu | Copy Path / Reference… | CmdOrCtrl+Alt+C
+  compare.clipboard | Compare with Clipboard | 
+  ---
+  edit.select_all | Select All | CmdOrCtrl+A
+  Selection › | text-cursor
+    edit.extend_selection | Extend Selection | Alt+Up
+    edit.shrink_selection | Shrink Selection | Alt+Down
+    ---
+    edit.select_next_occurrence | Add Selection for Next Occurrence | Alt+J
+    edit.unselect_occurrence | Unselect Occurrence | Alt+Shift+J
+    edit.select_all_occurrences | Select All Occurrences | CmdOrCtrl+Shift+L
+    ---
+    edit.add_cursor_up | Add Caret Above | CmdOrCtrl+Alt+Up
+    edit.add_cursor_down | Add Caret Below | CmdOrCtrl+Alt+Down
+  ---
+  edit.duplicate | Duplicate Line or Selection | CmdOrCtrl+D
+  edit.delete_line | Delete Line | CmdOrCtrl+Backspace
+  code.move_line_up | Move Line Up | Alt+Shift+Up
+  code.move_line_down | Move Line Down | Alt+Shift+Down
+# View | eye
+  Tool Windows › | panel-right
+    view.toggle_project | Project | CmdOrCtrl+1
+    tool-window:agent-sessions | Agent Sessions | 
+    ---
+    view.toggle_services | Services | CmdOrCtrl+8
+    view.toggle_terminal | Terminal | Alt+F12
+    tool-window:local-history | Local History | 
+    tool-window:remote | Remote | 
+    tool-window:git | Git | 
+    ---
+    view.toggle_structure | Structure | CmdOrCtrl+7
+    view.toggle_http | HTTP Client | 
+    database.window | Database | 
+    tool-window:diagram-files | Diagrams | 
+    ---
+    projects.switcher | Open projects | CmdOrCtrl+Alt+P
+    keep_awake.toggle | Keep awake | 
+    focus.toggle | Focus mode | 
+    relax.start | Relax mode | 
+    tasks.open | Task Manager | 
+  ---
+  Appearance › | palette
+    view.switch_theme | Switch Theme | CmdOrCtrl+Alt+T
+    app.theme_studio | Theme Studio… | 
+  ---
+  view.zoom_in | Zoom In | CmdOrCtrl+Shift+=
+  view.zoom_out | Zoom Out | CmdOrCtrl+Shift+-
+  view.zoom_reset | Actual Size (100%) | CmdOrCtrl+Shift+0
+  ---
+  view.full_screen | Full Screen | F11
+  view.editor_full | Editor Area: All the Window | CmdOrCtrl+Shift+F12
+  view.editor_full_width | Editor Area: All the Width | 
+  view.editor_full_height | Editor Area: All the Height | 
+  ---
+  notifications.recent | Show Recent Notifications | 
+  notifications.close | Close Notifications | 
+# Find | search
+  find.open | Find… | CmdOrCtrl+F
+  find.replace | Replace… | CmdOrCtrl+R
+  ---
+  find.next | Find Next | CmdOrCtrl+G
+  find.prev | Find Previous | CmdOrCtrl+Shift+G
+  ---
+  project.search | Search in Project… | CmdOrCtrl+Shift+F
+  project.replace_in_files | Replace in Files… | CmdOrCtrl+Shift+R
+  refactor.find_usages | Find Usages | Alt+F7
+# Navigate | compass
+  navigate.back | Back | CmdOrCtrl+[
+  navigate.forward | Forward | CmdOrCtrl+]
+  ---
+  project.search_files | Go to File… | CmdOrCtrl+P
+  navigate.line | Go to Line… | CmdOrCtrl+L
+  ---
+  navigate.definition | Go to Declaration | CmdOrCtrl+B
+  navigate.implementation | Go to Implementation | CmdOrCtrl+Alt+B
+  navigate.type_declaration | Go to Type Declaration | CmdOrCtrl+Shift+B
+  ---
+  navigate.type_hierarchy | Type Hierarchy | Ctrl+H
+  diagram.show | Show Diagram | CmdOrCtrl+Alt+Shift+U
+  view.canvas | Dependency Canvas | CmdOrCtrl+Shift+D
+  ---
+  file.reveal_in_project | Select in Project View | Alt+F1
+# Code | braces
+  code.complete | Complete Code | Ctrl+Space
+  code.show_actions | Show Context Actions | Alt+Enter
+  ---
+  code.comment | Comment with Line Comment | CmdOrCtrl+/
+  code.move_statement_up | Move Statement Up | CmdOrCtrl+Shift+Up
+  code.move_statement_down | Move Statement Down | CmdOrCtrl+Shift+Down
+  ---
+  Folding › | chevrons-collapse
+    code.fold | Collapse | CmdOrCtrl+-
+    code.unfold | Expand | CmdOrCtrl+=
+    ---
+    code.fold_all | Collapse All | CmdOrCtrl+Shift+NumpadSubtract
+    code.unfold_all | Expand All | CmdOrCtrl+Shift+NumpadAdd
+  ---
+  quality.format_file | Reformat File | CmdOrCtrl+Alt+L
+  sql.format_statement | Reformat SQL Statement | 
+  lsp.format | Reformat with Language Server | Shift+Alt+F
+  quality.format_project | Reformat Project | 
+  ---
+  quality.check_file | Check File | 
+  quality.check_project | Check Project | 
+# Refactor | wand
+  refactor.rename | Rename… | Shift+F6
+  refactor.change_signature | Change Signature… | CmdOrCtrl+F6
+  refactor.move | Move… | F6
+  ---
+  refactor.undo | Undo Last Refactoring | 
+# Git | git-branch
+  git.commit | Commit… | 
+  git.changes | Show Changes | 
+  git.log | Show Git Log | Alt+9
+  Branches and Tags › | git-branch
+    git.new_branch | New Branch… | 
+    git.rename_branch | Rename Branch… | 
+    git.new_tag | New Tag… | 
+    git.push_to | Push… | 
+  In Progress › | compare
+    git.conflicts | Resolve Conflicts… | 
+    git.continue_operation | Continue | 
+    git.skip_operation | Skip Commit | 
+    git.abort_operation | Abort | 
+  ---
+  git.pull | Pull | CmdOrCtrl+T
+  git.push | Push | CmdOrCtrl+Shift+K
+  git.fetch | Fetch | 
+  ---
+  git.annotate | Annotate with Git Blame | 
+  git.file_history | Show File History | 
+  Compare With › | compare
+    git.compare_head | Last Commit | 
+    git.compare_revision | Revision… | 
+    git.compare_branch | Branch… | 
+  git.rollback | Rollback… | CmdOrCtrl+Alt+Shift+Z
+  ---
+  git.revert_change | Revert Change | CmdOrCtrl+Alt+Z
+  git.change_actions | Change Actions… | 
+  git.annotated_commit | Show Annotated Commit | 
+# Tools | wrench
+  database.data_sources | Data Sources and Drivers… | 
+  terminal.new | New Terminal Tab | 
+  ---
+  Language Servers › | server
+    lsp.choose_engine | Choose Language Engine… | 
+    lsp.use_built_in | Use Built-in Engine | 
+    ---
+    lsp.download | Download Language Server | 
+    ---
+    lsp.restart | Restart Language Servers | 
+    lsp.show_log | Show Language Server Log | 
+  ---
+  project.reindex | Reindex Project | 
+  app.clear_caches | Clear and Rebuild Caches… | 
+  ---
+  Remote › | server
+    remote.pull_project | Pull the Project | 
+    remote.push_project | Push the Project | 
+    remote.sync_project | Sync the Project | 
+    ---
+    remote.connection | Connection Settings… | 
+# Window | app-window | windows
+  tab.next | Next Tab | CmdOrCtrl+Shift+]
+  tab.prev | Previous Tab | CmdOrCtrl+Shift+[
+  view.next_group | Next Group | CmdOrCtrl+Alt+Shift+PageDown
+  view.prev_group | Previous Group | CmdOrCtrl+Alt+Shift+PageUp
+  ---
+  tab.close_others | Close Other Tabs | 
+  tab.close_saved | Close Saved Tabs | 
+  tab.close_all | Close All Tabs | 
+# Help | circle-help | help
+  help.keyboard_shortcuts | Keyboard Shortcuts… | 
+  ---
+  view.debug_overlay | Diagnostic Overlay | F12
+  ---
+  app.about | About Lumen | 
+  updates.check | Check for Updates… | 

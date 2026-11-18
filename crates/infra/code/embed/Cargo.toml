@@ -1,0 +1,23 @@
+[package]
+name = "embed"
+description = "Static embeddings (model2vec) for semantic search: model, WordPiece tokenizer, download."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+text-search.workspace = true
+serde_json.workspace = true
+memmap2 = "0.9"
+ureq = "3"
+# The downloaded files checked against their known SHA-256.
+ring = "0.17"
+tracing.workspace = true
+
+[lints]
+workspace = true

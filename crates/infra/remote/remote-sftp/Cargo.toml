@@ -1,0 +1,19 @@
+[package]
+name = "remote-sftp"
+description = "SFTP for remote projects (the `remote` domain's RemoteFs / Connector ports), in pure Rust (russh): password, key or agent sign-in, the server's key checked."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+remote.workspace = true
+russh = { version = "0.65", default-features = false, features = ["ring", "flate2"] }
+russh-sftp = "3"
+tokio = { version = "1", default-features = false, features = ["rt", "net", "time", "io-util", "sync"] }
+
+[lints]
+workspace = true

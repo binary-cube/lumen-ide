@@ -1,0 +1,17 @@
+[package]
+name = "stylesheet"
+description = "CSS selectors read from text, shared by the languages that hold CSS (stylesheets, the `<style>` blocks of HTML, PHP, templates): the classes and ids they declare."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+code-intelligence.workspace = true
+kernel.workspace = true
+
+[lints]
+workspace = true

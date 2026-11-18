@@ -1,0 +1,174 @@
+# A release (plan 84a): a tag `v<version>` (the version of Cargo.toml) builds the app for
+# macOS (Apple Silicon), Windows and Linux, and makes a DRAFT release with the files,
+# SHA256SUMS and latest.json signed (plan 84b). A human reads the notes, edits them, and
+# publishes it: the notes are what the app shows as "What's new".
+# Run by hand (Actions › Release › Run workflow), it makes the same draft from the branch.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      # The tools' cache, made on main (release-cache.yml): a tag's own is seen by no other.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: xtask
+          save-if: false
+      - id: version
+        name: The tag is the version
+        run: |
+          version="$(cargo xtask release-version)"
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "${GITHUB_REF_NAME#v}" != "$version" ]]; then
+            echo "::error::the tag $GITHUB_REF_NAME isn't the version of Cargo.toml ($version)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-latest
+          - platform: Windows
+            os: windows-latest
+          - platform: Linux
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      # The dependencies built for release, kept on main by release-cache.yml (the same
+      # scripts, the same key): a tag can read main's caches, never another tag's.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ runner.os }}
+          # The release profile's settings (Cargo.toml): bumped with them.
+          key: profile-v1
+          save-if: false
+      - name: Build (macOS, Apple Silicon)
+        if: matrix.os == 'macos-latest'
+        run: ./scripts/build.sh mac --full
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: ./scripts/build.sh linux --full
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.platform }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Draft release
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: xtask
+          save-if: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - name: Checksums and the signed manifest
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: cargo xtask release-manifest --signed
+      - name: The notes, from the commits since the last release
+        run: |
+          previous="$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null || true)"
+          # Between the two comments: what the app shows as "What's New" (the page shows it
+          # too; the download section is the page's only).
+          {
+            echo "<!-- app -->"
+            echo "## What's new"
+            echo
+            if [[ -n "$previous" ]]; then
+              git log --no-merges --format='- %s' "$previous..HEAD"
+            else
+              echo "The first release."
+            fi
+            echo "<!-- /app -->"
+            echo
+            echo "## Download"
+            echo
+            echo "- **macOS** (Apple Silicon): \`*-macos-arm64.zip\`"
+            echo "- **Windows** (x64): \`*-windows-x64.zip\`"
+            echo "- **Linux** (x86_64): \`*-linux-x86_64.tar.gz\`"
+            echo
+            echo "The builds aren't signed yet: macOS and Windows warn the first time they're"
+            echo "opened (see the README's *Installing*)."
+          } > notes.md
+          cat notes.md
+      # What the draft is made of, kept with the run: a draft that can't be made (a token
+      # refused) is finished by hand from it, nothing built or signed again.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/latest.json
+            dist/latest.json.sig
+            notes.md
+          if-no-files-found: error
+      - name: The draft
+        env:
+          # A token of the repository's own (RELEASE_TOKEN, with Contents: write) when the
+          # organization keeps the workflows' token from making releases.
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          name="$(sed -n 's/^name *= *"\(.*\)"/\1/p' brand.toml | head -1)"
+          tag="v$VERSION"
+          files=(dist/*.zip dist/*.tar.gz dist/SHA256SUMS dist/latest.json dist/latest.json.sig)
+          # Drafts of this version made before (a run again): replaced only once the new one
+          # exists — a step failing leaves them as they were. A published release is never
+          # touched.
+          older="$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq ".[] | select(.draft and .tag_name == \"$tag\") | .id")"
+          pre=""
+          [[ "$VERSION" == *-* ]] && pre="--prerelease"
+          gh release create "$tag" --draft $pre --target "$GITHUB_SHA" \
+            --title "$name $VERSION" --notes-file notes.md "${files[@]}"
+          for id in $older; do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/$id"
+          done

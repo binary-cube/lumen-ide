@@ -1,0 +1,29 @@
+[package]
+name = "theme-decorations"
+description = "The themes' decorations (a garland with its lights and ornaments along the window's edges, snow behind the content, the corners' ornaments), drawn only for a theme that has them, and their setting."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+contracts.workspace = true
+kernel.workspace = true
+i18n.workspace = true
+extensions.workspace = true
+theming.workspace = true
+render-api.workspace = true
+icons.workspace = true
+# Matrix's characters are contributed as icons of the app's set.
+languages.workspace = true
+ui-components.workspace = true
+workbench-model.workspace = true
+settings-model.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,82 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Hash Join",
+      "Parallel Aware": false,
+      "Join Type": "Left",
+      "Startup Cost": 38259.00,
+      "Total Cost": 92106.00,
+      "Plan Rows": 1000000,
+      "Plan Width": 72,
+      "Actual Startup Time": 301.226,
+      "Actual Total Time": 1102.334,
+      "Actual Rows": 1000000,
+      "Actual Loops": 1,
+      "Inner Unique": true,
+      "Hash Cond": "(o.customer_id = c.id)",
+      "Shared Hit Blocks": 12000,
+      "Temp Read Blocks": 9500,
+      "Temp Written Blocks": 9500,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Relation Name": "orders",
+          "Alias": "o",
+          "Startup Cost": 0.00,
+          "Total Cost": 18334.00,
+          "Plan Rows": 1000000,
+          "Plan Width": 40,
+          "Actual Startup Time": 0.010,
+          "Actual Total Time": 95.110,
+          "Actual Rows": 1000000,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 8334
+        },
+        {
+          "Node Type": "Hash",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Startup Cost": 18334.00,
+          "Total Cost": 18334.00,
+          "Plan Rows": 500000,
+          "Plan Width": 36,
+          "Actual Startup Time": 300.870,
+          "Actual Total Time": 300.871,
+          "Actual Rows": 500000,
+          "Actual Loops": 1,
+          "Hash Buckets": 65536,
+          "Original Hash Buckets": 65536,
+          "Hash Batches": 16,
+          "Original Hash Batches": 8,
+          "Peak Memory Usage": 3083,
+          "Shared Hit Blocks": 3666,
+          "Temp Written Blocks": 3100,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Relation Name": "customers",
+              "Alias": "c",
+              "Startup Cost": 0.00,
+              "Total Cost": 8667.00,
+              "Plan Rows": 500000,
+              "Plan Width": 36,
+              "Actual Startup Time": 0.007,
+              "Actual Total Time": 48.551,
+              "Actual Rows": 500000,
+              "Actual Loops": 1,
+              "Shared Hit Blocks": 3666
+            }
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.180,
+    "Triggers": [
+    ],
+    "Execution Time": 1131.903
+  }
+]

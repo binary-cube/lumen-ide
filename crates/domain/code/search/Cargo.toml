@@ -1,0 +1,17 @@
+[package]
+name = "text-search"
+description = "Code search: code chunks, terms, BM25 and fusion with semantic similarity (vectors)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+
+[lints]
+workspace = true

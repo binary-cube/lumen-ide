@@ -1,0 +1,25 @@
+[package]
+name = "binary-files"
+description = "Files that can't be shown as text (videos, archives, executables, very large files): a tab saying so — the file is never loaded into the editor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+extensions.workspace = true
+document.workspace = true
+fs-local.workspace = true
+i18n.workspace = true
+ui-components.workspace = true
+ui-kit.workspace = true
+text-layout.workspace = true
+render-api.workspace = true
+
+[lints]
+workspace = true

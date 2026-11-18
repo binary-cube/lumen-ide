@@ -1,0 +1,34 @@
+[package]
+name = "canvas"
+description = "The canvas: the dependency graph between files, classes and functions, with their code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+theming.workspace = true
+kernel.workspace = true
+extensions.workspace = true
+i18n.workspace = true
+code-intelligence.workspace = true
+document.workspace = true
+icons.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+ui-kit.workspace = true
+ui-components.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+tracing.workspace = true
+workspace.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+text-search.workspace = true

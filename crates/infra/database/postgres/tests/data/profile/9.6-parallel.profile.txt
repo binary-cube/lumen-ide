@@ -1,0 +1,22 @@
+-- actual · format 1
+Aggregate  (cost=12165.57..12165.58 rows=1 width=8) (actual time=61.284..61.284 rows=1 loops=1)
+  Buffers: shared hit=4425 read=0
+  Partial Mode: Finalize
+  ->  Gather  (cost=12165.35..12165.56 rows=2 width=8) (actual time=61.120..61.276 rows=3 loops=1)
+        Workers Planned: 2
+        Workers Launched: 2
+        Buffers: shared hit=4425 read=0
+        Single Copy: false
+        ->  Aggregate  (cost=11165.35..11165.36 rows=1 width=8) (actual time=58.533..58.534 rows=1 loops=3)
+              Buffers: shared hit=4425 read=0
+              Partial: true
+              Partial Mode: Partial
+              ->  Seq Scan on pgbench_accounts  (cost=0.00..10123.67 rows=416667 width=0) (actual time=0.019..37.906 rows=333333 loops=3)
+                    Parallel Aware: true
+                    Worker 0: time=0.025..37.511 rows=328880 loops=1
+                    Worker 0 Buffers: shared hit=1455
+                    Worker 1: time=0.021..37.725 rows=336720 loops=1
+                    Worker 1 Buffers: shared hit=1488
+                    Buffers: shared hit=4425 read=0
+Planning Time: 0.088 ms
+Execution Time: 62.399 ms

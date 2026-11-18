@@ -1,0 +1,70 @@
+# The release builds' cache, kept on main: a tag's run can read the caches of the default
+# branch, never another tag's, so without this every release would build its few hundred
+# dependencies from nothing. The same scripts and keys as release.yml (`shared-key`), run
+# when the dependencies change, once a week (GitHub drops a cache unused for 7 days) or by
+# hand. It also tries the release builds on main, before a tag needs them.
+name: Release cache
+
+on:
+  push:
+    branches: [main]
+    paths: ["Cargo.lock", "rust-toolchain.toml", ".github/workflows/release-cache.yml"]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: release-cache
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-latest
+          - platform: Windows
+            os: windows-latest
+          - platform: Linux
+            os: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release-${{ runner.os }}
+          # The release profile's settings (Cargo.toml): bumped with them.
+          key: profile-v1
+      - name: Build (macOS)
+        if: matrix.os == 'macos-latest'
+        run: ./scripts/build.sh mac --full
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Build (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: ./scripts/build.sh linux --full
+
+  xtask:
+    name: Tools
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: xtask
+      - name: The tools the release runs
+        run: cargo build -p xtask

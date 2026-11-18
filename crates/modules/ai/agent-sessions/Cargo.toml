@@ -1,0 +1,31 @@
+[package]
+name = "agent-sessions"
+description = "The AI agents' sessions of a project, on the left under the project: listed, started and taken up again in a terminal tab of the editor."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+agents.workspace = true
+contracts.workspace = true
+extensions.workspace = true
+i18n.workspace = true
+languages.workspace = true
+icons.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+ui-kit.workspace = true
+ui-components.workspace = true
+workbench-model.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+command-model.workspace = true
+
+[lints]
+workspace = true

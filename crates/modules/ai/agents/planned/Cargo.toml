@@ -1,0 +1,19 @@
+[package]
+name = "agent-planned"
+description = "The agents the editor will host but doesn't yet (Codex, Junie, GitHub Copilot, Gemini): their names and icons, shown greyed out."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+agents.workspace = true
+extensions.workspace = true
+languages.workspace = true
+
+[lints]
+workspace = true

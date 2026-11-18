@@ -1,0 +1,9 @@
+{
+  "name": "bundled-dockerfile-language-server-nodejs",
+  "private": true,
+  "description": "The Dockerfile language server bundled with the app, installed by `cargo xtask lsp-bundle` with `npm ci` from the lockfile beside this file.",
+  "license": "MIT",
+  "dependencies": {
+    "dockerfile-language-server-nodejs": "0.15.0"
+  }
+}

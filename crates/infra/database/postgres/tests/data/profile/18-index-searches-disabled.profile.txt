@@ -1,0 +1,19 @@
+-- actual · format 1
+Nested Loop  (cost=0.42..2061.25 rows=48.5 width=76) (actual time=0.040..10.912 rows=50 loops=1)
+  Buffers: shared hit=984
+  Inner Unique: true
+  ->  Seq Scan on orders o  (cost=0.00..1834.00 rows=48.5 width=40) (actual time=0.020..9.871 rows=50 loops=1)
+        Filter: (status = ANY ('{new,paid}'::text[]))
+        Rows Removed by Filter: 99950
+        Buffers: shared hit=834
+        Disabled: true
+  ->  Index Scan using customers_pkey on customers c  (cost=0.42..4.68 rows=1 width=36) (actual time=0.018..0.018 rows=1 loops=50)
+        Index Cond: (id = o.customer_id)
+        Rows Removed by Index Recheck: 0
+        Index Searches: 50
+        Buffers: shared hit=150
+Planning Buffers: shared hit=3
+Planning Memory: used=31744 bytes allocated=65536 bytes
+Planning Time: 0.142 ms
+Execution Time: 10.955 ms
+Settings: enable_seqscan = 'off'

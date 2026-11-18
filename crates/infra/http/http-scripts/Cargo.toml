@@ -1,0 +1,20 @@
+[package]
+name = "http-scripts"
+description = "A request's JavaScript run by QuickJS (plan 77k): `http-requests`' script port, the HTTP client scripting API (`client.global`, `client.test`, `request.variables`, `response.*`) in an engine made for each script, limited in memory and time, reaching nothing outside."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+http-requests.workspace = true
+serde_json.workspace = true
+rquickjs = { version = "=0.14.0", default-features = false }
+# JWT signed with keys (RS*, PS*, ES*): the same ring the requests' TLS already brings.
+ring = "0.17"
+
+[lints]
+workspace = true

@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # Only the documentation (texts, plans, screenshots) or the release scripts changed (the
+    # release workflows run those): nothing to build or test.
+    paths-ignore: ["**.md", "docs/**", "LICENSE", "scripts/build.sh", "scripts/build.ps1"]
+  pull_request:
+    paths-ignore: ["**.md", "docs/**", "LICENSE", "scripts/build.sh", "scripts/build.ps1"]
+
+# A newer push to the same branch (or pull request) stops the run still going for an older
+# one: only the last commit's result matters.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+# Clippy and the tests on machines of their own, side by side: the run lasts as long as the
+# longer of the two, not both one after the other.
+jobs:
+  clippy:
+    name: clippy ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+          components: rustfmt, clippy
+      # Kept even when a step fails: the next run builds only what changed (saved only on
+      # success, a red run left the next one to build every dependency again).
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: clippy
+          cache-on-failure: true
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets && cargo clippy -p app --all-targets --features snapshot
+      - name: DDD dependency rules
+        run: cargo xtask check-deps
+
+  test:
+    name: test ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The whole history: the git tests read this repository's own (history, blame).
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: test
+          cache-on-failure: true
+      # Each test in a process of its own, as many at once as the machine has cores (a test
+      # never depends on what another left in the process).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+      # Linux: Arial's widths (Liberation Sans), as on macOS and Windows — the layout tests
+      # measure texts. The fonts there listed, for when one fails.
+      - name: Fonts (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y --no-install-recommends fonts-liberation >/dev/null
+          fc-list : family | sort -u | head -40
+      - name: Test
+        # Every crate's tests, all of their failures at once (not only the first crate's).
+        run: cargo nextest run --workspace --features app/snapshot --no-fail-fast
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2

@@ -1,0 +1,7 @@
+# Text as it's committed (LF) on every system: the tests read the repository's own files as
+# text (the locales, the menus' golden file, the samples) and Windows' CRLF checkout changed
+# them under the tests.
+* text=auto eol=lf
+# Third-party texts kept byte for byte as they came.
+*.LICENSE -text
+crates/modules/languages/javascript/data/TYPESCRIPT-*.txt -text

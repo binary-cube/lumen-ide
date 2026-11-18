@@ -1,0 +1,126 @@
+# Twig's tags, filters, functions, tests and operators (the format: code-intelligence's vocabulary).
+# The names are the language's; the rest is written here.
+tag	apply
+tag	autoescape
+tag	block
+tag	cache
+tag	deprecated
+tag	do
+tag	else
+tag	elseif
+tag	embed
+tag	extends
+tag	flush
+tag	for
+tag	from
+tag	guard
+tag	if
+tag	import
+tag	include
+tag	macro
+tag	sandbox
+tag	set
+tag	types
+tag	use
+tag	verbatim
+tag	with
+tag	endapply
+tag	endautoescape
+tag	endblock
+tag	endcache
+tag	endembed
+tag	endfor
+tag	endguard
+tag	endif
+tag	endmacro
+tag	endsandbox
+tag	endset
+tag	endverbatim
+tag	endwith
+filter	abs
+filter	batch	batch(¦)	size, fill, preserve_keys
+filter	capitalize
+filter	column	column(¦)	name, index
+filter	convert_encoding	convert_encoding(¦)	to, from
+filter	date	date(¦)	format, timezone
+filter	date_modify	date_modify(¦)	modifier
+filter	default	default(¦)	value, boolean
+filter	escape	escape(¦)	strategy, charset
+filter	filter	filter(¦)	arrow
+filter	find	find(¦)	arrow
+filter	first
+filter	format	format(¦)	values…
+filter	invoke	invoke(¦)	arguments…
+filter	join	join(¦)	glue, and
+filter	json_encode	json_encode(¦)	options, depth
+filter	keys
+filter	last
+filter	length
+filter	lower
+filter	map	map(¦)	arrow
+filter	merge	merge(¦)	items
+filter	nl2br
+filter	number_format	number_format(¦)	decimals, point, separator
+filter	raw
+filter	reduce	reduce(¦)	arrow, initial
+filter	replace	replace(¦)	pairs
+filter	reverse	reverse(¦)	preserve_keys
+filter	round	round(¦)	precision, method
+filter	shuffle
+filter	slice	slice(¦)	start, length, preserve_keys
+filter	sort	sort(¦)	arrow
+filter	spaceless
+filter	split	split(¦)	delimiter, limit
+filter	striptags	striptags(¦)	allowed
+filter	title
+filter	trim	trim(¦)	characters, side
+filter	upper
+filter	url_encode
+function	attribute	attribute(¦)	object, method, arguments
+function	block	block(¦)	name, template
+function	constant	constant(¦)	name, object
+function	cycle	cycle(¦)	values, position
+function	date	date(¦)	date, timezone
+function	dump	dump(¦)	values…
+function	enum	enum(¦)	class
+function	enum_cases	enum_cases(¦)	class
+function	include	include(¦)	template, variables, with_context, ignore_missing, sandboxed
+function	max	max(¦)	values…
+function	min	min(¦)	values…
+function	parent	parent(¦)
+function	random	random(¦)	values, max
+function	range	range(¦)	low, high, step
+function	source	source(¦)	name, ignore_missing
+function	template_from_string	template_from_string(¦)	template, name
+test	constant
+test	defined
+test	divisible
+test	empty
+test	even
+test	iterable
+test	mapping
+test	none
+test	null
+test	odd
+test	same
+test	sequence
+operator	and
+operator	b-and
+operator	b-or
+operator	b-xor
+operator	false
+operator	in
+operator	is
+operator	matches
+operator	not
+operator	null
+operator	or
+operator	true
+loop	index
+loop	index0
+loop	revindex
+loop	revindex0
+loop	first
+loop	last
+loop	length
+loop	parent

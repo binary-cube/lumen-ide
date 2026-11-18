@@ -1,0 +1,62 @@
+[package]
+name = "database-explorer"
+description = "Data sources at work, and their data view (the grid over a table: SQLite files opened as data, CSV files beside their text): one session per open source, its requests run one at a time in the background (the latest page of a table wins, any can be cancelled, idle sessions closed, all of them with their project), and the table repository the grid reads through (pages cached within a memory limit, the next one read ahead, changes applied in one transaction, each update or delete changing exactly one row). The Database tool window lists the data sources configured (the project's and every project's, kept by `storage`) and reads their tables as they're opened. Nothing runs until a source opens."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+database.workspace = true
+kernel.workspace = true
+extensions.workspace = true
+workbench-model.workspace = true
+settings-model.workspace = true
+i18n.workspace = true
+tracing.workspace = true
+ui-components.workspace = true
+# The data extractors a grid copies and exports with (the project's choice, the options).
+extractors.workspace = true
+ui-kit.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+icons.workspace = true
+command-model.workspace = true
+document.workspace = true
+fs-local.workspace = true
+storage.workspace = true
+# The data sources' passwords: the project's vault (as remote projects') and the keychain.
+secrets.workspace = true
+workspace.workspace = true
+
+[features]
+# The app's `--snapshot`: an export shown midway (its progress drawn, nothing written).
+snapshot = []
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+# The integration tests drive the worker and the repository on a real SQLite file and a
+# real CSV file.
+db-sqlite.workspace = true
+db-csv.workspace = true
+# The "Database" window on real PostgreSQL servers (the local test matrix's, when given).
+db-postgres.workspace = true
+# … and on real MySQL / MariaDB servers.
+db-mysql.workspace = true
+# The end-to-end tests of a driver through the drivers' protocol: the toy driver and
+# SQLite, served by the test binary itself as a driver's program.
+db-protocol = { workspace = true, features = ["toy"] }
+serde_json.workspace = true
+toml.workspace = true
+
+# Its binary is also the driver's program those tests start: no harness printing on its
+# stdout (the protocol's).
+[[test]]
+name = "protocol"
+harness = false

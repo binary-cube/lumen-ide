@@ -1,0 +1,45 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Sort",
+      "Parallel Aware": false,
+      "Startup Cost": 1048.74,
+      "Total Cost": 1073.74,
+      "Plan Rows": 10000,
+      "Plan Width": 244,
+      "Actual Startup Time": 21.336,
+      "Actual Total Time": 24.978,
+      "Actual Rows": 10000,
+      "Actual Loops": 1,
+      "Sort Key": ["tenk1.stringu1 DESC"],
+      "Sort Method": "external merge",
+      "Sort Space Used": 2696,
+      "Sort Space Type": "Disk",
+      "Shared Hit Blocks": 345,
+      "Temp Read Blocks": 337,
+      "Temp Written Blocks": 338,
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Relation Name": "tenk1",
+          "Alias": "tenk1",
+          "Startup Cost": 0.00,
+          "Total Cost": 445.00,
+          "Plan Rows": 10000,
+          "Plan Width": 244,
+          "Actual Startup Time": 0.008,
+          "Actual Total Time": 1.752,
+          "Actual Rows": 10000,
+          "Actual Loops": 1,
+          "Shared Hit Blocks": 345
+        }
+      ]
+    },
+    "Planning Time": 0.093,
+    "Triggers": [
+    ],
+    "Execution Time": 25.766
+  }
+]

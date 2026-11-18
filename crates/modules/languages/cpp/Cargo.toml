@@ -1,0 +1,26 @@
+[package]
+name = "lang-cpp"
+description = "The C / C++ module: the languages, their grammars, folding, clangd as their server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+extensions.workspace = true
+languages.workspace = true
+syntax-ts.workspace = true
+code-intelligence.workspace = true
+tree-sitter-c.workspace = true
+tree-sitter-cpp.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+document.workspace = true

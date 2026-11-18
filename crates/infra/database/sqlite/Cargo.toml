@@ -1,0 +1,18 @@
+[package]
+name = "db-sqlite"
+description = "SQLite for the `database` domain (rusqlite, SQLite compiled in): a file opened read-write or read-only (never created unless asked, WAL respected, waiting on a busy file), tables of every attached schema with cheap row estimates, structures read from the catalog (keys in order, auto-increment, indexes, foreign keys, rowid), pages read by rowid after the previous one, values by their storage class, affected rows counted, queries cancelled through the progress handler (an interrupt), the console's statements a page at a time with syntax errors placed, `EXPLAIN QUERY PLAN` as a tree and normalized, a statement profiled by running it (prepare and run timed, `sqlite3_stmt_status` counters, each plan element's real loops and rows from `scanstatus`, a write undone in a savepoint, a deadline), the tables' statistics (`sqlite_stat1`, indexes, sizes), `BEGIN DEFERRED | IMMEDIATE | EXCLUSIVE`, every column of a schema in one query and the functions from `pragma_function_list`, collations and generated columns, and what rebuilding a table needs (its CHECKs, triggers, indexes as written, views)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+database.workspace = true
+rusqlite.workspace = true
+
+[lints]
+workspace = true

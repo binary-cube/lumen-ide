@@ -1,0 +1,18 @@
+[package]
+name = "diagram-model"
+description = "Diagrams as draw.io writes them: the model (pages, cells, styles, geometry), reading and writing `.drawio` files (compressed pages read too), keeping what it doesn't know untouched. Pure: no UI, no disk, no threads."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+thiserror.workspace = true
+roxmltree = "0.21"
+miniz_oxide.workspace = true
+
+[lints]
+workspace = true

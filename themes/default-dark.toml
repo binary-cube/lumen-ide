@@ -1,0 +1,180 @@
+# Default Dark: the default dark theme.
+#
+# The UI tokens are looked up hierarchically: `editor.gutter.foreground.active` falls back to
+# `editor.gutter.foreground`, then to `editor.gutter`. The full list: docs/plan/07-teme.md.
+# The colors in [palette] are reused as `$name`.
+
+id = "default-dark"
+name = "Default Dark"
+appearance = "dark"
+
+[palette]
+base      = "#151618"
+card      = "#1e1f22"
+panel     = "#2b2d30"
+line      = "#393b40"
+fg        = "#dfe1e5"
+muted     = "#8a8e95"
+code      = "#bcbec4"
+accent    = "#3574f0"
+red       = "#f75464"
+orange    = "#cf8e6d"
+green     = "#6aab73"
+cyan      = "#2aacb8"
+blue      = "#56a8f5"
+purple    = "#c77dbb"
+yellow    = "#d5b778"
+grey      = "#7a7e85"
+
+[ui]
+"window.background"                = "$base"
+"card.border"                      = "#2c2e33"
+"panel.background"                 = "$panel"
+"border"                           = "$line"
+"text"                             = "$fg"
+"text.muted"                       = "$muted"
+"accent"                           = "$accent"
+"danger"                           = "$red"
+
+"editor.background"                = "$card"
+"editor.foreground"                = "$code"
+"editor.gutter.foreground"         = "#4b5059"
+"editor.gutter.foreground.active"  = "#a1a3ab"
+"editor.line.current"              = "#26282e"
+"editor.selection"                 = "#214283"
+"editor.selection.inactive"        = "#2f3542"
+"editor.cursor"                    = "#ced0d6"
+"editor.match"                     = "#d9a34338"
+"editor.match.current"             = "#d9a3438c"
+
+"tab.hover"                        = "$panel"
+"input.background"                 = "$card"
+"input.border"                     = "#4e5157"
+"popup.background"                 = "$panel"
+"popup.border"                     = "#43454a"
+"shadow"                           = "#00000059"
+"toggle.active"                    = "#3574f059"
+
+"tree.selection"                   = "#2a2d33"
+"tree.hover"                       = "#202227"
+"tree.indentGuide"                 = "#2a2c31"
+
+# The side panels and the tool strip on the left
+"sidebar.background"                 = "#1b1c1f"
+"toolStrip.foreground"               = "#a8abb2"
+"toolStrip.hover"                    = "#26282d"
+"toolStrip.active.background"        = "$accent"
+"toolStrip.active.foreground"        = "#ffffff"
+
+# The project panel's search field
+"searchField.background"             = "#161719"
+"searchField.border"                 = "#34363c"
+"searchField.border.focused"         = "#4a5a8a"
+
+# The terminal: background, text, cursor and the ANSI palette (16 colors)
+"terminal.background"                = "$card"
+"terminal.foreground"                = "$code"
+"terminal.cursor"                    = "#ced0d6"
+"terminal.ansi.black"                = "#1e1f22"
+"terminal.ansi.red"                  = "#f0524f"
+"terminal.ansi.green"                = "#5c962c"
+"terminal.ansi.yellow"               = "#a68a0d"
+"terminal.ansi.blue"                 = "#3993d4"
+"terminal.ansi.magenta"              = "#a771bf"
+"terminal.ansi.cyan"                 = "#00a3a3"
+"terminal.ansi.white"                = "#bcbec4"
+"terminal.ansi.brightBlack"          = "#595b5f"
+"terminal.ansi.brightRed"            = "#ff4050"
+"terminal.ansi.brightGreen"          = "#4fc414"
+"terminal.ansi.brightYellow"         = "#e5bf00"
+"terminal.ansi.brightBlue"           = "#1fb0ff"
+"terminal.ansi.brightMagenta"        = "#ed7eed"
+"terminal.ansi.brightCyan"           = "#00e5e5"
+"terminal.ansi.brightWhite"          = "#ffffff"
+
+# The scrollbars (a track always shown, and the thumb)
+"scrollbar.track"                    = "#2a2c31"
+"scrollbar.thumb"                    = "#4a4d55"
+"scrollbar.thumb.active"             = "#6b6f78"
+
+# The tab bar: its background and the active tab (joined to the editor)
+"tabBar.background"                  = "#18191b"
+"tab.active.background"              = "$card"
+"tab.hover.background"               = "#232427"
+"tab.active.indicator"               = "$accent"
+
+# The panels' resizable separator (line, handle, dots, accent on hover)
+"splitter.line"                      = "#26282d"
+"splitter.handle.background"         = "$base"
+"splitter.handle.border"             = "#45484f"
+"splitter.grip"                      = "$muted"
+"splitter.active"                    = "#7b7ff0"
+
+# Icons: the folders and the files by language (`icon.<language id>`)
+"icon.folder"                         = "#8c96a6"
+"icon.php"                            = "#8f9cf0"
+"icon.html"                           = "#e5885c"
+"icon.javascript"                     = "#e8c65f"
+"icon.css"                            = "#5aa9e6"
+"icon.scss"                           = "#d77fae"
+"icon.json"                           = "#d6a75c"
+"icon.yaml"                           = "#e06c75"
+# Icons by file type (the file-icons module)
+"icon.env"                           = "#e8c65f"
+"icon.git"                           = "#e06c50"
+"icon.composer"                      = "#c7a167"
+"icon.npm"                           = "#cb5a5a"
+"icon.lock"                          = "#8c96a6"
+"icon.docker"                        = "#3d9be9"
+"icon.config"                        = "#9aa3b2"
+"icon.xml"                           = "#e5885c"
+"icon.markdown"                      = "#7fa7e0"
+"icon.text"                          = "#9aa3b2"
+"icon.twig"                          = "#9bc25a"
+"icon.vue"                           = "#5fbf8f"
+"icon.react"                         = "#5ccfe6"
+"icon.typescript"                    = "#4a8fe0"
+"icon.c"                             = "#4a8fe0"
+"icon.cpp"                           = "#d77fae"
+"icon.lua"                           = "#5aa9e6"
+"icon.zig"                           = "#e5885c"
+"icon.bash"                          = "#7cbf7c"
+"icon.toml"                          = "#9aa3b2"
+"icon.dockerfile"                    = "#3d9be9"
+"icon.database"                      = "#c39ae0"
+"icon.shell"                         = "#7cbf7c"
+"icon.archive"                       = "#b8956a"
+"icon.image"                         = "#c39ae0"
+"icon.svg"                           = "#e5a35c"
+"icon.file"                          = "#8c96a6"
+
+[syntax]
+"comment"            = { fg = "$grey", italic = true }
+"keyword"            = "$orange"
+"operator"           = "$code"
+"string"             = "$green"
+"string.escape"      = "$orange"
+"number"             = "$cyan"
+"constant"           = { fg = "$purple", italic = true }
+"constant.builtin"   = "$orange"
+"variable"           = "$code"
+"variable.php"       = "$purple"
+"property"           = "$purple"
+"function"           = "$blue"
+"function.method"    = "$blue"
+"type"               = "$code"
+"tag"                = "$yellow"
+"attribute"          = "$code"
+"punctuation"        = "$code"
+# Language-specific: `<scope>.<language>` (looked up before the general one)
+"property.json"      = "$purple"
+"property.yaml"      = "$orange"
+"boolean"            = "$orange"
+"null"               = "$orange"
+
+# The windows over the editor and the menu's panel: frosted glass, gently (plan 55k).
+[backdrop]
+style = "glass"
+
+[floating]
+style = "glass"

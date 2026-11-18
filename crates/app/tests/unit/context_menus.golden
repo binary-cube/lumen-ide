@@ -1,0 +1,101 @@
+# editor
+refactor.rename | Rename… | ⇧F6 | file-pen
+refactor.change_signature | Change Signature… | ⌘F6 | braces
+refactor.move | Move… | F6 | folder-input
+---
+navigate.definition | Go to Declaration | ⌘B | arrow-up-right
+navigate.implementation | Go to Implementation | ⌘⌥B | arrow-down
+navigate.type_declaration | Go to Type Declaration | ⌘⇧B | tag
+navigate.type_hierarchy | Type Hierarchy | ⌃H | layers
+refactor.find_usages | Find Usages | ⌥F7 | search
+diagram.show | Show Diagram | ⌘⌥⇧U | diagram
+---
+edit.cut | Cut | ⌘X | scissors
+edit.copy | Copy | ⌘C | copy
+edit.paste | Paste | ⌘V | clipboard
+compare.clipboard | Compare with Clipboard |  | compare
+---
+Local History › | clock
+  history.show | Show Local History |  | clock
+# tree file
+New › | plus
+  tree.new_file | New File |  | file
+  tree.new_folder | New Folder |  | folder
+---
+tree.cut | Cut | ⌘X | scissors
+tree.copy | Copy | ⌘C | copy
+tree.paste | Paste | ⌘V | clipboard
+tree.rename | Rename… | ⇧F6 | file-pen
+refactor.move | Move… | F6 | folder-input
+---
+tree.copy_path | Copy Path |  | copy
+tree.copy_path_menu | Copy Path / Reference… |  | link
+tree.reveal_in_file_manager | Reveal in Finder |  | folder-open
+---
+Indexing › | folder
+  marks.excluded | Exclude from Index |  | folder-x
+  marks.library | Index as Library |  | folder-input
+  marks.generated | Index, Skip Text Search |  | gear
+  marks.normal | Index as Project Code |  | folder
+  marks.clear | Clear Indexing Choice |  | x
+---
+tree.delete | Delete… | ⌘Backspace | trash
+---
+Local History › | clock
+  history.show | Show Local History |  | clock
+# tree file, another active, text copied
+New › | plus
+  tree.new_file | New File |  | file
+  tree.new_folder | New Folder |  | folder
+---
+tree.cut | Cut | ⌘X | scissors
+tree.copy | Copy | ⌘C | copy
+tree.paste | Paste | ⌘V | clipboard
+tree.rename | Rename… | ⇧F6 | file-pen
+refactor.move | Move… | F6 | folder-input
+---
+tree.copy_path | Copy Path |  | copy
+tree.copy_path_menu | Copy Path / Reference… |  | link
+tree.reveal_in_file_manager | Reveal in Finder |  | folder-open
+---
+Compare With › | compare
+  compare.clipboard | Clipboard |  | compare
+---
+Indexing › | folder
+  marks.excluded | Exclude from Index |  | folder-x
+  marks.library | Index as Library |  | folder-input
+  marks.generated | Index, Skip Text Search |  | gear
+  marks.normal | Index as Project Code |  | folder
+  marks.clear | Clear Indexing Choice |  | x
+---
+tree.delete | Delete… | ⌘Backspace | trash
+---
+Local History › | clock
+  history.show | Show Local History |  | clock
+# tree folder
+New › | plus
+  tree.new_file | New File |  | file
+  tree.new_folder | New Folder |  | folder
+---
+project.find_in_folder | Find in Files… |  | search
+project.replace_in_folder | Replace in Files… |  | replace
+---
+tree.cut | Cut | ⌘X | scissors
+tree.copy | Copy | ⌘C | copy
+tree.paste | Paste | ⌘V | clipboard
+tree.rename | Rename… | ⇧F6 | file-pen
+refactor.move | Move… | F6 | folder-input
+---
+tree.copy_path | Copy Path |  | copy
+tree.copy_path_menu | Copy Path / Reference… |  | link
+tree.reveal_in_file_manager | Reveal in Finder |  | folder-open
+folder_sizes.analyze | Analyze Folder Sizes |  | folder-sizes
+---
+Indexing › | folder
+  marks.excluded | Exclude from Index |  | folder-x
+  marks.library | Index as Library |  | folder-input
+  marks.generated | Index, Skip Text Search |  | gear
+  marks.normal | Index as Project Code |  | folder
+  marks.clear | Clear Indexing Choice |  | x
+---
+tree.delete | Delete… | ⌘Backspace | trash

@@ -1,0 +1,599 @@
+//! The screen as a view: what it reacts to, and how its parts are laid out.
+
+use super::*;
+
+impl Viewer for CommitView {
+    fn set_data(&mut self, data: &dyn std::any::Any) {
+        if let Some(sizes) = data.downcast_ref::<LayoutSizes>() {
+            for divider in &mut self.dividers.0 {
+                divider.take_sizes(sizes);
+            }
+            self.sizes = Some(sizes.clone());
+            return;
+        }
+        // Made again at a start (the Git window's Commit tab): its project's repository found
+        // again.
+        if let Some(restored) = data.downcast_ref::<ui_components::Restored>() {
+            let repo = restored.project.as_deref().and_then(git::GitRepository::discover);
+            match repo {
+                Some(repo) => {
+                    let data =
+                        CommitData { repo: Arc::new(repo), project: restored.id, docked: true };
+                    self.set_data(&data);
+                    // The Git window made again from the session: its other fixed tab too.
+                    self.pending = Some(crate::log_view::missing_fixed_tabs());
+                }
+                None => self.gone = true,
+            }
+            return;
+        }
+        let Some(data) = data.downcast_ref::<CommitData>() else { return };
+        self.repo = Some(Arc::clone(&data.repo));
+        self.project = data.project;
+        self.docked = data.docked;
+        // Its sections at once; what's in them comes with the lists.
+        self.lay_places();
+        self.generation = self.changes_generation().unwrap_or(0);
+        // The draft written before (not committed yet).
+        let draft = drafts().get(data.repo.root()).cloned();
+        if let Some(draft) = draft
+            && self.message.text().is_empty()
+        {
+            self.message.set_text(&draft);
+        }
+        self.refresh();
+    }
+
+    /// Opened again in another group (split): the same repository.
+    fn mirror_data(&self) -> Option<Box<dyn std::any::Any>> {
+        let repo = Arc::clone(self.repo.as_ref()?);
+        Some(Box::new(CommitData { repo, project: self.project, docked: false }))
+    }
+
+    /// Docked, a fixed tab of the Git window (made again at the next start); else a tab.
+    fn closable(&self) -> bool {
+        !self.docked
+    }
+
+    fn restorable(&self) -> bool {
+        self.docked
+    }
+
+    fn panel_key(&self) -> Option<&'static str> {
+        self.docked.then_some(KEY)
+    }
+
+    /// Made again where there's no repository any more: it goes.
+    fn closed(&self) -> bool {
+        self.gone
+    }
+
+    fn take_action(&mut self) -> Option<ViewerAction> {
+        self.pending.take()
+    }
+
+    fn is_animating(&self) -> bool {
+        self.dividers.0.iter().any(Divider::is_animating)
+    }
+
+    fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        let divider = self.dividers.0.iter().find_map(|divider| divider.cursor(p));
+        divider.or_else(|| {
+            // A hunk's buttons are over the code: theirs first.
+            let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
+            if matches!(hit, Some(Hit::StageHunk(_) | Hit::DiscardHunk(_))) {
+                return Some(ViewerCursor::Pointer);
+            }
+            if self.code.is_over(p) {
+                return Some(ViewerCursor::Text);
+            }
+            let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
+            Some(match hit {
+                Hit::Message | Hit::PlacesFilter => ViewerCursor::Text,
+                Hit::Commit if !self.can_commit() => ViewerCursor::Arrow,
+                _ => ViewerCursor::Pointer,
+            })
+        })
+    }
+
+    fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
+        let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
+        let (i, staged) = match hit {
+            Hit::Row(i, staged) | Hit::Check(i, staged) => (i, staged),
+            // A branch's or a tag's: the same menu as the log's branches panel.
+            Hit::Place(i) => {
+                let on = self.menu_ref(i)?;
+                return Some(crate::ref_menu::rows(i, &on, &self.remotes));
+            }
+            _ => return None,
+        };
+        if !self.among_marked(i, staged) {
+            self.select(i, staged);
+        }
+        self.file_menu(i, staged)
+    }
+
+    fn poll(&mut self) -> bool {
+        let mut changed = false;
+        let opened = self.opening.poll();
+        if opened.is_some() {
+            self.pending = opened;
+            changed = true;
+        }
+        // The files changed (here or outside): the lists read again.
+        if self.status_rx.is_none()
+            && let Some(generation) = self.changes_generation()
+            && generation != self.generation
+        {
+            self.generation = generation;
+            self.refresh();
+        }
+        // The last commit's message (Amend): it takes the message's place.
+        if let Some(rx) = &self.amend_rx
+            && let Ok((message, pushed)) = rx.try_recv()
+        {
+            self.amend_rx = None;
+            self.amend_pushed = pushed;
+            if let Some(message) = message {
+                self.message.set_text(&message);
+            }
+            changed = true;
+        }
+        changed |= self.take_places();
+        if let Some(rx) = &self.status_rx
+            && let Ok((branch, result)) = rx.try_recv()
+        {
+            self.status_rx = None;
+            self.branch = branch;
+            self.lay_places();
+            match result {
+                Ok(files) => {
+                    self.files = files;
+                    self.reselect();
+                }
+                Err(e) => self.outcome = Some((Self::vcs_error(&e), true)),
+            }
+            changed = true;
+        }
+        if let Some(rx) = &self.diff_rx
+            && let Ok(diff) = rx.try_recv()
+        {
+            self.diff_rx = None;
+            self.diff = Some(diff);
+            // Places in what was shown: they mean nothing in the new one.
+            self.lines.clear();
+            self.line_anchor = None;
+            self.code.clear();
+            changed = true;
+        }
+        if let Some(rx) = &self.act_rx {
+            match rx.try_recv() {
+                Ok(done) => {
+                    self.act_rx = None;
+                    self.asking = false;
+                    if let Err(e) = done {
+                        self.outcome = Some((Self::vcs_error(&e), true));
+                    }
+                    self.refresh();
+                    self.tell_status();
+                    changed = true;
+                }
+                // Answered "no": nothing to read again.
+                Err(TryRecvError::Disconnected) => {
+                    self.act_rx = None;
+                    self.asking = false;
+                }
+                Err(TryRecvError::Empty) => {}
+            }
+        }
+        if let Some(rx) = &self.commit_rx
+            && let Ok(result) = rx.try_recv()
+        {
+            self.commit_rx = None;
+            self.outcome = Some(match result {
+                Ok(id) => {
+                    // Committed: its draft goes (and amending ends).
+                    self.message.set_text("");
+                    self.amend = false;
+                    self.amend_pushed = false;
+                    self.before_amend = None;
+                    if let Some(repo) = &self.repo {
+                        drafts().remove(repo.root());
+                    }
+                    (tr!("git.committed", id = id.chars().take(7).collect::<String>()), false)
+                }
+                Err(CommitError::NothingSelected) => (t("git.nothing_selected"), true),
+                Err(CommitError::NoMessage) => (t("git.no_message"), true),
+                Err(CommitError::Vcs(e)) => (Self::vcs_error(&e), true),
+            });
+            self.refresh();
+            self.tell_status();
+            changed = true;
+        }
+        changed
+            || self.status_rx.is_some()
+            || self.commit_rx.is_some()
+            || self.amend_rx.is_some()
+            || self.diff_rx.is_some()
+            || self.opening.is_busy()
+            || (self.act_rx.is_some() && !self.asking)
+    }
+
+    fn wants_text(&self) -> bool {
+        true
+    }
+
+    /// The message takes several lines (a summary, a blank line, the details).
+    fn field_takes_lines(&self) -> bool {
+        self.keys == Keys::Message
+    }
+
+    /// In the lists, Space moves the shown file to the other list; anything else typed goes
+    /// to the message (the keyboard with it).
+    fn text_input(&mut self, text: &str) -> bool {
+        match self.keys {
+            Keys::Places => {
+                self.edit_places_filter(|input| input.insert(text));
+                return true;
+            }
+            Keys::Lists if text == " " => {
+                self.toggle_shown();
+                return true;
+            }
+            Keys::Lists => self.keys = Keys::Message,
+            Keys::Message => {}
+        }
+        self.message.insert(text);
+        self.keep_draft();
+        true
+    }
+
+    fn edit_key(&mut self, key: ViewerKey) -> bool {
+        self.edit_key_with(key, ui_components::KeyReach::default())
+    }
+
+    /// In the lists: ↑ ↓ (pages, ends) through the files of both (⇧: choosing a run on the
+    /// shown file's list), ↵ opens the shown one, Tab
+    /// to the message. The message's keys: ⌥ / Ctrl by word, ⇧ selecting, ↑ ↓ by lines; ↵ a
+    /// new line (⌘ / Ctrl+↵ commits: the view's `commit`), Tab to the files.
+    fn edit_key_with(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
+        let (word, extend) = (reach.word, reach.extend);
+        if self.keys == Keys::Places {
+            return self.places_key(key, reach);
+        }
+        if self.keys == Keys::Lists {
+            match key {
+                // ⇧: the run chosen grows (or shrinks) along the shown file's list.
+                ViewerKey::Up if extend => self.extend(-1),
+                ViewerKey::Down if extend => self.extend(1),
+                ViewerKey::Up => self.step(-1),
+                ViewerKey::Down => self.step(1),
+                ViewerKey::PageUp => self.step(-10),
+                ViewerKey::PageDown => self.step(10),
+                ViewerKey::Home => self.step(isize::MIN / 2),
+                ViewerKey::End => self.step(isize::MAX / 2),
+                ViewerKey::Enter => self.pending = self.open_shown(),
+                ViewerKey::Tab => self.keys = Keys::Message,
+                _ => return false,
+            }
+            return true;
+        }
+        match key {
+            ViewerKey::Tab => {
+                if !self.files.is_empty() {
+                    self.keys = Keys::Lists;
+                }
+                return true;
+            }
+            ViewerKey::Backspace => self.message.backspace(word),
+            ViewerKey::Delete => self.message.delete(),
+            ViewerKey::Left => self.message.left(word, extend),
+            ViewerKey::Right => self.message.right(word, extend),
+            ViewerKey::Up => self.message.vertical(false, extend),
+            ViewerKey::Down => self.message.vertical(true, extend),
+            ViewerKey::Home => self.message.home(word, extend),
+            ViewerKey::End => self.message.end(word, extend),
+            ViewerKey::Enter => self.message.newline(),
+            _ => return false,
+        }
+        self.keep_draft();
+        true
+    }
+
+    fn paste(&mut self, text: &str) -> bool {
+        self.text_input(text)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        if self.keys == Keys::Places {
+            let selected = self.places_filter.selected_text();
+            return (!selected.is_empty()).then(|| selected.to_owned());
+        }
+        if let Some(code) = self.selected_code() {
+            return Some(code);
+        }
+        let selected = self.message.selected_text();
+        (!selected.is_empty()).then(|| selected.to_owned())
+    }
+
+    /// The app's edit commands, for the message.
+    fn command(&mut self, id: &str) -> bool {
+        // The places' filter with the keyboard: the edit commands are its.
+        if self.keys == Keys::Places {
+            let edited = match id {
+                "select_all" => {
+                    self.places_filter.select_all();
+                    return true;
+                }
+                "cut" => {
+                    self.edit_places_filter(|input| input.insert(""));
+                    return true;
+                }
+                "undo" => self.places_filter.undo(),
+                "redo" => self.places_filter.redo(),
+                _ => return false,
+            };
+            if edited {
+                self.places_scroll = 0.0;
+                self.lay_places();
+            }
+            return true;
+        }
+        if self.file_command(id) {
+            return true;
+        }
+        // A row of a branch's menu.
+        if let Some(action) = crate::ref_menu::chosen(id, |i| self.menu_ref(i), &self.remotes) {
+            self.pending = action;
+            return true;
+        }
+        match id {
+            "select_all" if self.keys == Keys::Lists => {
+                self.mark_all();
+                return true;
+            }
+            "select_all" => self.message.select_all(),
+            "cut" => self.message.insert(""),
+            "undo" => {
+                self.message.undo();
+            }
+            "redo" => {
+                self.message.redo();
+            }
+            // ⌘ / Ctrl+↵ (the module's command).
+            "commit" => return self.commit(),
+            _ => return false,
+        }
+        self.keep_draft();
+        true
+    }
+
+    fn pointer_down(
+        &mut self,
+        p: Point,
+        clicks: u32,
+        mods: ui_components::PressMods,
+    ) -> Option<ViewerAction> {
+        self.mods = mods;
+        let action = self.press(p, clicks);
+        self.mods = ui_components::PressMods::default();
+        action
+    }
+
+    /// Docked in the Git window (a bottom window's view): the same press, its modifiers
+    /// kept (⇧ / ⌘ choose several files there too).
+    fn press_with(
+        &mut self,
+        p: Point,
+        clicks: u32,
+        mods: ui_components::PressMods,
+    ) -> Option<ViewerAction> {
+        self.pointer_down(p, clicks, mods)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
+        let sizes = self.sizes.as_ref();
+        if self.dividers.0.iter_mut().any(|divider| divider.press(p, clicks, sizes)) {
+            return None;
+        }
+        for (bar, scroll) in self.bars.iter_mut().zip(&mut self.scrolls) {
+            if let Some(offset) = bar.press(p) {
+                *scroll = offset;
+                return None;
+            }
+        }
+        let on_message = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
+            == Some(Hit::Message);
+        self.selecting = on_message;
+        if on_message {
+            self.keys = Keys::Message;
+        }
+        if self.press_code(p, on_message) {
+            return None;
+        }
+        if on_message || self.message.contains(p) {
+            // Two clicks: a word; three: its line.
+            self.selecting = self.message.press(p, clicks, false);
+            return None;
+        }
+        if clicks == 2
+            && let Some(open) = self.open_at(p)
+        {
+            return Some(open);
+        }
+        self.click(p)
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        if self.dividers.0.iter_mut().fold(false, |any, divider| any | divider.drag(p)) {
+            return true;
+        }
+        for (bar, scroll) in self.bars.iter_mut().zip(&mut self.scrolls) {
+            if let Some(offset) = bar.drag(p) {
+                *scroll = offset;
+                return true;
+            }
+        }
+        if self.drag_code(p) {
+            return true;
+        }
+        if self.selecting {
+            self.message.drag(p);
+        }
+        self.selecting
+    }
+
+    fn release(&mut self) -> bool {
+        let sizes = self.sizes.as_ref();
+        let dividers =
+            self.dividers.0.iter_mut().fold(false, |any, divider| any | divider.release(sizes));
+        let bars = self.bars.iter_mut().fold(false, |any, bar| any | bar.release());
+        self.code.release()
+            | std::mem::take(&mut self.selecting)
+            | dividers
+            | bars
+            | self.message.release()
+    }
+
+    /// The files' scrollbar fading: a frame when it next changes.
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        let bars = self.bars.iter().filter_map(ui_components::EdgeScrollbar::next_frame);
+        bars.chain(self.message.next_frame()).min()
+    }
+
+    fn click(&mut self, p: Point) -> Option<ViewerAction> {
+        let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
+        // A file or a list clicked: the keyboard goes through the lists; the places' filter
+        // keeps it only while it's clicked.
+        if matches!(hit, Hit::Check(..) | Hit::Row(..) | Hit::All(_)) {
+            self.keys = Keys::Lists;
+        } else if self.keys == Keys::Places && hit != Hit::PlacesFilter {
+            self.keys = Keys::Message;
+        }
+        match hit {
+            Hit::Check(i, staged) => self.toggle(i, staged),
+            Hit::Row(i, staged) => self.pick(i, staged),
+            Hit::All(staged) => self.toggle_all(staged),
+            Hit::StageHunk(i) => self.toggle_hunk(i),
+            Hit::Line(h, l) => self.pick_line(h, l),
+            Hit::DiscardHunk(i) => return self.discard_hunk(i),
+            Hit::Refresh => self.refresh(),
+            Hit::Amend => self.set_amend(!self.amend),
+            Hit::Commit => {
+                self.commit();
+            }
+            Hit::Message => {
+                self.message.press(p, 1, false);
+            }
+            Hit::Place(i) => return self.pick_place(i),
+            Hit::PlacesFilter => {
+                self.keys = Keys::Places;
+                self.places_filter.click(p.x);
+            }
+            Hit::ClearPlacesFilter => self.edit_places_filter(|input| input.set_text("")),
+        }
+        None
+    }
+
+    fn hover(&mut self, p: Point) -> bool {
+        self.pointer = p;
+        let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
+        let changed = hover != self.hover;
+        self.hover = hover;
+        let bars = self.bars.iter_mut().fold(false, |any, bar| any | bar.hover(p));
+        let dividers = self.dividers.0.iter_mut().fold(false, |any, d| any | d.hover(p));
+        dividers | bars | self.message.hover(p) | changed
+    }
+
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        // Over the places: they scroll.
+        if self.docked && self.places_area.contains(self.pointer) {
+            let before = self.places_scroll;
+            self.places_scroll = (before + dy).max(0.0);
+            return self.places_scroll != before;
+        }
+        // Over the message: its own lines scroll.
+        if self.message.contains(self.pointer) {
+            return self.message.scroll_by(dy);
+        }
+        let Some(pane) = self.panes.iter().position(|r| r.contains(self.pointer)) else {
+            return false;
+        };
+        let (before, sideways) = (self.scrolls[pane], self.diff_x);
+        self.scrolls[pane] = (before + dy).max(0.0);
+        if pane == DIFF {
+            self.diff_x = (sideways + dx).clamp(0.0, self.diff_overflow);
+        }
+        self.scrolls[pane] != before || self.diff_x != sideways
+    }
+
+    fn paint(&mut self, ctx: ViewerPaint<'_>) {
+        if ctx.waker.is_some() {
+            self.waker.clone_from(&ctx.waker);
+        }
+        self.hits.clear();
+        let ds = Ctx::new(ctx.palette, ctx.scale);
+        let p = ctx.palette;
+        let px = |v: f32| ds.px(v);
+        let b = ctx.bounds;
+        // Rounded like the editor's card it fills (its bottom corners show).
+        let card = Quad::filled(b, p.editor_background).rounded(px(radius::CARD));
+        ctx.scene.push_layer(Some(b)).quad(card);
+        self.opening.set_waker(&ctx.waker);
+        let (style, strip) = (SplitterStyle::from_palette(ctx.palette), px(24.0));
+        // Docked: the places on the left, the screen in the rest.
+        let b = if self.docked {
+            let inner = Rect::new(
+                b.min_x() + px(8.0),
+                b.min_y() + px(8.0),
+                b.size.width - px(8.0),
+                b.size.height - px(16.0),
+            );
+            let (side, rest) = self.dividers.0[3].split(inner, px(12.0), style.clone(), ctx.scale);
+            self.paint_places(ctx.scene, ctx.text, ctx.icons, &ds, side);
+            Rect::new(rest.min_x() - px(8.0), b.min_y(), rest.size.width + px(8.0), b.size.height)
+        } else {
+            self.dividers.0[3].hide();
+            b
+        };
+        let layer = ctx.scene.push_layer(Some(b));
+        let width = b.size.width - px(32.0);
+        let x0 = b.min_x() + px(16.0);
+        let top = b.min_y() + px(12.0);
+        let page = Page { x0, width, small: ds.ui_font(-1.0) };
+        self.paint_header(layer, ctx.text, ctx.icons, &ds, &page, top);
+        let body_top = top + px(40.0);
+        let bottom = b.max_y() - px(12.0);
+        let area = Rect::new(x0, body_top, width, (bottom - body_top).max(0.0));
+        let [lists, sections, footer, _] = &mut self.dividers.0;
+        // Short: the message in a column beside the rest (the files and changes keep the
+        // height); else under them, its share dragged.
+        let (upper, message) = if area.size.height < px(COMPACT_H) {
+            let column = px(MESSAGE_COLUMN).min(area.size.width * 0.4).round();
+            let gap = px(space::LG);
+            let upper = Rect::new(
+                area.min_x(),
+                area.min_y(),
+                area.size.width - column - gap,
+                area.size.height,
+            );
+            let message = Rect::new(upper.max_x() + gap, area.min_y(), column, area.size.height);
+            // No divider between them (it stays where the tall layout had it otherwise).
+            footer.hide();
+            (upper, message)
+        } else {
+            footer.split(area, strip, style.clone(), ctx.scale)
+        };
+        let (files, changes) = lists.split(upper, strip, style.clone(), ctx.scale);
+        let (staged, unstaged) = sections.split(files, strip, style, ctx.scale);
+        for (card, on) in [(staged, true), (unstaged, false)] {
+            self.paint_section(ctx.scene, ctx.text, &ds, (card, on));
+        }
+        self.paint_diff(ctx.scene, ctx.text, ctx.icons, &ds, changes);
+        self.paint_message(ctx.scene, ctx.text, &ds, message);
+        for divider in &self.dividers.0 {
+            divider.paint(ctx.scene);
+        }
+        self.reveal = false;
+    }
+}

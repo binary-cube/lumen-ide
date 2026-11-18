@@ -1,0 +1,33 @@
+[package]
+name = "diagram-web"
+description = "draw.io itself on demand (plan 82f, 82g): a `.drawio` file edited in draw.io's own editor, downloaded once (a pinned, checked release) and run offline by the system's web engine, the file read and written by us, the theme's colors over draw.io's."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+extensions.workspace = true
+i18n.workspace = true
+render-api.workspace = true
+ui-kit.workspace = true
+ui-components.workspace = true
+workbench-model.workspace = true
+workspace.workspace = true
+command-model.workspace = true
+files.workspace = true
+pinned-downloads.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# The package served from memory, a war made in memory.
+pinned-downloads = { workspace = true, features = ["fake"] }
+
+[lints]
+workspace = true

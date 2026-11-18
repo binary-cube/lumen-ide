@@ -1,0 +1,21 @@
+[package]
+name = "acp-client"
+description = "An agent run as a process the editor talks to with the Agent Client Protocol: JSON-RPC over its standard input and output, its session opened or taken up again, its updates as events."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+acp.workspace = true
+agents.workspace = true
+process.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

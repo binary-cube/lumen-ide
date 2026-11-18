@@ -1,0 +1,71 @@
+# What Symfony adds to Twig (the format: code-intelligence's vocabulary). The names are the
+# framework's; the rest is written here.
+tag	form_theme
+tag	trans
+tag	endtrans
+tag	trans_default_domain
+tag	stopwatch
+tag	endstopwatch
+filter	abbr_class
+filter	abbr_method
+filter	file_excerpt	file_excerpt(¦)	line, srcContext
+filter	file_link	file_link(¦)	line
+filter	file_relative
+filter	format_args
+filter	format_args_as_text
+filter	format_file	format_file(¦)	line, text
+filter	format_file_from_text
+filter	humanize
+filter	sanitize_html	sanitize_html(¦)	sanitizer
+filter	serialize	serialize(¦)	format, context
+filter	trans	trans(¦)	arguments, domain, locale
+filter	yaml_dump	yaml_dump(¦)	inline, dumpObjects
+filter	yaml_encode	yaml_encode(¦)	inline, dumpObjects
+function	absolute_url	absolute_url(¦)	path
+function	asset	asset(¦)	path, packageName
+function	asset_version	asset_version(¦)	path, packageName
+function	controller	controller(¦)	controller, attributes, query
+function	csrf_token	csrf_token(¦)	intention
+function	expression	expression(¦)	expression
+function	field_choices	field_choices(¦)	form
+function	field_errors	field_errors(¦)	form
+function	field_help	field_help(¦)	form
+function	field_label	field_label(¦)	form
+function	field_name	field_name(¦)	form
+function	field_value	field_value(¦)	form
+function	form	form(¦)	form, variables
+function	form_end	form_end(¦)	form, variables
+function	form_errors	form_errors(¦)	form
+function	form_help	form_help(¦)	form
+function	form_label	form_label(¦)	form, label, variables
+function	form_rest	form_rest(¦)	form, variables
+function	form_row	form_row(¦)	form, variables
+function	form_start	form_start(¦)	form, variables
+function	form_widget	form_widget(¦)	form, variables
+function	fragment_uri	fragment_uri(¦)	controller, absolute, strict, sign
+function	importmap	importmap(¦)	entryPoint, attributes
+function	is_granted	is_granted(¦)	role, object, field
+function	logout_path	logout_path(¦)	key
+function	logout_url	logout_url(¦)	key
+function	path	path(¦)	name, parameters, relative
+function	relative_path	relative_path(¦)	path
+function	render	render(¦)	uri, options
+function	render_esi	render_esi(¦)	uri, options
+function	t	t(¦)	message, parameters, domain
+function	url	url(¦)	name, parameters, schemeRelative
+function	workflow_can	workflow_can(¦)	subject, transition, name
+function	workflow_has_marked_place	workflow_has_marked_place(¦)	subject, place, name
+function	workflow_transitions	workflow_transitions(¦)	subject, name
+test	rootform
+test	selectedchoice
+app	current_route
+app	current_route_parameters
+app	debug
+app	enabled_locales
+app	environment
+app	flashes
+app	locale
+app	request
+app	session
+app	token
+app	user

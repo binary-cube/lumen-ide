@@ -1,0 +1,68 @@
+# The PHP versions Lumen knows, oldest first, all on Alpine (the same build of PHP
+# everywhere, so the versions compare fairly). Used by `cargo xtask php-stubs`, which runs
+# tools/php-stubs/dump.php in each one to generate Lumen's own PHP stubs.
+#
+# A new PHP release: add a service below, run `cargo xtask php-stubs --pull`, commit
+# crates/modules/languages/php/data/php.stubs. To fetch all images: `docker compose pull`.
+name: lumen-php
+services:
+  php56:
+    image: php:5.6-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php70:
+    image: php:7.0-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php71:
+    image: php:7.1-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php72:
+    image: php:7.2-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php73:
+    image: php:7.3-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php74:
+    image: php:7.4-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php80:
+    image: php:8.0-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php81:
+    image: php:8.1-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php82:
+    image: php:8.2-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php83:
+    image: php:8.3-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php84:
+    image: php:8.4-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]
+  php85:
+    image: php:8.5-cli-alpine
+    volumes:
+      - ../../tools/php-stubs:/stubs:ro
+    command: ["php", "-n", "/stubs/dump.php"]

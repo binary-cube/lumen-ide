@@ -1,0 +1,19 @@
+[package]
+name = "database-mysql"
+description = "The MySQL / MariaDB driver, as a module: its two factories for the data sources (`mysql` and `mariadb`, one driver for MySQL 5.7 and MariaDB 10.2 to the newest, TLS by sslmode). Nothing of MySQL runs until a source connects."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+database.workspace = true
+db-mysql.workspace = true
+extensions.workspace = true
+
+[lints]
+workspace = true

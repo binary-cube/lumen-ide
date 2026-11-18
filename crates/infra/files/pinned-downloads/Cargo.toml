@@ -1,0 +1,31 @@
+[package]
+name = "pinned-downloads"
+description = "Downloads checked before use: HTTPS only from the hosts the caller allows (every redirect too), each file against its pinned SHA-256 / SHA-512, large ones resumed from a `.part`, size caps; archives (tar.gz, tar.xz, zip, one gzipped program) unpacked by our own code, nothing written outside their folder."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+# HTTPS from the allowed hosts, checked against their SHA-256 / SHA-512, unpacked by our
+# code (gzip, xz — Rust only, no C library to build for Windows —, zip's deflate).
+ureq = "3"
+ring = "0.17"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz", "optimization"] }
+
+# Files in memory instead of the network, archives made in memory (other crates' tests,
+# the app's snapshots).
+[features]
+fake = ["lzma-rust2/encoder"]
+
+[dev-dependencies]
+# Archives made by the tests (an xz tarball).
+lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz", "encoder"] }
+
+[lints]
+workspace = true

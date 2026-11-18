@@ -1,0 +1,147 @@
+# PHP's language server (plan 43g): phpactor, its release's PHAR bundled with the app
+# (`lsp/servers/phpactor/<version>/phpactor.phar`), run by the app's own PHP (`lsp/php/`: a
+# static PHP CLI — the user needs no PHP). One per project (no root markers: every package
+# in `vendor/` has its `composer.json`). The format: see the language servers module
+# (`lsp_client::spec`).
+#
+# The server answers by default, but the built-in engine keeps what it does as well or
+# better: its suggestions join the server's (the union), Rename is its own, Find Usages
+# joins its places and the server's references (plan 46a), and all its diagnostics stay (syntax, unused, deprecated, the PHP level, extensions
+# missing from composer.json, the frameworks' checks) beside the server's.
+
+# intelephense (plan 43h): proprietary — its licence forbids redistributing it, so it isn't
+# bundled. The user installs it from the settings (one click, once for every project, in the
+# app's data folder): its npm package at the version pinned here, from registry.npmjs.org,
+# checked against the registry's SHA-512 before anything is unpacked; or one installed
+# already is found (`intelephense` in PATH, npm's global folder). Its published `lib/` is
+# one bundle needing only Node's own modules: the tarball alone is the install, run by the
+# app's Node. Once installed it answers PHP by default on every OS (plan 43j: first here, so
+# the default — the first server available — is it; phpactor until then, the built-in
+# engine on Windows). Routed as phpactor is — the built-in engine keeps its
+# suggestions (joined) and all its diagnostics — but for Rename: a premium feature, offered
+# by intelephense only with a licence key (its capabilities say so); without one it's the
+# built-in engine's, with one its places in PHP files and the built-in engine's in the others
+# (Blade, Twig). Find Usages asks its references even without a key (plan 46a): its places in
+# PHP files, the built-in engine's in the templates.
+[[language-servers]]
+name = "intelephense"
+excluded-paths = { setting = "intelephense.files.exclude", pattern = "**/{path}/**" }
+languages = ["php"]
+command = "${node}"
+args = ["--max-old-space-size=${max-memory}", "${server}/lib/intelephense.js", "--stdio"]
+file-patterns = ["**/*.php", "**/composer.json", "**/composer.lock"]
+built-in = ["completion", "diagnostics"]
+# The licence key (premium features), from the keychain: never in a settings file or a log.
+secret-options = { licenceKey = "intelephense-licence" }
+# Its licence forbids hiding its notifications.
+show-messages = true
+
+[language-servers.install]
+npm = "intelephense"
+version = "1.18.5"
+integrity = "sha512-dqCH1YNCRlHGBLND+iUFjBJlGwM4pPimX2jm8AaP/6K2WZNM2K2+E8dOWCD3ZYMP2zC2ICBD9Soe2oxKtU9d9A=="
+program = "intelephense"
+entry = "lib/intelephense.js"
+licence-url = "https://intelephense.com/legal"
+size = 5072793
+
+# Its index per project, in its folder of the project's data folder (wiped by "Clear and
+# Rebuild Caches"); what it keeps for every project (its licence's activation) in its folder
+# of the app's data folder.
+[language-servers.initialization-options]
+storagePath = "${cache}"
+globalStoragePath = "${data}"
+clearCache = false
+
+[language-servers.settings.intelephense]
+telemetry = { enabled = false }
+format = { enable = true }
+
+[language-servers.settings.intelephense.files]
+maxSize = 5000000
+# Its defaults, plus what frameworks generate: Laravel's compiled Blade views, Symfony's
+# cache (copies of the project's classes: found twice otherwise).
+exclude = [
+    "**/.git/**",
+    "**/.svn/**",
+    "**/.hg/**",
+    "**/CVS/**",
+    "**/.DS_Store/**",
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**/{Tests,tests}/**",
+    "**/.history/**",
+    "**/vendor/**/vendor/**",
+    "**/storage/framework/views/**",
+    "**/var/cache/**",
+]
+
+[[language-servers]]
+name = "phpactor"
+excluded-paths = { option = "indexer.exclude_patterns", pattern = "/{path}/**" }
+languages = ["php"]
+bundle = "phpactor"
+command = "${php}"
+# `-n`: no php.ini of the machine's (deterministic: no xdebug, no extensions of the user's);
+# PHP's own messages on stderr, never in the protocol; its memory capped at the limit
+# chosen in the settings.
+args = [
+    "-n",
+    "-d", "memory_limit=${max-memory}M",
+    "-d", "display_errors=stderr",
+    "-d", "error_reporting=E_ALL & ~E_DEPRECATED",
+    "${server}/phpactor.phar",
+    "language-server",
+]
+# The PHAR's own check of the extensions (it asks for openssl, used only by TCP over TLS);
+# its caches (`%cache%`: the index, WorseReflection's) in its folder of the project's data,
+# wiped by "Clear and Rebuild Caches".
+env = { BOX_REQUIREMENT_CHECKER = "0", XDG_CACHE_HOME = "${cache}" }
+# The disk's changes it hears (from the project's watcher: it watches nothing itself).
+file-patterns = ["**/*.php", "**/composer.json", "**/composer.lock"]
+built-in = ["completion", "diagnostics", "rename"]
+
+# Windows: phpactor supports only Linux and macOS (its README: "Windows users will need to
+# use WSL"; it needs ext-posix), and PHP can't select on pipes there: the built-in engine by
+# default; chosen anyway, phpactor listens on a local port.
+[language-servers.os.windows]
+default-engine = "built-in"
+transport = "tcp"
+args = [
+    "-n",
+    "-d", "memory_limit=${max-memory}M",
+    "-d", "display_errors=stderr",
+    "-d", "error_reporting=E_ALL & ~E_DEPRECATED",
+    "${server}/phpactor.phar",
+    "language-server",
+    "--address=127.0.0.1:${port}",
+]
+
+# Its configuration (phpactor's initialization options are its config keys, over the
+# user's own).
+[language-servers.initialization-options]
+# Disk changes from the client only: its own watchers (`find`, `php`) scan the whole
+# project every 5 s — 2–3% CPU while idle.
+"indexer.enabled_watchers" = ["lsp"]
+# The first index in two processes (auto: one per core, slower on macOS; one: 2× slower).
+"indexer.parallel_workers" = 2
+# Diagnostics in its own process: "outsourced" ones start `phpactor` as a program (with a
+# PHP from PATH) at every check; `php -l` (provider `php`) starts PHP at every edit, flags
+# syntax newer than the bundled PHP, and the built-in engine reports syntax errors already.
+"language_server.diagnostic_outsource" = false
+"language_server.code_action_outsource" = false
+"language_server.diagnostic_providers" = ["code-action"]
+# What would be noise beside the built-in engine: a member called through `__call` /
+# `__callStatic` reported missing (Eloquent's `User::where()`), unused imports (the
+# built-in engine's, faded), the docblock / return-type suggestions.
+"language_server.diagnostic_ignore_codes" = [
+    "worse.missing_member",
+    "worse.unused_import",
+    "worse.docblock_missing_return_type",
+    "worse.docblock_missing_param",
+    "worse.docblock_missing_extends_tag",
+    "worse.docblock_missing_implements_tag",
+    "worse.missing_return_type",
+]
+# No questions: no extensions offered (phpstan, psalm…: off, as by default).
+"language_server_configuration.auto_config" = false

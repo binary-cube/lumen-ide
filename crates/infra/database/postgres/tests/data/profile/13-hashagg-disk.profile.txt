@@ -1,0 +1,13 @@
+-- actual · format 1
+Aggregate  (cost=39871.00..61096.00 rows=1000000 width=12) (actual time=412.557..893.104 rows=1000000 loops=1)
+  Group Key: customer_id
+  Peak Memory: 4244480 bytes
+  Spill: hash_agg disk=68157440 bytes batches=160
+  Buffers: shared hit=5406, temp read=7946 written=14236
+  Partial Mode: Simple
+  Planned Partitions: 32
+  ->  Seq Scan on orders  (cost=0.00..15406.00 rows=1000000 width=8) (actual time=0.011..81.209 rows=1000000 loops=1)
+        Buffers: shared hit=5406
+Planning Buffers: shared hit=4
+Planning Time: 0.071 ms
+Execution Time: 931.562 ms

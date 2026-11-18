@@ -1,0 +1,18 @@
+[package]
+name = "terminal-session"
+description = "Terminal bounded context: sessions, shell profiles, the PTY and emulator ports."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+regex.workspace = true
+
+[lints]
+workspace = true

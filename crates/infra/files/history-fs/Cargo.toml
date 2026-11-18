@@ -1,0 +1,20 @@
+[package]
+name = "history-fs"
+description = "The local history's store on disk: each file's versions gzip-compressed in a folder outside the project, named by time, kind and hash (listing never reads them)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+files.workspace = true
+history.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tracing.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,13 @@
+-- actual · format 1
+Bitmap Heap Scan on tenk1  (cost=5.06..224.98 rows=100 width=244) (actual time=0.101..0.380 rows=100 loops=1)
+  Recheck Cond: (unique1 < 100)
+  Rows Removed by Index Recheck: 0
+  Exact Heap Blocks: 90
+  Lossy Heap Blocks: 0
+  Buffers: shared hit=92
+  ->  Bitmap Index Scan on tenk1_unique1  (cost=0.00..5.04 rows=100 width=0) (actual time=0.049..0.049 rows=100 loops=1)
+        Index Cond: (unique1 < 100)
+        Buffers: shared hit=2
+Planning Time: 0.152 ms
+Execution Time: 0.431 ms
+Settings: enable_seqscan = 'off', work_mem = '64MB'

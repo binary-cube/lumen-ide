@@ -1,0 +1,41 @@
+# TOML's language server (plan 43): taplo, bundled with the app (`lsp/servers/taplo/
+# <version>`, its official program). One per project (or per folder holding a taplo
+# configuration, `.taplo.toml` / `taplo.toml`, which it reads). The format: see the language
+# servers module (`lsp_client::spec`).
+#
+# Never anything from the network: SchemaStore's catalog is off (`catalogs = []`), the
+# schemas it's given are bundled beside it, each made self-contained when it was bundled
+# (the schemas it refers to inlined), and any other schema it's told about (a `#:schema`
+# line, a project's taplo configuration) can't be fetched: its proxy is a closed local port.
+
+[[language-servers]]
+name = "taplo"
+languages = ["toml"]
+bundle = "taplo"
+command = "${server}/taplo"
+args = ["lsp", "stdio"]
+root-markers = [".taplo.toml", "taplo.toml"]
+file-patterns = ["**/*.toml", "**/Cargo.lock"]
+env = { RUST_LOG = "warn", HTTP_PROXY = "http://127.0.0.1:9", HTTPS_PROXY = "http://127.0.0.1:9", ALL_PROXY = "http://127.0.0.1:9", http_proxy = "http://127.0.0.1:9", https_proxy = "http://127.0.0.1:9", all_proxy = "http://127.0.0.1:9", NO_PROXY = "", no_proxy = "" }
+
+[language-servers.initialization-options]
+configurationSection = "evenBetterToml"
+
+[language-servers.settings.evenBetterToml.schema]
+enabled = true
+catalogs = []
+links = false
+
+# By the file's URL (a regular expression, as taplo reads them).
+[language-servers.settings.evenBetterToml.schema.associations]
+'(^|/)Cargo\.toml$' = "${server-uri}/schemas/cargo.json"
+'(^|/)\.cargo/config(\.toml)?$' = "${server-uri}/schemas/cargo-config.json"
+'(^|/)pyproject\.toml$' = "${server-uri}/schemas/pyproject.json"
+'(^|/)\.?rustfmt\.toml$' = "${server-uri}/schemas/rustfmt.json"
+
+[language-servers.settings.evenBetterToml.completion]
+maxKeys = 5
+
+[language-servers.settings.evenBetterToml.formatter]
+alignEntries = false
+reorderKeys = false

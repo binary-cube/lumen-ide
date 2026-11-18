@@ -1,0 +1,213 @@
+# Matrix: one of the built-in themes — phosphor green on black, like the screens of the
+# film; the syntax in greens (yellow-green to sea-green), errors still red; its digital
+# rain falling faintly behind the panels.
+
+id = "matrix"
+name = "Matrix"
+appearance = "dark"
+
+[palette]
+base      = "#010501"
+card      = "#020a04"
+panel     = "#041109"
+line      = "#0d2a17"
+fg        = "#a8ffbf"
+muted     = "#3c8a55"
+code      = "#4dff7c"
+accent    = "#00ff41"
+red       = "#ff5f56"
+orange    = "#d4ff4f"
+green     = "#00ff41"
+cyan      = "#5cffc4"
+blue      = "#3ee8a0"
+purple    = "#8dff6a"
+yellow    = "#e8ff7a"
+grey      = "#1f6e3a"
+
+[ui]
+"window.background"                  = "$base"
+"card.border"                        = "#0a1f10"
+"panel.background"                   = "$panel"
+"border"                             = "$line"
+"text"                               = "$fg"
+"text.muted"                         = "$muted"
+"accent"                             = "$accent"
+"danger"                             = "$red"
+"warning"                            = "#e8ff7a"
+
+"editor.background"                  = "$card"
+"editor.foreground"                  = "$code"
+"editor.gutter.foreground"           = "#1d5c33"
+"editor.gutter.foreground.active"    = "#6dff97"
+"editor.line.current"                = "#04140a"
+"editor.selection"                   = "#00ff41"
+"editor.selection.inactive"          = "#0b2a16"
+"editor.cursor"                      = "#00ff41"
+"editor.match"                       = "#e8ff7a30"
+"editor.match.current"               = "#e8ff7a80"
+
+"tab.hover"                          = "#06170d"
+"input.background"                   = "$card"
+"input.border"                       = "#13401f"
+"popup.background"                   = "#041109"
+"popup.border"                       = "#13401f"
+"shadow"                             = "#00000099"
+"toggle.active"                      = "#00ff4159"
+
+"tree.selection"                     = "#082513"
+"tree.hover"                         = "#051a0c"
+"tree.indentGuide"                   = "#0a2213"
+
+"sidebar.background"                 = "#020803"
+"toolStrip.foreground"               = "#4fc472"
+"toolStrip.hover"                    = "#0a2213"
+"toolStrip.active.background"        = "$accent"
+"toolStrip.active.foreground"        = "#010501"
+
+"searchField.background"             = "#020803"
+"searchField.border"                 = "#103519"
+"searchField.border.focused"         = "#00ff41"
+
+"terminal.background"                = "$card"
+"terminal.foreground"                = "$code"
+"terminal.cursor"                    = "#00ff41"
+"terminal.ansi.black"                = "#010501"
+"terminal.ansi.red"                  = "#ff5f56"
+"terminal.ansi.green"                = "#00ff41"
+"terminal.ansi.yellow"               = "#d4ff4f"
+"terminal.ansi.blue"                 = "#3ee8a0"
+"terminal.ansi.magenta"              = "#8dff6a"
+"terminal.ansi.cyan"                 = "#5cffc4"
+"terminal.ansi.white"                = "#a8ffbf"
+"terminal.ansi.brightBlack"          = "#1f6e3a"
+"terminal.ansi.brightRed"            = "#ff8a84"
+"terminal.ansi.brightGreen"          = "#66ff8f"
+"terminal.ansi.brightYellow"         = "#e8ff7a"
+"terminal.ansi.brightBlue"           = "#7affc0"
+"terminal.ansi.brightMagenta"        = "#b4ff99"
+"terminal.ansi.brightCyan"           = "#9dffdb"
+"terminal.ansi.brightWhite"          = "#d9ffe3"
+
+"scrollbar.track"                    = "#051a0c"
+"scrollbar.thumb"                    = "#0f3a1c"
+"scrollbar.thumb.active"             = "#1b5e30"
+
+"tabBar.background"                  = "#020803"
+"tab.active.background"              = "$card"
+"tab.hover.background"               = "#051a0c"
+"tab.active.indicator"               = "$accent"
+
+"splitter.line"                      = "#071a0d"
+"splitter.handle.background"         = "$base"
+"splitter.handle.border"             = "#13401f"
+"splitter.grip"                      = "$muted"
+"splitter.active"                    = "#00ff41"
+
+"icon.folder"                        = "#3c8a55"
+"icon.php"                           = "#5cffc4"
+"icon.html"                          = "#d4ff4f"
+"icon.javascript"                    = "#e8ff7a"
+"icon.css"                           = "#3ee8a0"
+"icon.scss"                          = "#8dff6a"
+"icon.json"                          = "#e8ff7a"
+"icon.yaml"                          = "#d4ff4f"
+"icon.env"                           = "#e8ff7a"
+"icon.git"                           = "#d4ff4f"
+"icon.composer"                      = "#d4ff4f"
+"icon.npm"                           = "#ff5f56"
+"icon.lock"                          = "#3c8a55"
+"icon.docker"                        = "#5cffc4"
+"icon.config"                        = "#3c8a55"
+"icon.xml"                           = "#d4ff4f"
+"icon.markdown"                      = "#3ee8a0"
+"icon.text"                          = "#3c8a55"
+"icon.twig"                          = "#00ff41"
+"icon.vue"                           = "#00ff41"
+"icon.react"                         = "#5cffc4"
+"icon.typescript"                    = "#3ee8a0"
+"icon.c"                             = "#3ee8a0"
+"icon.cpp"                           = "#8dff6a"
+"icon.lua"                           = "#3ee8a0"
+"icon.zig"                           = "#d4ff4f"
+"icon.bash"                          = "#00ff41"
+"icon.toml"                          = "#3c8a55"
+"icon.dockerfile"                    = "#5cffc4"
+"icon.database"                      = "#8dff6a"
+"icon.shell"                         = "#00ff41"
+"icon.archive"                       = "#d4ff4f"
+"icon.image"                         = "#8dff6a"
+"icon.svg"                           = "#d4ff4f"
+"icon.file"                          = "#3c8a55"
+
+[syntax]
+"comment"            = { fg = "$grey", italic = true }
+"keyword"            = { fg = "$green", bold = true }
+"operator"           = "$code"
+"string"             = "$purple"
+"string.escape"      = "$orange"
+"number"             = "$yellow"
+"constant"           = { fg = "$yellow", italic = true }
+"constant.builtin"   = "$orange"
+"variable"           = "$code"
+"variable.php"       = "$cyan"
+"property"           = "$blue"
+"function"           = "#c4ffd4"
+"function.method"    = "#c4ffd4"
+"type"               = { fg = "$yellow", bold = true }
+"tag"                = "$cyan"
+"attribute"          = "$blue"
+"punctuation"        = "#2fbf5a"
+"property.json"      = "$blue"
+"property.yaml"      = "$orange"
+"boolean"            = "$orange"
+"null"               = "$orange"
+
+# The caret: a bar that fades as it blinks, with a halo, gliding and leaving a trail.
+[caret]
+shape  = "bar"
+width  = 2
+blink  = "smooth"
+glow   = 0.8
+trail  = 220
+motion = "glide"
+
+# Overlays over a frosted pane: the window behind softly blurred, a touch of its black-green.
+[backdrop]
+style = "glass"
+color = "$base"
+
+# The menu's panel: frosted glass, subtly (plan 55k).
+[floating]
+style = "glass"
+
+# The digital rain (plan 45): on by default, faint, behind the panels (the editor stays
+# clean); the user turns it off or thins it in the theme's own settings, kept for this theme.
+[[options]]
+id       = "rain"
+kind     = "toggle"
+label.en = "Digital rain"
+label.ro = "Ploaie digitală"
+default  = true
+
+[[options]]
+id       = "density"
+kind     = "slider"
+label.en = "Rain density"
+label.ro = "Densitatea ploii"
+min      = 0.1
+max      = 0.8
+step     = 0.1
+default  = 0.4
+
+[[decorations.layers]]
+kind    = "matrix"
+when    = "rain"
+style   = "katakana"
+colors  = ["$green"]
+density = "@density"
+speed   = 0.4
+size    = 0.5
+glow    = 0.6
+opacity = 0.2
+zone    = "panels"
+glass   = 0.35

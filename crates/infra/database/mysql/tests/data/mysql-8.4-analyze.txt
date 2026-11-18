@@ -1,0 +1,7 @@
+-> Table scan on <temporary>  (actual time=3.68..3.78 rows=1800 loops=1)
+    -> Aggregate using temporary table  (actual time=3.68..3.68 rows=1800 loops=1)
+        -> Nested loop inner join  (cost=294 rows=400) (actual time=0.327..2.24 rows=3600 loops=1)
+            -> Filter: (c.vip = 0)  (cost=204 rows=200) (actual time=0.238..0.682 rows=1800 loops=1)
+                -> Table scan on c  (cost=204 rows=2000) (actual time=0.214..0.589 rows=2000 loops=1)
+            -> Covering index lookup on o using orders_customer (customer_id=c.id)  (cost=0.252 rows=2) (actual time=563e-6..734e-6 rows=2 loops=1800)
+

@@ -1,0 +1,51 @@
+[
+  {
+    "Plan": {
+      "Node Type": "Hash Join",
+      "Parallel Aware": false,
+      "Join Type": "Inner",
+      "Startup Cost": 226.23,
+      "Total Cost": 709.73,
+      "Plan Rows": 10000,
+      "Plan Width": 488,
+      "Inner Unique": true,
+      "Hash Cond": "(t1.unique2 = t2.unique2)",
+      "Plans": [
+        {
+          "Node Type": "Seq Scan",
+          "Parent Relationship": "Outer",
+          "Parallel Aware": false,
+          "Relation Name": "tenk1",
+          "Alias": "t1",
+          "Startup Cost": 0.00,
+          "Total Cost": 458.00,
+          "Plan Rows": 10000,
+          "Plan Width": 244
+        },
+        {
+          "Node Type": "Hash",
+          "Parent Relationship": "Inner",
+          "Parallel Aware": false,
+          "Startup Cost": 101.10,
+          "Total Cost": 101.10,
+          "Plan Rows": 10010,
+          "Plan Width": 244,
+          "Plans": [
+            {
+              "Node Type": "Seq Scan",
+              "Parent Relationship": "Outer",
+              "Parallel Aware": false,
+              "Relation Name": "tenk2",
+              "Alias": "t2",
+              "Startup Cost": 0.00,
+              "Total Cost": 101.10,
+              "Plan Rows": 10010,
+              "Plan Width": 244
+            }
+          ]
+        }
+      ]
+    },
+    "Planning Time": 0.214
+  }
+]

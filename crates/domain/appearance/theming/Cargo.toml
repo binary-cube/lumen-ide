@@ -1,0 +1,18 @@
+[package]
+name = "theming"
+description = "Theming bounded context: the theme model, semantic tokens, style resolution."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

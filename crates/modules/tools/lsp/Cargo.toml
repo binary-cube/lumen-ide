@@ -1,0 +1,40 @@
+[package]
+name = "language-servers"
+description = "Language servers as a module: the servers the languages' modules describe as data (or the user adds), started per project at the first file of their language and stopped when unused, their answers through the Intelligence ports, their figures in the Task Manager, their choice per language in the settings."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+document.workspace = true
+workspace.workspace = true
+code-intelligence.workspace = true
+refactor.workspace = true
+settings-model.workspace = true
+lsp-client.workspace = true
+storage.workspace = true
+secrets.workspace = true
+ui-components.workspace = true
+ui-kit.workspace = true
+render-api.workspace = true
+text-layout.workspace = true
+i18n.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+lsp-client = { workspace = true, features = ["fake"] }
+# The fake registry's package (gzipped) and its integrity.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+ring = "0.17"
+
+[lints]
+workspace = true

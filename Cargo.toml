@@ -1,0 +1,449 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/kernel",
+    "crates/domain/core/workspace",
+    "crates/domain/code/quality",
+    "crates/domain/code/document",
+    "crates/domain/code/language",
+    "crates/domain/code/intelligence",
+    "crates/domain/code/search",
+    "crates/domain/appearance/theming",
+    "crates/domain/tools/terminal",
+    "crates/domain/tools/app-updates",
+    "crates/infra/system/self-update",
+    "crates/domain/ai/agents",
+    "crates/domain/ai/acp",
+    "crates/domain/ai/mcp",
+    "crates/domain/vcs/vcs",
+    "crates/domain/http/http-requests",
+    "crates/domain/code/refactor",
+    "crates/domain/core/workbench",
+    "crates/domain/core/contracts",
+    "crates/domain/core/commands",
+    "crates/domain/core/settings",
+    "crates/domain/core/extensions",
+    "crates/domain/core/i18n",
+    "crates/render/render-api",
+    "crates/render/text",
+    "crates/render/icons",
+    "crates/render/render-wgpu",
+    "crates/render/render-software",
+    "crates/platform/platform-api",
+    "crates/platform/platform-winit",
+    "crates/ui/ui-kit",
+    "crates/ui/vector-tiles",
+    "crates/ui/ui-components",
+    "crates/ui/ui-workbench",
+    "crates/infra/files/fs-local",
+    "crates/domain/code/stylesheet",
+    "crates/domain/code/markup",
+    "crates/domain/tools/power",
+    "crates/domain/tools/diagram-model",
+    "crates/infra/code/syntax-treesitter",
+    "crates/infra/code/lsp-client",
+    "crates/infra/code/lsp-protocol",
+    "crates/language-server",
+    "crates/infra/system/pty",
+    "crates/infra/ai/acp-client",
+    "crates/infra/ai/agent-files",
+    "crates/infra/ai/mcp-transport",
+    "crates/infra/files/storage",
+    "crates/infra/vcs/git",
+    "crates/infra/system/process",
+    "crates/infra/files/files",
+    "crates/infra/files/pinned-downloads",
+    "crates/infra/code/indexer",
+    "crates/infra/code/embed",
+    "crates/infra/media/image",
+    "crates/modules/languages/php",
+    "crates/modules/languages/html",
+    "crates/modules/languages/javascript",
+    "crates/modules/languages/css",
+    "crates/modules/languages/scss",
+    "crates/modules/languages/json",
+    "crates/modules/languages/yaml",
+    "crates/modules/languages/sql",
+    "crates/modules/languages/cpp",
+    "crates/modules/languages/lua",
+    "crates/modules/languages/zig",
+    "crates/modules/languages/bash",
+    "crates/modules/languages/toml",
+    "crates/modules/languages/markdown",
+    "crates/modules/languages/dockerfile",
+    "crates/modules/languages/dotenv",
+    "crates/modules/languages/http",
+    "crates/modules/appearance/file-icons",
+    "crates/modules/appearance/icon-packs",
+    "crates/modules/languages/twig",
+    "crates/modules/languages/blade",
+    "crates/modules/project/tree",
+    "crates/modules/project/indexing",
+    "crates/modules/tools/terminal",
+    "crates/modules/editing/quality",
+    "crates/modules/appearance/themes",
+    "crates/modules/viewers/image",
+    "crates/modules/insight/structure",
+    "crates/modules/editing/colors",
+    "crates/modules/editing/language-levels",
+    "crates/modules/insight/canvas",
+    "crates/modules/frameworks/symfony",
+    "crates/modules/frameworks/laravel",
+    "crates/modules/frameworks/yii",
+    "crates/modules/frameworks/htmx",
+    "crates/modules/frameworks/react",
+    "crates/modules/frameworks/vue",
+    "crates/domain/code/diff",
+    "crates/modules/tools/compare",
+    "crates/modules/appearance/theme-studio",
+    "crates/modules/appearance/decorations",
+    "crates/modules/viewers/markdown",
+    "crates/domain/viewers/diagram-text",
+    "crates/domain/viewers/tex",
+    "crates/infra/media/web-fetch",
+    "crates/infra/http/http-transport",
+    "crates/infra/http/http-environments",
+    "crates/infra/http/http-scripts",
+    "crates/modules/editing/emmet",
+    "crates/app",
+    "xtask",
+    "crates/modules/vcs/git",
+    "crates/modules/editing/refactoring",
+    "crates/modules/viewers/binary",
+    "crates/modules/tools/diagram-editor",
+    "crates/modules/tools/diagram-files",
+    "crates/modules/tools/diagram-web",
+    "crates/modules/insight/diagrams",
+    "crates/modules/database/explorer",
+    "crates/modules/database/console",
+    "crates/modules/database/extractors",
+    "crates/modules/project/local-history",
+    "crates/modules/project/folder-sizes",
+    "crates/domain/vcs/history",
+    "crates/domain/project/remote",
+    "crates/domain/database/database",
+    "crates/domain/database/extractors",
+    "crates/infra/remote/remote-sftp",
+    "crates/infra/remote/remote-ftp",
+    "crates/infra/system/secrets",
+    "crates/infra/system/process-stats",
+    "crates/infra/system/process-registry",
+    "crates/infra/system/power",
+    "crates/infra/database/postgres",
+    "crates/modules/database/postgres",
+    "crates/infra/database/mysql",
+    "crates/modules/database/mysql",
+    "crates/infra/database/sqlite",
+    "crates/modules/database/sqlite",
+    "crates/infra/database/csv",
+    "crates/modules/database/csv",
+    "crates/infra/database/protocol",
+    "crates/modules/database/external",
+    "crates/modules/database/diagram",
+    "crates/modules/project/remote",
+    "crates/modules/project/switcher",
+    "crates/modules/tools/task-manager",
+    "crates/modules/tools/relax",
+    "crates/modules/tools/focus",
+    "crates/modules/tools/keep-awake",
+    "crates/modules/tools/updates",
+    "crates/modules/ai/agents/claude",
+    "crates/modules/ai/agents/cline",
+    "crates/modules/ai/agents/planned",
+    "crates/modules/ai/agent-sessions",
+    "crates/modules/ai/agent-chat",
+    "crates/modules/ai/mcp-server",
+    "crates/modules/tools/http-client",
+    "crates/modules/project/marks",
+    "crates/modules/tools/running-work",
+    "crates/modules/tools/services",
+    "crates/modules/tools/lsp",
+    "crates/infra/files/history-fs",
+]
+default-members = ["crates/app"]
+# Third-party code kept in the repo (grammars not published on crates.io): not linted.
+exclude = ["third_party"]
+
+[workspace.package]
+version = "1.0.0-beta.3"
+edition = "2024"
+rust-version = "1.99"
+publish = false
+license = "MIT"
+repository = "https://github.com/binary-cube/lumen-ide"
+
+[workspace.dependencies]
+# Internal crates
+kernel = { path = "crates/kernel" }
+app-updates = { path = "crates/domain/tools/app-updates" }
+self-update = { path = "crates/infra/system/self-update" }
+code-quality = { path = "crates/domain/code/quality" }
+workspace = { path = "crates/domain/core/workspace" }
+document = { path = "crates/domain/code/document" }
+languages = { path = "crates/domain/code/language" }
+code-intelligence = { path = "crates/domain/code/intelligence" }
+text-search = { path = "crates/domain/code/search" }
+theming = { path = "crates/domain/appearance/theming" }
+terminal-session = { path = "crates/domain/tools/terminal" }
+workbench-model = { path = "crates/domain/core/workbench" }
+command-model = { path = "crates/domain/core/commands" }
+settings-model = { path = "crates/domain/core/settings" }
+extensions = { path = "crates/domain/core/extensions" }
+i18n = { path = "crates/domain/core/i18n" }
+render-api = { path = "crates/render/render-api" }
+text-layout = { path = "crates/render/text" }
+icons = { path = "crates/render/icons" }
+render-wgpu = { path = "crates/render/render-wgpu" }
+render-software = { path = "crates/render/render-software" }
+platform-api = { path = "crates/platform/platform-api" }
+platform-winit = { path = "crates/platform/platform-winit" }
+ui-kit = { path = "crates/ui/ui-kit" }
+vector-tiles = { path = "crates/ui/vector-tiles" }
+ui-components = { path = "crates/ui/ui-components" }
+ui-workbench = { path = "crates/ui/ui-workbench" }
+fs-local = { path = "crates/infra/files/fs-local" }
+stylesheet = { path = "crates/domain/code/stylesheet" }
+markup = { path = "crates/domain/code/markup" }
+power = { path = "crates/domain/tools/power" }
+diagram-model = { path = "crates/domain/tools/diagram-model" }
+power-system = { path = "crates/infra/system/power" }
+diagram-text = { path = "crates/domain/viewers/diagram-text" }
+tex = { path = "crates/domain/viewers/tex" }
+http-requests = { path = "crates/domain/http/http-requests" }
+web-fetch = { path = "crates/infra/media/web-fetch" }
+http-transport = { path = "crates/infra/http/http-transport" }
+http-environments = { path = "crates/infra/http/http-environments" }
+http-scripts = { path = "crates/infra/http/http-scripts" }
+syntax-ts = { path = "crates/infra/code/syntax-treesitter" }
+lsp-client = { path = "crates/infra/code/lsp-client" }
+lsp-protocol = { path = "crates/infra/code/lsp-protocol" }
+pty = { path = "crates/infra/system/pty" }
+storage = { path = "crates/infra/files/storage" }
+lang-php = { path = "crates/modules/languages/php" }
+lang-html = { path = "crates/modules/languages/html" }
+lang-javascript = { path = "crates/modules/languages/javascript" }
+lang-css = { path = "crates/modules/languages/css" }
+lang-scss = { path = "crates/modules/languages/scss" }
+lang-json = { path = "crates/modules/languages/json" }
+lang-yaml = { path = "crates/modules/languages/yaml" }
+lang-sql = { path = "crates/modules/languages/sql" }
+lang-cpp = { path = "crates/modules/languages/cpp" }
+lang-lua = { path = "crates/modules/languages/lua" }
+lang-zig = { path = "crates/modules/languages/zig" }
+lang-bash = { path = "crates/modules/languages/bash" }
+lang-toml = { path = "crates/modules/languages/toml" }
+lang-markdown = { path = "crates/modules/languages/markdown" }
+lang-dockerfile = { path = "crates/modules/languages/dockerfile" }
+lang-dotenv = { path = "crates/modules/languages/dotenv" }
+lang-http = { path = "crates/modules/languages/http" }
+file-icons = { path = "crates/modules/appearance/file-icons" }
+icon-packs = { path = "crates/modules/appearance/icon-packs" }
+lang-twig = { path = "crates/modules/languages/twig" }
+lang-blade = { path = "crates/modules/languages/blade" }
+project-tree = { path = "crates/modules/project/tree" }
+indexing = { path = "crates/modules/project/indexing" }
+terminal-panel = { path = "crates/modules/tools/terminal" }
+quality = { path = "crates/modules/editing/quality" }
+indexer = { path = "crates/infra/code/indexer" }
+embed = { path = "crates/infra/code/embed" }
+image-decode = { path = "crates/infra/media/image" }
+viewer-image = { path = "crates/modules/viewers/image" }
+structure = { path = "crates/modules/insight/structure" }
+colors = { path = "crates/modules/editing/colors" }
+language-levels = { path = "crates/modules/editing/language-levels" }
+canvas = { path = "crates/modules/insight/canvas" }
+contracts = { path = "crates/domain/core/contracts" }
+agents = { path = "crates/domain/ai/agents" }
+acp = { path = "crates/domain/ai/acp" }
+mcp = { path = "crates/domain/ai/mcp" }
+acp-client = { path = "crates/infra/ai/acp-client" }
+agent-files = { path = "crates/infra/ai/agent-files" }
+mcp-transport = { path = "crates/infra/ai/mcp-transport" }
+diff = { path = "crates/domain/code/diff" }
+version-control = { path = "crates/domain/vcs/vcs" }
+refactor = { path = "crates/domain/code/refactor" }
+git = { path = "crates/infra/vcs/git" }
+process = { path = "crates/infra/system/process" }
+files = { path = "crates/infra/files/files" }
+pinned-downloads = { path = "crates/infra/files/pinned-downloads" }
+vcs-git = { path = "crates/modules/vcs/git" }
+refactoring = { path = "crates/modules/editing/refactoring" }
+binary-files = { path = "crates/modules/viewers/binary" }
+diagram-editor = { path = "crates/modules/tools/diagram-editor" }
+diagram-files = { path = "crates/modules/tools/diagram-files" }
+diagram-web = { path = "crates/modules/tools/diagram-web" }
+diagrams = { path = "crates/modules/insight/diagrams" }
+local-history = { path = "crates/modules/project/local-history" }
+folder-sizes = { path = "crates/modules/project/folder-sizes" }
+history = { path = "crates/domain/vcs/history" }
+remote = { path = "crates/domain/project/remote" }
+database = { path = "crates/domain/database/database" }
+extractors = { path = "crates/domain/database/extractors" }
+remote-sftp = { path = "crates/infra/remote/remote-sftp" }
+remote-ftp = { path = "crates/infra/remote/remote-ftp" }
+secrets = { path = "crates/infra/system/secrets" }
+process-stats = { path = "crates/infra/system/process-stats" }
+process-registry = { path = "crates/infra/system/process-registry" }
+db-postgres = { path = "crates/infra/database/postgres" }
+database-postgres = { path = "crates/modules/database/postgres" }
+db-mysql = { path = "crates/infra/database/mysql" }
+database-mysql = { path = "crates/modules/database/mysql" }
+db-sqlite = { path = "crates/infra/database/sqlite" }
+database-sqlite = { path = "crates/modules/database/sqlite" }
+db-csv = { path = "crates/infra/database/csv" }
+database-csv = { path = "crates/modules/database/csv" }
+db-protocol = { path = "crates/infra/database/protocol" }
+database-external = { path = "crates/modules/database/external" }
+database-diagram = { path = "crates/modules/database/diagram" }
+remote-projects = { path = "crates/modules/project/remote" }
+database-explorer = { path = "crates/modules/database/explorer" }
+database-console = { path = "crates/modules/database/console" }
+data-extractors = { path = "crates/modules/database/extractors" }
+task-manager = { path = "crates/modules/tools/task-manager" }
+relax = { path = "crates/modules/tools/relax" }
+focus-mode = { path = "crates/modules/tools/focus" }
+keep-awake = { path = "crates/modules/tools/keep-awake" }
+updates = { path = "crates/modules/tools/updates" }
+agent-claude = { path = "crates/modules/ai/agents/claude" }
+agent-cline = { path = "crates/modules/ai/agents/cline" }
+agent-planned = { path = "crates/modules/ai/agents/planned" }
+agent-sessions = { path = "crates/modules/ai/agent-sessions" }
+agent-chat = { path = "crates/modules/ai/agent-chat" }
+mcp-server = { path = "crates/modules/ai/mcp-server" }
+http-client = { path = "crates/modules/tools/http-client" }
+path-marks = { path = "crates/modules/project/marks" }
+project-switcher = { path = "crates/modules/project/switcher" }
+running-work = { path = "crates/modules/tools/running-work" }
+services-panel = { path = "crates/modules/tools/services" }
+language-servers = { path = "crates/modules/tools/lsp" }
+history-fs = { path = "crates/infra/files/history-fs" }
+compare = { path = "crates/modules/tools/compare" }
+theme-studio = { path = "crates/modules/appearance/theme-studio" }
+theme-decorations = { path = "crates/modules/appearance/decorations" }
+viewer-markdown = { path = "crates/modules/viewers/markdown" }
+emmet = { path = "crates/modules/editing/emmet" }
+fw-symfony = { path = "crates/modules/frameworks/symfony" }
+fw-laravel = { path = "crates/modules/frameworks/laravel" }
+fw-yii = { path = "crates/modules/frameworks/yii" }
+fw-htmx = { path = "crates/modules/frameworks/htmx" }
+fw-react = { path = "crates/modules/frameworks/react" }
+fw-vue = { path = "crates/modules/frameworks/vue" }
+themes-builtin = { path = "crates/modules/appearance/themes" }
+
+# External dependencies (versions pinned here, used with `.workspace = true`)
+serde_json = "1"
+# A file's symbols kept compressed (the index's blocks, plan 74): deflate, pure Rust.
+miniz_oxide = "0.8"
+thiserror = "2"
+tracing = "0.1"
+# Identities that never repeat (a bottom window's views).
+# Local sockets (named pipes on Windows, Unix sockets elsewhere): one running instance.
+interprocess = "2.4"
+uuid = { version = "1", features = ["v4"] }
+# The local time of day (a query console's Output stamps its lines with it); already in the
+# tree through other crates, only its clock asked for.
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# Passwords wiped from memory once dropped (`kernel::Secret`).
+zeroize = "1.9"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+raw-window-handle = "0.6"
+bytemuck = { version = "1", features = ["derive"] }
+wgpu = "30"
+winit = "0.30"
+pollster = "1"
+cosmic-text = "0.19"
+memmap2 = "0.9"
+etagere = "0.3"
+tiny-skia = "0.12"
+png = "0.18"
+anyhow = "1"
+rfd = "0.17"
+muda = "0.21"
+ropey = "1.6"
+unicode-segmentation = "1"
+regex = "1"
+arboard = { version = "3", default-features = false }
+proptest = "1"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+dirs = "7"
+tree-sitter = "0.27"
+resvg = { version = "0.48", default-features = false }
+mimalloc = { version = "0.1", default-features = false }
+libmimalloc-sys = { version = "0.1", default-features = false, features = ["extended"] }
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }
+tree-sitter-php = "0.25"
+tree-sitter-html = "0.23"
+tree-sitter-javascript = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-css = "0.25"
+# Vendored: the published build gives MSVC a GCC flag it refuses (see its build.rs).
+tree-sitter-scss = { path = "third_party/tree-sitter-scss" }
+tree-sitter-json = "0.24"
+tree-sitter-yaml = "0.7"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-lua = "0.5"
+tree-sitter-zig = "1.1"
+tree-sitter-bash = "0.25"
+tree-sitter-toml-ng = "0.7"
+tree-sitter-md = "0.5.4"
+tree-sitter-containerfile = "0.9"
+tree-sitter-twig = { path = "third_party/tree-sitter-twig" }
+tree-sitter-blade = { path = "third_party/tree-sitter-blade" }
+tree-sitter-sql = { path = "third_party/tree-sitter-sql" }
+tree-sitter-dotenv = { path = "third_party/tree-sitter-dotenv" }
+tree-sitter-http = { path = "third_party/tree-sitter-http" }
+alacritty_terminal = "0.26"
+notify = "8"
+# SQLite, compiled in (`bundled`: nothing to install, the same version everywhere).
+rusqlite = { version = "0.41", default-features = false, features = ["bundled", "hooks", "column_decltype"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"            # drivers may allow it locally, with a // SAFETY: comment
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+# A clone whose original isn't used after it: an allocation and a copy for nothing.
+redundant_clone = "warn"
+
+[profile.release]
+opt-level = 3        # Maximum optimization
+lto = "fat"          # Whole-program optimization: 10% smaller binary (84.4 → 75.9 MB), slower build
+codegen-units = 1    # Allows deeper optimization passes; also the faster release build
+# (measured on GitHub's Linux runner: the app's crates and fat LTO in ~7 min with 1, ~13
+# with 16). Changing a release setting: bump `profile-v…` in release.yml and
+# release-cache.yml (a cache's key never takes new content).
+# Unwinding (the default): a panic is caught where it can be (a window, a parser, a
+# module), so it never takes the whole app — and every unsaved file — with it.
+
+
+# The local builds (`scripts/build.sh`; `--full` for `release`): as `release`, but the
+# whole-program optimization thin and the code optimized in parallel (fat LTO with one
+# codegen unit runs its last step on a single core). What's handed out stays `release`.
+[profile.dist-fast]
+inherits = "release"
+lto = "thin"
+codegen-units = 16
+
+[profile.dev]
+# File:line in backtraces is enough: full debug info makes every test binary several times
+# larger and slower to link (65 of them on a `cargo test --workspace`).
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 2                    # dependencies optimized: rendering stays smooth in debug
+debug = false
+
+# The project's own tasks (the app icon rendered at every size, data converted): optimized,
+# as their dependencies are (measured: the icon in 1.4 s instead of 6.8 s).
+[profile.dev.package.xtask]
+opt-level = 2
+
+# The parser runs on every keystroke and over whole projects in the tests.
+[profile.dev.package.tree-sitter]
+opt-level = 3

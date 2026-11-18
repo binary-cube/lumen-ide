@@ -1,0 +1,67 @@
+[
+  {
+    "Plan": {
+      "Node Type": "ModifyTable",
+      "Operation": "Update",
+      "Parallel Aware": false,
+      "Relation Name": "accounts",
+      "Alias": "accounts",
+      "Startup Cost": 0.29,
+      "Total Cost": 8.31,
+      "Plan Rows": 1,
+      "Plan Width": 103,
+      "Actual Startup Time": 0.094,
+      "Actual Total Time": 0.095,
+      "Actual Rows": 0,
+      "Actual Loops": 1,
+      "Shared Hit Blocks": 8,
+      "Shared Read Blocks": 0,
+      "Shared Dirtied Blocks": 1,
+      "Shared Written Blocks": 0,
+      "WAL Records": 1,
+      "WAL FPI": 0,
+      "WAL Bytes": 68,
+      "Plans": [
+        {
+          "Node Type": "Index Scan",
+          "Parent Relationship": "Member",
+          "Parallel Aware": false,
+          "Scan Direction": "Forward",
+          "Index Name": "accounts_pkey",
+          "Relation Name": "accounts",
+          "Alias": "accounts",
+          "Startup Cost": 0.29,
+          "Total Cost": 8.31,
+          "Plan Rows": 1,
+          "Plan Width": 103,
+          "Actual Startup Time": 0.020,
+          "Actual Total Time": 0.021,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Index Cond": "(aid = 7)",
+          "Rows Removed by Index Recheck": 0,
+          "Shared Hit Blocks": 3,
+          "WAL Records": 0,
+          "WAL FPI": 0,
+          "WAL Bytes": 0
+        }
+      ]
+    },
+    "Planning": {
+      "Shared Hit Blocks": 12,
+      "Shared Read Blocks": 0,
+      "Shared Dirtied Blocks": 0,
+      "Shared Written Blocks": 0
+    },
+    "Planning Time": 0.087,
+    "Triggers": [
+      {
+        "Trigger Name": "accounts_audit",
+        "Relation": "accounts",
+        "Time": 0.041,
+        "Calls": 1
+      }
+    ],
+    "Execution Time": 0.172
+  }
+]

@@ -1,0 +1,28 @@
+[package]
+name = "lang-javascript"
+description = "The JavaScript family's module: JavaScript, TypeScript and TSX — languages, grammars, injections (JSON.parse), folding, declarations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+markup.workspace = true
+kernel.workspace = true
+extensions.workspace = true
+languages.workspace = true
+syntax-ts.workspace = true
+code-intelligence.workspace = true
+refactor.workspace = true
+code-quality.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-typescript.workspace = true
+
+[lints]
+workspace = true

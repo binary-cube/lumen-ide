@@ -1,0 +1,43 @@
+[package]
+name = "lsp-client"
+description = "Generic LSP client: JSON-RPC over a server's stdio, documents kept in step, its answers as the Intelligence ports' — one driver thread per server, restarted after a crash."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+sysinfo.workspace = true
+kernel.workspace = true
+markup.workspace = true
+code-intelligence.workspace = true
+document.workspace = true
+workbench-model.workspace = true
+process.workspace = true
+lsp-protocol.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+tracing.workspace = true
+# The servers downloaded when first needed (and those the user installs: intelephense):
+# HTTPS from the pinned sources, checked against their SHA-256 / SHA-512, unpacked by our
+# code (`pinned-downloads`); the checksums of what's assembled, a tarball read from memory.
+pinned-downloads.workspace = true
+ring = "0.17"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+# The fake language server and downloads from memory (tests, the app's snapshots).
+[features]
+fake = ["pinned-downloads/fake"]
+
+[dev-dependencies]
+proptest.workspace = true
+# Files served from memory, archives made in memory.
+pinned-downloads = { workspace = true, features = ["fake"] }
+
+[lints]
+workspace = true

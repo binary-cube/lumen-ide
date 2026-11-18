@@ -1,0 +1,273 @@
+# Cyberpunk: one of the built-in themes — a violet-black night lit by magenta and cyan
+# neon, warnings in electric yellow; the syntax in neon tones. Its decorations (on by
+# default, faint, each with its switch in the theme's settings): a neon edge, a neon grid
+# along the bottom behind the panels, neon rain and a rare glitch; holographic signs in the
+# corners, off until switched on.
+
+id = "cyberpunk"
+name = "Cyberpunk"
+appearance = "dark"
+
+[palette]
+base      = "#0b0614"
+card      = "#100a1c"
+panel     = "#150d24"
+line      = "#2a1a42"
+fg        = "#e8dcff"
+muted     = "#8a74b8"
+code      = "#e4d8ff"
+accent    = "#ff2bd6"
+red       = "#ff3b5c"
+orange    = "#ff9e3d"
+green     = "#3dffb0"
+cyan      = "#00e5ff"
+blue      = "#5c9dff"
+purple    = "#b46bff"
+yellow    = "#fcee0a"
+grey      = "#6b5a8e"
+
+[ui]
+"window.background"                  = "$base"
+"card.border"                        = "#1f1433"
+"panel.background"                   = "$panel"
+"border"                             = "$line"
+"text"                               = "$fg"
+"text.muted"                         = "$muted"
+"accent"                             = "$accent"
+"danger"                             = "$red"
+"warning"                            = "$yellow"
+
+"editor.background"                  = "$card"
+"editor.foreground"                  = "$code"
+"editor.gutter.foreground"           = "#4e3d70"
+"editor.gutter.foreground.active"    = "#00e5ff"
+"editor.line.current"                = "#170e29"
+"editor.selection"                   = "#ff2bd6"
+"editor.selection.inactive"          = "#2b1a44"
+"editor.cursor"                      = "#00e5ff"
+"editor.match"                       = "#fcee0a30"
+"editor.match.current"               = "#fcee0a80"
+
+"tab.hover"                          = "#1a1030"
+"input.background"                   = "$card"
+"input.border"                       = "#3a2560"
+"popup.background"                   = "#150d24"
+"popup.border"                       = "#3a2560"
+"shadow"                             = "#00000099"
+"toggle.active"                      = "#ff2bd659"
+
+"tree.selection"                     = "#2a1740"
+"tree.hover"                         = "#1c1130"
+"tree.indentGuide"                   = "#24173a"
+
+"sidebar.background"                 = "#0e0819"
+"toolStrip.foreground"               = "#a58bd6"
+"toolStrip.hover"                    = "#24173a"
+"toolStrip.active.background"        = "$accent"
+"toolStrip.active.foreground"        = "#0b0614"
+
+"searchField.background"             = "#0e0819"
+"searchField.border"                 = "#33204f"
+"searchField.border.focused"         = "#00e5ff"
+
+"terminal.background"                = "$card"
+"terminal.foreground"                = "$code"
+"terminal.cursor"                    = "#00e5ff"
+"terminal.ansi.black"                = "#0b0614"
+"terminal.ansi.red"                  = "#ff3b5c"
+"terminal.ansi.green"                = "#3dffb0"
+"terminal.ansi.yellow"               = "#fcee0a"
+"terminal.ansi.blue"                 = "#5c9dff"
+"terminal.ansi.magenta"              = "#ff2bd6"
+"terminal.ansi.cyan"                 = "#00e5ff"
+"terminal.ansi.white"                = "#e4d8ff"
+"terminal.ansi.brightBlack"          = "#6b5a8e"
+"terminal.ansi.brightRed"            = "#ff7a91"
+"terminal.ansi.brightGreen"          = "#8affd0"
+"terminal.ansi.brightYellow"         = "#fff66b"
+"terminal.ansi.brightBlue"           = "#96c0ff"
+"terminal.ansi.brightMagenta"        = "#ff7ae6"
+"terminal.ansi.brightCyan"           = "#7df9ff"
+"terminal.ansi.brightWhite"          = "#ffffff"
+
+"scrollbar.track"                    = "#140c22"
+"scrollbar.thumb"                    = "#33204f"
+"scrollbar.thumb.active"             = "#55358a"
+
+"tabBar.background"                  = "#0e0819"
+"tab.active.background"              = "$card"
+"tab.hover.background"               = "#1a1030"
+"tab.active.indicator"               = "$accent"
+
+"splitter.line"                      = "#1c1130"
+"splitter.handle.background"         = "$base"
+"splitter.handle.border"             = "#3a2560"
+"splitter.grip"                      = "$muted"
+"splitter.active"                    = "#00e5ff"
+
+"icon.folder"                        = "#8a74b8"
+"icon.php"                           = "#b46bff"
+"icon.html"                          = "#ff9e3d"
+"icon.javascript"                    = "#fcee0a"
+"icon.css"                           = "#00e5ff"
+"icon.scss"                          = "#ff2bd6"
+"icon.json"                          = "#fcee0a"
+"icon.yaml"                          = "#ff9e3d"
+"icon.env"                           = "#fcee0a"
+"icon.git"                           = "#ff9e3d"
+"icon.composer"                      = "#ff9e3d"
+"icon.npm"                           = "#ff3b5c"
+"icon.lock"                          = "#8a74b8"
+"icon.docker"                        = "#00e5ff"
+"icon.config"                        = "#8a74b8"
+"icon.xml"                           = "#ff9e3d"
+"icon.markdown"                      = "#5c9dff"
+"icon.text"                          = "#8a74b8"
+"icon.twig"                          = "#3dffb0"
+"icon.vue"                           = "#3dffb0"
+"icon.react"                         = "#00e5ff"
+"icon.typescript"                    = "#5c9dff"
+"icon.c"                             = "#5c9dff"
+"icon.cpp"                           = "#ff2bd6"
+"icon.lua"                           = "#5c9dff"
+"icon.zig"                           = "#ff9e3d"
+"icon.bash"                          = "#3dffb0"
+"icon.toml"                          = "#8a74b8"
+"icon.dockerfile"                    = "#00e5ff"
+"icon.database"                      = "#b46bff"
+"icon.shell"                         = "#3dffb0"
+"icon.archive"                       = "#ff9e3d"
+"icon.image"                         = "#ff2bd6"
+"icon.svg"                           = "#ff9e3d"
+"icon.file"                          = "#8a74b8"
+
+[syntax]
+"comment"            = { fg = "$grey", italic = true }
+"keyword"            = { fg = "$accent", bold = true }
+"operator"           = "#c9b6f0"
+"string"             = "$cyan"
+"string.escape"      = "$orange"
+"number"             = "$orange"
+"constant"           = { fg = "$orange", italic = true }
+"constant.builtin"   = "$purple"
+"variable"           = "$code"
+"variable.php"       = "#7df9ff"
+"property"           = "$blue"
+"function"           = "$yellow"
+"function.method"    = "$yellow"
+"type"               = { fg = "$purple", bold = true }
+"tag"                = "$accent"
+"attribute"          = "$cyan"
+"punctuation"        = "#9a86c8"
+"property.json"      = "$blue"
+"property.yaml"      = "$accent"
+"boolean"            = "$purple"
+"null"               = "$purple"
+
+# The caret: a neon bar with a halo, gliding; a classic blink (a fading one would ask for
+# frames all the time, on top of the decorations').
+[caret]
+shape  = "bar"
+width  = 2
+blink  = "classic"
+glow   = 0.7
+motion = "glide"
+
+# Overlays over a frosted pane: the window behind softly blurred, a touch of its night violet.
+[backdrop]
+style = "glass"
+color = "$base"
+
+# The menu's panel: frosted glass, subtly (plan 55k).
+[floating]
+style = "glass"
+
+# Its decorations, each with its switch (kept for this theme).
+[[options]]
+id       = "neon"
+kind     = "toggle"
+label.en = "Neon edge"
+label.ro = "Margine neon"
+default  = true
+
+[[options]]
+id       = "grid"
+kind     = "toggle"
+label.en = "Neon grid"
+label.ro = "Grilă neon"
+default  = true
+
+[[options]]
+id       = "rain"
+kind     = "toggle"
+label.en = "Neon rain"
+label.ro = "Ploaie neon"
+default  = true
+
+[[options]]
+id       = "glitch"
+kind     = "toggle"
+label.en = "Rare glitch"
+label.ro = "Glitch rar"
+default  = true
+
+[[options]]
+id       = "signs"
+kind     = "toggle"
+label.en = "Holographic signs"
+label.ro = "Semne holografice"
+default  = false
+
+[[decorations.layers]]
+kind    = "neon"
+when    = "neon"
+style   = "hue"
+colors  = ["$accent", "$cyan"]
+speed   = 0.25
+size    = 0.2
+glow    = 0.5
+opacity = 0.4
+
+[[decorations.layers]]
+kind    = "synthwave"
+when    = "grid"
+style   = "grid"
+colors  = ["$cyan", "$accent", "$accent"]
+speed   = 0.3
+size    = 0.4
+opacity = 0.2
+zone    = "panels"
+glass   = 0.25
+
+[[decorations.layers]]
+kind    = "neon-rain"
+when    = "rain"
+colors  = ["$accent", "$cyan"]
+density = 0.3
+speed   = 0.5
+size    = 0.45
+glow    = 0.5
+opacity = 0.24
+
+[[decorations.layers]]
+kind    = "glitch"
+when    = "glitch"
+style   = "bands"
+colors  = ["$accent", "$cyan", "#ffffff"]
+density = 0.15
+size    = 0.4
+opacity = 0.26
+zone    = "panels"
+glass   = 0.25
+
+[[decorations.layers]]
+kind    = "holo-signs"
+when    = "signs"
+colors  = ["$accent", "$cyan", "$yellow"]
+density = 0.3
+speed   = 0.4
+size    = 0.5
+glow    = 0.6
+opacity = 0.3
+zone    = "panels"
+glass   = 0.6

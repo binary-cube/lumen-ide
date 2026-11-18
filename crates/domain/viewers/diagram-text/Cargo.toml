@@ -1,0 +1,16 @@
+[package]
+name = "diagram-text"
+description = "Diagrams written as text (Mermaid): parsed into typed models, with the line of each error. No layout, no drawing."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+
+[lints]
+workspace = true

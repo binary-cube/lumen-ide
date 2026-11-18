@@ -1,0 +1,28 @@
+[package]
+name = "render-wgpu"
+description = "The default rendering driver, based on wgpu (Metal, DX12, Vulkan, GL)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+render-api.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true
+bytemuck.workspace = true
+pollster.workspace = true
+etagere.workspace = true
+tracing.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAMetalLayer"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+
+[lints]
+workspace = true

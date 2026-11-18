@@ -1,0 +1,19 @@
+[package]
+name = "fw-laravel"
+description = "Laravel: the project's views, routes and config keys — completion, go to definition, hover."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+extensions.workspace = true
+code-intelligence.workspace = true
+kernel.workspace = true
+
+[lints]
+workspace = true

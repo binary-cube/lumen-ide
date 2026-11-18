@@ -1,0 +1,19 @@
+[package]
+name = "platform-api"
+description = "Platform contracts: window, input, clipboard, dialogs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+raw-window-handle.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

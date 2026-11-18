@@ -1,0 +1,23 @@
+[package]
+name = "focus-mode"
+description = "Focus mode: the area being worked in stays in color, the rest of the window turns gray; its button above Relax mode's, the theme's animated effects standing still meanwhile."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+i18n.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+ui-components.workspace = true
+languages.workspace = true
+settings-model.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true

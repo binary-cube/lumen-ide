@@ -1,0 +1,107 @@
+# Blade's directives (the format: code-intelligence's vocabulary). The names are the
+# language's; the rest is written here.
+directive	@if	@if(¦)	condition
+directive	@unless	@unless(¦)	condition
+directive	@isset	@isset(¦)	variable
+directive	@empty	@empty(¦)	variable
+directive	@auth
+directive	@guest
+directive	@env	@env(¦)	environment
+directive	@production
+directive	@switch	@switch(¦)	value
+directive	@for	@for(¦)	init; condition; step
+directive	@foreach	@foreach(¦)	items as item
+directive	@forelse	@forelse(¦)	items as item
+directive	@while	@while(¦)	condition
+directive	@section	@section(¦)	name
+directive	@push	@push(¦)	stack
+directive	@prepend	@prepend(¦)	stack
+directive	@once
+directive	@php
+directive	@verbatim
+directive	@error	@error(¦)	field
+directive	@component	@component(¦)	view, data
+directive	@slot	@slot(¦)	name
+directive	@pushOnce	@pushOnce(¦)	stack
+directive	@session	@session(¦)	key
+directive	@can	@can(¦)	ability, model
+directive	@cannot	@cannot(¦)	ability, model
+directive	@canany	@canany(¦)	abilities, model
+directive	@endPushOnce
+directive	@endauth
+directive	@endcan
+directive	@endcanany
+directive	@endcannot
+directive	@endcomponent
+directive	@endempty
+directive	@endenv
+directive	@enderror
+directive	@endfor
+directive	@endforeach
+directive	@endforelse
+directive	@endguest
+directive	@endif
+directive	@endisset
+directive	@endonce
+directive	@endphp
+directive	@endprepend
+directive	@endproduction
+directive	@endpush
+directive	@endsection
+directive	@endsession
+directive	@endslot
+directive	@endswitch
+directive	@endunless
+directive	@endverbatim
+directive	@endwhile
+directive	@else
+directive	@elseif	@elseif(¦)	condition
+directive	@elseauth
+directive	@elseguest
+directive	@case	@case(¦)	value
+directive	@default
+directive	@break
+directive	@continue
+directive	@show
+directive	@stop
+directive	@overwrite
+directive	@hasSection	@hasSection(¦)	name
+directive	@sectionMissing	@sectionMissing(¦)	name
+directive	@yield	@yield(¦)	section, default
+directive	@extends	@extends(¦)	view
+directive	@include	@include(¦)	view, data
+directive	@includeIf	@includeIf(¦)	view, data
+directive	@includeWhen	@includeWhen(¦)	condition, view, data
+directive	@includeUnless	@includeUnless(¦)	condition, view, data
+directive	@includeFirst	@includeFirst(¦)	views, data
+directive	@each	@each(¦)	view, items, item, empty
+directive	@stack	@stack(¦)	name
+directive	@parent
+directive	@props	@props(¦)	names
+directive	@aware	@aware(¦)	names
+directive	@class	@class(¦)	classes
+directive	@style	@style(¦)	styles
+directive	@checked	@checked(¦)	condition
+directive	@selected	@selected(¦)	condition
+directive	@disabled	@disabled(¦)	condition
+directive	@readonly	@readonly(¦)	condition
+directive	@required	@required(¦)	condition
+directive	@csrf
+directive	@method	@method(¦)	verb
+directive	@vite	@vite(¦)	entries
+directive	@livewire	@livewire(¦)	component
+directive	@inject	@inject(¦)	variable, service
+directive	@lang	@lang(¦)	key
+directive	@choice	@choice(¦)	key, count
+directive	@dd	@dd(¦)	values
+directive	@dump	@dump(¦)	values
+loop	index
+loop	iteration
+loop	remaining
+loop	count
+loop	first
+loop	last
+loop	even
+loop	odd
+loop	depth
+loop	parent

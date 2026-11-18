@@ -1,0 +1,9 @@
+-- actual · format 1
+Limit  (cost=0.47..9.42 rows=10 width=16) (actual time=0.084..0.112 rows=10 loops=1)
+  ->  Incremental Sort  (cost=0.47..8954.47 rows=10000 width=16) (actual time=0.083..0.109 rows=10 loops=1)
+        Sort Key: four, ten
+        Presorted Key: four
+        Full-sort Groups: {Group Count: 1, Sort Methods Used: [quicksort], Sort Space Memory: {Average Sort Space Used: 26, Peak Sort Space Used: 26}}
+        ->  Index Scan using tenk1_four on tenk1  (cost=0.29..8454.47 rows=10000 width=16) (actual time=0.031..0.065 rows=101 loops=1)
+Planning Time: 0.162 ms
+Execution Time: 0.148 ms

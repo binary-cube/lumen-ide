@@ -1,0 +1,17 @@
+[package]
+name = "acp"
+description = "The Agent Client Protocol as data: the messages an agent and the editor exchange, and a conversation built from an agent's updates."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

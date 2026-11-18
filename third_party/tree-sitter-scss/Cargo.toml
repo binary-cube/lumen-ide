@@ -1,0 +1,20 @@
+[package]
+name = "tree-sitter-scss"
+description = "SCSS grammar for the tree-sitter parsing library (tree-sitter-grammars/tree-sitter-scss 1.0.0), its build fixed for MSVC"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/tree-sitter-grammars/tree-sitter-scss"
+publish = false
+build = "bindings/rust/build.rs"
+
+[lib]
+path = "bindings/rust/lib.rs"
+doctest = false
+test = false
+
+[dependencies]
+tree-sitter = ">=0.21.0"
+
+[build-dependencies]
+cc = "1.0.92"

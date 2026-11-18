@@ -1,0 +1,19 @@
+[package]
+name = "code-intelligence"
+description = "Intelligence bounded context: symbols, index, name resolution, completion and go to definition."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+smallvec = "1"
+kernel.workspace = true
+i18n.workspace = true
+
+[lints]
+workspace = true

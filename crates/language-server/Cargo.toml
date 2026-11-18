@@ -1,0 +1,49 @@
+[package]
+name = "language-server"
+description = "The built-in engines offered to other editors: a language server on stdio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[[bin]]
+name = "language-server"
+path = "src/main.rs"
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+i18n.workspace = true
+extensions.workspace = true
+code-intelligence.workspace = true
+document.workspace = true
+syntax-ts.workspace = true
+indexer.workspace = true
+storage.workspace = true
+lsp-protocol.workspace = true
+refactor.workspace = true
+lang-php.workspace = true
+lang-html.workspace = true
+lang-css.workspace = true
+lang-javascript.workspace = true
+lang-sql.workspace = true
+lang-twig.workspace = true
+lang-blade.workspace = true
+languages.workspace = true
+fw-laravel.workspace = true
+fw-symfony.workspace = true
+fw-yii.workspace = true
+fw-vue.workspace = true
+fw-react.workspace = true
+fw-htmx.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+lsp-client.workspace = true
+
+[lints]
+workspace = true

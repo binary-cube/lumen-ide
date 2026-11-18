@@ -1,0 +1,19 @@
+[package]
+name = "emmet"
+description = "Emmet: abbreviations expanded on Tab in HTML (div.card#main, ul>li*3, a[href], !, lorem…)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+markup.workspace = true
+extensions.workspace = true
+code-intelligence.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,7 @@
+-> Filter: (b.`name` = a.`name`)  (cost=19826 rows=19800) (actual time=0.253..1.01 rows=99 loops=1)
+    -> Inner hash join (<hash>(b.`name`)=<hash>(a.`name`))  (cost=19826 rows=19800) (actual time=0.233..0.984 rows=99 loops=1)
+        -> Table scan on b  (cost=0.257 rows=2000) (actual time=0.0368..0.676 rows=2000 loops=1)
+        -> Hash
+            -> Filter: (a.id < 100)  (cost=20.1 rows=99) (actual time=0.0486..0.0921 rows=99 loops=1)
+                -> Index range scan on a using PRIMARY over (id < 100)  (cost=20.1 rows=99) (actual time=0.0469..0.0867 rows=99 loops=1)
+
