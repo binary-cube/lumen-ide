@@ -59,6 +59,9 @@ jobs:
     env:
       # Whether the project's signing certificate is there (a secret can't be asked in `if`).
       HAS_MACOS_SIGNING: ${{ secrets.MACOS_SIGNING_P12 != '' }}
+      # SignPath (Windows): its token a secret, its organization and project the
+      # repository's variables (Settings › Secrets and variables › Actions › Variables).
+      HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -99,6 +102,44 @@ jobs:
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: ./scripts/build.ps1
+      # Signed by SignPath (free for open source, certificate by SignPath Foundation): the
+      # program sent as it was built here, the request approved by hand in SignPath (its
+      # rules: every release's signing approved), the signed program put back in the zip.
+      # Without SignPath set up: unsigned, as before.
+      - name: The program to sign (Windows)
+        id: unsigned
+        if: matrix.os == 'windows-latest' && env.HAS_SIGNPATH == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-windows
+          path: target/release/*.exe
+          archive: false
+          if-no-files-found: error
+      - name: Signed by SignPath (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_SIGNPATH == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || 'lumen-ide' }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          # The approval is by hand: an hour to give it.
+          wait-for-completion-timeout-in-seconds: 3600
+          skip-decompress: true
+          output-artifact-directory: signed
+      - name: The signed program in the zip (Windows)
+        if: matrix.os == 'windows-latest' && env.HAS_SIGNPATH == 'true'
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem signed -Recurse -Filter *.exe | Select-Object -First 1
+          if (-not $exe) { throw "SignPath gave no program back" }
+          $sig = Get-AuthenticodeSignature $exe.FullName
+          Write-Host "signed: $($sig.Status) by $($sig.SignerCertificate.Subject)"
+          if ($sig.Status -ne 'Valid') { throw "the signature isn't valid: $($sig.StatusMessage)" }
+          $zip = Get-ChildItem dist -Filter *-windows-x64.zip | Select-Object -First 1
+          Compress-Archive -Path $exe.FullName -DestinationPath $zip.FullName -Force
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: ./scripts/build.sh linux --full

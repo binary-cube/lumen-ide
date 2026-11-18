@@ -199,6 +199,34 @@ Next up ([plan 84](docs/plan/84-lansari-si-actualizari.md)):
   it; if you choose to update, it downloads in the background, closes, replaces itself and
   reopens your windows. Nothing is installed without your click.
 
+## Code signing policy
+
+Free code signing on Windows provided by [SignPath.io](https://about.signpath.io),
+certificate by [SignPath Foundation](https://signpath.org) (applied for: until it's
+granted, the Windows builds are unsigned).
+
+- **Committers and reviewers:** the members of [Binary Cube](https://github.com/orgs/binary-cube/people).
+- **Approvers:** the owners of [Binary Cube](https://github.com/orgs/binary-cube/people).
+
+Every release is built from this repository by GitHub Actions on GitHub's own machines
+(`.github/workflows/release.yml`) and its signing approved by hand. The macOS builds are
+signed with the project's own certificate; each release's files are listed with their
+SHA-256 in `SHA256SUMS`, and `latest.json` is signed with the project's key.
+
+## Privacy
+
+Lumen collects nothing about you and sends no telemetry (the language servers' own is
+turned off). It connects only to:
+
+- **GitHub**, to look for a new version (now and then, or when you ask; turned off in
+  Settings › Updates) and to download it when you choose to;
+- **the language servers' and tools' sources** (npm, Node.js, GitHub releases), pinned
+  and checked, the first time a file needs one;
+- **what you connect it to yourself**: your databases, remote projects (SFTP / FTP), the
+  requests of your `.http` files, the AI agents you start.
+
+The MCP server, off until you turn it on, listens only on your own machine.
+
 ## License
 
 [MIT](LICENSE). Bundled third-party grammars keep their own licenses (`third_party/`).
