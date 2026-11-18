@@ -560,7 +560,7 @@ pub fn remove(name: &str) -> Result<(), String> {
 /// This app version's references' key: its version and its manifest's fingerprint.
 fn refs_key() -> String {
     let digest = ring_free_hash(EMBEDDED.as_bytes());
-    format!("{}-{digest:016x}", env!("CARGO_PKG_VERSION"))
+    format!("{}-{digest:016x}", kernel::brand::version())
 }
 
 /// FNV-1a: a stable fingerprint of the manifest (no cryptography needed).

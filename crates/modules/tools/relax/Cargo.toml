@@ -1,7 +1,6 @@
 [package]
 name = "relax"
 description = "Relax mode: a calm animated scene over the whole window (stars, a sea of light, a ribbon of light), its button above the Task Manager's, Esc to leave; optionally started after a while without input."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -75,7 +75,7 @@ impl Driver {
             .map_or_else(|| "root".to_owned(), |n| n.to_string_lossy().into_owned());
         json!({
             "processId": std::process::id(),
-            "clientInfo": {"name": kernel::brand::NAME, "version": env!("CARGO_PKG_VERSION")},
+            "clientInfo": {"name": kernel::brand::NAME, "version": kernel::brand::version()},
             "rootUri": root,
             "rootPath": self.config.root.to_string_lossy(),
             "workspaceFolders": [{"uri": root, "name": name}],

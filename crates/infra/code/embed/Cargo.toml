@@ -1,7 +1,6 @@
 [package]
 name = "embed"
 description = "Static embeddings (model2vec) for semantic search: model, WordPiece tokenizer, download."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

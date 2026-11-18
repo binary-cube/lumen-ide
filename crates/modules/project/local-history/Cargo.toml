@@ -1,7 +1,6 @@
 [package]
 name = "local-history"
 description = "Local history: a version of every file kept on each save (and the one on disk before it), listed per file, compared with the current text and brought back — no git needed."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

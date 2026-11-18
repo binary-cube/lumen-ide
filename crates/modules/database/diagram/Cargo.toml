@@ -1,7 +1,6 @@
 [package]
 name = "database-diagram"
 description = "The relations diagram of a data source, as a module: its tables as cards (their columns, keys and types) and the links between them from their foreign keys, with the columns joining them and their cardinality; laid out once per structure in the background, narrowed to a table's neighbors or by name, panned and zoomed. Opened by the explorer through the domain's port, never depending on it."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

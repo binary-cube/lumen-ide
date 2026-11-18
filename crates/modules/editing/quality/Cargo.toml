@@ -1,7 +1,6 @@
 [package]
 name = "quality"
 description = "Formatting and checking code with the project's tools (a formatter / checker its language's module knows, a binary, or the project's own script): on demand and on save, in the background."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

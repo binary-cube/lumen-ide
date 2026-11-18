@@ -84,7 +84,7 @@ pub fn start(port: u16, token: &str) -> Result<u16, String> {
     // Another port or token: the one running stops first (its port freed).
     *running = None;
     let handler: mcp_transport::Handler = Arc::new(|message: &Value| {
-        let info = ServerInfo { name: "editor", version: env!("CARGO_PKG_VERSION") };
+        let info = ServerInfo { name: "editor", version: kernel::brand::version() };
         mcp::answer(message, info, &mcp::tools(), &mut call)
     });
     let server = match mcp_transport::Server::start(port, token.to_owned(), Arc::clone(&handler)) {

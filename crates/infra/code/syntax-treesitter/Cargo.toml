@@ -1,7 +1,6 @@
 [package]
 name = "syntax-ts"
 description = "The shared parsing engine based on tree-sitter, with language layers and injections."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

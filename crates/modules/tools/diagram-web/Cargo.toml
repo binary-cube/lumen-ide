@@ -1,7 +1,6 @@
 [package]
 name = "diagram-web"
 description = "draw.io itself on demand (plan 82f, 82g): a `.drawio` file edited in draw.io's own editor, downloaded once (a pinned, checked release) and run offline by the system's web engine, the file read and written by us, the theme's colors over draw.io's."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "git"
 description = "The git adapter: reading with gitoxide (pure Rust, no git installed needed), status and commits with the installed git."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

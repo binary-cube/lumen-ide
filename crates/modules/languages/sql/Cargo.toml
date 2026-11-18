@@ -1,7 +1,6 @@
 [package]
 name = "lang-sql"
 description = "The SQL module: language, grammar (vendored DerekStride tree-sitter-sql), highlighting, folding, `$$` bodies as SQL, keywords and functions per dialect, and \"Reformat Code\" by the domain's formatter (a statement or the file, by the document's dialect, with its settings)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

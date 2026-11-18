@@ -1,7 +1,6 @@
 [package]
 name = "diagrams"
 description = "Type diagrams: the class at the cursor with its parents, interfaces, traits, children and constructor dependencies, laid out like UML, navigable."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

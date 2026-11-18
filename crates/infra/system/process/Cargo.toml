@@ -1,7 +1,6 @@
 [package]
 name = "process"
 description = "Running external programs and project scripts: in a folder, with stdin, a timeout, stoppable, both outputs read while they run, no console window on Windows."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

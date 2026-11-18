@@ -1,7 +1,6 @@
 [package]
 name = "running-work"
 description = "The question asked before closing a window, a project or the app while work still runs (a program in a terminal, an upload, a query): what runs, grouped by project and module, with Stop and close, Wait and Cancel."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

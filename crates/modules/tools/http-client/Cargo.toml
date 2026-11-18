@@ -1,7 +1,6 @@
 [package]
 name = "http-client"
 description = "The HTTP client module (plan 77): .http files' requests run (▶ in the gutter, ⌘↵, Run All), their environments chosen, the project's cookies, the responses in the Services window (readable, colored, opened in the editor, copied as cURL)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

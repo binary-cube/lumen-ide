@@ -1,7 +1,6 @@
 [package]
 name = "terminal-panel"
 description = "The terminal panel: tabs, the grid rendered on the GPU, the ANSI palette from the theme, its settings."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

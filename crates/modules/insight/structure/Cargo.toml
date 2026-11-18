@@ -1,7 +1,6 @@
 [package]
 name = "structure"
 description = "The Structure panel: the declaration at the cursor, where it's used, its problems and the file's tree."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

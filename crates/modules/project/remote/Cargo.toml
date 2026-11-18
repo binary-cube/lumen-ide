@@ -1,7 +1,6 @@
 [package]
 name = "remote-projects"
 description = "Remote projects (SFTP, FTP, FTPS): opening one into a local copy, keeping it in step with the server (a save goes up after checking the server's copy), the transfers' log in a tool window. Nothing runs for a local project."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

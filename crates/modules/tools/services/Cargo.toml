@@ -1,7 +1,6 @@
 [package]
 name = "services-panel"
 description = "The Services window at the bottom: what the modules have running (a data source's consoles and their results), as a tree whose nodes' tabs are their views (the Output log, a result). Generic: it never knows who contributes (they register a ServiceProvider); nothing of theirs runs before it's first shown."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

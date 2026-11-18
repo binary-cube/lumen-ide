@@ -1,7 +1,6 @@
 [package]
 name = "indexing"
 description = "The project's index as a module: kept up to date from the domain's events, through a queue that merges what's asked."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

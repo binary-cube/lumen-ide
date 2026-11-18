@@ -1,7 +1,6 @@
 [package]
 name = "ui-workbench"
 description = "The workbench views: editor, tabs, status bar, panels, popovers."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

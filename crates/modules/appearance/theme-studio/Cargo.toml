@@ -1,7 +1,6 @@
 [package]
 name = "theme-studio"
 description = "The theme studio: interface and syntax colors, previewed live, saved for the project or everywhere."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

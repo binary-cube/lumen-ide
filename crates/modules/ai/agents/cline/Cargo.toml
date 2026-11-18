@@ -1,7 +1,6 @@
 [package]
 name = "agent-cline"
 description = "Cline (its command-line program) as an agent the editor hosts: its sessions listed from its own files, started and taken up again."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

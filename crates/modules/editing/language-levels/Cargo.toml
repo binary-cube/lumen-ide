@@ -1,7 +1,6 @@
 [package]
 name = "language-levels"
 description = "The language version picker (e.g. PHP 8.3): a popover above the status bar item, choosing the version for the project or only for the active file."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

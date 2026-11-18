@@ -1,7 +1,6 @@
 [package]
 name = "history-fs"
 description = "The local history's store on disk: each file's versions gzip-compressed in a folder outside the project, named by time, kind and hash (listing never reads them)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

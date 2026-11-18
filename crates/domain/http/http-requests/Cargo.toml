@@ -1,7 +1,6 @@
 [package]
 name = "http-requests"
 description = "HTTP requests as the user writes them: `.http` files (the common `.http` syntax) read into requests, their environments (public, private, local), variables resolved, cURL in and out. No network, no UI."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "vcs-git"
 description = "Git: the project's repository (read with gitoxide, no git installed needed), comparisons with revisions / branches, blame, commits."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

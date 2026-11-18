@@ -1,7 +1,6 @@
 [package]
 name = "lang-php"
 description = "The PHP module: language, grammar, injections (HTML, JSON, heredoc), folding."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

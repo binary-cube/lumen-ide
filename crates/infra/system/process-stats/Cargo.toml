@@ -1,7 +1,6 @@
 [package]
 name = "process-stats"
 description = "What this process's threads cost (each thread's name and the CPU time it used) and what the programs it started cost (macOS, Linux, Windows), for attributing CPU, memory and disk to the parts of the app."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

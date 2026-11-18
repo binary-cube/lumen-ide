@@ -1,7 +1,6 @@
 [package]
 name = "version-control"
 description = "Version control bounded context: commits, blame, the lines changed since the last commit and the repository port (git)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

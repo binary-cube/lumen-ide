@@ -1,7 +1,6 @@
 [package]
 name = "render-api"
 description = "Rendering contracts: Scene, primitives, Renderer, RendererFactory."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

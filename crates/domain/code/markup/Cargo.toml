@@ -1,7 +1,6 @@
 [package]
 name = "markup"
 description = "HTML's elements as read from text, shared by the languages that hold markup (HTML, PHP, Blade, Twig, JSX) and Emmet: the void ones, the last still open, and HTML as plain text (extensible rules per tag)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "database-console"
 description = "Query consoles: a data source's SQL in a real .sql file of the project's own folder (consoles/<source>/<name>.sql), its bar above the editor (Run, Stop, Explain, the transaction's mode, Playground / Script, the database and schema it runs on), the statement under the cursor, the selection or the whole script run on a connection of the console's own (made through the explorer's ConsoleAccess: the same password, startup script and read-only), closed with the console or once idle. Explain and Explain Analyze profile the statement through the driver (kept per console in memory, bounded, its summary and tree in the Output; a profile run on production confirmed once per console), analyzed with what's read of its tables on the same connection (their structures, statistics, the accepted virtual keys) and the session's runs by fingerprint: its profile seen in a tab of the Services window or of the editor (the tree with the time's heat, the costliest branch and the problems, the statement's summary, what can be optimized with the SQL suggested — copied or inserted, never run —, the steps' details, the exports). \"Jump to Query Console…\" from the Database window, a data view and the palette. Nothing connects before the first run."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

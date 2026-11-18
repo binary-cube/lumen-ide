@@ -1,7 +1,6 @@
 [package]
 name = "app-updates"
 description = "The app's own updates, as rules: versions compared (SemVer, pre-releases), the releases' list and the signed manifest read, the file for this system chosen, the release's notes as lines to show."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

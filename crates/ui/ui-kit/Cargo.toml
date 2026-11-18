@@ -1,7 +1,6 @@
 [package]
 name = "ui-kit"
 description = "Our own UI kit: element tree, layout, focus, input, virtualized lists."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "database-explorer"
 description = "Data sources at work, and their data view (the grid over a table: SQLite files opened as data, CSV files beside their text): one session per open source, its requests run one at a time in the background (the latest page of a table wins, any can be cancelled, idle sessions closed, all of them with their project), and the table repository the grid reads through (pages cached within a memory limit, the next one read ahead, changes applied in one transaction, each update or delete changing exactly one row). The Database tool window lists the data sources configured (the project's and every project's, kept by `storage`) and reads their tables as they're opened. Nothing runs until a source opens."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

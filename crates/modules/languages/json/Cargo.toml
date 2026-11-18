@@ -1,7 +1,6 @@
 [package]
 name = "lang-json"
 description = "The JSON module: language, grammar, content sniffer, folding with the key count."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

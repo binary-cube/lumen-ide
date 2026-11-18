@@ -1,7 +1,6 @@
 [package]
 name = "settings-model"
 description = "Settings bounded context: layered configuration (default, user, project)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "task-manager"
 description = "The Task Manager: what each part of the app (its own and the modules') costs — CPU, memory, GPU — gathered in the background, sortable and filterable."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "canvas"
 description = "The canvas: the dependency graph between files, classes and functions, with their code."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

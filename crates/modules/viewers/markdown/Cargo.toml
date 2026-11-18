@@ -1,7 +1,6 @@
 [package]
 name = "viewer-markdown"
 description = "The Markdown preview: rendered on the GPU, next to the source (Editor / Split / Preview)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "languages"
 description = "Language bounded context: the Language contract, language detection, layers and injections."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

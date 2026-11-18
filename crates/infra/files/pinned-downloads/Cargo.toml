@@ -1,7 +1,6 @@
 [package]
 name = "pinned-downloads"
 description = "Downloads checked before use: HTTPS only from the hosts the caller allows (every redirect too), each file against its pinned SHA-256 / SHA-512, large ones resumed from a `.part`, size caps; archives (tar.gz, tar.xz, zip, one gzipped program) unpacked by our own code, nothing written outside their folder."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

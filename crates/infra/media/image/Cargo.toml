@@ -1,7 +1,6 @@
 [package]
 name = "image-decode"
 description = "Image decoding (PNG, JPEG, GIF, WebP, BMP, ICO, SVG) into RGBA8 pixels."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

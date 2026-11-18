@@ -1,7 +1,6 @@
 [package]
 name = "emmet"
 description = "Emmet: abbreviations expanded on Tab in HTML (div.card#main, ul>li*3, a[href], !, lorem…)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

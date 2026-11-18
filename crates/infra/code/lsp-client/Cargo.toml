@@ -1,7 +1,6 @@
 [package]
 name = "lsp-client"
 description = "Generic LSP client: JSON-RPC over a server's stdio, documents kept in step, its answers as the Intelligence ports' — one driver thread per server, restarted after a crash."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

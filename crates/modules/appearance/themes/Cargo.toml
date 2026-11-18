@@ -1,7 +1,6 @@
 [package]
 name = "themes-builtin"
 description = "The module with the bundled themes (dark, light and more)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

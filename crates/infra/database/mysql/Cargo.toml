@@ -1,7 +1,6 @@
 [package]
 name = "db-mysql"
 description = "MySQL and MariaDB for the `database` domain (mysql_async, pure Rust, rustls): sessions on a small runtime of their own, rows streamed through the text protocol, statements stopped by `KILL QUERY` from a second connection; databases (its schemas) / tables / columns / indexes / keys from information_schema, pages by key, the transaction's state as the server says it; for the console, warnings as notices, errors with their place (`near … at line N`), plans from `EXPLAIN FORMAT=JSON` and profiles from MySQL 8.0.18's `EXPLAIN ANALYZE` and MariaDB's `ANALYZE FORMAT=JSON` (every key kept), run in a read-only transaction of its own or a savepoint and rolled back, with the session's counters, the tables' statistics, and the catalog read in bulk, for MySQL 5.7 and MariaDB 10.2 to the newest."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

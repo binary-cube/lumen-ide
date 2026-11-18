@@ -1,7 +1,6 @@
 [package]
 name = "keep-awake"
 description = "Keep awake: the computer doesn't go to sleep while it's on (an AI working in a terminal, transfers, a long indexing) — its button above Focus mode's, its settings on its own page; the system's hold taken once for the whole app and let go when it's off or the app ends."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "fw-symfony"
 description = "Symfony: the project's Twig templates and routes — completion, go to definition, hover."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

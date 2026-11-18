@@ -250,7 +250,7 @@ pub fn shell_env(
         }
     };
     give("COLORTERM", "truecolor");
-    give("TERM_PROGRAM_VERSION", env!("CARGO_PKG_VERSION"));
+    give("TERM_PROGRAM_VERSION", kernel::brand::version());
     give("CLICOLOR", "1");
     give("LS_COLORS", LS_COLORS);
     give("LSCOLORS", LSCOLORS);

@@ -1,7 +1,6 @@
 [package]
 name = "diagram-files"
 description = "The project's diagrams: the Diagrams window listing the .drawio files kept in the project's folder, New Diagram, folders, renames, moves; whatever opens .drawio opens them."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

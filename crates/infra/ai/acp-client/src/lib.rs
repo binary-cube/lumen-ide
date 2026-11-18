@@ -303,7 +303,7 @@ impl AgentProcess {
             reading.lock().unwrap_or_else(PoisonError::into_inner).tell(Event::Exited);
             woken();
         });
-        let version = env!("CARGO_PKG_VERSION");
+        let version = kernel::brand::version();
         shared.lock().unwrap_or_else(PoisonError::into_inner).ask(
             "initialize",
             wire::initialize("editor", version),

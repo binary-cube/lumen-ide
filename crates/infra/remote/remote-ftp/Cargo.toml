@@ -1,7 +1,6 @@
 [package]
 name = "remote-ftp"
 description = "FTP and FTPS (explicit / implicit TLS, rustls) for remote projects: the `remote` domain's RemoteFs / Connector ports."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

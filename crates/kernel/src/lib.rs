@@ -19,9 +19,7 @@ pub mod secret;
 pub mod text;
 pub mod work;
 
-pub use cache::{
-    APP_VERSION, GenerationalCache, Interner, Memo, Packed, Purge, SharedMemo, cache_stamp,
-};
+pub use cache::{GenerationalCache, Interner, Memo, Packed, Purge, SharedMemo, cache_stamp};
 pub use color::Rgba;
 pub use event::{DomainEvent, EventBus, Subscription};
 pub use fuzzy::{FuzzyStyle, fuzzy_match, fuzzy_score};

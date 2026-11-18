@@ -1,7 +1,6 @@
 [package]
 name = "database-sqlite"
 description = "The SQLite driver, as a module: its factory for the data sources, and SQLite files (.sqlite, .sqlite3, .db, .db3) recognized by their header, only their first bytes read. Nothing of SQLite runs until a source opens."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

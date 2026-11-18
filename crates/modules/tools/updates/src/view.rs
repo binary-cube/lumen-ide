@@ -176,7 +176,7 @@ impl Viewer for NotesView {
         let notes = self.notes.as_ref()?;
         Some(i18n::tr!(
             "updates.notes_subtitle",
-            current = kernel::brand::VERSION,
+            current = kernel::brand::version(),
             date = notes.date.as_str(),
             size = i18n::bytes(notes.size)
         ))

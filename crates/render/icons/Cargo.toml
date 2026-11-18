@@ -1,7 +1,6 @@
 [package]
 name = "icons"
 description = "SVG icons: rasterized (resvg) as masks tinted by the theme, through the glyph atlas."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

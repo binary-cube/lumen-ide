@@ -1,7 +1,6 @@
 [package]
 name = "text-layout"
 description = "Text: shaping, font fallback, rasterization and the glyph atlas."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

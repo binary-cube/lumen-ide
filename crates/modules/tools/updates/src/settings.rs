@@ -19,7 +19,7 @@ pub const PRERELEASES: Setting<bool> = Setting::new("updates", "prereleases", ru
 pub const SKIPPED: Setting<String> = Setting::new("updates", "skipped", String::new);
 
 fn running_a_beta() -> bool {
-    app_updates::Version::parse(kernel::brand::VERSION).is_some_and(|v| v.is_pre())
+    app_updates::Version::parse(kernel::brand::version()).is_some_and(|v| v.is_pre())
 }
 
 /// What the settings say.
@@ -93,7 +93,7 @@ impl SettingsContribution for UpdatesSettings {
     fn block(&self, scope: SettingsScope<'_>) -> SettingsBlock {
         let s = scope.settings;
         let mut notes =
-            vec![i18n::tr!("updates.settings_version", version = kernel::brand::VERSION)];
+            vec![i18n::tr!("updates.settings_version", version = kernel::brand::version())];
         let skipped = s.get(&SKIPPED);
         if !skipped.is_empty() {
             notes.push(i18n::tr!("updates.settings_skipped", version = skipped.as_str()));

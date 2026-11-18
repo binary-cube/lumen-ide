@@ -1,7 +1,6 @@
 [package]
 name = "path-marks"
 description = "The user's marks on the project's folders and files: what's indexed and how."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

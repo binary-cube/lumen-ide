@@ -1,7 +1,6 @@
 [package]
 name = "render-software"
 description = "The software (CPU) rendering driver, for headless tests and as a fallback."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

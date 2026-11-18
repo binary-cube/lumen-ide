@@ -1,7 +1,6 @@
 [package]
 name = "workbench-model"
 description = "Workbench bounded context: UI state (layout, panels, tabs, focus) without rendering, and the port modules act through."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "database-csv"
 description = "The CSV driver, as a module: its factory for the data sources, and CSV / TSV files (.csv, .tsv, .tab) recognized by their extension and a text start, only their first bytes read. Nothing of it runs until a source opens."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

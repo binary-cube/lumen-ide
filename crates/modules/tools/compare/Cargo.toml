@@ -1,7 +1,6 @@
 [package]
 name = "compare"
 description = "Comparing two files (or a file / selection with the clipboard): aligned differences, including within lines, and composing a new file from left / right (as in a merge)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

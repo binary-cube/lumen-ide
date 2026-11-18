@@ -1,7 +1,6 @@
 [package]
 name = "ui-components"
 description = "What modules build their views with, kept apart from the workbench's own screens (so changing those recompiles only the app): the Viewer contract, the design system (ds), the palette, splitters, tooltips, side panels, the color picker, code drawing."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

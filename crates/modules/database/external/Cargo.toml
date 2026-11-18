@@ -1,7 +1,6 @@
 [package]
 name = "database-external"
 description = "Drivers installed apart, as a module: the drivers' manifests (`drivers/<name>/driver.toml` in the config folder) read the first time a driver is asked for, each one listed among the drivers (marked external), its files and its value editors known — its program started only when a session of it opens, through the drivers' protocol (`db-protocol`)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

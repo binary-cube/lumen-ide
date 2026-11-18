@@ -1,7 +1,6 @@
 [package]
 name = "lang-http"
 description = "The .http module: HTTP request files (`.http`, `.rest`, the syntax shared by HTTP clients), their grammar (vendored rest-nvim tree-sitter-http), colors (a request's body in its own language, its scripts in JavaScript), folding per request."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

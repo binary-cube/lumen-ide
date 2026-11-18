@@ -1,7 +1,6 @@
 [package]
 name = "db-csv"
 description = "CSV files for the `database` domain, read with the domain's own CSV rules: one table per file, its dialect, style and column types guessed from its start, an index of record offsets built in chunks (cancelled, resumed) so pages are read by seek and never the whole file, sorting and filtering up to a size, rows found by place and fingerprint, and commits streamed into a temporary copy renamed over the original (checked unchanged first; retried while another program holds it on Windows), bytes not changed copied as they were."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

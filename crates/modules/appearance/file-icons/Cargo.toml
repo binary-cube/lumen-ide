@@ -1,7 +1,6 @@
 [package]
 name = "file-icons"
 description = "File icons in the tree and tabs, by name, glob or extension."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

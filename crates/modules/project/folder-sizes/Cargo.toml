@@ -1,7 +1,6 @@
 [package]
 name = "folder-sizes"
 description = "Folder sizes: how much a folder holds, folder by folder (a pie of the biggest, a list to go down into), measured on a worker and kept in the project's data folder with when it was."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

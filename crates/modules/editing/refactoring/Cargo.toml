@@ -1,7 +1,6 @@
 [package]
 name = "refactoring"
 description = "Refactoring: rename a symbol everywhere it's used (PHP, JS, CSS, HTML), with a preview of every place before applying, and undo."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

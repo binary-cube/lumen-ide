@@ -1,7 +1,6 @@
 [package]
 name = "updates"
 description = "The app's updates: a newer version looked for on GitHub and told once (its notes, What's New), downloaded only when the user chooses, then put in place as the app restarts with its windows — the work still running and the unsaved files asked about first."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

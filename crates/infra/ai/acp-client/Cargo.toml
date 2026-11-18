@@ -1,7 +1,6 @@
 [package]
 name = "acp-client"
 description = "An agent run as a process the editor talks to with the Agent Client Protocol: JSON-RPC over its standard input and output, its session opened or taken up again, its updates as events."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

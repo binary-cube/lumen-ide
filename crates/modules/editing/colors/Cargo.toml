@@ -1,7 +1,6 @@
 [package]
 name = "colors"
 description = "Colors in code: finds them (hex, rgb, hsl, CSS names) for the gutter swatch and writes them back from the picker."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

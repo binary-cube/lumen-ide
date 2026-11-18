@@ -1,7 +1,6 @@
 [package]
 name = "i18n"
 description = "Translations: catalogs per language, ICU messages (arguments, CLDR plurals, select), catalogs contributed by modules."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

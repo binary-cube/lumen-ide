@@ -1,7 +1,6 @@
 [package]
 name = "code-intelligence"
 description = "Intelligence bounded context: symbols, index, name resolution, completion and go to definition."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

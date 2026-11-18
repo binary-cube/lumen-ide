@@ -1,7 +1,6 @@
 [package]
 name = "mcp-server"
 description = "The editor's MCP server: agents on the machine use the editor (files opened, the selection, the open tabs, an open file's text) through tools the modules offer; off until turned on."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

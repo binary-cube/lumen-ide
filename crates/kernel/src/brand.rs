@@ -15,8 +15,19 @@ pub const BUNDLE_ID: &str = env!("BRAND_BUNDLE_ID");
 /// there.
 pub const REPOSITORY: &str = env!("BRAND_REPOSITORY");
 
-/// The app's version (the workspace's: every crate shares it).
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The app's version, as the app set it at its start ([`set_version`]: its own package's);
+/// `0.0.0` before (a test). Given at run time, not built into every crate: only the app's
+/// package carries the release's version, so a new one rebuilds the app, not the workspace.
+pub fn version() -> &'static str {
+    VERSION.get().copied().unwrap_or("0.0.0")
+}
+
+/// The app's version, set once at its start (`kernel::brand::version()` of its package).
+pub fn set_version(version: &'static str) {
+    let _ = VERSION.set(version);
+}
+
+static VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 
 /// The app's icon (256 × 256 PNG, round art on a transparent background, made by `cargo
 /// xtask icon`): the windows' and the Dock's (outside the bundle), the calm scene's mark.

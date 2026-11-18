@@ -1,7 +1,6 @@
 [package]
 name = "lang-html"
 description = "The HTML module: language, grammar, injections (JS, CSS, JSON), folding."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

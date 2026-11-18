@@ -1,7 +1,6 @@
 [package]
 name = "web-fetch"
 description = "Files from the web for what a document shows (a Markdown preview's images): limited, without credentials, cached on disk in a capped folder."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

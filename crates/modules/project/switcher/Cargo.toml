@@ -1,7 +1,6 @@
 [package]
 name = "project-switcher"
 description = "Switching between the projects open in the app's windows: each its number while it's open and its shortcut (⌥⌘1…9, shown in the top bar after the git branch), and a modal listing them to filter and bring one to the front."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

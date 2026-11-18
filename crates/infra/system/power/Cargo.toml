@@ -1,7 +1,6 @@
 [package]
 name = "power-system"
 description = "The system's own way to keep the computer awake (the `power` port): an IOKit assertion on macOS, a power request on Windows, a systemd inhibitor on Linux — each let go when its hold is dropped, and by the system when the process ends."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

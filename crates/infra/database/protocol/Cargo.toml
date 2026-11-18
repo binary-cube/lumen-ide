@@ -1,7 +1,6 @@
 [package]
 name = "db-protocol"
 description = "The drivers' protocol: a driver installed apart (a program of any language, a bridge to JDBC) as an ordinary `database` driver. Versioned messages (serde, JSON-RPC in Content-Length frames as LSP's) for the handshake, the connection (its password only through the pipe, never in arguments, the environment or a log), tables, structure, pages with their rows' keys, counts, statements, row changes and structure changes (planned, shown, run as shown), cancel and exit, and (protocol 2) the console: statements run with their rows streamed in `$/rows` notifications, cursors, plans, transactions, the schema, the catalog in bulk, errors with their place and SQLSTATE — a driver of the first version still served, in a limited console —, and (protocol 3) profiles in the editor's normalized model (their own format number, newer ones read as far as understood, every extra kept with its type) and the tables' statistics, a driver of protocol 2 profiled through its plans; the client over a child process (no shell, no console window on Windows, its error output kept short and scrubbed of the password, killed when its session closes, a crash or a silence said and the next request starting it again); the adapter making it a `Driver`; the driver's side for drivers written in Rust; the manifests (`driver.toml`) drivers are installed with."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

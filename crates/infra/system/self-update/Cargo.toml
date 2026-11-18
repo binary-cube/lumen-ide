@@ -1,7 +1,6 @@
 [package]
 name = "self-update"
 description = "The app's own updates, done: the newest release asked of GitHub, its manifest's signature checked with the project's key, this system's file downloaded and checked, unpacked beside the app; then, the app closed, a helper puts it in the app's place (the old one kept until it worked) and starts it again."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

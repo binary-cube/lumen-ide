@@ -1,7 +1,6 @@
 [package]
 name = "agent-files"
 description = "What every agent's module reads on disk alike: its program found where installers put it, its sessions' files listed with limits (no links followed) and kept by their stamps, bounded reads."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

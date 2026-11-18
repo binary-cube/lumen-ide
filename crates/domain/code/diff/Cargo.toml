@@ -1,7 +1,6 @@
 [package]
 name = "diff"
 description = "The differences between two texts (by line and within lines) and composing a new text from pieces chosen left / right."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

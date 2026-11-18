@@ -141,7 +141,7 @@ impl ProtocolDriver {
         let connection = Connection::new(&name, self.launch.launch()?)?;
         let ours = VERSIONS.pair();
         let initialize =
-            dto::Initialize { protocol: VERSIONS, editor: env!("CARGO_PKG_VERSION").to_owned() };
+            dto::Initialize { protocol: VERSIONS, editor: kernel::brand::version().to_owned() };
         let hello: dto::Initialized =
             connection.call(method::INITIALIZE, &initialize, None, HANDSHAKE_TIMEOUT, ours)?;
         if !VERSIONS.contains(hello.protocol) {

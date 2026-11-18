@@ -1,7 +1,6 @@
 [package]
 name = "refactor"
 description = "Refactoring: the plan of changes (rename, signature) across the project's files, applying and undoing it; each language's rules come through ports."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

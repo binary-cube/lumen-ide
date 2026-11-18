@@ -1,7 +1,6 @@
 [package]
 name = "code-quality"
 description = "Code quality bounded context: formatters and checkers (what they are, what's chosen per project, how a run is planned and its output read), the runs on a file kept from overlapping, their events."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

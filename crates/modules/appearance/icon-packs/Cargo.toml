@@ -1,7 +1,6 @@
 [package]
 name = "icon-packs"
 description = "Icon packs with other drawings for the interface (Lucide, Tabler, Phosphor, Material Symbols, Remix Icon, Heroicons, Fluent, Iconoir, Bootstrap Icons, Octicons, Ionicons) and file icon sets (Material, Catppuccin, Symbols, vscode-icons), each a module, read only once chosen."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

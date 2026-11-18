@@ -1,6 +1,7 @@
 //! Serves LSP on stdin / stdout (`--stdio`, what editors pass, is the only way it talks).
 
 fn main() -> std::process::ExitCode {
+    kernel::brand::set_version(env!("CARGO_PKG_VERSION"));
     if std::env::args().any(|a| a == "--version") {
         println!("{}", env!("CARGO_PKG_VERSION"));
         return std::process::ExitCode::SUCCESS;

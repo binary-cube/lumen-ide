@@ -115,7 +115,7 @@ fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
             Notification::info(i18n::tr!("updates.available_title", app = app, version = version))
                 .with_detail(i18n::tr!(
                     "updates.available_detail",
-                    current = kernel::brand::VERSION
+                    current = kernel::brand::version()
                 ))
                 .with_action(t("updates.whats_new"), WHATS_NEW)
                 .with_action(t("updates.update"), INSTALL),
@@ -151,7 +151,7 @@ fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
             let told = ours(Notification::success(i18n::tr!(
                 "updates.up_to_date",
                 app = app,
-                version = kernel::brand::VERSION
+                version = kernel::brand::version()
             )));
             state::forget_notification();
             told

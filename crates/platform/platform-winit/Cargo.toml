@@ -1,7 +1,6 @@
 [package]
 name = "platform-winit"
 description = "The platform implementation over winit."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

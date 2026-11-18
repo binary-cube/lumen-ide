@@ -1,7 +1,6 @@
 [package]
 name = "fw-vue"
 description = "Vue: template directives (v-if, v-for, v-model…) and the Composition API — completion, hover, parameter help."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

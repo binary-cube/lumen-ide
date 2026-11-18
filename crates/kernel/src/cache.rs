@@ -276,9 +276,6 @@ impl<K: Clone> ToOwnedKey<K> for K {
     }
 }
 
-/// The application version (all crates share the workspace version).
-pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
-
 /// The stamp written in the header of an on-disk cache: the app version combined with
 /// the cache's own `format` version. A cache with another stamp (older / newer app, or a
 /// format change) is ignored and rebuilt — a new release never reads data it might
@@ -286,7 +283,7 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub fn cache_stamp(format: u32) -> u64 {
     // FNV-1a over the version text and the format number.
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in APP_VERSION.bytes().chain(format.to_le_bytes()) {
+    for byte in crate::brand::version().bytes().chain(format.to_le_bytes()) {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0100_0000_01b3);
     }

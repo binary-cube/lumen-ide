@@ -1,7 +1,6 @@
 [package]
 name = "vector-tiles"
 description = "Outlines (lines, cubic curves, closed paths) and their rasterization off the UI thread into tiles of alpha masks, one per color, with the shapes diagrams are drawn with (rounded boxes, ellipses, diamonds, cylinders, clouds, documents, notes, arrows…): shared by the Markdown preview's Mermaid diagrams and the diagram editor."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

@@ -1,7 +1,6 @@
 [package]
 name = "data-extractors"
 description = "Data extractors, as a module: the choice a grid's toolbar makes kept per project (its own project.toml), \"Skip Computed / Skip Generated Columns\" and the separated formats (CSV, TSV, pipes, semicolons, the user's own: separator, quote, header, NULL's text, line ending) kept in the settings and edited in \"Configure CSV Formats…\", handed to the catalog every grid copies and exports through; the user's own extractors — *.extractor templates in the project's own folder and the config folder, read in the background and again when they change, their errors shown where they are, a few examples made by \"Go to Extractors Directory\" — and their files as a language (colored by the Twig grammar, completed)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

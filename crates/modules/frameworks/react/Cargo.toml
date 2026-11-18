@@ -1,7 +1,6 @@
 [package]
 name = "fw-react"
 description = "React: the signatures of hooks and the API — hover, parameter help, completion."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

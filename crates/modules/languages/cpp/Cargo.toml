@@ -1,7 +1,6 @@
 [package]
 name = "lang-cpp"
 description = "The C / C++ module: the languages, their grammars, folding, clangd as their server."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

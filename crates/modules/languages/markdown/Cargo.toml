@@ -1,7 +1,6 @@
 [package]
 name = "lang-markdown"
 description = "The Markdown module: language, grammars (blocks and inline text), colors, folding by section, code blocks in their own language, headings as its structure."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

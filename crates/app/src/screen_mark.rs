@@ -34,7 +34,7 @@ impl ScreenWidget for ScreenMark {
     fn open(&self, _ctx: &WidgetContext) -> Option<Box<dyn WidgetView>> {
         Some(Box::new(Mark {
             logo: Logo::Unasked,
-            version: format!("v{}", kernel::brand::VERSION),
+            version: format!("v{}", kernel::brand::version()),
         }))
     }
 }

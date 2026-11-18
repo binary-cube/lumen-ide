@@ -1,7 +1,6 @@
 [package]
 name = "diagram-editor"
 description = "The diagram editor (plan 80): `.drawio` files opened as tabs — the sheet, its shapes, edges and texts drawn from draw.io's own format, pan and zoom, the pages as tabs."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

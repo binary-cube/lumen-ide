@@ -51,7 +51,7 @@ fn schedule(delay: Duration) {
 /// GitHub asked for a newer version (`manual`: the user asked — "up to date" said too, and
 /// a failure). One found already being downloaded or ready isn't asked about again.
 pub fn check(manual: bool) {
-    let Some(current) = Version::parse(kernel::brand::VERSION) else { return };
+    let Some(current) = Version::parse(kernel::brand::version()) else { return };
     if !state::begin_look(manual) {
         return;
     }

@@ -1,7 +1,6 @@
 [package]
 name = "http-transport"
 description = "The HTTP requests' transport (plan 77): `http-requests`' port implemented with ureq — any method, headers, a body of bytes and files sent as they're read, redirects followed one by one (each seen), the project's cookies, TLS (verified unless asked not to), timeouts, a large body spilled to a file, cancellable between reads."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

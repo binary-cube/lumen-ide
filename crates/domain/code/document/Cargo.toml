@@ -1,7 +1,6 @@
 [package]
 name = "document"
 description = "Document bounded context: text content and editing (buffer, selections, transactions, history)."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

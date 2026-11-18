@@ -1,7 +1,6 @@
 [package]
 name = "files"
 description = "Safe file writes shared by the adapters: atomic (a temporary file synced, then renamed over the target), and private ones readable only by the user from the start."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true

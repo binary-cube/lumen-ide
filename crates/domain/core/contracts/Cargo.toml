@@ -1,7 +1,6 @@
 [package]
 name = "contracts"
 description = "What modules ask of each other without knowing each other: the requests and the data they carry."
-version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
