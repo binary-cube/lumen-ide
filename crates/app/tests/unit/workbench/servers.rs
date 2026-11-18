@@ -179,7 +179,14 @@ impl Opened {
             if done(&mut self.wb, &seen.lock().unwrap()) {
                 return;
             }
-            assert!(Instant::now() < until, "timed out waiting for {what}");
+            if Instant::now() >= until {
+                // What the server was asked, and the documents it has: where it stopped.
+                let seen = seen.lock().unwrap();
+                let mut asked: Vec<&String> = seen.methods.iter().collect();
+                asked.dedup();
+                let documents: Vec<&String> = seen.documents.keys().collect();
+                panic!("timed out waiting for {what}; asked: {asked:?}; documents: {documents:?}");
+            }
             std::thread::sleep(Duration::from_millis(5));
         }
     }
