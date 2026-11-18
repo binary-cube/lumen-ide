@@ -8803,6 +8803,7 @@ dependencies = [
  "command-model",
  "contracts",
  "extensions",
+ "files",
  "i18n",
  "icons",
  "kernel",
