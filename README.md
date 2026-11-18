@@ -252,4 +252,8 @@ The MCP server, off until you turn it on, listens only on your own machine.
 
 ## License
 
-[MIT](LICENSE). Bundled third-party grammars keep their own licenses (`third_party/`).
+Lumen is under the [MIT license](LICENSE).
+
+The parts of other projects it carries keep their own licenses: the syntax grammars in
+[`third_party`](third_party), each in its folder with its license file, and the language
+servers it can download, listed with theirs in [`packaging/lsp/NOTICE`](packaging/lsp/NOTICE).
