@@ -1,6 +1,6 @@
 //! An update made ready: this system's file downloaded into the updates' folder (resumed if
 //! it broke off, checked against the manifest's SHA-256 and size), unpacked there by our
-//! own code, the new app found in it and noted (`staged.toml`) for the helper that puts it
+//! own code, the new app found in it and noted (`staged.toml`) for what puts it
 //! in place. Nothing of the app running is touched.
 
 use std::path::{Path, PathBuf};
@@ -11,7 +11,7 @@ use pinned_downloads::fetch::{Fetch, Pin, fetch_file};
 
 use crate::check::Available;
 
-/// What the helper reads in a staged update's folder.
+/// What putting it in place reads in a staged update's folder.
 pub const STAGED: &str = "staged.toml";
 
 /// An update ready to be put in place.
@@ -97,7 +97,7 @@ fn sha256(path: &Path) -> Option<Vec<u8>> {
     Some(context.finish().as_ref().to_vec())
 }
 
-/// `staged` noted in its folder, for the helper.
+/// `staged` noted in its folder, for putting it in place.
 fn write(staged: &Staged) -> std::io::Result<()> {
     let mut table = toml::Table::new();
     table.insert("version".into(), toml::Value::String(staged.version.clone()));

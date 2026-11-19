@@ -1,33 +1,28 @@
-//! An update put in place, once the app closed (plan 84f). The app, quitting, starts the
-//! helper ([`start_helper`]): a copy of its own program in the temporary folder (so it
-//! doesn't run from what it replaces), told the staged update, where the app is and the
-//! session to reopen, with a pipe the app holds until it ends. The helper ([`apply_main`])
-//! waits for that pipe to close (the app gone, on every system alike), sets the app aside,
-//! puts the new one in its place — the old one given back if that fails —, notes how it
-//! went ([`take_result`]: told by the app at its next start) and starts the app again, which
-//! reopens its windows.
+//! An update put in place by the app itself (plan 85), while it still runs: the app set
+//! aside beside it (`Lumen.app.old`, `lumen.exe.old` — a running program can be renamed on
+//! every system, Windows included), the new one moved to its place, the old one given back
+//! if that fails ([`put_in_place`]). Then the app quits and starts again ([`restart`]): on
+//! macOS opened by the system (`open`), so the new app answers for itself (what it was
+//! allowed is kept); elsewhere the new program started at once. Started so, it waits for
+//! the old process to end ([`WAIT_ARG`], [`wait_for`]) before anything else, and reopens
+//! the session. What's set aside goes at its next start ([`clean_left`]).
 
 use std::ffi::OsString;
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{ChildStdin, Command, Stdio};
-use std::sync::{Mutex, PoisonError};
-use std::time::Duration;
+use std::process::{Command, Stdio};
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
-use crate::stage::{self, Staged};
+use crate::stage;
 
-/// The helper's first argument (then the staged folder).
-pub const HELPER_ARG: &str = "--apply-update";
-/// Where the app is (what's replaced).
-pub const TARGET_ARG: &str = "--target";
 /// Started again with the session to reopen (its id, 32 hex digits).
 pub const REOPEN_ARG: &str = "--reopen-session";
+/// Started again with the process to wait for first (the app before the update: its id).
+pub const WAIT_ARG: &str = "--wait-for";
 /// How the last update went, in the updates' folder.
 pub const RESULT: &str = "result.toml";
-
-/// The pipes to the helpers started: held until this process ends (the helper waits for
-/// that).
-static HELD: Mutex<Vec<ChildStdin>> = Mutex::new(Vec::new());
+/// How long a new start waits for the old process at most.
+const WAIT_MOST: Duration = Duration::from_secs(30);
 
 /// What's replaced for the program at `exe`: its bundle on macOS (`…/Name.app/Contents/
 /// MacOS/name`), the program itself elsewhere.
@@ -41,6 +36,13 @@ pub fn target(exe: &Path) -> PathBuf {
     }
 }
 
+/// This app's place ([`target`] of this program), known from its start: once an update
+/// is in place, this program's own path may name the one set aside (Linux, Windows).
+pub fn place() -> Option<PathBuf> {
+    static PLACE: OnceLock<Option<PathBuf>> = OnceLock::new();
+    PLACE.get_or_init(|| std::env::current_exe().ok().map(|exe| target(&exe))).clone()
+}
+
 /// Whether the app at `target` can be replaced by this user: its folder takes a new file
 /// (`/Applications` of another user, `Program Files`, a read-only volume don't).
 pub fn writable(target: &Path) -> bool {
@@ -51,30 +53,78 @@ pub fn writable(target: &Path) -> bool {
     made
 }
 
-/// The helper started for `staged`, the app at `target` (the session `reopen` reopened
-/// after): it waits until this process ends.
-pub fn start_helper(staged: &Staged, target: &Path, reopen: Option<u128>) -> Result<(), String> {
-    let exe = std::env::current_exe().map_err(|e| format!("this program: {e}"))?;
-    let helper = std::env::temp_dir().join(format!(
-        "{}-update-{}{}",
-        kernel::brand::ID,
-        kernel::id::uuid_text(kernel::id::new_uuid()),
-        std::env::consts::EXE_SUFFIX
-    ));
-    std::fs::copy(&exe, &helper).map_err(|e| format!("{}: {e}", helper.display()))?;
-    let mut command = Command::new(&helper);
-    command.arg(HELPER_ARG).arg(&staged.dir).arg(TARGET_ARG).arg(target);
-    if let Some(id) = reopen {
-        command.arg(REOPEN_ARG).arg(kernel::id::uuid_text(id));
+/// The update staged in `dir` put in this app's place ([`place`]), the app still running;
+/// how it went noted for its next start. The new version, or why not (the app as it was).
+pub fn put_in_place(dir: &Path) -> Result<String, String> {
+    let target = place().ok_or("this program's path is unknown")?;
+    let version = apply(dir, &target)?;
+    if let Some(root) = dir.parent()
+        && let Err(e) = note(root, &Outcome { version: version.clone(), error: None })
+    {
+        tracing::warn!("how the update went couldn't be noted: {e}");
     }
-    command.stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null());
+    tracing::info!(%version, target = %target.display(), "the update is in place");
+    Ok(version)
+}
+
+/// The app started again (this process ending: the new one waits for it), the session
+/// `reopen` reopened by it. `false` if it couldn't be.
+pub fn restart(reopen: Option<u128>) -> bool {
+    let Some(target) = place() else { return false };
+    let reopen = reopen.map(kernel::id::uuid_text);
+    let (program, args) = restart_command(&target, std::process::id(), reopen.as_deref());
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     detach(&mut command);
-    let mut child = command.spawn().map_err(|e| format!("{}: {e}", helper.display()))?;
-    if let Some(pipe) = child.stdin.take() {
-        HELD.lock().unwrap_or_else(PoisonError::into_inner).push(pipe);
+    match command.spawn() {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::warn!(target = %target.display(), "the app couldn't be started again: {e}");
+            false
+        }
     }
-    tracing::info!(version = %staged.version, target = %target.display(), "the update's helper started");
-    Ok(())
+}
+
+/// What starts the app at `target` again: an app bundle opened by the system (`open -n`:
+/// the new app answers for itself, never the old one), a program at once; told to wait for
+/// `pid` and to reopen `reopen`.
+pub fn restart_command(target: &Path, pid: u32, reopen: Option<&str>) -> (PathBuf, Vec<OsString>) {
+    let mut args: Vec<OsString> = Vec::new();
+    let bundle = target.extension().is_some_and(|e| e == "app");
+    let program = if bundle && cfg!(target_os = "macos") {
+        args.extend(["-n".into(), target.as_os_str().to_owned(), "--args".into()]);
+        PathBuf::from("/usr/bin/open")
+    } else if bundle {
+        target.join("Contents").join("MacOS").join(kernel::brand::ID)
+    } else {
+        target.to_path_buf()
+    };
+    args.extend([WAIT_ARG.into(), pid.to_string().into()]);
+    if let Some(id) = reopen {
+        args.extend([REOPEN_ARG.into(), id.into()]);
+    }
+    (program, args)
+}
+
+/// Process `pid` waited for until it ends (at most [`WAIT_MOST`]): a new start after an
+/// update, before anything else (the old one still closing would take its place).
+pub fn wait_for(pid: u32) {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let pid = Pid::from_u32(pid);
+    let mut system = System::new();
+    let since = Instant::now();
+    while since.elapsed() < WAIT_MOST {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        if system.process(pid).is_none() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    tracing::warn!(pid = pid.as_u32(), "the app before the update still runs: started anyway");
 }
 
 /// `command` started on its own: not in the app's process group (a Ctrl-C in the terminal
@@ -101,43 +151,9 @@ pub struct Outcome {
     pub error: Option<String>,
 }
 
-/// The helper (`args`: what [`start_helper`] gave, after the program): waits for the app to
-/// end, puts the update in place, notes how it went, starts the app again. Its exit code.
-pub fn apply_main(args: &[OsString]) -> i32 {
-    let mut args = args.iter();
-    let (Some(_), Some(dir)) = (args.next(), args.next()) else { return 2 };
-    let dir = PathBuf::from(dir);
-    let mut target = None;
-    let mut reopen = None;
-    while let Some(arg) = args.next() {
-        match arg.to_str() {
-            Some(TARGET_ARG) => target = args.next().map(PathBuf::from),
-            Some(REOPEN_ARG) => reopen = args.next().and_then(|a| a.to_str()).map(str::to_owned),
-            _ => {}
-        }
-    }
-    let Some(target) = target else { return 2 };
-    // The app ends: its end of the pipe closes (whatever ends it).
-    let mut sink = Vec::new();
-    let _ = std::io::stdin().read_to_end(&mut sink);
-    std::thread::sleep(Duration::from_millis(300));
-    let outcome = match apply(&dir, &target) {
-        Ok(version) => Outcome { version, error: None },
-        Err(why) => Outcome {
-            version: stage::read(&dir).map(|s| s.version).unwrap_or_default(),
-            error: Some(why),
-        },
-    };
-    if let Some(root) = dir.parent() {
-        let _ = note(root, &outcome);
-    }
-    relaunch(&target, reopen.as_deref());
-    i32::from(outcome.error.is_some())
-}
-
 /// The staged update in `dir` put at `target`: the app there set aside first, given back if
-/// the new one can't take its place; once in place, the old one and the download go.
-/// The new version on success.
+/// the new one can't take its place; once in place, the download goes (the old one at the
+/// next start: it's still running). The new version on success.
 pub fn apply(dir: &Path, target: &Path) -> Result<String, String> {
     let staged = stage::read(dir).ok_or_else(|| format!("{}: no update staged", dir.display()))?;
     let mut aside = aside(target);
@@ -147,7 +163,8 @@ pub fn apply(dir: &Path, target: &Path) -> Result<String, String> {
         aside =
             aside.with_extension(format!("old-{}", kernel::id::uuid_text(kernel::id::new_uuid())));
     }
-    // The app's files may still be held a moment after it ends (Windows): tried again.
+    // Its files may be held a moment by another program (Windows: an antivirus, Explorer):
+    // tried again.
     retry(|| std::fs::rename(target, &aside))
         .map_err(|e| format!("{} couldn't be set aside: {e}", target.display()))?;
     let placed = retry(|| std::fs::rename(&staged.app, target)).or_else(|_| {
@@ -159,7 +176,6 @@ pub fn apply(dir: &Path, target: &Path) -> Result<String, String> {
         let _ = std::fs::rename(&aside, target);
         return Err(format!("the new version couldn't be put in place: {why}"));
     }
-    let _ = remove(&aside);
     let _ = std::fs::remove_dir_all(dir);
     Ok(staged.version)
 }
@@ -214,34 +230,6 @@ fn copy_all(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
-/// The app at `target` started again (the session `reopen` reopened by it), on its own.
-///
-/// An app bundle is opened by the system (`open -n`), not started by the helper: started
-/// by it, the helper — a lone copy of the program in the temporary folder, its signature
-/// not the app's — was the one macOS held responsible for what the app does, so every
-/// access to a protected folder (Documents…) asked again, the answer kept for no one.
-fn relaunch(target: &Path, reopen: Option<&str>) {
-    let bundle = target.extension().is_some_and(|e| e == "app");
-    let mut command = if bundle && cfg!(target_os = "macos") {
-        let mut open = Command::new("/usr/bin/open");
-        open.arg("-n").arg(target);
-        if reopen.is_some() {
-            open.arg("--args");
-        }
-        open
-    } else if bundle {
-        Command::new(target.join("Contents").join("MacOS").join(kernel::brand::ID))
-    } else {
-        Command::new(target)
-    };
-    if let Some(id) = reopen {
-        command.arg(REOPEN_ARG).arg(id);
-    }
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    detach(&mut command);
-    let _ = command.spawn();
-}
-
 /// What earlier updates left beside the app at `target` (`Lumen.app.old`, `….old-<id>`: set
 /// aside, not removable then) removed — best effort, at the app's start.
 pub fn clean_left(target: &Path) {
@@ -280,8 +268,8 @@ pub fn take_result(root: &Path) -> Option<Outcome> {
     })
 }
 
-/// The helpers' copies of the program left in the temporary folder (one can't delete
-/// itself while it runs, on Windows).
+/// The copies of the program earlier versions left in the temporary folder (their update
+/// helper: one can't delete itself while it runs, on Windows).
 fn clean_helpers() {
     let prefix = format!("{}-update-", kernel::brand::ID);
     let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else { return };

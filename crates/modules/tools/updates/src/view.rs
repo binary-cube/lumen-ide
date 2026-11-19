@@ -125,6 +125,8 @@ impl NotesView {
             },
             Hit::Skip => self.finish(|host| crate::skip(host)),
             Hit::Close => {
+                // Downloaded (Later): in place for the next start.
+                crate::later();
                 self.done = true;
                 self.action = Some(ViewerAction::Close);
             }

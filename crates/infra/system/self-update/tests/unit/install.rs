@@ -36,8 +36,8 @@ fn staged(root: &Path, app_is_folder: bool) -> (PathBuf, PathBuf) {
     (dir, target)
 }
 
-/// The new app takes the old one's place (a program, a bundle alike); the old one and the
-/// download go once it's there.
+/// The new app takes the old one's place (a program, a bundle alike); the download goes once
+/// it's there, the old one waits beside it (still running) for the next start.
 #[test]
 fn an_update_takes_the_app_s_place() {
     for folder in [false, true] {
@@ -46,7 +46,9 @@ fn an_update_takes_the_app_s_place() {
         assert_eq!(apply(&dir, &target).unwrap(), "2.0.0");
         let program = if folder { target.join("Contents").join("program") } else { target.clone() };
         assert_eq!(std::fs::read(program).unwrap(), b"new");
-        assert!(!aside(&target).exists() && !dir.exists(), "nothing left behind");
+        assert!(aside(&target).exists() && !dir.exists(), "the old one aside, the download gone");
+        clean_left(&target);
+        assert!(!aside(&target).exists(), "gone at the next start");
         std::fs::remove_dir_all(&root).unwrap();
     }
 }
@@ -98,4 +100,37 @@ fn what_an_earlier_update_left_never_blocks_the_next() {
         .collect();
     assert_eq!(left, ["program"], "only the app");
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// Started again: an app bundle opened by the system on macOS (never the program itself:
+/// the new app answers for itself), a program at once — told the process to wait for and
+/// the session to reopen.
+#[test]
+fn the_app_is_started_again_waiting_for_the_old_one() {
+    let (program, args) = restart_command(Path::new("/opt/my app/app"), 42, Some("ab12"));
+    assert_eq!(program, Path::new("/opt/my app/app"));
+    assert_eq!(args, ["--wait-for", "42", "--reopen-session", "ab12"]);
+    let (program, args) = restart_command(Path::new("/Applications/My App.app"), 7, None);
+    if cfg!(target_os = "macos") {
+        assert_eq!(program, Path::new("/usr/bin/open"));
+        assert_eq!(args, ["-n", "/Applications/My App.app", "--args", "--wait-for", "7"]);
+    } else {
+        assert!(program.ends_with(Path::new("Contents/MacOS").join(kernel::brand::ID)));
+        assert_eq!(args, ["--wait-for", "7"]);
+    }
+}
+
+/// A process that isn't there (or ended): not waited for.
+#[test]
+fn an_ended_process_is_not_waited_for() {
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--list")
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    let since = std::time::Instant::now();
+    wait_for(pid);
+    assert!(since.elapsed() < std::time::Duration::from_secs(5));
 }

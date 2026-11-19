@@ -47,7 +47,7 @@ pub struct AppWindows {
     /// The session to reopen once the first window is there (the app started again after an
     /// update: `--reopen-session`).
     reopen_at_start: Option<u128>,
-    /// An update to put in place as the app ends (its staged folder): the helper's.
+    /// An update in place (its staged folder): the app started again as it ends.
     update: Option<std::path::PathBuf>,
 }
 
@@ -253,13 +253,14 @@ impl Application for AppWindows {
         control
     }
 
-    /// The settings still being written behind reach the disk; an update asked for is handed
-    /// to its helper (it waits for this process to end, then reopens this session).
+    /// The settings still being written behind reach the disk; after an update (in place
+    /// already), the app started again (it waits for this process to end, then reopens
+    /// this session).
     fn exiting(&mut self) {
         storage::settings::flush();
-        if let Some(dir) = self.update.take() {
-            tracing::info!(session = %kernel::id::uuid_text(self.sessions.id), "the update handed over");
-            crate::updating::hand_over(&dir, self.sessions.id);
+        if self.update.take().is_some() {
+            tracing::info!(session = %kernel::id::uuid_text(self.sessions.id), "started again after the update");
+            crate::updating::restart(self.sessions.id);
         }
     }
 }

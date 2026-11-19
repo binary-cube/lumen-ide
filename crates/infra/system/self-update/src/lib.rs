@@ -2,8 +2,9 @@
 //! release worth offering and reads its manifest, once its signature is checked with the
 //! project's public key ([`PUBLIC_KEY`], the release workflow's); [`stage`] downloads this
 //! system's file (its SHA-256 the manifest's) and unpacks it beside the app's data, never
-//! over the app; [`install`], the app closed, puts it in the app's place — the old one set
-//! aside and given back if anything fails — and starts it again with its windows.
+//! over the app; [`install`] puts it in the app's place, by the app itself while it runs —
+//! the old one set aside and given back if anything fails — and starts it again with its
+//! windows.
 //!
 //! Nothing here decides to update: the app asks, the user chooses. Only GitHub's hosts are
 //! talked to ([`HOSTS`]), over HTTPS, nothing about the user sent.

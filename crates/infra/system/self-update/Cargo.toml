@@ -1,6 +1,6 @@
 [package]
 name = "self-update"
-description = "The app's own updates, done: the newest release asked of GitHub, its manifest's signature checked with the project's key, this system's file downloaded and checked, unpacked beside the app; then, the app closed, a helper puts it in the app's place (the old one kept until it worked) and starts it again."
+description = "The app's own updates, done: the newest release asked of GitHub, its manifest's signature checked with the project's key, this system's file downloaded and checked, unpacked beside the app; then put in the app's place by the app itself (the old one kept until it worked) and the app started again."
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
@@ -17,6 +17,8 @@ files.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 tracing.workspace = true
+# Whether the app before an update still runs (a new start waits for it).
+sysinfo.workspace = true
 # The manifest's signature (the release workflow's Ed25519 key).
 ed25519-dalek = "3"
 # An archive downloaded before checked again, read in pieces.

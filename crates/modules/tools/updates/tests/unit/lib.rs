@@ -131,6 +131,14 @@ fn ready_restarts_into_the_update_through_the_app() {
     let mut cant = Host::default();
     install(&mut cant);
     assert_eq!(cant.told.len(), 1, "said it can't");
+    // Not put in place: said, no restart (the app as it was).
+    let dir = PathBuf::from("/updates/broken");
+    let staged = Staged { dir: dir.clone(), version: "2.0.0".into(), app: dir.join("app") };
+    state::set(Phase::Ready { available: found(), staged }, None);
+    let mut host = Host { can_restart: true, ..Host::default() };
+    install(&mut host);
+    assert!(host.restarted.is_empty(), "not in place: no restart");
+    assert!(host.told[0].title.contains("disk full"), "{}", host.told[0].title);
 }
 
 /// Skip This Version: nothing offered any more, the notification closed, said.

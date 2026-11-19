@@ -138,12 +138,6 @@ fn main() -> anyhow::Result<()> {
             None => anyhow::bail!("the MCP server has no token yet"),
         };
     }
-    // Started by the app as it quit, to put an update in its place (a copy of its program in
-    // the temporary folder): nothing else runs.
-    if std::env::args_os().nth(1).is_some_and(|a| a == self_update::install::HELPER_ARG) {
-        let args: Vec<_> = std::env::args_os().skip(1).collect();
-        std::process::exit(self_update::install::apply_main(&args));
-    }
     let started = startup::begin();
     // The snapshots' language server (made up, on stdin / stdout): nothing else runs.
     #[cfg(feature = "snapshot")]
@@ -183,6 +177,17 @@ fn main() -> anyhow::Result<()> {
             args.drain(i..(i + 2).min(args.len()));
             id
         });
+    // Started again after an update: the app before it waited for until it ends (else, still
+    // closing, it would take this start's paths and its place).
+    if let Some(i) = args.iter().position(|a| a == self_update::install::WAIT_ARG) {
+        let pid = args.get(i + 1).and_then(|a| a.to_str()).and_then(|a| a.parse().ok());
+        args.drain(i..(i + 2).min(args.len()));
+        if let Some(pid) = pid {
+            self_update::install::wait_for(pid);
+        }
+    }
+    // This app's place, known before anything can move it.
+    let _ = self_update::install::place();
     #[cfg(not(feature = "snapshot"))]
     if snapshot.is_some() {
         anyhow::bail!("this build can't render snapshots (built without the `snapshot` feature)");

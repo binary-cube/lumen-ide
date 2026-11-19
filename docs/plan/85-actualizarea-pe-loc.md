@@ -27,7 +27,7 @@ din nou o face sistemul (macOS), o comandă mică a shell-ului care așteaptă s
 procesul vechi (Linux) sau programul nou, care așteaptă singur să se închidă cel vechi
 (Windows). Nu mai există copie în folderul temporar și nici ajutor.
 
-## 85a — Mutarea pe loc, în aplicație (toate sistemele)
+## 85a — Mutarea pe loc, în aplicație (toate sistemele) — făcut
 
 - În `self-update`, `install::apply(dir, target)` rămâne cum e (pusă deoparte → mutată →
   pusă înapoi la eșec), dar e chemată **de aplicație**, la „Restart Now”, înainte de
@@ -47,7 +47,7 @@ procesul vechi (Linux) sau programul nou, care așteaptă singur să se închid�
 - Teste: mutarea și punerea înapoi într-un folder temporar (deja acoperite pentru `apply`),
   plus aplicația care nu se închide la eșec.
 
-## 85b — Pornirea din nou
+## 85b — Pornirea din nou — făcut
 
 - **macOS**: la închidere, aplicația lansează
   `/bin/sh -c 'while kill -0 $0 2>/dev/null; do sleep 0.1; done; open "$1" --args "$@"'`
@@ -65,6 +65,25 @@ procesul vechi (Linux) sau programul nou, care așteaptă singur să se închid�
   aplicația nu-l oprește.
 - Teste: comanda compusă pe fiecare sistem (argumentele, citarea căilor cu spații), plus
   `--wait-for` cu un PID care nu există (pornește imediat).
+
+### Cum a ieșit (85a + 85b)
+
+- `self_update::install::put_in_place(dir)` mută versiunea nouă pe loc; o face modulul de
+  actualizări la „Restart Now”, pe loc, înainte de închidere. La eșec spune de ce
+  (`updates.cant_place`), iar aplicația nu se închide. Merge o singură dată pe același
+  update (`state::is_placed`).
+- „Later” din „What's New” o pune și ea pe loc, fără să spună nimic, deci pornirea următoare
+  e versiunea nouă. Dacă renunți la închidere (Cancel la fișierele nesalvate), versiunea nouă
+  rămâne pe loc pentru pornirea următoare.
+- `install::place()` află locul aplicației o dată, la pornire. După mutare, calea propriului
+  program poate arăta spre `.old` (Linux, Windows).
+- Pornirea din nou: `install::restart(session)` → `restart_command`. Pe macOS e
+  `open -n <app> --args --wait-for <pid> --reopen-session <id>`, iar în rest programul,
+  direct, cu aceleași argumente. Așteptarea o face programul nou, oriunde, în `main`, înainte
+  de verificarea de instanță unică (`install::wait_for`, prin `sysinfo`, cel mult 30 s), nu
+  un script de shell.
+- `.old` rămâne până la pornirea următoare (`clean_left`), pentru că programul vechi încă
+  rulează din el.
 
 ## 85c — Windows: instalatorul, când aplicația a venit din el
 

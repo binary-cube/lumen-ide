@@ -178,7 +178,7 @@ impl EditorApp {
                 return;
             }
             // An update staged: quit as Quit does (what still runs and the unsaved files
-            // asked about); the app's windows hand it to the helper once they're closed.
+            // asked about); once its windows are closed, the app starts again (the update in place).
             AppRequest::RestartToUpdate(staged) => {
                 self.pending.update = Some(staged);
                 let control = self.quit();

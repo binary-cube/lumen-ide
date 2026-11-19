@@ -27,8 +27,8 @@ pub const EVERY: Duration = Duration::from_secs(12 * 60 * 60);
 /// app was just started again after one, and what an earlier update left behind cleared.
 pub fn start() {
     kernel::work::run(THREAD, || {
-        if let Ok(exe) = std::env::current_exe() {
-            self_update::install::clean_left(&self_update::install::target(&exe));
+        if let Some(place) = self_update::install::place() {
+            self_update::install::clean_left(&place);
         }
         let outcome = self_update::folder().and_then(|f| self_update::install::take_result(&f));
         if let Some(outcome) = outcome {
@@ -93,8 +93,8 @@ pub fn download() {
     let Some((available, stop)) = state::begin_download() else { return };
     kernel::work::run(THREAD, move || {
         let version = available.release.version.clone();
-        let target = std::env::current_exe().map(|e| self_update::install::target(&e));
-        let replaceable = target.as_deref().is_ok_and(self_update::install::writable);
+        let target = self_update::install::place();
+        let replaceable = target.as_deref().is_some_and(self_update::install::writable);
         if !replaceable {
             let place = target.map(|t| t.display().to_string()).unwrap_or_default();
             let why = i18n::tr!(

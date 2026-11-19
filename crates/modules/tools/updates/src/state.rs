@@ -91,6 +91,8 @@ struct State {
     told_at: Option<std::time::Instant>,
     /// A wake asked for later (the app in the background: no window took it then).
     rewake: Option<kernel::work::Later>,
+    /// The staged update already put in the app's place (its folder): only a restart left.
+    placed: Option<std::path::PathBuf>,
 }
 
 static STATE: Mutex<Option<State>> = Mutex::new(None);
@@ -230,6 +232,16 @@ pub fn end_download(version: &app_updates::Version, ended: Result<Staged, String
         }
     });
     wake_all();
+}
+
+/// The staged update in `dir` is in the app's place now.
+pub fn mark_placed(dir: &std::path::Path) {
+    with(|s| s.placed = Some(dir.to_path_buf()));
+}
+
+/// Whether the staged update in `dir` is in the app's place already.
+pub fn is_placed(dir: &std::path::Path) -> bool {
+    with(|s| s.placed.as_deref() == Some(dir))
 }
 
 /// The version found let go (skipped): a download running stops, nothing is offered.

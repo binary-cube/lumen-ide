@@ -185,11 +185,20 @@ fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
     host.update_notification(notification);
 }
 
-/// The version found: downloaded (Update), or — ready — put in place (Restart Now: the app
-/// closes as Quit does, asking about what still runs and what isn't saved).
+/// The version found: downloaded (Update), or — ready — put in the app's place, the app
+/// still running, then restarted into (Restart Now: the app closes as Quit does, asking
+/// about what still runs and what isn't saved; cancelled, the next start is the new one).
+/// Not put in place: said, the app as it was.
 pub(crate) fn install(host: &mut dyn WorkbenchHost) {
     match state::phase() {
         Phase::Ready { staged, .. } => {
+            if let Err(why) = place(&staged.dir) {
+                host.notify(Notification::warning(i18n::tr!(
+                    "updates.cant_place",
+                    why = why.as_str()
+                )));
+                return;
+            }
             if !host.restart_to_update(&staged.dir) {
                 host.notify(Notification::warning(t("updates.cant_restart")));
             }
@@ -197,6 +206,35 @@ pub(crate) fn install(host: &mut dyn WorkbenchHost) {
         Phase::Available(_) => checker::download(),
         Phase::Idle | Phase::Downloading { .. } => {}
     }
+}
+
+/// Ready, not now (What's New's Later): put in the app's place all the same, quietly — the
+/// next start is the new version (what fails is tried again at Restart Now).
+pub(crate) fn later() {
+    if let Phase::Ready { staged, .. } = state::phase() {
+        let _ = place(&staged.dir);
+    }
+}
+
+/// The staged update in `dir` put in the app's place, once.
+fn place(dir: &std::path::Path) -> Result<(), String> {
+    if state::is_placed(dir) {
+        return Ok(());
+    }
+    put_in_place(dir)?;
+    state::mark_placed(dir);
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn put_in_place(dir: &std::path::Path) -> Result<(), String> {
+    self_update::install::put_in_place(dir).map(drop)
+}
+
+/// In tests: nothing moved (a folder named `broken` fails).
+#[cfg(test)]
+fn put_in_place(dir: &std::path::Path) -> Result<(), String> {
+    if dir.ends_with("broken") { Err("disk full".into()) } else { Ok(()) }
 }
 
 /// The version found not offered again (saved; a newer one is offered).
