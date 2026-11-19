@@ -233,6 +233,12 @@ impl WorkbenchHost for Workbench {
 }
 
 impl ViewHost for Workbench {
+    fn anchor(&self, of: workbench_model::Anchor) -> Option<kernel::Rect> {
+        match of {
+            workbench_model::Anchor::TopBarLabel => self.chrome.top_bar.branch_anchor(),
+        }
+    }
+
     fn open_view(&mut self, title: &str, extension: &str, data: &dyn std::any::Any) -> bool {
         let dir = self.project.as_ref().map(|p| p.root_path().to_path_buf()).unwrap_or_default();
         let path = dir.join(format!("{title}.{extension}"));
@@ -369,6 +375,20 @@ impl EditorHost for Workbench {
 
     fn refuse_if_locked(&mut self) -> bool {
         Workbench::refuse_if_locked(self)
+    }
+
+    fn unsaved_files(&self) -> Vec<std::path::PathBuf> {
+        // The current group's tabs are `self.tabs`; the others' are kept in their groups.
+        let current = self.editors.current;
+        let others = self.editors.groups.iter().enumerate().filter(|(g, _)| *g != current);
+        let tabs = self.tabs.iter().chain(others.flat_map(|(_, g)| g.tabs.iter()));
+        let mut found: Vec<std::path::PathBuf> = tabs
+            .filter(|t| t.untitled.is_none() && t.is_dirty())
+            .filter_map(|t| t.doc.path().map(std::path::Path::to_path_buf))
+            .collect();
+        found.sort();
+        found.dedup();
+        found
     }
 
     fn save_active(&mut self) -> bool {

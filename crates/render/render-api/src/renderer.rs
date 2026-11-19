@@ -146,6 +146,12 @@ pub trait Renderer {
         false
     }
 
+    /// Whether its surface is transparent where the scene leaves it so (what's under it
+    /// shows: a floating layer over the pages needs it).
+    fn transparent(&self) -> bool {
+        false
+    }
+
     /// Whether it draws the layers' backdrop blurs ([`crate::Layer::backdrop_blur`]); one
     /// that doesn't leaves them out (the app then draws its backdrops without them).
     fn backdrop_blur(&self) -> bool {

@@ -15,6 +15,7 @@
 //! Without `git` installed, reading works and the operations that need it say so.
 
 mod agent_tools;
+mod branch_picker;
 mod branches;
 mod changes;
 mod changes_view;
@@ -32,7 +33,12 @@ mod push_dialog;
 mod ref_dialog;
 mod ref_menu;
 mod refs_store;
+mod stash;
+mod stash_dialog;
+mod stash_menu;
 mod status;
+mod switch;
+mod switch_dialog;
 mod sync;
 
 use std::path::Path;
@@ -88,6 +94,10 @@ pub const SHOW_CONFLICTS: CommandId = CommandId("git.conflicts");
 pub const CONTINUE_OPERATION: CommandId = CommandId("git.continue_operation");
 pub const SKIP_OPERATION: CommandId = CommandId("git.skip_operation");
 pub const ABORT_OPERATION: CommandId = CommandId("git.abort_operation");
+/// The work put aside to switch branches brought back (the switch's notification).
+pub const POP_SWITCH_STASH: CommandId = CommandId("git.pop_switch_stash");
+pub const STASH: CommandId = CommandId("git.stash");
+pub const SWITCH_BRANCH: CommandId = CommandId("git.switch_branch");
 
 /// The menu bar's Git menu: its sections (the module's own, as its context menu groups
 /// them) and Compare With ›.
@@ -110,10 +120,12 @@ fn menu_place(id: CommandId) -> Option<MenuAt> {
         COMMIT => (REPOSITORY, 10),
         SHOW_CHANGES => (REPOSITORY, 20),
         SHOW_LOG => (REPOSITORY, 30),
+        STASH => (BRANCHES, 50),
         SHOW_CONFLICTS => (OPERATION, 10),
         CONTINUE_OPERATION => (OPERATION, 20),
         SKIP_OPERATION => (OPERATION, 30),
         ABORT_OPERATION => (OPERATION, 40),
+        SWITCH_BRANCH => (BRANCHES, 5),
         NEW_BRANCH => (BRANCHES, 10),
         RENAME_BRANCH => (BRANCHES, 20),
         NEW_TAG => (BRANCHES, 30),
@@ -176,6 +188,14 @@ impl Module for GitModule {
         ctx.contribute::<Arc<dyn ViewerProvider>>(Arc::new(conflicts_view::ConflictsProvider));
         ctx.contribute::<Arc<dyn ViewerProvider>>(Arc::new(ref_dialog::RefDialogProvider));
         ctx.contribute::<Arc<dyn ViewerProvider>>(Arc::new(push_dialog::PushDialogProvider));
+        ctx.contribute::<Arc<dyn ViewerProvider>>(Arc::new(switch_dialog::SwitchDialogProvider));
+        ctx.contribute::<Arc<dyn ViewerProvider>>(Arc::new(stash_dialog::StashDialogProvider));
+        ctx.contribute::<Arc<dyn ViewerProvider>>(Arc::new(branch_picker::BranchPickerProvider));
+        // The top bar's branch: a list to switch it.
+        ctx.contribute(workbench_model::TopBarLabelAction {
+            command: SWITCH_BRANCH,
+            tooltip: "git.switch_branch_tip",
+        });
         // The changed files, followed per project (the button's count, the Changes tab).
         ctx.contribute::<Arc<dyn ProjectService>>(Arc::new(status::ChangesService));
         let keyed = |id, label, icon, keys: &'static [&'static str], handler| CommandContribution {
@@ -250,6 +270,25 @@ impl Module for GitModule {
             ),
             command(NEW_TAG, "New Tag…", "tag", Arc::new(ref_dialog::AskRef(ref_dialog::new_tag))),
             command(SHOW_CONFLICTS, "Resolve Conflicts…", "compare", Arc::new(ShowConflicts)),
+            command(
+                SWITCH_BRANCH,
+                "Switch Branch…",
+                "arrow-left-right",
+                Arc::new(branch_picker::SwitchBranch),
+            ),
+            keyed(
+                STASH,
+                "Stash Changes…",
+                "archive-down",
+                &[],
+                Arc::new(stash_dialog::StashChanges),
+            ),
+            command(
+                POP_SWITCH_STASH,
+                "Bring Back the Work Put Aside",
+                "archive-up",
+                Arc::new(switch::PopSwitchStash),
+            ),
             command(
                 CONTINUE_OPERATION,
                 "Continue",

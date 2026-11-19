@@ -39,8 +39,12 @@ struct Live {
     hidden_since: Option<Instant>,
     /// Its picture asked for (something opened over it), since when.
     asked: Option<(Instant, Asked)>,
-    /// What's cut out of it (what floats over it), as last told.
+    /// What floats over it (the mouse there the app's), as last told, and whether it's cut
+    /// out of it.
     holes: Vec<(kernel::Rect, f32)>,
+    cut: bool,
+    /// Its corners as last rounded (radius, which).
+    corners: (f32, u8),
 }
 
 /// What the app pages told, not yet handed to their views (filled by the engine's handlers
@@ -212,6 +216,8 @@ impl WebViews {
                             hidden_since: None,
                             asked: None,
                             holes: Vec::new(),
+                            cut: true,
+                            corners: (0.0, 0),
                         }),
                         None => self.failed.push(page.id),
                     }
@@ -222,15 +228,34 @@ impl WebViews {
         changed
     }
 
-    /// What floats over the pages, cut out of each (rect, corners' radius; physical): told to
-    /// a page only when it changes.
-    pub(super) fn set_holes(&mut self, holes: &[(kernel::Rect, f32)]) {
+    /// What floats over the pages (rect, corners' radius; physical): the mouse there the
+    /// app's, and — `cut` (no floating layer to draw it over them) — cut out of each. Told
+    /// to a page only when it changes.
+    pub(super) fn set_holes(&mut self, holes: &[(kernel::Rect, f32)], cut: bool) {
         for live in &mut self.live {
-            if live.holes != holes {
-                live.view.set_holes(holes);
+            if live.holes != holes || live.cut != cut {
+                live.view.set_holes(holes, cut);
                 live.holes = holes.to_vec();
+                live.cut = cut;
             }
         }
+    }
+
+    /// Each page's corners rounded as `corners(area)` says (its card's): told to a page only
+    /// when they change.
+    pub(super) fn set_corners(&mut self, corners: impl Fn(kernel::Rect) -> (f32, u8)) {
+        for live in &mut self.live {
+            let now = corners(live.area);
+            if live.corners != now {
+                live.view.set_corners(now.0, now.1);
+                live.corners = now;
+            }
+        }
+    }
+
+    /// Whether a page is on screen now (what floats is drawn over it then).
+    pub(super) fn any_shown(&self) -> bool {
+        self.live.iter().any(|l| l.visible)
     }
 
     /// The pictures drawn in place of the pages something is open over (page id, picture).

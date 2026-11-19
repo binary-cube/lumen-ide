@@ -102,6 +102,8 @@ pub struct LanguageSupport {
     pub system_indicators: Vec<Arc<dyn workbench_model::SystemIndicator>>,
     /// What the modules say in the top bar of a window's project (its shortcut).
     pub top_bar_badges: Vec<Arc<dyn workbench_model::TopBarBadge>>,
+    /// What a click on the top bar's branch runs (a module's list to switch it).
+    pub top_bar_label_actions: Vec<workbench_model::TopBarLabelAction>,
     /// Who asks for the region being worked in to stand out (Focus mode).
     pub region_emphasis: Vec<Arc<dyn workbench_model::RegionEmphasis>>,
     /// The modules' blocks in the settings window (their own settings).
@@ -600,6 +602,7 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
             status_indicators: contributions.take(),
             system_indicators: contributions.take(),
             top_bar_badges: contributions.take(),
+            top_bar_label_actions: contributions.take(),
             region_emphasis: contributions.take(),
             card_previews: contributions.take(),
             settings,

@@ -395,8 +395,9 @@ impl Workbench {
     /// The mouse at `p` over the bar: an item with a window opens it (over that item); away
     /// from the item and its window, an unpinned one closes. `true`: a redraw.
     pub(super) fn hover_status_popover(&mut self, p: Point) -> bool {
-        // The resources pinned: their pills say it already, no window over the meter.
-        let pills = self.resource_pills.is_open();
+        // The resources pinned: their pills say it already, no window over the meter (pinned
+        // just now, before a frame opened them, too).
+        let pills = self.resource_pills.is_open() || self.resources_pinned();
         let over = self
             .status
             .hit(p)
@@ -780,6 +781,11 @@ impl Workbench {
         self.status_popover.close();
         if !pinned {
             self.resource_pills.close();
+        } else if self.resources.is_some() && !self.resource_pills.is_open() {
+            // Their pills at once (not at the next frame: the mouse moving meanwhile would
+            // open their window over the meter as well).
+            self.resource_pills.open(RESOURCES, Rect::default());
+            self.resource_pills.set_pinned(true);
         }
         self.pin_resources(pinned);
     }

@@ -296,6 +296,10 @@ pub struct Picker {
     /// (no search of its own), nothing is lit until the arrows move.
     suggest: bool,
     moved: bool,
+    /// Its search shown however few items there are ([`Picker::always_search`]).
+    search_always: bool,
+    /// The search was pressed: a drag selects in it.
+    selecting: bool,
 }
 
 impl Picker {
@@ -340,6 +344,11 @@ impl Picker {
         self.start(items, chosen.into_iter().collect(), false, Box::new(ItemRows::default()));
         self.suggest = true;
         self.moved = any && (chosen.is_some() || lit_first);
+    }
+
+    /// Its search shown however few items there are (a list one types into first).
+    pub fn always_search(&mut self) {
+        self.search_always = true;
     }
 
     /// Its rows have a check's place (several to choose, or one chosen): else `↵` takes the
@@ -394,7 +403,7 @@ impl Picker {
 
     /// It has a search field (many items): it takes the text typed.
     pub fn searches(&self) -> bool {
-        !self.suggest && self.items.len() > SEARCH_FROM
+        !self.suggest && (self.search_always || self.items.len() > SEARCH_FROM)
     }
 
     /// `p` is on it (a click there is its own).
@@ -514,6 +523,26 @@ impl Picker {
         true
     }
 
+    /// The mouse dragged after a press in the search: what it covers selected.
+    pub fn drag(&mut self, p: Point) -> bool {
+        if !self.open || !self.selecting {
+            return false;
+        }
+        self.query.extend_to(p.x);
+        true
+    }
+
+    /// The mouse let go.
+    pub fn release(&mut self) -> bool {
+        std::mem::take(&mut self.selecting)
+    }
+
+    /// Text pasted into the search: on one line (its breaks made spaces).
+    pub fn paste(&mut self, text: &str) -> bool {
+        let line = text.split(['\n', '\r']).filter(|l| !l.is_empty()).collect::<Vec<_>>();
+        self.text_input(&line.join(" "))
+    }
+
     /// What's selected in the search (copied).
     pub fn selected_text(&self) -> Option<String> {
         let selected = self.query.selected_text();
@@ -522,6 +551,13 @@ impl Picker {
 
     /// A press: a row chosen, outside closes it, elsewhere on it nothing.
     pub fn press(&mut self, p: Point) -> Option<PickerEvent> {
+        self.press_with(p, 1)
+    }
+
+    /// [`press`](Self::press) as the `clicks`-th of a quick series: in the search, two
+    /// select a word, three all of it.
+    pub fn press_with(&mut self, p: Point, clicks: u32) -> Option<PickerEvent> {
+        self.selecting = false;
         if !self.open {
             return None;
         }
@@ -535,7 +571,8 @@ impl Picker {
             return None;
         }
         if self.search.contains(p) {
-            self.query.press(p.x, 1);
+            self.query.press(p.x, clicks);
+            self.selecting = true;
             return None;
         }
         let (_, i) = self.rows.iter().find(|(r, _)| r.contains(p))?;

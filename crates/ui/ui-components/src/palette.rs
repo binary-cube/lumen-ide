@@ -30,6 +30,8 @@ pub struct Palette {
     pub vcs_added: Rgba,
     pub vcs_modified: Rgba,
     pub vcs_deleted: Rgba,
+    /// A changed file's badge in a list (filled with these, its sign over them).
+    pub vcs_badges: VcsBadges,
 
     pub code_text: Rgba,
     pub gutter_text: Rgba,
@@ -200,6 +202,17 @@ impl SyntaxColors {
     }
 }
 
+/// The colors of the changed files' badges, by state (the theme's `vcs.badge.*`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VcsBadges {
+    pub modified: Rgba,
+    pub added: Rgba,
+    pub deleted: Rgba,
+    pub renamed: Rgba,
+    pub untracked: Rgba,
+    pub conflicted: Rgba,
+}
+
 impl Palette {
     /// Fallback values for dark themes (and the palette used before themes are
     /// loaded).
@@ -218,6 +231,14 @@ impl Palette {
             vcs_added: Rgba::rgb(0x5a9e60),
             vcs_modified: Rgba::rgb(0x4d86c9),
             vcs_deleted: Rgba::rgb(0x868a91),
+            vcs_badges: VcsBadges {
+                modified: Rgba::rgb(0xd9a53b),
+                added: Rgba::rgb(0x4f9c5a),
+                deleted: Rgba::rgb(0xd5525f),
+                renamed: Rgba::rgb(0x4a82c4),
+                untracked: Rgba::rgb(0x6d58a8),
+                conflicted: Rgba::rgb(0xdb7434),
+            },
 
             code_text: Rgba::rgb(0xbcbec4),
             gutter_text: Rgba::rgb(0x4b5059),
@@ -351,6 +372,14 @@ impl Palette {
             vcs_added: c("vcs.added", c("terminal.ansi.green", base.vcs_added)),
             vcs_modified: c("vcs.modified", c("terminal.ansi.blue", base.vcs_modified)),
             vcs_deleted: c("vcs.deleted", c("text.muted", base.vcs_deleted)),
+            vcs_badges: VcsBadges {
+                modified: c("vcs.badge.modified", base.vcs_badges.modified),
+                added: c("vcs.badge.added", base.vcs_badges.added),
+                deleted: c("vcs.badge.deleted", base.vcs_badges.deleted),
+                renamed: c("vcs.badge.renamed", base.vcs_badges.renamed),
+                untracked: c("vcs.badge.untracked", base.vcs_badges.untracked),
+                conflicted: c("vcs.badge.conflicted", base.vcs_badges.conflicted),
+            },
             code_text: c("editor.foreground", base.code_text),
             gutter_text: c("editor.gutter.foreground", base.gutter_text),
             gutter_text_active: c("editor.gutter.foreground.active", base.gutter_text_active),
@@ -472,6 +501,14 @@ impl Palette {
             vcs_added: Rgba::rgb(0x5aa35f),
             vcs_modified: Rgba::rgb(0x3f7fd1),
             vcs_deleted: Rgba::rgb(0x9aa0a8),
+            vcs_badges: VcsBadges {
+                modified: Rgba::rgb(0xedbd4f),
+                added: Rgba::rgb(0x3f9a4c),
+                deleted: Rgba::rgb(0xd8434f),
+                renamed: Rgba::rgb(0x3f7fd1),
+                untracked: Rgba::rgb(0x5d4b8c),
+                conflicted: Rgba::rgb(0xe07028),
+            },
             code_text: Rgba::rgb(0x24292f),
             gutter_text: Rgba::rgb(0xb0b4bb),
             gutter_text_active: Rgba::rgb(0x50555e),

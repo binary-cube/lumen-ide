@@ -132,6 +132,11 @@ pub trait ViewHost {
     fn set_tool_badge(&mut self, tool: &'static str, badge: Option<ToolBadge>) {
         let _ = (tool, badge);
     }
+    /// Where `of` is in the window (physical pixels), as last drawn; `None`: not shown.
+    fn anchor(&self, of: crate::Anchor) -> Option<kernel::Rect> {
+        let _ = of;
+        None
+    }
 }
 
 /// The editor's text: the active file's (editing, saving, its document, the type at its
@@ -157,6 +162,10 @@ pub trait EditorHost {
     /// none).
     fn save_active(&mut self) -> bool {
         false
+    }
+    /// The files open with changes not saved yet (every group's), each once.
+    fn unsaved_files(&self) -> Vec<PathBuf> {
+        Vec::new()
     }
     /// Selects `range` (bytes) of the active document, shown, the editor given the keys.
     fn select_active(&mut self, range: std::ops::Range<usize>) -> bool {

@@ -89,3 +89,23 @@ peste orice.
 - `hitTest` pe vederi Metal (macOS): https://developer.apple.com/forums/thread/728843
 - CEF, randare în afara ecranului cu texturi: https://docs.rs/crate/cef/latest/source/src/osr_texture_import/mod.rs
 - Servo încorporat (iced): https://docs.rs/crate/iced_servo/0.1.0/source/README.md
+
+## Făcut (varianta A)
+
+- **Stratul peste pagini** (`platform_api::FloatingLayer`, `Window::floating_layer`): o
+  suprafață transparentă a ferestrei, deasupra paginilor, în care aplicația desenează ce
+  plutește (ferestrele peste bară, notificările, meniurile, tooltip-urile) cu un renderer al
+  ei. Pagina rămâne întreagă, cu umbre și transparență peste ea.
+  - **macOS** (`floating_macos.rs`): o vedere proprie peste vederea ferestrei, cu stratul
+    Metal al renderer-ului; `hitTest:` nu găsește nimic în ea, deci mouse-ul trece mai jos.
+  - **Windows** (`floating_windows.rs`): o fereastră copil desenată prin DirectComposition,
+    transparentă unde nu e nimic. Regiunea ei e doar unde plutește ceva (cu loc de umbră),
+    iar mouse-ul de acolo e dat ferestrei aplicației.
+- Stratul există doar cât e o pagină pe ecran. Găurile din pagină rămân doar pentru mouse
+  (`set_holes(…, cut: false)`); se taie și desenul doar dacă stratul nu se poate face
+  (`floating_failed`, încercat o singură dată).
+- `WebView::set_corners`: colțurile paginii rotunjite ca ale cardului în care stă.
+
+## Lăsat (varianta A)
+
+- Varianta C (CEF / Servo) rămâne neîncercată, din motivele de mai sus.

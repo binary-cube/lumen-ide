@@ -102,6 +102,8 @@ enum Hit {
     StageHunk(usize),
     DiscardHunk(usize),
     Refresh,
+    /// Stash… in the header.
+    Stash,
     Commit,
     Message,
     Amend,
@@ -176,6 +178,8 @@ pub struct CommitView {
     outcome: Option<(String, bool)>,
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
     hits: Vec<(Rect, Hit)>,
+    /// The files' state badges, as last drawn (their tooltips: the state in words).
+    badges: Vec<(Rect, version_control::FileState)>,
     hover: Option<Hit>,
     /// The message was pressed: the mouse dragged selects in it.
     selecting: bool,
@@ -272,7 +276,7 @@ impl CommitView {
 
     /// The reference place row `i` is (with what a local branch tracks), for its menu.
     fn menu_ref(&self, i: usize) -> Option<crate::ref_menu::MenuRef> {
-        let places::Place::Ref { name, kind, .. } = &self.place_rows.get(i)?.place else {
+        let places::Place::Ref { name, kind, current, .. } = &self.place_rows.get(i)?.place else {
             return None;
         };
         let local = *kind == version_control::RefKind::Branch;
@@ -280,7 +284,8 @@ impl CommitView {
             .then(|| self.places.states.iter().find(|s| s.branch == *name))
             .flatten()
             .and_then(|s| s.upstream.clone());
-        Some(crate::ref_menu::MenuRef { name: name.clone(), local, upstream })
+        let (kind, current) = (Some(*kind), *current);
+        Some(crate::ref_menu::MenuRef { name: name.clone(), local, upstream, kind, current })
     }
 
     /// The places' rows made again (what they're made of changed, or a fold).
@@ -338,6 +343,25 @@ impl CommitView {
                 let root = self.repo.as_ref()?.root().to_path_buf();
                 Some(ViewerAction::Request(AppRequest::ShowFolder(root.join(path))))
             }
+        }
+    }
+
+    /// The stash place row `i` is.
+    fn stash_at(&self, i: usize) -> Option<version_control::Stash> {
+        match &self.place_rows.get(i)?.place {
+            places::Place::Stash(stash) => Some(stash.clone()),
+            _ => None,
+        }
+    }
+
+    /// Place row `i` double-clicked: a branch or a tag switched to, a stash applied.
+    fn place_twice(&mut self, i: usize) -> Option<ViewerAction> {
+        match self.place_rows.get(i)?.place.clone() {
+            places::Place::Ref { name, kind, current: false, .. } => {
+                crate::switch::Wanted::of(&name, kind).map(crate::ref_menu::switch_action)
+            }
+            places::Place::Stash(stash) => Some(crate::stash_dialog::apply_action(stash)),
+            _ => None,
         }
     }
 

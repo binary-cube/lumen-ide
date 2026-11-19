@@ -566,7 +566,10 @@ impl WgpuRenderer {
         surface.configure(&ctx.device, &config);
         #[cfg(target_os = "macos")]
         macos::configure_layer(&surface);
-        let transparent = config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
+        let transparent = matches!(
+            config.alpha_mode,
+            wgpu::CompositeAlphaMode::PreMultiplied | wgpu::CompositeAlphaMode::PostMultiplied
+        );
         // The pipelines made ahead, if they were made for this surface.
         let drawer = match prepared {
             Some(drawer) if drawer.format == config.format && drawer.transparent == transparent => {
@@ -669,11 +672,15 @@ impl WgpuRenderer {
         if let Some(format) = caps.formats.iter().find(|f| !f.is_srgb()) {
             config.format = *format;
         }
-        // Transparent where the scene leaves it so (the window's corners), when it can be.
-        if options.transparent
-            && caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied)
-        {
-            config.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
+        // Transparent where the scene leaves it so (the window's corners, a floating layer),
+        // when it can be: premultiplied (DX12, Vulkan); on Metal "post-multiplied" only makes
+        // the layer not opaque — Core Animation reads its pixels premultiplied, as drawn.
+        if options.transparent {
+            if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PreMultiplied) {
+                config.alpha_mode = wgpu::CompositeAlphaMode::PreMultiplied;
+            } else if caps.alpha_modes.contains(&wgpu::CompositeAlphaMode::PostMultiplied) {
+                config.alpha_mode = wgpu::CompositeAlphaMode::PostMultiplied;
+            }
         }
         config.present_mode = if options.vsync {
             wgpu::PresentMode::Fifo
@@ -954,6 +961,10 @@ impl Renderer for WgpuRenderer {
     fn backdrop_blur(&self) -> bool {
         // The blur reads the kept frame.
         self.partial
+    }
+
+    fn transparent(&self) -> bool {
+        self.drawer.transparent
     }
 
     fn capture(

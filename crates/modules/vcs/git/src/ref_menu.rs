@@ -16,6 +16,7 @@ pub(crate) const NEW_TAG: &str = "branch.new-tag:";
 pub(crate) const PUSH: &str = "branch.push:";
 /// `branch.push-to:<row>:<remote>`.
 pub(crate) const PUSH_TO: &str = "branch.push-to:";
+pub(crate) const SWITCH: &str = "branch.switch:";
 
 /// The reference a menu is opened on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,6 +27,10 @@ pub(crate) struct MenuRef {
     pub local: bool,
     /// What a local branch tracks (`origin/main`), if anything.
     pub upstream: Option<String>,
+    /// What it is (`None`: the detached head).
+    pub kind: Option<version_control::RefKind>,
+    /// The branch checked out now.
+    pub current: bool,
 }
 
 impl MenuRef {
@@ -36,10 +41,19 @@ impl MenuRef {
 
 /// The rows for reference `on` (at row `row`), `remotes` the repository's.
 pub(crate) fn rows(row: usize, on: &MenuRef, remotes: &[String]) -> Vec<ViewMenuEntry> {
-    let mut rows = vec![
+    let mut rows = Vec::new();
+    // Switched to first (not the one checked out now, nor the detached head).
+    if !on.current && on.kind.is_some() {
+        let label = tr!("git.switch_to", name = on.name.as_str());
+        rows.push(
+            ViewMenuEntry::item(format!("{SWITCH}{row}"), label).with_icon("arrow-left-right"),
+        );
+        rows.push(ViewMenuEntry::Separator);
+    }
+    rows.push(
         ViewMenuEntry::item(format!("{NEW_BRANCH}{row}"), t("git.new_branch_from_here"))
             .with_icon("git-branch"),
-    ];
+    );
     if on.local {
         rows.push(
             ViewMenuEntry::item(format!("{RENAME}{row}"), t("git.rename_branch"))
@@ -85,6 +99,10 @@ pub(crate) fn chosen(
             }))
         })
     };
+    if let Some(i) = row(SWITCH) {
+        let wanted = reference(i).and_then(|on| crate::switch::Wanted::of(&on.name, on.kind?));
+        return Some(wanted.map(switch_action));
+    }
     if let Some(i) = row(NEW_BRANCH) {
         return Some(dialog(i, ref_dialog::new_branch));
     }
@@ -108,4 +126,11 @@ pub(crate) fn chosen(
     Some(Some(ViewerAction::WithHost(ui_components::WithHost::once(move |host| {
         crate::push_dialog::open(host, preset);
     }))))
+}
+
+/// Switching to `wanted`, as a view's action.
+pub(crate) fn switch_action(wanted: crate::switch::Wanted) -> ViewerAction {
+    ViewerAction::WithHost(ui_components::WithHost::once(move |host| {
+        crate::switch::switch(host, wanted);
+    }))
 }

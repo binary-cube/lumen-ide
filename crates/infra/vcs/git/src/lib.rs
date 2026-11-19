@@ -8,6 +8,7 @@
 //! else is affected.
 
 mod process;
+mod switching;
 pub mod trust;
 
 /// The process ids of the `git`s running now.
@@ -819,7 +820,7 @@ impl Repository for GitRepository {
     }
 
     fn stashes(&self) -> Vec<version_control::Stash> {
-        let out = self.git(&["stash", "list", "--format=%gd%x1f%s"]).unwrap_or_default();
+        let out = self.git(&["stash", "list", "--format=%gd%x1f%s%x1f%H"]).unwrap_or_default();
         version_control::parse_stashes(&out)
     }
 
@@ -904,6 +905,53 @@ impl Repository for GitRepository {
     fn mark_resolved(&self, paths: &[String]) -> Result<(), VcsError> {
         let paths: Vec<&str> = paths.iter().map(String::as_str).collect();
         self.git(&[&["add", "-A", "--"], paths.as_slice()].concat()).map(|_| ())
+    }
+
+    fn changed_between(&self, revision: &str, paths: &[String]) -> Result<Vec<String>, VcsError> {
+        GitRepository::changed_between(self, revision, paths)
+    }
+
+    fn present_in(&self, revision: &str, paths: &[String]) -> Result<Vec<String>, VcsError> {
+        GitRepository::present_in(self, revision, paths)
+    }
+
+    fn switch(
+        &self,
+        target: &version_control::SwitchTarget,
+        discard: bool,
+    ) -> Result<(), VcsError> {
+        self.switch_to(target, discard)
+    }
+
+    fn stash_push(&self, options: &version_control::StashOptions) -> Result<(), VcsError> {
+        GitRepository::stash_push(self, options)
+    }
+
+    fn stash_apply(&self, id: &str, pop: bool) -> Result<(), VcsError> {
+        GitRepository::stash_apply(self, id, pop)
+    }
+
+    fn stash_drop(&self, id: &str) -> Result<(), VcsError> {
+        GitRepository::stash_drop(self, id)
+    }
+
+    fn stash_branch(&self, id: &str, branch: &str) -> Result<(), VcsError> {
+        GitRepository::stash_branch(self, id, branch)
+    }
+
+    fn recent_branches(&self, limit: usize) -> Vec<String> {
+        let out = self.git(&["reflog", "show", "--format=%gs", "-n", "300", "HEAD"]);
+        let current = version_control::Repository::branch(self);
+        let locals = version_control::Repository::branches(self);
+        version_control::recent_checkouts(&out.unwrap_or_default(), current.as_deref(), limit * 2)
+            .into_iter()
+            .filter(|b| locals.contains(b))
+            .take(limit)
+            .collect()
+    }
+
+    fn stashes_staged(&self) -> bool {
+        GitRepository::stashes_staged(self)
     }
 
     fn proceed(&self, step: OperationStep) -> Result<Proceeded, VcsError> {

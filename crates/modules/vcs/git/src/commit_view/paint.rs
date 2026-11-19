@@ -44,6 +44,19 @@ impl CommitView {
         let refresh_rect = Rect::new(rx - px(12.0) - size, y, room, px(28.0));
         draw_text(layer, &refresh, rx, ds::optical_baseline(y, px(28.0), small), p.accent);
         self.hits.push((refresh_rect, Hit::Refresh));
+        // Stash…, before it (while there's something to put aside).
+        if !self.files.is_empty() {
+            let stash = text.shape_line(&t("git.stash_link"), small);
+            let sx = refresh_rect.min_x() - px(14.0) - stash.width;
+            if let Some(id) = icons.id("archive-down") {
+                let at = Rect::new(sx - px(6.0) - size, y + (px(28.0) - size) / 2.0, size, size);
+                ui_kit::draw_icon(layer, icons, id, at, p.accent);
+            }
+            let room = stash.width + px(18.0) + size;
+            let stash_rect = Rect::new(sx - px(12.0) - size, y, room, px(28.0));
+            draw_text(layer, &stash, sx, ds::optical_baseline(y, px(28.0), small), p.accent);
+            self.hits.push((stash_rect, Hit::Stash));
+        }
     }
 
     /// A list in `card`: its head (a checkbox for all of it, its name, how many) and its files.
@@ -51,6 +64,7 @@ impl CommitView {
         &mut self,
         scene: &mut render_api::Scene,
         text: &mut text_layout::TextSystem,
+        icons: &icons::Icons,
         ds: &Ctx<'_>,
         (card, staged): (Rect, bool),
     ) {
@@ -113,7 +127,7 @@ impl CommitView {
             let y = body.min_y() + px(4.0) + at as f32 * row_h - scroll;
             if y + row_h >= body.min_y() && y <= body.max_y() {
                 let row = Rect::new(body.min_x() + px(4.0), y, body.size.width - px(8.0), row_h);
-                self.paint_file(rows, text, ds, (body, row), (i, staged));
+                self.paint_file(rows, (text, icons), ds, (body, row), (i, staged));
             }
         }
         self.bars[which].set_auto_hiding(true);
@@ -128,7 +142,7 @@ impl CommitView {
     pub(super) fn paint_file(
         &mut self,
         layer: &mut render_api::Layer,
-        text: &mut text_layout::TextSystem,
+        (text, icons): (&mut text_layout::TextSystem, &icons::Icons),
         ds: &Ctx<'_>,
         (list, row): (Rect, Rect),
         (i, staged): (usize, bool),
@@ -147,11 +161,21 @@ impl CommitView {
             layer.quad(Quad::filled(row, p.text.with_alpha(0.04)).rounded(px(radius::SM)));
         }
         checkbox(layer, text, ds, row, staged, true);
-        let (mark, color) = state_badge(state, p);
         let room = row.size.width - px(30.0);
         let line = Rect::new(row.min_x() + px(30.0), row.min_y(), room, row.size.height);
         let path = file.path.as_str();
-        ds::file_row(layer, text, ds, line, ds::FileRow { path, mark, color, tag: None });
+        // Its state as a badge where the row's mark is (the mark itself left empty).
+        let color = p.text_muted;
+        ds::file_row(layer, text, ds, line, ds::FileRow { path, mark: "", color, tag: None });
+        let side = px(ds::CHANGE_BADGE);
+        let badge = Rect::new(
+            (line.min_x() + px(3.0)).round(),
+            (row.min_y() + (row.size.height - side) / 2.0).round(),
+            side,
+            side,
+        );
+        ds::change_badge(layer, icons, ds, badge, crate::files_tree::change_state(state));
+        self.badges.push((badge.intersect(&list).unwrap_or_default(), state));
         let visible = |r: Rect| r.intersect(&list).unwrap_or_default();
         self.hits.push((visible(row), Hit::Row(i, staged)));
         let check = Rect::new(row.min_x(), row.min_y(), px(28.0), row.size.height);
@@ -497,16 +521,4 @@ pub(super) fn checkbox(
     let state = if on { ds::Check::On } else { ds::Check::Off };
     let mid = row.min_y() + row.size.height / 2.0;
     ds::checkbox(layer, text, ds, row.min_x() + ds.px(6.0), mid, state, enabled);
-}
-
-/// The state's letter and color (`M` modified, `A` added…).
-pub(crate) fn state_badge(state: FileState, p: &ui_components::Palette) -> (&'static str, Rgba) {
-    match state {
-        FileState::Modified => ("M", p.vcs_modified),
-        FileState::Added => ("A", p.vcs_added),
-        FileState::Untracked => ("U", p.vcs_added),
-        FileState::Deleted => ("D", p.danger),
-        FileState::Renamed => ("R", p.vcs_modified),
-        FileState::Conflicted => ("!", p.warning),
-    }
 }

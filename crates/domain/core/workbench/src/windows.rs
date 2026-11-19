@@ -78,6 +78,22 @@ pub trait TopBarBadge: Send + Sync + std::fmt::Debug {
     fn badge(&self, project: &ProjectWindow) -> Option<TopBadge>;
 }
 
+/// What a click on the top bar's label (the project's branch) runs, from the module giving
+/// it; none contributed: the label is only shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TopBarLabelAction {
+    pub command: command_model::CommandId,
+    /// Its tooltip (an i18n key).
+    pub tooltip: &'static str,
+}
+
+/// A place of the window something opens by (a popover under its button).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Anchor {
+    /// The top bar's label (the branch).
+    TopBarLabel,
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/windows.rs"]
 mod tests;

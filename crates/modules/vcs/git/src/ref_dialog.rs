@@ -33,6 +33,8 @@ pub enum Target {
     Commit { id: String, short: String },
     /// A branch (local or remote) or a tag.
     Reference { name: String, local_branch: bool },
+    /// A stash: its commit and its message.
+    Stash { id: String, message: String },
 }
 
 /// Which dialog.
@@ -50,6 +52,11 @@ pub enum RefKindAsked {
     NewTag {
         on: Option<String>,
         on_label: String,
+    },
+    /// From stash `id` (checked out, the stash applied there and dropped).
+    FromStash {
+        id: String,
+        message: String,
     },
 }
 
@@ -103,6 +110,7 @@ fn open(host: &mut dyn WorkbenchHost, target: Option<Target>, read: Reading) -> 
                 RefKindAsked::NewBranch { .. } => t("git.new_branch_title"),
                 RefKindAsked::RenameBranch { .. } => t("git.rename_branch_title"),
                 RefKindAsked::NewTag { .. } => t("git.new_tag_title"),
+                RefKindAsked::FromStash { .. } => t("git.stash_branch_title"),
             };
             host.open_modal(&title, EXTENSION, &RefRequest { repo, kind, taken });
         }) as Completion
@@ -114,7 +122,9 @@ fn new_branch_on(repo: &dyn Repository, target: Option<Target>) -> Option<(RefKi
     let (from, from_label) = match target {
         Some(Target::Commit { id, short }) => (Some(id), short),
         Some(Target::Reference { name, .. }) => (Some(name.clone()), name),
-        None => (None, repo.branch().map_or_else(|| "HEAD".into(), |b| format!("HEAD ({b})"))),
+        Some(Target::Stash { .. }) | None => {
+            (None, repo.branch().map_or_else(|| "HEAD".into(), |b| format!("HEAD ({b})")))
+        }
     };
     Some((RefKindAsked::NewBranch { from, from_label }, false))
 }
@@ -131,9 +141,19 @@ fn new_tag_on(_repo: &dyn Repository, target: Option<Target>) -> Option<(RefKind
     let (on, on_label) = match target {
         Some(Target::Commit { id, short }) => (Some(id), short),
         Some(Target::Reference { name, .. }) => (Some(name.clone()), name),
-        None => (None, "HEAD".into()),
+        Some(Target::Stash { .. }) | None => (None, "HEAD".into()),
     };
     Some((RefKindAsked::NewTag { on, on_label }, true))
+}
+
+fn from_stash_on(_repo: &dyn Repository, target: Option<Target>) -> Option<(RefKindAsked, bool)> {
+    let Some(Target::Stash { id, message }) = target else { return None };
+    Some((RefKindAsked::FromStash { id, message }, false))
+}
+
+/// New Branch… from stash `stash`.
+pub(crate) fn stash_branch(host: &mut dyn WorkbenchHost, stash: version_control::Stash) -> bool {
+    open(host, Some(Target::Stash { id: stash.id, message: stash.message }), from_stash_on)
 }
 
 /// New Branch…, from `target`, else `HEAD`.
@@ -169,8 +189,6 @@ enum Hit {
     Name,
     Message,
     Checkout,
-    Go,
-    Cancel,
 }
 
 /// The field with the keys.
@@ -253,6 +271,7 @@ impl RefDialog {
                     r.repo.create_branch(&name, from.as_deref(), checkout)
                 }
                 RefKindAsked::RenameBranch { old } => r.repo.rename_branch(old, &name),
+                RefKindAsked::FromStash { id, .. } => r.repo.stash_branch(id, &name),
                 RefKindAsked::NewTag { on, .. } => {
                     let message = (!message.is_empty()).then_some(message.as_str());
                     r.repo.create_tag(&name, on.as_deref(), message)
@@ -287,17 +306,22 @@ impl RefDialog {
         match self.request.as_ref().map(|r| &r.kind) {
             Some(RefKindAsked::NewBranch { .. }) => tr!("git.branch_created", name = name),
             Some(RefKindAsked::RenameBranch { .. }) => tr!("git.branch_renamed", name = name),
+            Some(RefKindAsked::FromStash { .. }) => tr!("git.stash_branch_made", name = name),
             _ => tr!("git.tag_created", name = name),
         }
     }
 }
 
+/// The dialogs' width (logical pixels): a name and a line or two.
+const WIDTH: f32 = 560.0;
+
 /// The dialogs' content heights (logical pixels).
 fn height(kind: &RefKindAsked) -> f32 {
     match kind {
-        RefKindAsked::NewBranch { .. } => 210.0,
-        RefKindAsked::RenameBranch { .. } => 150.0,
-        RefKindAsked::NewTag { .. } => 240.0,
+        RefKindAsked::NewBranch { .. } => 140.0,
+        RefKindAsked::RenameBranch { .. } => 100.0,
+        RefKindAsked::NewTag { .. } => 150.0,
+        RefKindAsked::FromStash { .. } => 100.0,
     }
 }
 
@@ -322,11 +346,26 @@ impl Viewer for RefDialog {
             }
             RefKindAsked::RenameBranch { old } => tr!("git.rename_branch_of", name = old.as_str()),
             RefKindAsked::NewTag { on_label, .. } => tr!("git.new_tag_on", on = on_label.as_str()),
+            RefKindAsked::FromStash { message, .. } => message.clone(),
         })
     }
 
     fn modal_height(&self) -> Option<f32> {
         self.request.as_ref().map(|r| height(&r.kind))
+    }
+
+    fn modal_width(&self) -> Option<f32> {
+        Some(WIDTH)
+    }
+
+    /// Create / Rename (↵), Cancel — in the window's footer.
+    fn modal_buttons(&self) -> Vec<ui_components::ModalButton> {
+        use ui_components::ModalButton;
+        let can = self.problem().is_none() && self.running.is_none();
+        vec![
+            ModalButton::main("go", self.go_label(), can),
+            ModalButton::other("cancel", t("git.ref_cancel")),
+        ]
     }
 
     fn modal_icon(&self) -> Option<&'static str> {
@@ -448,22 +487,8 @@ impl Viewer for RefDialog {
                 );
                 self.hits.push((field, Hit::Message));
             }
-            RefKindAsked::RenameBranch { .. } => {}
+            RefKindAsked::RenameBranch { .. } | RefKindAsked::FromStash { .. } => {}
         }
-        // The buttons.
-        let bh = px(ds::BUTTON_H);
-        let by = b.max_y() - px(56.0) + (px(56.0) - bh) / 2.0;
-        let go = self.go_label();
-        let w = ds::primary_width(text, &ds, &[&go]);
-        let g = Rect::new(b.max_x() - pad - w, by, w, bh);
-        let can = problem.is_none() && self.running.is_none();
-        ds::primary_button(layer, text, &ds, g, &go, can, self.hover == Some(Hit::Go));
-        self.hits.push((g, Hit::Go));
-        let cancel = t("git.ref_cancel");
-        let cw = ds::primary_width(text, &ds, &[&cancel]);
-        let c = Rect::new(g.min_x() - px(10.0) - cw, by, cw, bh);
-        ds::secondary_button(layer, text, &ds, c, &cancel, true, self.hover == Some(Hit::Cancel));
-        self.hits.push((c, Hit::Cancel));
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
@@ -477,10 +502,6 @@ impl Viewer for RefDialog {
                 self.message.press(p.x, clicks);
             }
             Some(Hit::Checkout) => self.checkout = !self.checkout,
-            Some(Hit::Go) => {
-                self.give();
-            }
-            Some(Hit::Cancel) => self.action = Some(ViewerAction::Close),
             None => {}
         }
         self.action.take()
@@ -542,6 +563,10 @@ impl Viewer for RefDialog {
     fn command(&mut self, id: &str) -> bool {
         match id {
             "go" => self.give(),
+            "cancel" => {
+                self.action = Some(ViewerAction::Close);
+                true
+            }
             "select_all" => {
                 self.input().select_all();
                 true

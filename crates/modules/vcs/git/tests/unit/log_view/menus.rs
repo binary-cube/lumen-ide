@@ -65,7 +65,8 @@ fn a_commits_menu_toggles_its_files_copies_and_compares() {
             COMPARE_PREVIOUS,
             COMPARE_WORKING,
             NEW_BRANCH_HERE,
-            NEW_TAG_HERE
+            NEW_TAG_HERE,
+            CHECKOUT_HERE
         ]
     );
     // Every file of the commit, then only this one again.
@@ -109,7 +110,10 @@ fn a_commits_menu_toggles_its_files_copies_and_compares() {
 fn the_logs_commit_menu_has_only_what_concerns_every_file() {
     let mut view = history();
     view.path = None;
-    assert_eq!(ids(&view.commit_menu()), [COPY_HASH, COPY_MESSAGE, NEW_BRANCH_HERE, NEW_TAG_HERE]);
+    assert_eq!(
+        ids(&view.commit_menu()),
+        [COPY_HASH, COPY_MESSAGE, NEW_BRANCH_HERE, NEW_TAG_HERE, CHECKOUT_HERE]
+    );
 }
 
 #[test]
@@ -163,7 +167,10 @@ fn branches_and_tags_are_asked_from_the_menus() {
         },
     }];
     let rows = ids(&view.branch_menu(0).unwrap());
-    assert_eq!(rows, ["branch.new-branch:0", "branch.rename:0", "branch.new-tag:0"]);
+    assert_eq!(
+        rows,
+        ["branch.switch:0", "branch.new-branch:0", "branch.rename:0", "branch.new-tag:0"]
+    );
     assert!(view.command("branch.rename:0"));
     assert!(matches!(view.take_action(), Some(ViewerAction::WithHost(_))));
 }
@@ -179,7 +186,8 @@ fn a_local_branch_pushes_to_what_it_tracks_and_to_each_remote() {
             kind: RefKind::Branch,
         },
     }];
-    assert_eq!(view.branch_menu(0).unwrap().len(), 3, "without remotes, no pushes");
+    // Switch to, its line, then three: without remotes, no pushes.
+    assert_eq!(view.branch_menu(0).unwrap().len(), 5, "without remotes, no pushes");
     view.remotes = vec!["fork".into(), "origin".into()];
     view.branch_states = vec![version_control::SyncState {
         branch: "topic".into(),
@@ -188,8 +196,8 @@ fn a_local_branch_pushes_to_what_it_tracks_and_to_each_remote() {
         behind: 0,
     }];
     let rows = view.branch_menu(0).unwrap();
-    assert!(matches!(&rows[4], ViewMenuEntry::Item { id, .. } if id == "branch.push:0"));
-    let ViewMenuEntry::Submenu { entries, .. } = &rows[5] else { panic!("the remotes") };
+    assert!(matches!(&rows[6], ViewMenuEntry::Item { id, .. } if id == "branch.push:0"));
+    let ViewMenuEntry::Submenu { entries, .. } = &rows[7] else { panic!("the remotes") };
     assert_eq!(ids(entries), ["branch.push-to:0:0", "branch.push-to:0:1"]);
     assert!(view.command("branch.push-to:0:1"));
     assert!(matches!(view.take_action(), Some(ViewerAction::WithHost(_))));

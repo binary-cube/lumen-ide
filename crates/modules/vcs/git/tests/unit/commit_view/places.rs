@@ -13,7 +13,11 @@ fn places() -> Places {
             r("origin/main", RefKind::Remote),
             r("v1.0", RefKind::Tag),
         ],
-        stashes: vec![Stash { name: "stash@{0}".into(), message: "On main: wip".into() }],
+        stashes: vec![Stash {
+            name: "stash@{0}".into(),
+            message: "On main: wip".into(),
+            id: "1".into(),
+        }],
         submodules: vec!["libs/x".into()],
         states: vec![SyncState { branch: "main".into(), upstream: None, ahead: 1, behind: 0 }],
     }

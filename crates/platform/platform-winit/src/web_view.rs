@@ -238,9 +238,53 @@ impl platform_api::WebView for WryWebView {
         }
     }
 
-    fn set_holes(&self, holes: &[(Rect, f32)]) {
+    fn set_holes(&self, holes: &[(Rect, f32)], cut: bool) {
         if let Some(h) = &self.holes {
-            h.set(holes, self.area.get());
+            h.set(holes, self.area.get(), cut);
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    fn set_corners(&self, radius: f32, corners: u8) {
+        if let Some(h) = &self.holes {
+            h.set_corners(radius, corners, self.area.get());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[allow(unsafe_code)]
+    fn set_corners(&self, radius: f32, corners: u8) {
+        use platform_api::Corners;
+        use wry::WebViewExtMacOS;
+        let page = self.view.webview();
+        let scale = self.window.scale_factor();
+        // SAFETY: `-[NSView layer]`, `-[CALayer contentsAreFlipped]`, `-setCornerRadius:`,
+        // `-setMaskedCorners:`, `-setMasksToBounds:` with their declared types, on the main
+        // thread (the window's), on the page's own view.
+        unsafe {
+            let layer: Option<objc2::rc::Retained<objc2::runtime::AnyObject>> =
+                objc2::msg_send![&*page, layer];
+            let Some(layer) = layer else { return };
+            // Core Animation's corners by its y: from the bottom unless the layer is flipped.
+            let flipped: bool = objc2::msg_send![&*layer, contentsAreFlipped];
+            let (top, bottom) = if flipped { (0u64, 1u64) } else { (1, 0) };
+            let bit = |x: u64, y: u64| 1u64 << (x + 2 * y);
+            let mut mask = 0u64;
+            for (corner, x, y) in [
+                (Corners::TOP_LEFT, 0, top),
+                (Corners::TOP_RIGHT, 1, top),
+                (Corners::BOTTOM_LEFT, 0, bottom),
+                (Corners::BOTTOM_RIGHT, 1, bottom),
+            ] {
+                if corners & corner != 0 {
+                    mask |= bit(x, y);
+                }
+            }
+            let rounded = mask != 0 && radius > 0.0;
+            let r = if rounded { f64::from(radius) / scale } else { 0.0 };
+            let _: () = objc2::msg_send![&*layer, setCornerRadius: r];
+            let _: () = objc2::msg_send![&*layer, setMaskedCorners: mask];
+            let _: () = objc2::msg_send![&*layer, setMasksToBounds: rounded];
         }
     }
 

@@ -866,3 +866,26 @@ fn a_page_picture_is_drawn_only_at_its_size() {
     assert!(!fits(&picture, kernel::Rect::new(10.0, 10.0, 160.0, 50.0)));
     assert!(!fits(&picture, kernel::Rect::new(10.0, 10.0, 100.0, 30.0)));
 }
+
+/// A page reaching its card's corners has them rounded as the card's (less the border it
+/// sits inside); a page away from them stays square.
+#[test]
+fn a_page_s_corners_follow_its_card_s() {
+    let wb = workbench();
+    let card = wb.card;
+    let radius = (CARD_RADIUS * wb.scale).round();
+    // The card's lower part, inside its border: its bottom corners.
+    let line = wb.scale.round().max(1.0);
+    let area = Rect::new(
+        card.min_x() + line,
+        card.min_y() + card.size.height / 2.0,
+        card.size.width - 2.0 * line,
+        card.size.height / 2.0 - line,
+    );
+    let (r, corners) = wb.page_corners(area);
+    assert_eq!(corners, platform_api::Corners::BOTTOM_LEFT | platform_api::Corners::BOTTOM_RIGHT);
+    assert!((r - (radius - line)).abs() < 0.01, "{r}");
+    // In its middle: square.
+    let inside = Rect::new(card.min_x() + 50.0, card.min_y() + 50.0, 100.0, 100.0);
+    assert_eq!(wb.page_corners(inside), (0.0, 0));
+}

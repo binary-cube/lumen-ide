@@ -20,6 +20,8 @@ const HEIGHT: f32 = 40.0;
 pub struct TopBarModel<'a> {
     pub project: Option<&'a str>,
     pub branch: Option<&'a str>,
+    /// The branch is a button (a module runs something on its click: a list to switch).
+    pub branch_button: bool,
     /// After the branch, muted in a small frame: what a module says of this window's
     /// project (its shortcut: `⌥⌘1`).
     pub badge: Option<&'a str>,
@@ -46,6 +48,8 @@ pub enum TopBarHit {
     /// The menu button (☰).
     Menu,
     Projects,
+    /// The branch (a button when a module gave it a click).
+    Branch,
     /// The badge after the branch (a module's: the project's shortcut).
     Badge,
     /// A registered button (by its id).
@@ -69,6 +73,8 @@ pub struct TopBar {
     /// The menu button (empty when not drawn).
     menu: Rect,
     project: Rect,
+    /// The branch, when it's a button (empty otherwise).
+    branch: Rect,
     /// The badge after the branch (empty when not drawn).
     badge: Rect,
     /// The registered buttons (from the last paint).
@@ -130,6 +136,11 @@ impl TopBar {
         (self.menu.size.width > 0.0).then_some(self.menu)
     }
 
+    /// The branch button's area, when it's one.
+    pub fn branch_anchor(&self) -> Option<Rect> {
+        (self.branch.size.width > 0.0).then_some(self.branch)
+    }
+
     /// The project button's area (the project list opens below it).
     pub fn project_anchor(&self) -> Rect {
         self.project
@@ -141,6 +152,7 @@ impl TopBar {
         let rect = match hit {
             TopBarHit::Menu => self.menu,
             TopBarHit::Projects => self.project,
+            TopBarHit::Branch => self.branch,
             TopBarHit::Badge => self.badge,
             TopBarHit::Action(id) => self.actions.iter().find(|(_, a)| *a == id)?.0,
             TopBarHit::Minimize => self.minimize,
@@ -159,6 +171,8 @@ impl TopBar {
             TopBarHit::Menu
         } else if self.project.contains(p) {
             TopBarHit::Projects
+        } else if self.branch.contains(p) {
+            TopBarHit::Branch
         } else if self.badge.contains(p) {
             TopBarHit::Badge
         } else if let Some((_, id)) = self.actions.iter().find(|(r, _)| r.contains(p)) {
@@ -286,21 +300,53 @@ impl TopBar {
         ));
         x = self.project.max_x() + px(14.0);
 
-        // The git branch (display only).
+        // The git branch: shown, or a button (a module's list to switch it) with a chevron.
+        self.branch = Rect::default();
         if let Some(branch) = model.branch {
             let from = x;
-            if let Some(id) = icons.id("git-branch") {
-                let size = px(15.0);
-                let r = Rect::new(x, b.min_y() + (b.size.height - size) / 2.0, size, size);
-                draw_icon(layer, icons, id, r, palette.text_muted);
-                x += size + px(6.0);
-            }
             let shaped = text.shape_line(branch, &font);
-            draw_text(layer, &shaped, x, baseline, palette.text_muted);
+            let icon = px(15.0);
+            let chevron = if model.branch_button { px(6.0) + px(12.0) } else { 0.0 };
+            let inner = icon + px(6.0) + shaped.width + chevron;
+            if model.branch_button {
+                let h = px(26.0);
+                let r = Rect::new(
+                    x - px(8.0),
+                    (b.min_y() + (b.size.height - h) / 2.0).round(),
+                    inner + px(16.0),
+                    h,
+                );
+                let lit = self.hover == Some(TopBarHit::Branch);
+                if lit {
+                    layer.quad(Quad::filled(r, palette.text.with_alpha(0.07)).rounded(px(6.0)));
+                }
+                self.branch = r;
+            }
+            let color = if self.hover == Some(TopBarHit::Branch) {
+                palette.text
+            } else {
+                palette.text_muted
+            };
+            if let Some(id) = icons.id("git-branch") {
+                let r = Rect::new(x, b.min_y() + (b.size.height - icon) / 2.0, icon, icon);
+                draw_icon(layer, icons, id, r, color);
+            }
+            x += icon + px(6.0);
+            draw_text(layer, &shaped, x, baseline, color);
+            x += shaped.width;
+            if model.branch_button
+                && let Some(id) = icons.id("chevron-down")
+            {
+                let size = px(12.0);
+                let r =
+                    Rect::new(x + px(6.0), b.min_y() + (b.size.height - size) / 2.0, size, size);
+                draw_icon(layer, icons, id, r, palette.text_muted);
+                x += px(6.0) + size;
+            }
             let h = px(16.0);
             let top = b.min_y() + (b.size.height - h) / 2.0;
-            self.occupied.push(Rect::new(from, top, x + shaped.width - from, h));
-            x += shaped.width + px(12.0);
+            self.occupied.push(Rect::new(from, top, x - from, h));
+            x += px(12.0) + if model.branch_button { px(8.0) } else { 0.0 };
         }
         // A module's word on this project (its shortcut), in a small frame.
         self.badge = Rect::default();

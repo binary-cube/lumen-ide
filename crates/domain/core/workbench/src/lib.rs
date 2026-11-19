@@ -86,4 +86,4 @@ pub use settings_page::{
 };
 pub use sizes::LayoutSizes;
 pub use status::{Indicator, StatusIndicator, SystemIndicator, SystemSign};
-pub use windows::{ProjectWindow, TopBadge, TopBarBadge};
+pub use windows::{Anchor, ProjectWindow, TopBadge, TopBarBadge, TopBarLabelAction};

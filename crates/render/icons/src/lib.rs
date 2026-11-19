@@ -382,6 +382,16 @@ const BUILTIN: &[(&str, &str)] = &[
     ("redo", include_str!("../svg/redo.svg")),
     ("wrench", include_str!("../svg/wrench.svg")),
     ("circle-help", include_str!("../svg/circle-help.svg")),
+    // A changed file's state, drawn in its badge (thicker: small, on a color).
+    ("mark-modified", include_str!("../svg/mark-modified.svg")),
+    ("mark-added", include_str!("../svg/mark-added.svg")),
+    ("mark-deleted", include_str!("../svg/mark-deleted.svg")),
+    ("mark-renamed", include_str!("../svg/mark-renamed.svg")),
+    ("mark-untracked", include_str!("../svg/mark-untracked.svg")),
+    ("mark-conflicted", include_str!("../svg/mark-conflicted.svg")),
+    ("arrow-left-right", include_str!("../svg/arrow-left-right.svg")),
+    ("archive-down", include_str!("../svg/archive-down.svg")),
+    ("archive-up", include_str!("../svg/archive-up.svg")),
 ];
 
 /// Identifier of a registered icon.

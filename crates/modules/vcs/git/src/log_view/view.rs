@@ -508,16 +508,18 @@ impl Viewer for LogView {
             return None;
         };
         match hit {
-            // A folder opens / closes; a branch is chosen, its log shown with a double click.
+            // A folder opens / closes; a branch is chosen, its log shown; a double click
+            // switches to it.
             Hit::Branch(i) => {
-                let group = matches!(
-                    self.branch_rows.get(i).map(|r| &r.item),
-                    Some(BranchItem::Group { .. })
-                );
-                if group || clicks >= 2 {
-                    self.choose_branch(i);
-                }
                 self.branch_selected = Some(i);
+                if clicks >= 2 {
+                    let menu = self.menu_ref(i);
+                    let wanted = menu
+                        .filter(|on| !on.current)
+                        .and_then(|on| crate::switch::Wanted::of(&on.name, on.kind?));
+                    return wanted.map(crate::ref_menu::switch_action);
+                }
+                self.choose_branch(i);
                 None
             }
             Hit::BranchSync(_) => None,

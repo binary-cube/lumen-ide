@@ -674,6 +674,7 @@ fn a_place_s_branch_has_the_log_s_menu() {
     assert_eq!(
         ids,
         [
+            format!("branch.switch:{i}"),
             format!("branch.new-branch:{i}"),
             format!("branch.rename:{i}"),
             format!("branch.new-tag:{i}"),

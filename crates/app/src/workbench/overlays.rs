@@ -398,6 +398,11 @@ impl Workbench {
                     Tip::new(rect, i18n::t("tooltip.menu")).with_shortcut(self.menu_shortcut())
                 }
                 TopBarHit::Projects => with(rect, "projects", None),
+                TopBarHit::Branch => {
+                    let action = self.branch_action()?;
+                    Tip::new(rect, i18n::t(action.tooltip))
+                        .with_shortcut(crate::commands::shortcut_label(action.command))
+                }
                 TopBarHit::Badge => {
                     Tip::new(rect, self.chrome.badge.as_ref().map(|b| b.tooltip.clone())?)
                 }

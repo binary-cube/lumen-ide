@@ -210,6 +210,42 @@ impl Workbench {
             .collect()
     }
 
+    /// The corners of a page at `area` (physical) to round as the card it's in (the
+    /// editor's, a side or bottom window's): those on a card's corner (within its border),
+    /// and their radius — `(radius, corners)`, the corners as [`platform_api::Corners`]'
+    /// bits (none: square).
+    pub fn page_corners(&self, area: kernel::Rect) -> (f32, u8) {
+        let radius = (CARD_RADIUS * self.scale).round();
+        let near = self.scale.round().max(1.0) + 1.0;
+        let cards = std::iter::once(self.card).chain(self.tools.sides.iter().map(|s| s.bounds));
+        for card in cards {
+            if card.intersect(&area).is_none() {
+                continue;
+            }
+            let left = (area.min_x() - card.min_x()).abs();
+            let right = (card.max_x() - area.max_x()).abs();
+            let top = (area.min_y() - card.min_y()).abs();
+            let bottom = (card.max_y() - area.max_y()).abs();
+            let mut corners = 0;
+            let mut inset: f32 = 0.0;
+            for (bit, dx, dy) in [
+                (platform_api::Corners::TOP_LEFT, left, top),
+                (platform_api::Corners::TOP_RIGHT, right, top),
+                (platform_api::Corners::BOTTOM_LEFT, left, bottom),
+                (platform_api::Corners::BOTTOM_RIGHT, right, bottom),
+            ] {
+                if dx <= near && dy <= near {
+                    corners |= bit;
+                    inset = inset.max(dx.max(dy));
+                }
+            }
+            if corners != 0 {
+                return ((radius - inset).max(0.0), corners);
+            }
+        }
+        (0.0, 0)
+    }
+
     /// What floats over the pages and shows through them (each a rect with its corners'
     /// radius; physical): the bar's window or the resources' pills, the notifications, the
     /// tooltip. Nothing where pages can't have holes.

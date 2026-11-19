@@ -39,12 +39,15 @@ impl Workbench {
         }
         // What the views drew past the card's rounded corners cut back.
         self.round_card_corners(scene, b, top.min(b.max_y()));
-        self.paint_tool_tab_drop(text, scene);
     }
 
     /// A tab dragged out of its strip: where it would go (an insertion line among another
     /// group's tabs, the part of a view it would take) and its pill by the pointer.
-    pub(super) fn paint_tool_tab_drop(&self, text: &mut TextSystem, scene: &mut Scene) {
+    pub(in crate::workbench) fn paint_tool_tab_drop(
+        &self,
+        text: &mut TextSystem,
+        scene: &mut Scene,
+    ) {
         let Some(drag) =
             self.tools.tab_drag.as_ref().filter(|d| d.state == TabDragState::Moving && !d.in_strip)
         else {

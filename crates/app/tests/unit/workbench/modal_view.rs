@@ -239,3 +239,44 @@ fn a_modal_view_without_a_field_gets_its_keys() {
     assert_eq!(wb.modal_view_text(&mut text, "1"), Some(true));
     assert_eq!(*keys.lock().unwrap(), ['0', '1']);
 }
+
+/// A popover's view that says it's done without asking anything (closed by Esc, a click
+/// outside it): closed by the window — never left open unseen, taking every click and key.
+#[test]
+fn a_popover_done_without_an_action_is_closed() {
+    /// A view done on Esc or on any press, asking for nothing.
+    #[derive(Default)]
+    struct Quiet(bool);
+    impl ui_workbench::Viewer for Quiet {
+        fn paint(&mut self, _ctx: ui_workbench::ViewerPaint<'_>) {}
+        fn closed(&self) -> bool {
+            self.0
+        }
+        fn edit_key(&mut self, _key: ui_workbench::ViewerKey) -> bool {
+            self.0 = true;
+            true
+        }
+        fn press(&mut self, _p: Point, _clicks: u32) -> Option<ui_workbench::ViewerAction> {
+            self.0 = true;
+            None
+        }
+    }
+    let (support, _) = crate::modules::load(&extensions::ModuleSelection::default());
+    let mut wb = Workbench::new(Arc::new(support), Ports::local());
+    wb.forget_projects();
+    wb.resize(PhysicalSize::new(1200, 800), 1.0);
+    let mut text = TextSystem::new();
+    let popover = || ModalView {
+        viewer: Box::new(Quiet::default()),
+        frame: None,
+        popover: true,
+        dragging: false,
+        extension: "view-test-popover".into(),
+    };
+    wb.modal_view = Some(popover());
+    wb.edit_key(&mut text, EditKey::Escape);
+    assert!(!wb.has_modal_view(), "Esc: done, closed");
+    wb.modal_view = Some(popover());
+    wb.click_modal_view(&mut text, Point::new(5.0, 5.0), 1);
+    assert!(!wb.has_modal_view(), "a click outside: done, closed");
+}

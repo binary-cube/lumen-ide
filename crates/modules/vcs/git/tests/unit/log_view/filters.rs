@@ -235,13 +235,13 @@ fn the_branches_panel_filters_and_a_double_click_shows_a_branch() {
     assert_eq!(view.filter.references, ["feature/login"], "↵: the first one");
     view.filter_branch(None);
     view.bar.focus = None;
-    // Clicks on its row: one marks it, two show it.
+    // A click on its row shows it; two switch to it (an action for the host).
     view.hits = vec![(Rect::new(0.0, 0.0, 100.0, 20.0), Hit::Branch(at))];
-    view.press(Point::new(5.0, 5.0), 1);
-    assert!(view.filter.references.is_empty());
-    assert_eq!(view.branch_selected, Some(at));
-    view.press(Point::new(5.0, 5.0), 2);
+    assert!(view.press(Point::new(5.0, 5.0), 1).is_none());
     assert_eq!(view.filter.references, ["feature/login"]);
+    assert_eq!(view.branch_selected, Some(at));
+    let twice = view.press(Point::new(5.0, 5.0), 2);
+    assert!(matches!(twice, Some(ViewerAction::WithHost(_))), "switched to");
 }
 
 /// The bar's fields are text fields: the app's ⌘A / ⌘X / ⌘Z reach the one with the keys,

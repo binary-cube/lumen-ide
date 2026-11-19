@@ -4,7 +4,20 @@ use super::*;
 use ui_workbench::Painter;
 
 impl Workbench {
+    /// Everything into `scene` (the snapshots', the tests').
+    #[cfg_attr(not(any(test, feature = "snapshot")), allow(dead_code))]
     pub fn paint(&mut self, text: &mut TextSystem, scene: &mut Scene) {
+        self.paint_with_floating(text, scene, None);
+    }
+
+    /// [`Self::paint`], what floats (the overlays, the tooltips) drawn into `floating` when
+    /// given: the window's layer over the pages, drawn over them.
+    pub fn paint_with_floating(
+        &mut self,
+        text: &mut TextSystem,
+        scene: &mut Scene,
+        floating: Option<&mut Scene>,
+    ) {
         // This window's caret (its theme's: windows can have different ones).
         ui_kit::caret::configure(self.caret_look());
         // The installed PHP (…) found in the background since: the levels take it.
@@ -69,12 +82,21 @@ impl Workbench {
         self.paint_page_pictures(scene);
         // The content muted but where the work is; the overlays over it never are.
         self.emphasize(scene, emphasis);
-        // The overlays, bottom up: the stack's order, the one input follows.
+        // The overlays, bottom up: the stack's order, the one input follows — on the layer
+        // over the pages when there's one.
+        let top = match floating {
+            Some(floating) => floating,
+            None => scene,
+        };
         for o in Overlay::ALL.into_iter().rev() {
-            o.slot().paint(self, text, scene);
+            o.slot().paint(self, text, top);
         }
+        // A tab being dragged (its pill, where it would go), an editor's or a bottom
+        // window's: over everything — the side panels, the separators, the pages.
+        self.paint_tab_drag(text, top);
+        self.paint_tool_tab_drop(text, top);
         let window = Rect::new(0.0, 0.0, self.size.width as f32, self.size.height as f32);
-        self.tooltips.paint(text, scene, &self.palette, self.scale, window);
+        self.tooltips.paint(text, top, &self.palette, self.scale, window);
         self.save_session_soon();
         self.release_unseen_syntax();
         self.paint_phases.mark("overlays");
@@ -177,7 +199,7 @@ impl Workbench {
     }
 
     /// The editor groups: the unfocused ones (with their state swapped in temporarily),
-    /// then the current one, the dividers and a tab being dragged.
+    /// then the current one and the dividers (a tab being dragged: over everything, last).
     fn paint_groups(&mut self, text: &mut TextSystem, scene: &mut Scene) {
         for g in 0..self.editors.groups.len() {
             if g != self.editors.current {
@@ -195,7 +217,6 @@ impl Workbench {
         let card = self.card;
         self.round_card_corners(scene, card, card.min_y() + card.size.height / 2.0);
         self.paint_group_dividers(scene);
-        self.paint_tab_drag(text, scene);
     }
 
     /// The side panels, each a card with its header and content (`paint_side_panel`).
@@ -363,6 +384,7 @@ impl Workbench {
         let model = TopBarModel {
             project: current.as_ref().map(|c| c.name.as_str()),
             branch: self.chrome.project_label.as_deref(),
+            branch_button: self.branch_action().is_some(),
             badge: shown.as_deref(),
             // Full screen, the system's window buttons are gone (macOS).
             left_inset: if self.chrome.full_screen { 0.0 } else { self.chrome.titlebar_inset },

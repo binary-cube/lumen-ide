@@ -483,9 +483,10 @@ impl OverlaySlot for ModalViewSlot {
         wb.modal_view_tooltip(p)
     }
 
-    /// A popover lets the scroll go on to what's under it.
+    /// A popover lets the scroll go on to what's under it, unless the mouse is over what it
+    /// scrolls itself (a list).
     fn scroll(&self, wb: &mut Workbench, dx: f32, dy: f32) -> Option<bool> {
-        if self.kind(wb) == OverlayKind::Popover {
+        if self.kind(wb) == OverlayKind::Popover && !wb.modal_view_takes_scroll() {
             return None;
         }
         Some(wb.scroll_modal_view(dx, dy).unwrap_or(false))

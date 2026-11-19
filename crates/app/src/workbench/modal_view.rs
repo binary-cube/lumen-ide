@@ -216,12 +216,18 @@ impl Workbench {
         }
     }
 
-    /// Takes what the view's keys produced.
+    /// Takes what the view's keys produced; a view done with nothing more to ask for is
+    /// closed (never left open unseen, taking every click and key).
     pub(super) fn take_modal_action(&mut self, text: &mut TextSystem) {
         let action = self.modal_view.as_mut().and_then(|m| m.viewer.take_action());
-        if let Some(action) = action
-            && let result @ (MouseResult::ViewerRequest(_) | MouseResult::OpenProject(_)) =
-                self.modal_action(text, action)
+        let Some(action) = action else {
+            if self.modal_view.as_ref().is_some_and(|m| m.viewer.closed()) {
+                self.modal_view = None;
+            }
+            return;
+        };
+        if let result @ (MouseResult::ViewerRequest(_) | MouseResult::OpenProject(_)) =
+            self.modal_action(text, action)
         {
             self.request = Some(result);
         }
@@ -448,6 +454,8 @@ impl Workbench {
             Some(other) => {
                 tracing::debug!(?other, "a modal view's action after its work is ignored")
             }
+            // Done with nothing to ask for: closed.
+            None if modal.viewer.closed() => self.modal_view = None,
             None => {}
         }
         changed
@@ -459,6 +467,11 @@ impl Workbench {
     }
 
     /// A bare view drawing the whole window is open: nothing behind it is drawn.
+    /// A popover's view takes the wheel now (the mouse over its list).
+    pub(super) fn modal_view_takes_scroll(&self) -> bool {
+        self.modal_view.as_ref().is_some_and(|m| m.viewer.takes_scroll())
+    }
+
     pub(super) fn modal_view_covers(&self) -> bool {
         self.modal_view.as_ref().is_some_and(|m| m.frame.is_none() && m.viewer.covers_window())
     }

@@ -78,7 +78,13 @@ fn stashes_and_submodules_as_git_lists_them() {
     let stashes =
         parse_stashes("stash@{0}\u{1f}On main: wip\nstash@{1}\u{1f}WIP on x: 4b3685a style\n");
     assert_eq!(stashes.len(), 2);
-    assert_eq!(stashes[0], Stash { name: "stash@{0}".into(), message: "On main: wip".into() });
+    let wip = Stash { name: "stash@{0}".into(), message: "On main: wip".into(), id: String::new() };
+    assert_eq!(stashes[0], wip);
+    let with_id = parse_stashes("stash@{0}\u{1f}On main: a\u{1f}b\u{1f}4b3685a\n");
+    assert_eq!(
+        (with_id[0].message.as_str(), with_id[0].id.as_str()),
+        ("On main: a\u{1f}b", "4b3685a")
+    );
     assert!(parse_stashes("").is_empty());
     let modules = "submodule.libs/b.path libs/b\nsubmodule.a.path vendor/a\n";
     assert_eq!(parse_submodules(modules), ["libs/b", "vendor/a"]);

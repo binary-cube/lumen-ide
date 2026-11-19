@@ -32,6 +32,9 @@ fn contributes_the_provider_and_the_git_menu() {
             RENAME_BRANCH.0,
             NEW_TAG.0,
             SHOW_CONFLICTS.0,
+            SWITCH_BRANCH.0,
+            STASH.0,
+            POP_SWITCH_STASH.0,
             CONTINUE_OPERATION.0,
             SKIP_OPERATION.0,
             ABORT_OPERATION.0,
@@ -43,9 +46,13 @@ fn contributes_the_provider_and_the_git_menu() {
     let reload = commands.last().unwrap();
     assert_eq!(reload.handler.when(), command_model::When::View(log_view::VIEW));
     assert_eq!(reload.spec.shortcuts, ["r"]);
-    // The commit view, the log, the changes, the conflicts and the dialogs; the service following the
-    // changes.
-    assert_eq!(contributions.take::<Arc<dyn ViewerProvider>>().len(), 6);
+    // The commit view, the log, the changes, the conflicts, the dialogs (branches, push,
+    // switch, stash) and the branch list; the service following the changes.
+    assert_eq!(contributions.take::<Arc<dyn ViewerProvider>>().len(), 9);
+    // The top bar's branch: its list.
+    let label = contributions.take::<workbench_model::TopBarLabelAction>();
+    assert_eq!(label.len(), 1);
+    assert_eq!(label[0].command, SWITCH_BRANCH);
     assert_eq!(contributions.take::<Arc<dyn ProjectService>>().len(), 1);
     // The Git menu: the repository's operations everywhere, a file's where there's one.
     let menus = contributions.take::<MenuContribution>();
@@ -53,11 +60,8 @@ fn contributes_the_provider_and_the_git_menu() {
     let rows = menus[0].rows_in(MenuPlace::TreeFolder, &|_| true);
     assert!(rows.contains(&MenuRow::Command(PULL, EVERYWHERE)));
     assert!(!rows.iter().any(|r| matches!(r, MenuRow::Command(id, _) if *id == FILE_HISTORY)));
-    assert!(
-        commands
-            .iter()
-            .all(|c| c.spec.menu.is_some() || [RELOAD_LOG, COMMIT_NOW].contains(&c.spec.id))
-    );
+    assert!(commands.iter().all(|c| c.spec.menu.is_some()
+        || [RELOAD_LOG, COMMIT_NOW, POP_SWITCH_STASH].contains(&c.spec.id)));
     // The button's menu: the log first; the changes aren't in it (the Commit tab shows
     // them), only in the command palette.
     let strip = menus[0].rows_in(MenuPlace::ToolStrip, &|_| true);

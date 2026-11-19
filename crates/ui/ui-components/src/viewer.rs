@@ -1033,6 +1033,11 @@ pub trait Viewer: Send {
     fn covers_window(&self) -> bool {
         false
     }
+    /// Opened as a popover: it takes the wheel now (the mouse is over its list, as its last
+    /// `hover` saw); `false` (the default) lets the scroll go on to what's under it.
+    fn takes_scroll(&self) -> bool {
+        false
+    }
     /// The cursor over `p`, if the viewer wants a particular one there.
     fn cursor_at(&self, _p: Point) -> Option<ViewerCursor> {
         None

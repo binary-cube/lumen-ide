@@ -14,12 +14,17 @@ mod graph;
 mod log;
 mod push;
 pub mod staging;
+mod switching;
 
 pub use conflict::{Choice, Hunk, Merged, OperationStep, Piece, Proceeded, Side, Stage};
 pub use filter::{LogFilter, LogOrder, TextFilter, TextMatcher, day_start, parse_day};
 pub use graph::{GraphBuilder, GraphRow};
 pub use log::{CommitDetails, FileChange, LogEntry, RefKind, RefLabel, SyncState};
 pub use push::{PushPlan, PushedBranch, Remote, url_without_password};
+pub use switching::{
+    RemoteSwitch, StashConflict, StashOptions, SwitchPlan, SwitchTarget, is_untracked,
+    recent_checkouts, remote_switch, stash_named, switch_plan,
+};
 
 /// The repository's `HEAD` moved (a commit, a checkout, a reset): what's committed changed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -448,6 +453,50 @@ pub trait Repository: Send + Sync + std::fmt::Debug {
         let _ = step;
         Err(VcsError::Failed("operations not supported".into()))
     }
+    /// Of `paths`, those whose committed content differs between `HEAD` and `revision`.
+    fn changed_between(&self, revision: &str, paths: &[String]) -> Result<Vec<String>, VcsError> {
+        let _ = (revision, paths);
+        Err(VcsError::Failed("switching not supported".into()))
+    }
+    /// Of `paths`, those that exist in `revision`.
+    fn present_in(&self, revision: &str, paths: &[String]) -> Result<Vec<String>, VcsError> {
+        let _ = (revision, paths);
+        Err(VcsError::Failed("switching not supported".into()))
+    }
+    /// The working tree switched to `target`; `discard`: the changes in its way thrown away.
+    fn switch(&self, target: &SwitchTarget, discard: bool) -> Result<(), VcsError> {
+        let _ = (target, discard);
+        Err(VcsError::Failed("switching not supported".into()))
+    }
+    /// The changes put aside as `options` say.
+    fn stash_push(&self, options: &StashOptions) -> Result<(), VcsError> {
+        let _ = options;
+        Err(VcsError::Failed("stashes not supported".into()))
+    }
+    /// Stash `id` (its commit) applied, dropped after when `pop`.
+    fn stash_apply(&self, id: &str, pop: bool) -> Result<(), VcsError> {
+        let _ = (id, pop);
+        Err(VcsError::Failed("stashes not supported".into()))
+    }
+    /// Stash `id` thrown away.
+    fn stash_drop(&self, id: &str) -> Result<(), VcsError> {
+        let _ = id;
+        Err(VcsError::Failed("stashes not supported".into()))
+    }
+    /// Branch `branch` made from stash `id` (checked out, the stash applied and dropped).
+    fn stash_branch(&self, id: &str, branch: &str) -> Result<(), VcsError> {
+        let _ = (id, branch);
+        Err(VcsError::Failed("stashes not supported".into()))
+    }
+    /// The local branches last checked out, newest first (without the current one).
+    fn recent_branches(&self, limit: usize) -> Vec<String> {
+        let _ = limit;
+        Vec::new()
+    }
+    /// Whether a stash of only what's staged can be made.
+    fn stashes_staged(&self) -> bool {
+        false
+    }
 }
 
 /// The extension point of version control systems (contributed by modules, e.g. git):
@@ -508,19 +557,23 @@ pub fn relative_path(root: &Path, path: &Path) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join("/"))
 }
 
-/// A stash: its name (`stash@{0}`) and its message (`On main: wip`).
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// A stash: its name (`stash@{0}`, which moves as others are made), its message
+/// (`On main: wip`) and its commit (what it's found by again).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Stash {
     pub name: String,
     pub message: String,
+    pub id: String,
 }
 
-/// `git stash list --format=%gd%x1f%s`'s lines as stashes.
+/// `git stash list --format=%gd%x1f%s%x1f%H`'s lines as stashes (the commit may be missing,
+/// in an older listing).
 pub fn parse_stashes(out: &str) -> Vec<Stash> {
     out.lines()
         .filter_map(|line| {
-            let (name, message) = line.split_once('\u{1f}')?;
-            Some(Stash { name: name.to_owned(), message: message.to_owned() })
+            let (name, rest) = line.split_once('\u{1f}')?;
+            let (message, id) = rest.rsplit_once('\u{1f}').unwrap_or((rest, ""));
+            Some(Stash { name: name.to_owned(), message: message.to_owned(), id: id.to_owned() })
         })
         .collect()
 }

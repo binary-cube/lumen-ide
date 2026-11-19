@@ -361,3 +361,55 @@ pub fn glass_badge(
     }
     pane
 }
+
+/// A changed file's badge's side, logical pixels.
+pub const CHANGE_BADGE: f32 = 16.0;
+
+/// A changed file's state as a small rounded square in its color (the theme's
+/// `vcs.badge.*`) with its sign over it (`…` modified, `+` added, `−` deleted, `→` renamed,
+/// `?` untracked, `!` conflicted), in `rect` (a square, on whole pixels).
+pub fn change_badge(
+    layer: &mut Layer,
+    icons: &icons::Icons,
+    ctx: &Ctx<'_>,
+    rect: Rect,
+    state: crate::changed_files::ChangeState,
+) {
+    let (fill, icon) = change_badge_look(state, ctx.palette);
+    let r = ctx.px(radius::SM).min(rect.size.height / 2.0);
+    layer.quad(Quad::filled(rect, ctx.fade(fill)).rounded(r));
+    if let Some(id) = icons.id(icon) {
+        let s = (rect.size.height * 0.72).round();
+        let at = Rect::new(
+            (rect.min_x() + (rect.size.width - s) / 2.0).round(),
+            (rect.min_y() + (rect.size.height - s) / 2.0).round(),
+            s,
+            s,
+        );
+        ui_kit::draw_icon(layer, icons, id, at, ctx.fade(sign_on(fill)));
+    }
+}
+
+/// A state's badge color and the icon of its sign.
+pub fn change_badge_look(
+    state: crate::changed_files::ChangeState,
+    p: &Palette,
+) -> (Rgba, &'static str) {
+    use crate::changed_files::ChangeState;
+    let b = &p.vcs_badges;
+    match state {
+        ChangeState::Modified => (b.modified, "mark-modified"),
+        ChangeState::Added => (b.added, "mark-added"),
+        ChangeState::Deleted => (b.deleted, "mark-deleted"),
+        ChangeState::Renamed => (b.renamed, "mark-renamed"),
+        ChangeState::Untracked => (b.untracked, "mark-untracked"),
+        ChangeState::Conflicted => (b.conflicted, "mark-conflicted"),
+        ChangeState::Failed => (p.warning, "mark-conflicted"),
+    }
+}
+
+/// The sign's color over `fill`: white on a dark fill, nearly black on a light one.
+pub fn sign_on(fill: Rgba) -> Rgba {
+    let luminance = 0.2126 * fill.r + 0.7152 * fill.g + 0.0722 * fill.b;
+    if luminance > 0.6 { Rgba::rgb(0x1f2329) } else { Rgba::WHITE }
+}

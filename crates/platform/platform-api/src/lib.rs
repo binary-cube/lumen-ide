@@ -44,10 +44,50 @@ pub trait WebView: fmt::Debug {
     /// The places cut out of it ([`Window::web_view_holes`]): there the app's own drawing
     /// shows through and the mouse reaches the app, not the page (what floats over the page:
     /// a pinned window, a tooltip). Each a rectangle (physical pixels, in the window) with
-    /// its corners' radius; none: the page whole.
-    fn set_holes(&self, holes: &[(Rect, f32)]) {
-        let _ = holes;
+    /// its corners' radius; none: the page whole. `cut`: the page isn't drawn there either
+    /// (else only the mouse goes to the app: what floats is drawn over the page, on the
+    /// window's [`FloatingLayer`]).
+    fn set_holes(&self, holes: &[(Rect, f32)], cut: bool) {
+        let _ = (holes, cut);
     }
+    /// Its `corners` ([`Corners`]' bits) rounded by `radius` (physical pixels): as the card
+    /// it's in, where it reaches that card's corners. None: square.
+    fn set_corners(&self, radius: f32, corners: u8) {
+        let _ = (radius, corners);
+    }
+}
+
+/// A page's corners ([`WebView::set_corners`]), as bits.
+#[derive(Debug, Clone, Copy)]
+pub struct Corners;
+
+impl Corners {
+    pub const TOP_LEFT: u8 = 1;
+    pub const TOP_RIGHT: u8 = 2;
+    pub const BOTTOM_LEFT: u8 = 4;
+    pub const BOTTOM_RIGHT: u8 = 8;
+}
+
+/// A transparent layer over the window's pages ([`Window::floating_layer`]): what the app
+/// draws there (what floats: a window over the bar, notifications, menus, tooltips) is over
+/// the pages too, with its shadows and its translucency — nothing cut out of them. The app
+/// draws it with its own renderer (its handles); where nothing is drawn, the page or the
+/// window under it shows. It never takes the mouse itself: the mouse over what floats
+/// reaches the app (the pages' holes, [`WebView::set_holes`], or `set_shapes`). Lives on
+/// the window's thread; gone when dropped.
+pub trait FloatingLayer: fmt::Debug {
+    /// Its native handles, for a renderer (a transparent surface).
+    fn handles(&self) -> Arc<dyn WindowHandles>;
+    /// Shown or hidden (hidden: nothing of it on screen, nothing taken).
+    fn set_visible(&self, visible: bool);
+    /// Where something floats now (physical pixels, in the window; each with its corners'
+    /// radius, and with `margin` around it for its shadow): where it may draw and where the
+    /// mouse is the app's. Where a platform needs it (Windows).
+    fn set_shapes(&self, shapes: &[(Rect, f32)], margin: f32) {
+        let _ = (shapes, margin);
+    }
+    /// Put back over every page (a page made after it goes on top).
+    fn raise(&self) {}
 }
 
 /// A page's picture ([`WebView::snapshot`]): `width` × `height` pixels, RGBA, rows top
@@ -233,6 +273,12 @@ pub trait Window: fmt::Debug {
         inbox: WebInbox,
     ) -> Option<Box<dyn WebView>> {
         let _ = (source, bounds, data, inbox);
+        None
+    }
+
+    /// A transparent layer over the pages ([`FloatingLayer`]); `None` where there's none
+    /// (what floats then goes in holes cut out of the pages).
+    fn floating_layer(&self) -> Option<Box<dyn FloatingLayer>> {
         None
     }
 

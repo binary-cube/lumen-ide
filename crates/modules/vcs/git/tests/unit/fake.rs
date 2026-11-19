@@ -51,6 +51,15 @@ pub struct FakeRepository {
     pub file_history: Vec<Commit>,
     pub index_texts: Vec<(String, String)>,
     pub patches: Mutex<Vec<(String, version_control::PatchTarget, bool)>>,
+    /// Switching: what differs on any target, the untracked files any target has, the
+    /// switches made (target, discarding), the branches last checked out.
+    pub differs: Vec<String>,
+    pub present: Vec<String>,
+    pub switched: Mutex<Vec<(version_control::SwitchTarget, bool)>>,
+    pub recent: Vec<String>,
+    /// The stashes, and how each was made.
+    pub stashes: Mutex<Vec<version_control::Stash>>,
+    pub stash_pushes: Mutex<Vec<version_control::StashOptions>>,
 }
 
 pub fn commit(id: &str, summary: &str) -> Commit {
@@ -160,6 +169,48 @@ impl Repository for FakeRepository {
     }
     fn operation(&self) -> Option<version_control::Operation> {
         self.operation.clone()
+    }
+    fn changed_between(&self, _: &str, paths: &[String]) -> Result<Vec<String>, VcsError> {
+        Ok(self.differs.iter().filter(|d| paths.contains(d)).cloned().collect())
+    }
+    fn present_in(&self, _: &str, paths: &[String]) -> Result<Vec<String>, VcsError> {
+        Ok(self.present.iter().filter(|d| paths.contains(d)).cloned().collect())
+    }
+    fn switch(
+        &self,
+        target: &version_control::SwitchTarget,
+        discard: bool,
+    ) -> Result<(), VcsError> {
+        self.switched.lock().unwrap().push((target.clone(), discard));
+        Ok(())
+    }
+    fn recent_branches(&self, limit: usize) -> Vec<String> {
+        self.recent.iter().take(limit).cloned().collect()
+    }
+    fn stashes(&self) -> Vec<version_control::Stash> {
+        self.stashes.lock().unwrap().clone()
+    }
+    fn stash_push(&self, options: &version_control::StashOptions) -> Result<(), VcsError> {
+        options.check().map_err(|c| VcsError::Failed(format!("{c:?}")))?;
+        self.stash_pushes.lock().unwrap().push(options.clone());
+        let mut stashes = self.stashes.lock().unwrap();
+        let id = format!("s{}", stashes.len() + 1);
+        let message = options.message.clone().unwrap_or_default();
+        stashes.insert(0, version_control::Stash { name: String::new(), message, id });
+        Ok(())
+    }
+    fn stash_apply(&self, id: &str, pop: bool) -> Result<(), VcsError> {
+        let mut stashes = self.stashes.lock().unwrap();
+        if !stashes.iter().any(|s| s.id == id) {
+            return Err(VcsError::Failed("no stash".into()));
+        }
+        if pop {
+            stashes.retain(|s| s.id != id);
+        }
+        Ok(())
+    }
+    fn stashes_staged(&self) -> bool {
+        true
     }
     fn mark_resolved(&self, paths: &[String]) -> Result<(), VcsError> {
         self.conflicted.lock().unwrap().retain(|p| !paths.contains(p));

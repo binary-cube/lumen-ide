@@ -57,3 +57,12 @@ impl Chrome {
         false
     }
 }
+
+impl Workbench {
+    /// What a click on the top bar's branch runs, when a module gave it one (and there's a
+    /// branch shown).
+    pub(super) fn branch_action(&self) -> Option<workbench_model::TopBarLabelAction> {
+        self.chrome.project_label.as_ref()?;
+        self.support.top_bar_label_actions.first().copied()
+    }
+}

@@ -18,6 +18,7 @@ fn hits_buttons_and_empty_area() {
     let model = TopBarModel {
         project: Some("demo"),
         branch: Some("main"),
+        branch_button: false,
         badge: None,
         left_inset: 80.0,
         controls: None,
@@ -52,6 +53,7 @@ fn the_menu_button_comes_first_and_the_project_after_it() {
         let model = TopBarModel {
             project: Some("demo"),
             branch: None,
+            branch_button: false,
             badge: None,
             left_inset: 0.0,
             controls: Some(false),

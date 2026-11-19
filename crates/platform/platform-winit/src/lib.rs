@@ -11,6 +11,12 @@ mod context_menu;
 #[cfg(target_os = "macos")]
 mod dock;
 mod file_drag;
+#[cfg(target_os = "macos")]
+#[path = "floating_macos.rs"]
+mod floating;
+#[cfg(target_os = "windows")]
+#[path = "floating_windows.rs"]
+mod floating;
 mod ime_caret;
 #[cfg(target_os = "windows")]
 mod jump_list;
@@ -484,6 +490,17 @@ impl Window for WinitWindow {
 
     fn web_view_holes(&self) -> bool {
         cfg!(any(target_os = "macos", target_os = "windows"))
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn floating_layer(&self) -> Option<Box<dyn platform_api::FloatingLayer>> {
+        // `EDITOR_NO_FLOATING_LAYER=1`: what floats over the pages goes in holes cut out of
+        // them, as before.
+        if std::env::var_os("EDITOR_NO_FLOATING_LAYER").is_some() {
+            return None;
+        }
+        floating::Floating::new(&self.window)
+            .map(|layer| Box::new(layer) as Box<dyn platform_api::FloatingLayer>)
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]

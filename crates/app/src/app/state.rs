@@ -73,10 +73,25 @@ impl Default for Pointer {
     }
 }
 
+/// The window's layer over the pages ([`platform_api::FloatingLayer`]): what floats (the
+/// overlays, the tooltips) drawn into its scene by its own renderer, over the pages — whole,
+/// nothing cut out of them.
+pub(super) struct Floating {
+    /// Let go before its layer (the fields' order).
+    pub renderer: Box<dyn Renderer>,
+    pub layer: Box<dyn platform_api::FloatingLayer>,
+    pub scene: Scene,
+}
+
 /// What painting a frame uses and measures: the renderer, the scene, the debug overlay,
 /// the input latency and the resize diagnostic.
 pub(super) struct Frames {
     pub renderer: Option<Box<dyn Renderer>>,
+    /// The layer over the pages, what floats drawn there (only while a page is on screen).
+    pub floating: Option<Floating>,
+    /// No floating layer could be made here (none, or not transparent): holes are cut out
+    /// of the pages instead, not tried again.
+    pub floating_failed: bool,
     pub overlay: DebugOverlay,
     pub scene: Scene,
     /// The moment of the first input not yet painted (for input → frame latency).
@@ -104,6 +119,8 @@ impl Frames {
     pub fn new() -> Self {
         Self {
             renderer: None,
+            floating: None,
+            floating_failed: false,
             overlay: DebugOverlay::new(String::new()),
             scene: Scene::default(),
             pending_input: None,

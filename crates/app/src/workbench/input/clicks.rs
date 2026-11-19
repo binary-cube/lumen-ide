@@ -55,8 +55,12 @@ impl Workbench {
             // The `…`: what didn't fit, as rows doing what they do in the bar.
             // The resources: pinned (their pills in the editor's corner) or unpinned, as
             // their window's pin does.
+            // A double click's second press does nothing more (pinned, not pinned and
+            // unpinned again).
             if action == super::status::RESOURCES {
-                self.toggle_resources_pin();
+                if clicks < 2 {
+                    self.toggle_resources_pin();
+                }
                 return Some(MouseResult::Redraw);
             }
             if action == super::status::FILE_DETAILS {
@@ -448,6 +452,14 @@ impl Workbench {
             TopBarHit::Badge => match self.chrome.badge.as_ref().and_then(|b| b.command) {
                 Some(command) => {
                     self.run_command(command);
+                    MouseResult::Redraw
+                }
+                None => MouseResult::None,
+            },
+            // The branch: what its module runs (a list to switch it, under the button).
+            TopBarHit::Branch => match self.branch_action() {
+                Some(action) => {
+                    self.run_command(action.command);
                     MouseResult::Redraw
                 }
                 None => MouseResult::None,

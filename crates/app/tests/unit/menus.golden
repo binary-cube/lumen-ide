@@ -153,10 +153,12 @@
   git.changes | Show Changes | 
   git.log | Show Git Log | Alt+9
   Branches and Tags › | git-branch
+    git.switch_branch | Switch Branch… | 
     git.new_branch | New Branch… | 
     git.rename_branch | Rename Branch… | 
     git.new_tag | New Tag… | 
     git.push_to | Push… | 
+    git.stash | Stash Changes… | 
   In Progress › | compare
     git.conflicts | Resolve Conflicts… | 
     git.continue_operation | Continue | 
@@ -364,10 +366,12 @@
   git.changes | Show Changes | 
   git.log | Show Git Log | Alt+9
   Branches and Tags › | git-branch
+    git.switch_branch | Switch Branch… | 
     git.new_branch | New Branch… | 
     git.rename_branch | Rename Branch… | 
     git.new_tag | New Tag… | 
     git.push_to | Push… | 
+    git.stash | Stash Changes… | 
   In Progress › | compare
     git.conflicts | Resolve Conflicts… | 
     git.continue_operation | Continue | 
@@ -573,10 +577,12 @@
   git.changes | Show Changes | 
   git.log | Show Git Log | Alt+9
   Branches and Tags › | git-branch
+    git.switch_branch | Switch Branch… | 
     git.new_branch | New Branch… | 
     git.rename_branch | Rename Branch… | 
     git.new_tag | New Tag… | 
     git.push_to | Push… | 
+    git.stash | Stash Changes… | 
   In Progress › | compare
     git.conflicts | Resolve Conflicts… | 
     git.continue_operation | Continue | 

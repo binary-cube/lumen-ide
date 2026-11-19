@@ -520,3 +520,113 @@ fn stashes_are_listed_and_submodules_come_from_gitmodules() {
     assert_eq!(repo.submodules(), ["libs/x"]);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_switch_carries_what_isn_t_in_its_way_and_names_what_is() {
+    use version_control::{SwitchPlan, SwitchTarget, switch_plan};
+    let Some((repo, dir)) = sample_repository("switch") else { return };
+    // `a.php` differs on `feature`; `src/chat/bot.php` doesn't.
+    std::fs::write(dir.join("src/chat/bot.php"), "bot, edited").unwrap();
+    let dirty = repo.staged_files().unwrap();
+    let paths: Vec<String> = dirty.iter().map(|f| f.path.clone()).collect();
+    let differs = repo.changed_between("feature", &paths).unwrap();
+    assert!(differs.is_empty(), "{differs:?}");
+    assert_eq!(switch_plan(None, &dirty, &differs, &[]), SwitchPlan::Free { carried: 1 });
+    repo.switch(&SwitchTarget::Branch("feature".into()), false).unwrap();
+    assert_eq!(repo.branch().as_deref(), Some("feature"));
+    assert_eq!(std::fs::read_to_string(dir.join("src/chat/bot.php")).unwrap(), "bot, edited");
+    // Now `a.php` edited: in the way of `main`, where it differs.
+    std::fs::write(dir.join("a.php"), "c").unwrap();
+    let dirty = repo.staged_files().unwrap();
+    let paths: Vec<String> = dirty.iter().map(|f| f.path.clone()).collect();
+    let differs = repo.changed_between("main", &paths).unwrap();
+    assert_eq!(
+        switch_plan(None, &dirty, &differs, &[]),
+        SwitchPlan::Blocked { files: vec!["a.php".into()] }
+    );
+    assert!(repo.switch(&SwitchTarget::Branch("main".into()), false).is_err(), "git refuses");
+    // Put aside, switched, brought back.
+    let options = version_control::StashOptions {
+        message: Some("Before main".into()),
+        untracked: true,
+        ..Default::default()
+    };
+    repo.stash_push(&options).unwrap();
+    repo.switch(&SwitchTarget::Branch("main".into()), false).unwrap();
+    let stash = repo.stashes().into_iter().next().unwrap();
+    assert!(stash.message.contains("Before main"), "{}", stash.message);
+    assert!(!stash.id.is_empty());
+    repo.switch(&SwitchTarget::Branch("feature".into()), false).unwrap();
+    repo.stash_apply(&stash.id, true).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("a.php")).unwrap(), "c");
+    assert!(repo.stashes().is_empty(), "popped");
+    // Thrown away: the switch goes anyway.
+    repo.switch(&SwitchTarget::Branch("main".into()), true).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("a.php")).unwrap(), "a");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn untracked_files_the_target_has_are_found() {
+    let Some((repo, dir)) = sample_repository("untracked") else { return };
+    let paths = vec!["src/chat/bot.php".to_owned(), "nowhere.txt".to_owned()];
+    assert_eq!(repo.present_in("main", &paths).unwrap(), ["src/chat/bot.php"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn new_branches_from_remote_ones_and_a_detached_head() {
+    use version_control::SwitchTarget;
+    let Some((repo, dir)) = sample_repository("remote-switch") else { return };
+    let git = |args: &[&str]| run_git(&dir, args, ("Ana", "2026-01-01T10:00:00Z"));
+    // A remote as a clone has it (its branches tracked under `refs/remotes/origin/`).
+    git(&["remote", "add", "origin", "https://example.invalid/repo.git"]).unwrap();
+    git(&["update-ref", "refs/remotes/origin/feature", "feature"]).unwrap();
+    let new = SwitchTarget::NewBranch {
+        name: "work".into(),
+        start: "origin/feature".into(),
+        track: true,
+    };
+    repo.switch(&new, false).unwrap();
+    assert_eq!(repo.branch().as_deref(), Some("work"));
+    let upstream = git(&["rev-parse", "--abbrev-ref", "work@{upstream}"]).unwrap();
+    assert_eq!(String::from_utf8_lossy(&upstream.stdout).trim(), "origin/feature");
+    repo.switch(&SwitchTarget::Detached("main".into()), false).unwrap();
+    assert!(repo.detached());
+    assert!(repo.switch(&SwitchTarget::Branch("--force".into()), false).is_err(), "an option");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn stashes_of_what_s_staged_kept_and_dropped_by_their_commit() {
+    let Some((repo, dir)) = sample_repository("stashes") else { return };
+    std::fs::write(dir.join("a.php"), "staged").unwrap();
+    repo.stage(&["a.php".into()]).unwrap();
+    std::fs::write(dir.join("src/chat/bot.php"), "not staged").unwrap();
+    let keep = version_control::StashOptions { keep_index: true, ..Default::default() };
+    repo.stash_push(&keep).unwrap();
+    // What was staged is still there, staged; the rest went.
+    assert_eq!(std::fs::read_to_string(dir.join("a.php")).unwrap(), "staged");
+    assert_eq!(std::fs::read_to_string(dir.join("src/chat/bot.php")).unwrap(), "bot");
+    let first = repo.stashes()[0].id.clone();
+    if repo.stashes_staged() {
+        let staged = version_control::StashOptions { staged_only: true, ..Default::default() };
+        repo.stash_push(&staged).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("a.php")).unwrap(), "a");
+        assert_eq!(repo.stashes().len(), 2);
+    }
+    // The first one is found by its commit, wherever it moved.
+    repo.stash_drop(&first).unwrap();
+    assert!(repo.stashes().iter().all(|s| s.id != first));
+    assert!(repo.stash_drop(&first).is_err(), "gone");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn git_s_version_is_read_as_it_prints_it() {
+    use crate::switching::version_at_least;
+    assert!(version_at_least("git version 2.39.3 (Apple Git-146)", (2, 35)));
+    assert!(version_at_least("git version 2.45.1.windows.1", (2, 35)));
+    assert!(!version_at_least("git version 2.34.9", (2, 35)));
+    assert!(!version_at_least("", (2, 35)));
+}

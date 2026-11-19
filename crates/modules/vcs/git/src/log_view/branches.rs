@@ -11,7 +11,7 @@ const TOP_PAD: f32 = 6.0;
 
 impl LogView {
     pub(super) fn branch_row_h(&self) -> f32 {
-        (28.0 * self.scale.max(0.1)).round()
+        (30.0 * self.scale.max(0.1)).round()
     }
 
     /// Where the panel's rows are.
@@ -79,12 +79,15 @@ impl LogView {
                 BranchItem::Ref { name, .. } => shown.iter().any(|r| r == name),
                 BranchItem::Group { .. } => false,
             };
+            // Inset from its neighbours: a chosen row and a hovered one next to it keep a gap.
+            let gap = px(2.0).round();
+            let lit = Rect::new(row.min_x(), top + gap, row.size.width, row_h - 2.0 * gap);
             if chosen {
-                tree::highlight(layer, row, p.accent.with_alpha(0.16), px(radius::MD));
+                tree::highlight(layer, lit, p.accent.with_alpha(0.16), px(radius::MD));
             } else if self.branch_selected == Some(i) {
-                tree::highlight(layer, row, p.text.with_alpha(0.08), px(radius::MD));
+                tree::highlight(layer, lit, p.text.with_alpha(0.08), px(radius::MD));
             } else if self.hover == Some(Hit::Branch(i)) {
-                tree::highlight(layer, row, p.text.with_alpha(0.05), px(radius::MD));
+                tree::highlight(layer, lit, p.text.with_alpha(0.05), px(radius::MD));
             }
             if let Some(hit) = row.intersect(&area) {
                 self.hits.push((hit, Hit::Branch(i)));

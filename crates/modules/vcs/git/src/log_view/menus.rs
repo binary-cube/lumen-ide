@@ -24,6 +24,7 @@ const SHOW_IN_PROJECT: &str = "file.show-in-project:";
 const REVEAL_FILE: &str = "file.reveal:";
 const NEW_BRANCH_HERE: &str = "commit.new-branch";
 const NEW_TAG_HERE: &str = "commit.new-tag";
+const CHECKOUT_HERE: &str = "commit.checkout";
 
 impl LogView {
     /// The menu of what's under `p`: a commit's row (it's selected) or a file of the details.
@@ -76,6 +77,10 @@ impl LogView {
                     .with_icon("git-branch"),
             );
             rows.push(ViewMenuEntry::item(NEW_TAG_HERE, t("git.new_tag_here")).with_icon("tag"));
+            rows.push(
+                ViewMenuEntry::item(CHECKOUT_HERE, t("git.checkout_commit"))
+                    .with_icon("arrow-left-right"),
+            );
         }
         rows
     }
@@ -107,7 +112,7 @@ impl LogView {
     }
 
     /// The reference branches panel row `i` is (with what a local branch tracks).
-    fn menu_ref(&self, i: usize) -> Option<crate::ref_menu::MenuRef> {
+    pub(super) fn menu_ref(&self, i: usize) -> Option<crate::ref_menu::MenuRef> {
         match &self.branch_rows.get(i)?.item {
             BranchItem::Ref { name, kind, .. } => {
                 let local = *kind == RefKind::Branch;
@@ -115,11 +120,23 @@ impl LogView {
                     .then(|| self.branch_states.iter().find(|s| s.branch == *name))
                     .flatten()
                     .and_then(|s| s.upstream.clone());
-                Some(crate::ref_menu::MenuRef { name: name.clone(), local, upstream })
+                let current = local && self.sync.as_ref().is_some_and(|s| s.branch == *name);
+                let kind = Some(*kind);
+                Some(crate::ref_menu::MenuRef {
+                    name: name.clone(),
+                    local,
+                    upstream,
+                    kind,
+                    current,
+                })
             }
-            BranchItem::Head => {
-                Some(crate::ref_menu::MenuRef { name: "HEAD".into(), local: false, upstream: None })
-            }
+            BranchItem::Head => Some(crate::ref_menu::MenuRef {
+                name: "HEAD".into(),
+                local: false,
+                upstream: None,
+                kind: None,
+                current: true,
+            }),
             _ => None,
         }
     }
@@ -135,6 +152,14 @@ impl LogView {
     pub(super) fn menu_command(&mut self, id: &str) -> bool {
         if let Some(action) = crate::ref_menu::chosen(id, |i| self.menu_ref(i), &self.remotes) {
             self.pending = action;
+            return true;
+        }
+        if id == CHECKOUT_HERE {
+            self.pending = self.selected_commit().map(|c| {
+                let wanted =
+                    crate::switch::Wanted::Commit { id: c.id.clone(), short: c.short().to_owned() };
+                crate::ref_menu::switch_action(wanted)
+            });
             return true;
         }
         let asked = if id == NEW_BRANCH_HERE || id == NEW_TAG_HERE {

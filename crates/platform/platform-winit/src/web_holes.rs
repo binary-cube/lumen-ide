@@ -63,6 +63,9 @@ struct State {
     holes: Vec<(Rect, f32)>,
     /// A press began in a hole: its drags and its release are the app's too.
     pressed: bool,
+    /// The page isn't drawn in its holes (else they only take the mouse: what floats is
+    /// drawn over the page, on the window's floating layer).
+    cut: bool,
 }
 
 /// A page's holes.
@@ -105,15 +108,22 @@ impl Holes {
     }
 
     /// The holes now (`area`: the page's, physical pixels in the window): those over it
-    /// cut out of it.
-    pub(crate) fn set(&self, holes: &[(Rect, f32)], area: Rect) {
+    /// take the mouse from it — and, `cut`, are cut out of it.
+    pub(crate) fn set(&self, holes: &[(Rect, f32)], area: Rect, cut: bool) {
         let over: Vec<(Rect, f32)> =
             holes.iter().copied().filter(|(r, _)| r.intersect(&area).is_some()).collect();
-        let changed = self.state.borrow().holes != over;
+        let changed = {
+            let s = self.state.borrow();
+            s.holes != over || s.cut != cut
+        };
         if !changed {
             return;
         }
-        self.state.borrow_mut().holes = over;
+        {
+            let mut s = self.state.borrow_mut();
+            s.holes = over;
+            s.cut = cut;
+        }
         self.mask(area);
         if !self.state.borrow().holes.is_empty() && self.monitor.borrow().is_none() {
             self.watch();
@@ -130,7 +140,10 @@ impl Holes {
     /// The page's layer masked: all of it but the holes (`area`: where the page is).
     fn mask(&self, area: Rect) {
         let scale = self.window.scale_factor();
-        let holes = self.state.borrow().holes.clone();
+        let holes = {
+            let s = self.state.borrow();
+            if s.cut { s.holes.clone() } else { Vec::new() }
+        };
         // SAFETY: `-[NSView layer]`, `-[CALayer bounds]`, `-setMask:`, `+[CAShapeLayer
         // layer]`, `-setFrame:`, `-setFillRule:`, `-setPath:`, `-contentsAreFlipped` are called
         // with their declared types on the main thread; the path is retained by the layer

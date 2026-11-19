@@ -42,6 +42,8 @@ pub enum ChangeState {
     Modified,
     Deleted,
     Renamed,
+    /// New, not tracked yet.
+    Untracked,
     /// Changed on both sides (a merge's, a server's).
     Conflicted,
     /// Couldn't go (offline, refused): its note says why.
@@ -752,7 +754,6 @@ impl FilesTree {
         self.icons.stamp(icons);
         let font = ds.ui_font(0.0);
         let small = ds.ui_font(-1.5);
-        let mono = ds.code_font(-1.5).with_weight(Font::SEMIBOLD);
         let chosen = self.selected_row();
         let range = TreeList::new(layout.row_height, self.rows.len())
             .visible(self.scroll, list.size.height);
@@ -829,16 +830,15 @@ impl FilesTree {
                         (p.text_muted, &dim),
                     );
                     let lx = layout.label_x(icon);
-                    let (letter, color) = state_mark(file.state, p);
-                    let letter_shaped = text.shape_line(letter, &mono);
-                    let lw = letter_shaped.width;
-                    draw_text(
-                        rows_layer,
-                        &letter_shaped,
-                        right - lw,
-                        ds::optical_baseline(top, layout.row_height, &mono),
-                        color,
+                    // Its state's badge on the right.
+                    let lw = px(ds::CHANGE_BADGE);
+                    let badge = Rect::new(
+                        (right - lw).round(),
+                        (top + (layout.row_height - lw) / 2.0).round(),
+                        lw,
+                        lw,
                     );
+                    ds::change_badge(rows_layer, icons, ds, badge, file.state);
                     let old = file
                         .old_path
                         .as_deref()
@@ -1023,6 +1023,7 @@ fn flatten(
 pub fn state_mark(state: ChangeState, p: &Palette) -> (&'static str, Rgba) {
     match state {
         ChangeState::Added => ("A", p.vcs_added),
+        ChangeState::Untracked => ("?", p.vcs_added),
         ChangeState::Deleted => ("D", p.text_muted),
         ChangeState::Renamed => ("R", p.vcs_modified),
         ChangeState::Conflicted => ("U", p.danger),
@@ -1034,7 +1035,7 @@ pub fn state_mark(state: ChangeState, p: &Palette) -> (&'static str, Rgba) {
 /// A file's name color by its state (added green, modified blue, deleted grey).
 fn name_color(state: ChangeState, p: &Palette) -> Rgba {
     match state {
-        ChangeState::Added => p.vcs_added,
+        ChangeState::Added | ChangeState::Untracked => p.vcs_added,
         ChangeState::Modified | ChangeState::Renamed => p.vcs_modified,
         ChangeState::Deleted => p.text_muted,
         ChangeState::Conflicted => p.danger,

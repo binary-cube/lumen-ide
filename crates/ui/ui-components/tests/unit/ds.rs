@@ -326,3 +326,32 @@ fn the_horizontal_faded_divider_fades_to_both_ends() {
     divider_horizontal_faded(&mut empty, &ctx, 20.0, 20.0, 0.0);
     assert!(empty.quads.is_empty());
 }
+
+#[test]
+fn every_change_has_its_badge_sign_and_the_theme_s_color() {
+    use crate::changed_files::ChangeState;
+    let p = Palette::dark();
+    let icons = icons::Icons::builtin();
+    for state in [
+        ChangeState::Modified,
+        ChangeState::Added,
+        ChangeState::Deleted,
+        ChangeState::Renamed,
+        ChangeState::Untracked,
+        ChangeState::Conflicted,
+        ChangeState::Failed,
+    ] {
+        let (_, icon) = change_badge_look(state, &p);
+        assert!(icons.id(icon).is_some(), "{icon} is in the pack");
+    }
+    assert_eq!(change_badge_look(ChangeState::Untracked, &p).0, p.vcs_badges.untracked);
+    assert_eq!(change_badge_look(ChangeState::Modified, &p).0, p.vcs_badges.modified);
+}
+
+#[test]
+fn a_badge_s_sign_reads_on_its_color() {
+    // Dark on a light amber, white on a dark purple.
+    assert_ne!(sign_on(kernel::Rgba::rgb(0xedbd4f)), kernel::Rgba::WHITE);
+    assert_eq!(sign_on(kernel::Rgba::rgb(0x5d4b8c)), kernel::Rgba::WHITE);
+    assert_eq!(sign_on(Palette::dark().vcs_badges.deleted), kernel::Rgba::WHITE);
+}

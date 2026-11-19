@@ -411,6 +411,10 @@ impl EditorApp {
 
         self.ensure_text();
         self.workbench.paint_phases.mark("text_system");
+        // A page on screen: what floats is drawn on the layer over it.
+        if !only_decorations {
+            self.sync_floating(&window);
+        }
         let shared = Rc::clone(&self.shared);
         let mut fonts = shared.fonts.borrow_mut();
         let (Fonts::Ready(text), Some(renderer)) = (&mut *fonts, &mut self.frames.renderer) else {
@@ -460,7 +464,11 @@ impl EditorApp {
                 self.workbench.set_full_screen(full_screen);
                 self.workbench.set_maximize_hovered(window.maximize_hovered());
                 self.workbench.set_page_holes(window.web_view_holes());
-                self.workbench.paint(text, &mut self.frames.scene);
+                let floating = self.frames.floating.as_mut().map(|f| {
+                    f.scene.reset(kernel::Rgba::TRANSPARENT);
+                    &mut f.scene
+                });
+                self.workbench.paint_with_floating(text, &mut self.frames.scene, floating);
                 // The pages over the views, where the views just drew themselves; a page
                 // something opened over, its picture in its place from the next frame.
                 let pictured = self.web_views.sync(
@@ -483,8 +491,24 @@ impl EditorApp {
                     self.workbench.set_page_pictures(self.web_views.pictures());
                     window.request_redraw();
                 }
-                // What floats over the pages shows through them.
-                self.web_views.set_holes(&self.workbench.page_holes());
+                // What floats over the pages: the mouse there the app's; drawn over them on
+                // the floating layer, else cut out of them (shows through).
+                let holes = self.workbench.page_holes();
+                self.web_views.set_holes(&holes, self.frames.floating.is_none());
+                // Their corners as the cards they're in.
+                let workbench = &self.workbench;
+                self.web_views.set_corners(|area| workbench.page_corners(area));
+                if let Some(floating) = &self.frames.floating {
+                    // Something open over the views (a menu, a dialog; the pages hidden
+                    // under it): all of the layer; else only where something floats.
+                    let shapes = if self.workbench.overlay_open() {
+                        vec![(kernel::Rect::from_size(viewport), 0.0)]
+                    } else {
+                        holes
+                    };
+                    floating.layer.set_shapes(&shapes, (FLOATING_SHADOW * scale).ceil());
+                    floating.layer.raise();
+                }
                 // What the views have for their app pages, once those are placed.
                 self.web_views.send(self.workbench.take_web_sends());
                 // Its maximize button is the system's (Windows' snap layouts on hover); full
@@ -542,6 +566,14 @@ impl EditorApp {
         let mut glyphs = WithIcons { text: &mut **text, icons: self.workbench.icons() };
         let painted = frame_start.elapsed();
         let result = renderer.render(&self.frames.scene, &mut glyphs);
+        // What floats, on its layer over the pages (shown once it has a frame).
+        if !only_decorations && let Some(floating) = &mut self.frames.floating {
+            match floating.renderer.render(&floating.scene, &mut glyphs) {
+                Ok(stats) if stats.retry => window.request_redraw(),
+                Ok(_) => floating.layer.set_visible(true),
+                Err(e) => tracing::warn!("the floating layer's frame: {e}"),
+            }
+        }
         // A long frame says which half took the time (the scene, the GPU).
         if frame_start.elapsed() >= Duration::from_millis(500) {
             let phases = self.workbench.paint_phases.text();
@@ -877,6 +909,54 @@ fn altgr_text(event: &KeyEvent) -> bool {
 fn chord_with(event: &KeyEvent, key: ChordKey) -> KeyChord {
     let m = event.modifiers;
     KeyChord { primary: m.primary(), shift: m.shift, alt: m.alt, control: MAC && m.ctrl, key }
+}
+
+/// The room around what floats for its shadow (logical pixels): the floating layer draws
+/// and takes the mouse there too.
+const FLOATING_SHADOW: f32 = 28.0;
+
+impl EditorApp {
+    /// The layer over the pages made while a page is on screen (what floats drawn there,
+    /// over it), let go once none is; its renderer at the window's size. Where none can be
+    /// made (or it can't be transparent), holes are cut out of the pages instead.
+    fn sync_floating(&mut self, window: &Arc<dyn Window>) {
+        let wanted = self.web_views.any_shown()
+            && !self.frames.floating_failed
+            && self.frames.renderer.is_some();
+        if !wanted {
+            if let Some(floating) = self.frames.floating.take() {
+                floating.layer.set_visible(false);
+            }
+            return;
+        }
+        let size = window.inner_size();
+        if self.frames.floating.is_none() {
+            let Some(layer) = window.floating_layer() else {
+                self.frames.floating_failed = true;
+                return;
+            };
+            let options = RenderOptions { transparent: true, ..self.shared.render_options };
+            let target: Arc<dyn RenderTarget> = Arc::new(layer.handles());
+            match WgpuRendererFactory.create(target, size, &options) {
+                Ok(renderer) if renderer.transparent() => {
+                    tracing::info!("what floats is drawn over the pages, on its own layer");
+                    self.frames.floating =
+                        Some(state::Floating { renderer, layer, scene: Scene::default() });
+                }
+                Ok(_) => {
+                    tracing::info!("the floating layer can't be transparent: holes instead");
+                    self.frames.floating_failed = true;
+                }
+                Err(e) => {
+                    tracing::warn!("the floating layer's renderer didn't start: {e}");
+                    self.frames.floating_failed = true;
+                }
+            }
+        }
+        if let Some(floating) = &mut self.frames.floating {
+            floating.renderer.resize(size);
+        }
+    }
 }
 
 impl EditorApp {

@@ -76,6 +76,11 @@ impl Viewer for CommitView {
         self.dividers.0.iter().any(Divider::is_animating)
     }
 
+    fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
+        let (r, state) = self.badges.iter().rev().find(|(r, _)| r.contains(p))?;
+        Some(ui_components::Tip::new(*r, crate::files_tree::state_name(*state)))
+    }
+
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
         let divider = self.dividers.0.iter().find_map(|divider| divider.cursor(p));
         divider.or_else(|| {
@@ -102,6 +107,9 @@ impl Viewer for CommitView {
             Hit::Row(i, staged) | Hit::Check(i, staged) => (i, staged),
             // A branch's or a tag's: the same menu as the log's branches panel.
             Hit::Place(i) => {
+                if self.stash_at(i).is_some() {
+                    return Some(crate::stash_menu::rows(i));
+                }
                 let on = self.menu_ref(i)?;
                 return Some(crate::ref_menu::rows(i, &on, &self.remotes));
             }
@@ -342,7 +350,11 @@ impl Viewer for CommitView {
         if self.file_command(id) {
             return true;
         }
-        // A row of a branch's menu.
+        // A row of a stash's menu, of a branch's.
+        if let Some(action) = crate::stash_menu::chosen(id, |i| self.stash_at(i)) {
+            self.pending = action;
+            return true;
+        }
         if let Some(action) = crate::ref_menu::chosen(id, |i| self.menu_ref(i), &self.remotes) {
             self.pending = action;
             return true;
@@ -416,6 +428,13 @@ impl Viewer for CommitView {
             self.selecting = self.message.press(p, clicks, false);
             return None;
         }
+        // A branch or a tag of the places, twice: switched to; a stash: brought back.
+        if clicks == 2
+            && let Some(Hit::Place(i)) =
+                self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
+        {
+            return self.place_twice(i);
+        }
         if clicks == 2
             && let Some(open) = self.open_at(p)
         {
@@ -478,6 +497,14 @@ impl Viewer for CommitView {
             Hit::Line(h, l) => self.pick_line(h, l),
             Hit::DiscardHunk(i) => return self.discard_hunk(i),
             Hit::Refresh => self.refresh(),
+            Hit::Stash => {
+                return Some(ViewerAction::WithHost(ui_components::WithHost::once(|host| {
+                    crate::stash_dialog::open_push(
+                        host,
+                        crate::stash_dialog::StashPreset::default(),
+                    );
+                })));
+            }
             Hit::Amend => self.set_amend(!self.amend),
             Hit::Commit => {
                 self.commit();
@@ -532,6 +559,7 @@ impl Viewer for CommitView {
             self.waker.clone_from(&ctx.waker);
         }
         self.hits.clear();
+        self.badges.clear();
         let ds = Ctx::new(ctx.palette, ctx.scale);
         let p = ctx.palette;
         let px = |v: f32| ds.px(v);
@@ -587,7 +615,7 @@ impl Viewer for CommitView {
         let (files, changes) = lists.split(upper, strip, style.clone(), ctx.scale);
         let (staged, unstaged) = sections.split(files, strip, style, ctx.scale);
         for (card, on) in [(staged, true), (unstaged, false)] {
-            self.paint_section(ctx.scene, ctx.text, &ds, (card, on));
+            self.paint_section(ctx.scene, ctx.text, ctx.icons, &ds, (card, on));
         }
         self.paint_diff(ctx.scene, ctx.text, ctx.icons, &ds, changes);
         self.paint_message(ctx.scene, ctx.text, &ds, message);

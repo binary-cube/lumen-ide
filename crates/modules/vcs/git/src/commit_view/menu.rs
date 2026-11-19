@@ -15,6 +15,9 @@ pub(super) const DISCARD_FILE: &str = "file.discard:";
 pub(super) const RESET_FILE: &str = "file.reset:";
 pub(super) const RESET_TO_COMMIT: &str = "file.reset-to:";
 pub(super) const ANNOTATE_FILE: &str = "file.annotate:";
+/// Put aside: the files of the row (`file.stash:<paths>`), what's staged (`list.stash-staged`).
+pub(super) const STASH_FILES: &str = "file.stash:";
+pub(super) const STASH_STAGED: &str = "list.stash-staged";
 
 /// How many of a file's commits "Reset to Commit" offers.
 pub(super) const COMMITS_OFFERED: usize = 100;
@@ -127,6 +130,7 @@ impl CommitView {
             if !new {
                 rows.push(row(RESET_TO_COMMIT, t("git.reset_to_commit"), "git-commit"));
             }
+            rows.extend(stash_rows(&row, staged, t("git.stash_file")));
         }
         Some(rows)
     }
@@ -156,6 +160,7 @@ impl CommitView {
                 rows.push(row(DISCARD_FILE, t("git.discard_file"), "trash"));
             }
             rows.push(row(RESET_FILE, t("git.reset_file"), "trash"));
+            rows.extend(stash_rows(&row, staged, t("git.stash_files_row")));
         }
         rows
     }
@@ -191,6 +196,17 @@ impl CommitView {
     pub(super) fn file_command(&mut self, id: &str) -> bool {
         let of = |prefix: &str| id.strip_prefix(prefix).map(str::to_owned);
         let at = |view: &Self, path: &str| view.files.iter().position(|f| f.path == path);
+        if id == STASH_STAGED {
+            let preset = crate::stash_dialog::StashPreset { staged_only: true, paths: Vec::new() };
+            self.pending = Some(stash_action(preset));
+            return true;
+        }
+        if let Some(path) = of(STASH_FILES) {
+            let preset =
+                crate::stash_dialog::StashPreset { staged_only: false, paths: split_paths(&path) };
+            self.pending = Some(stash_action(preset));
+            return true;
+        }
         self.pending = if let Some(path) = of(OPEN_FILE) {
             self.file_path(&path).map(|path| ViewerAction::OpenFile {
                 path,
@@ -339,4 +355,27 @@ pub(super) fn reset(repo: &dyn Repository, paths: &[String], staged: bool) -> Do
         repo.unstage(paths)?;
     }
     repo.discard(paths)
+}
+
+/// The rows putting work aside: the row's files (`files` says how many), and on the staged
+/// list what's staged.
+fn stash_rows(
+    row: &dyn Fn(&str, String, &'static str) -> ViewMenuEntry,
+    staged: bool,
+    files: String,
+) -> Vec<ViewMenuEntry> {
+    let mut rows = vec![ViewMenuEntry::Separator, row(STASH_FILES, files, "archive-down")];
+    if staged {
+        rows.push(
+            ViewMenuEntry::item(STASH_STAGED, t("git.stash_staged_row")).with_icon("archive-down"),
+        );
+    }
+    rows
+}
+
+/// Stash Changes… opened on `preset`, as a view's action.
+fn stash_action(preset: crate::stash_dialog::StashPreset) -> ViewerAction {
+    ViewerAction::WithHost(ui_components::WithHost::once(move |host| {
+        crate::stash_dialog::open_push(host, preset);
+    }))
 }
