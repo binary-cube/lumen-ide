@@ -134,3 +134,14 @@ fn an_ended_process_is_not_waited_for() {
     wait_for(pid);
     assert!(since.elapsed() < std::time::Duration::from_secs(5));
 }
+
+/// The installer run silent, told the process to wait for and the session to reopen.
+#[test]
+fn the_installer_runs_silent_and_reopens_the_session() {
+    let args = setup_args(42, Some("ab12"));
+    assert_eq!(
+        args,
+        ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/WAITPID=42", "/REOPEN=ab12"]
+    );
+    assert_eq!(setup_args(1, None).len(), 4);
+}

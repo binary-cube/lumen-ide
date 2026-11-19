@@ -85,7 +85,7 @@ procesul vechi (Linux) sau programul nou, care așteaptă singur să se închid�
 - `.old` rămâne până la pornirea următoare (`clean_left`), pentru că programul vechi încă
   rulează din el.
 
-## 85c — Windows: instalatorul, când aplicația a venit din el
+## 85c — Windows: instalatorul, când aplicația a venit din el — făcut
 
 Instalată prin `lumen-<v>-windows-x64-setup.exe`, aplicația are o intrare în Settings › Apps
 cu versiunea ei. Dacă înlocuim doar `.exe`-ul, intrarea rămâne cu versiunea veche.
@@ -105,7 +105,24 @@ cu versiunea ei. Dacă înlocuim doar `.exe`-ul, intrarea rămâne cu versiunea 
 - Teste: alegerea arhivei sau a instalatorului din manifest după cum e instalată aplicația,
   plus argumentele instalatorului.
 
-## 85d — Ce dispare
+### Cum a ieșit (85c)
+
+- `latest.json` are installerul ca platforma `windows-x64-setup` (`xtask release`).
+  Aplicațiile mai vechi cer doar `windows-x64` și nu-l văd.
+- `install::installed_by_setup()`: pe Windows, `unins000.exe` lângă program.
+  `install::platforms()` pune atunci `windows-x64-setup` înaintea arhivei.
+- `stage` nu despachetează un `…-setup.exe`: îl ține cum e (`Staged::is_setup`).
+  `put_in_place` nu mută nimic; notează doar versiunea.
+- La ieșire, `install::restart(dir, session)` rulează installerul cu
+  `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /WAITPID=<pid> /REOPEN=<id>`.
+  Fără `/MERGETASKS`: installerul își amintește singur alegerile de data trecută.
+- `installer.iss`, în `[Code]`, așteaptă procesul (`Wait-Process`, cel mult 30 s). Un
+  `[Run]` cu `Check: ShouldReopen` pornește apoi aplicația cu `--reopen-session`.
+- Dacă installerul nu termină: `take_result` vede o notă fără eroare, dar cu altă versiune
+  decât cea care rulează, și spune că actualizarea nu s-a terminat. Verificarea e aceeași
+  pentru toate căile.
+
+## 85d — Ce dispare — făcut odată cu 85a
 
 - `start_helper`, `apply_main`, `HELPER_ARG`, `HELD` (pipe-ul), copia din folderul temporar.
 - `clean_helpers` mai rămâne **o versiune**, ca să șteargă copiile lăsate de versiunile

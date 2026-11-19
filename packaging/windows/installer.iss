@@ -67,7 +67,38 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppId}.exe"; Tasks: desktop
 
 [Run]
 Filename: "{app}\{#AppId}.exe"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
+; Run by the app to update (/VERYSILENT /REOPEN=<session>): the app started again, its
+; windows reopened.
+Filename: "{app}\{#AppId}.exe"; Parameters: "--reopen-session {code:ReopenId}"; Flags: nowait; Check: ShouldReopen
 
 [UninstallDelete]
 ; What an update left beside the program (the old one set aside, not removable then).
 Type: files; Name: "{app}\{#AppId}.exe.old*"
+
+[Code]
+// Run by the app to update: /WAITPID=<the app's process> (waited for: it's closing) and
+// /REOPEN=<its session> (the app started after with it).
+
+function ReopenId(Param: String): String;
+begin
+  Result := ExpandConstant('{param:REOPEN|}');
+end;
+
+function ShouldReopen(): Boolean;
+begin
+  Result := ReopenId('') <> '';
+end;
+
+function InitializeSetup(): Boolean;
+var
+  Pid: Integer;
+  Code: Integer;
+begin
+  Pid := StrToIntDef(ExpandConstant('{param:WAITPID|}'), 0);
+  if Pid > 0 then
+    Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -Command "Wait-Process -Id ' + IntToStr(Pid) +
+      ' -Timeout 30 -ErrorAction SilentlyContinue"',
+      '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Result := True;
+end;

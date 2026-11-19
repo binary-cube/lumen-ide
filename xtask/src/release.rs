@@ -28,10 +28,17 @@ pub struct Asset {
     pub sha256: String,
 }
 
-/// A release's installer (`<id>-<version>-<platform>-setup.exe`): listed in `SHA256SUMS`,
-/// never in `latest.json` (the app updates itself from the archive).
+/// A release's installer (`<id>-<version>-<platform>-setup.exe`): in `SHA256SUMS`, and in
+/// `latest.json` as `<platform>-setup` (an app the installer installed updates through it;
+/// older apps only ask for `<platform>`).
 pub fn is_installer(name: &str, id: &str, version: &str) -> bool {
     name.strip_prefix(&format!("{id}-{version}-")).is_some_and(|rest| rest.ends_with("-setup.exe"))
+}
+
+/// An installer's platform in the manifest: `windows-x64-setup`.
+fn installer_platform(name: &str, id: &str, version: &str) -> String {
+    let rest = name.strip_prefix(&format!("{id}-{version}-")).unwrap_or(name);
+    format!("{}-setup", rest.strip_suffix("-setup.exe").unwrap_or(rest))
 }
 
 /// The platform in a release file's name `<id>-<version>-<platform>.<zip|tar.gz>`; `None` for
@@ -170,7 +177,7 @@ pub fn write_manifest(
         let path: PathBuf = entry.path();
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
         let asset = Asset {
-            platform: platform.unwrap_or_default(),
+            platform: platform.unwrap_or_else(|| installer_platform(&name, id, version)),
             name,
             size: bytes.len() as u64,
             sha256: hex(&Sha256::digest(&bytes)),
@@ -181,12 +188,12 @@ pub fn write_manifest(
         return Err(format!("no {id}-{version}-*.zip / .tar.gz in {}", dist.display()));
     }
     assets.sort_by(|a, b| a.platform.cmp(&b.platform));
-    let text = manifest(version, date, &assets);
+    installers.sort_by(|a, b| a.name.cmp(&b.name));
+    let listed: Vec<Asset> = assets.iter().chain(&installers).cloned().collect();
+    let text = manifest(version, date, &listed);
     let write = |name: &str, text: &str| {
         std::fs::write(dist.join(name), text).map_err(|e| format!("{name}: {e}"))
     };
-    installers.sort_by(|a, b| a.name.cmp(&b.name));
-    let listed: Vec<Asset> = assets.iter().chain(&installers).cloned().collect();
     write("SHA256SUMS", &sums(&listed))?;
     write("latest.json", &text)?;
     let mut done: Vec<String> =

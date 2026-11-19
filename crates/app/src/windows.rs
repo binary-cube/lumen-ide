@@ -258,9 +258,9 @@ impl Application for AppWindows {
     /// this session).
     fn exiting(&mut self) {
         storage::settings::flush();
-        if self.update.take().is_some() {
+        if let Some(staged) = self.update.take() {
             tracing::info!(session = %kernel::id::uuid_text(self.sessions.id), "started again after the update");
-            crate::updating::restart(self.sessions.id);
+            crate::updating::restart(&staged, self.sessions.id);
         }
     }
 }

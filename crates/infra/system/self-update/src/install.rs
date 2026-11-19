@@ -53,11 +53,34 @@ pub fn writable(target: &Path) -> bool {
     made
 }
 
+/// Whether the app was installed by its installer (Windows: its uninstaller beside it):
+/// it's updated through the installer then (Settings › Apps keeps its version).
+pub fn installed_by_setup() -> bool {
+    cfg!(windows)
+        && place()
+            .and_then(|p| p.parent().map(|d| d.join("unins000.exe")))
+            .is_some_and(|u| u.exists())
+}
+
+/// The release files this app can update from, best first: an app the installer installed
+/// takes the installer (`windows-x64-setup`), then the archive.
+pub fn platforms() -> Vec<&'static str> {
+    let preferred = app_updates::platform::preferred(std::env::consts::OS, std::env::consts::ARCH);
+    let mut out = Vec::with_capacity(preferred.len() + 1);
+    if installed_by_setup() && preferred.contains(&"windows-x64") {
+        out.push("windows-x64-setup");
+    }
+    out.extend_from_slice(preferred);
+    out
+}
+
 /// The update staged in `dir` put in this app's place ([`place`]), the app still running;
 /// how it went noted for its next start. The new version, or why not (the app as it was).
+/// An installer moves nothing now: it runs as the app ends ([`restart`]).
 pub fn put_in_place(dir: &Path) -> Result<String, String> {
     let target = place().ok_or("this program's path is unknown")?;
-    let version = apply(dir, &target)?;
+    let staged = stage::read(dir).ok_or_else(|| format!("{}: no update staged", dir.display()))?;
+    let version = if staged.is_setup() { staged.version } else { apply(dir, &target)? };
     if let Some(root) = dir.parent()
         && let Err(e) = note(root, &Outcome { version: version.clone(), error: None })
     {
@@ -68,11 +91,16 @@ pub fn put_in_place(dir: &Path) -> Result<String, String> {
 }
 
 /// The app started again (this process ending: the new one waits for it), the session
-/// `reopen` reopened by it. `false` if it couldn't be.
-pub fn restart(reopen: Option<u128>) -> bool {
+/// `reopen` reopened by it — or, the update staged in `dir` being an installer, that run
+/// (it waits for this process, installs, starts the app). `false` if it couldn't be.
+pub fn restart(dir: &Path, reopen: Option<u128>) -> bool {
     let Some(target) = place() else { return false };
     let reopen = reopen.map(kernel::id::uuid_text);
-    let (program, args) = restart_command(&target, std::process::id(), reopen.as_deref());
+    let pid = std::process::id();
+    let (program, args) = match stage::read(dir).filter(stage::Staged::is_setup) {
+        Some(setup) => (setup.app, setup_args(pid, reopen.as_deref())),
+        None => restart_command(&target, pid, reopen.as_deref()),
+    };
     let mut command = Command::new(program);
     command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     detach(&mut command);
@@ -104,6 +132,20 @@ pub fn restart_command(target: &Path, pid: u32, reopen: Option<&str>) -> (PathBu
         args.extend([REOPEN_ARG.into(), id.into()]);
     }
     (program, args)
+}
+
+/// The installer's arguments: silent, no restart of Windows; it waits for `pid` and
+/// starts the app reopening `reopen` (`packaging/windows/installer.iss`).
+pub fn setup_args(pid: u32, reopen: Option<&str>) -> Vec<OsString> {
+    let mut args: Vec<OsString> = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+    args.push(format!("/WAITPID={pid}").into());
+    if let Some(id) = reopen {
+        args.push(format!("/REOPEN={id}").into());
+    }
+    args
 }
 
 /// Process `pid` waited for until it ends (at most [`WAIT_MOST`]): a new start after an
@@ -262,10 +304,14 @@ pub fn take_result(root: &Path) -> Option<Outcome> {
     let text = std::fs::read_to_string(&path).ok()?;
     let _ = std::fs::remove_file(&path);
     let table: toml::Table = text.parse().ok()?;
-    Some(Outcome {
-        version: table.get("version")?.as_str()?.to_owned(),
-        error: table.get("error").and_then(toml::Value::as_str).map(str::to_owned),
-    })
+    let version = table.get("version")?.as_str()?.to_owned();
+    let mut error = table.get("error").and_then(toml::Value::as_str).map(str::to_owned);
+    // Noted before it ran (an installer), but this isn't that version: it didn't finish.
+    let running = kernel::brand::version();
+    if error.is_none() && running != "0.0.0" && version != running {
+        error = Some("the installer didn't finish; the app is still the version it was".into());
+    }
+    Some(Outcome { version, error })
 }
 
 /// The copies of the program earlier versions left in the temporary folder (their update

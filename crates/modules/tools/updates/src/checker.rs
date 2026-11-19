@@ -58,15 +58,13 @@ pub fn check(manual: bool) {
     kernel::work::run(THREAD, move || {
         let config = settings::config();
         let fetch = Http::new(self_update::HOSTS);
+        let platforms = self_update::install::platforms();
         let ask = Ask {
             repository: kernel::brand::REPOSITORY,
             current: &current,
             prereleases: config.prereleases,
             skipped: config.skipped.as_ref(),
-            platforms: app_updates::platform::preferred(
-                std::env::consts::OS,
-                std::env::consts::ARCH,
-            ),
+            platforms: &platforms,
         };
         let looked = match self_update::check::check(&fetch, ask) {
             Ok(Some(found)) => {

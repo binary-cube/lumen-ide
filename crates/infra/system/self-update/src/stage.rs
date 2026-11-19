@@ -24,6 +24,16 @@ pub struct Staged {
     pub app: PathBuf,
 }
 
+/// An installer's name ends so (`…-windows-x64-setup.exe`).
+pub const SETUP_SUFFIX: &str = "-setup.exe";
+
+impl Staged {
+    /// Whether it's an installer, run to update (not an app put in place).
+    pub fn is_setup(&self) -> bool {
+        self.app.file_name().is_some_and(|n| n.to_string_lossy().ends_with(SETUP_SUFFIX))
+    }
+}
+
 /// The new app's name in what's unpacked: the bundle on macOS, the program elsewhere.
 pub fn app_name() -> String {
     if cfg!(target_os = "macos") {
@@ -66,6 +76,12 @@ pub fn stage(
         fetch_file(fetch, &available.url, crate::HOSTS, &part, &pin, file.size, progress, stop)
             .map_err(String::from)?;
         std::fs::rename(&part, &archive).map_err(|e| format!("{}: {e}", archive.display()))?;
+    }
+    // An installer (the app its install updates through): run as it is, nothing unpacked.
+    if file.name.ends_with(SETUP_SUFFIX) {
+        let staged = Staged { dir: dir.clone(), version, app: archive };
+        write(&staged).map_err(|e| format!("{}: {e}", dir.join(STAGED).display()))?;
+        return Ok(staged);
     }
     let unpacked = dir.join("app");
     if unpacked.exists() {

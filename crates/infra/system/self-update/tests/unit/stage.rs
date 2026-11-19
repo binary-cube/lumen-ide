@@ -131,3 +131,26 @@ fn a_note_points_inside_its_folder_and_old_downloads_go() {
     assert!(!root.join("1.9.0").exists(), "another version's download gone");
     std::fs::remove_dir_all(&root).unwrap();
 }
+
+/// An installer (the app its install updates through): downloaded and checked, run as it
+/// is — nothing unpacked.
+#[test]
+fn an_installer_is_staged_as_it_is() {
+    const SETUP: &str =
+        "https://github.com/o/r/releases/download/v2.0.0/app-2.0.0-windows-x64-setup.exe";
+    let bytes = b"MZ setup".to_vec();
+    let memory = Memory::default();
+    memory.serve(SETUP, bytes.clone());
+    let root = temp();
+    let stop = AtomicBool::new(false);
+    let mut setup = available(&bytes, pinned_downloads::digest::sha256_hex(&bytes));
+    setup.file.platform = "windows-x64-setup".into();
+    setup.file.name = "app-2.0.0-windows-x64-setup.exe".into();
+    setup.url = SETUP.into();
+    let staged = stage(&memory, &setup, &root, "app.exe", &|_, _| {}, &stop).unwrap();
+    assert!(staged.is_setup());
+    assert_eq!(std::fs::read(&staged.app).unwrap(), b"MZ setup");
+    assert!(!staged.dir.join("app").exists(), "nothing unpacked");
+    assert_eq!(read(&staged.dir), Some(staged.clone()));
+    std::fs::remove_dir_all(&root).unwrap();
+}

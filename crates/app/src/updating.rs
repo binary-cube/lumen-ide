@@ -1,10 +1,11 @@
 //! An update asked for by the updates' module (plan 85): already in the app's place (the
-//! module put it there), the app started again as it ends, to reopen this run's session.
+//! module put it there), the app started again as it ends, to reopen this run's session —
+//! or its installer run (Windows, the app installed by it), which starts the app after.
 //! The module puts it in place and asks; only the app quits.
 
 /// The app started again once this process ends, session `session` reopened: `false` if
 /// it couldn't be (said in the log; the app just ends, the update in place for its next
 /// start).
-pub fn restart(session: u128) -> bool {
-    self_update::install::restart(Some(session))
+pub fn restart(staged: &std::path::Path, session: u128) -> bool {
+    self_update::install::restart(staged, Some(session))
 }

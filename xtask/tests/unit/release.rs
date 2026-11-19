@@ -73,7 +73,8 @@ fn the_manifest_is_written_from_the_release_files() {
     std::fs::write(dist.join("app-1.0.0-macos-universal.zip"), b"mac").unwrap();
     std::fs::write(dist.join("app-1.0.0-windows-x64.zip"), b"win").unwrap();
     std::fs::write(dist.join("app-0.9.0-windows-x64.zip"), b"old").unwrap();
-    // The installer: in the sums, never in the manifest (the app updates from the archive).
+    // The installer: in the sums, and in the manifest as `<platform>-setup` (what an app it
+    // installed updates through).
     std::fs::write(dist.join("app-1.0.0-windows-x64-setup.exe"), b"setup").unwrap();
     let secret_file = root.join("secret");
     make_key(&root, &secret_file).unwrap();
@@ -87,7 +88,7 @@ fn the_manifest_is_written_from_the_release_files() {
     let doc: Value = serde_json::from_str(&text).unwrap();
     let platforms: Vec<&str> =
         doc["files"].as_array().unwrap().iter().map(|f| f["platform"].as_str().unwrap()).collect();
-    assert_eq!(platforms, ["macos-universal", "windows-x64"]);
+    assert_eq!(platforms, ["macos-universal", "windows-x64", "windows-x64-setup"]);
     let signature = std::fs::read_to_string(dist.join("latest.json.sig")).unwrap();
     let public = std::fs::read_to_string(root.join(PUBLIC_KEY)).unwrap();
     assert!(verify(&text, &signature, &public));
