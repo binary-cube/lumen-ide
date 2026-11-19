@@ -13,6 +13,9 @@ use serde_json::Value;
 pub const HEAD: usize = 64 * 1024;
 pub const TAIL: usize = 64 * 1024;
 
+/// The most working folders kept of a session.
+pub const CWDS_MAX: usize = 16;
+
 /// A title's longest (characters), longer ones cut with "…".
 const TITLE_MAX: usize = 80;
 
@@ -29,7 +32,10 @@ pub fn folder_name(root: &str) -> String {
 pub struct Facts {
     pub id: Option<String>,
     pub title: Option<String>,
-    pub cwd: Option<String>,
+    /// The folders it worked in (distinct, in the order met, at most [`CWDS_MAX`]): from
+    /// its start and its end — a session resumed after its project moved works in the new
+    /// folder from then on, its start still naming the old one.
+    pub cwds: Vec<String>,
     /// When it started (seconds since the epoch).
     pub started: Option<i64>,
 }
@@ -105,7 +111,14 @@ pub fn facts(head: &[u8], tail: &[u8], whole: bool) -> Facts {
     let mut first_typed = None;
     // The names, the latest of each kind: the start's, then the end's over them.
     let (mut custom, mut ai, mut last) = (None, None, None);
+    let mut cwds: Vec<String> = Vec::new();
     let mut take = |record: &Value| {
+        if let Some(cwd) = record.get("cwd").and_then(Value::as_str)
+            && cwds.len() < CWDS_MAX
+            && !cwds.iter().any(|c| c == cwd)
+        {
+            cwds.push(cwd.to_owned());
+        }
         let text = |key: &str| record.get(key).and_then(Value::as_str).and_then(tidy);
         match record.get("type").and_then(Value::as_str) {
             Some("custom-title") => custom = text("customTitle").or(custom.take()),
@@ -118,7 +131,6 @@ pub fn facts(head: &[u8], tail: &[u8], whole: bool) -> Facts {
     for record in records(head, false, !whole) {
         let field = |key: &str| record.get(key).and_then(Value::as_str).map(str::to_owned);
         facts.id = facts.id.or_else(|| field("sessionId").filter(|id| valid_id(id)));
-        facts.cwd = facts.cwd.or_else(|| field("cwd"));
         if facts.started.is_none() {
             facts.started = record.get("timestamp").and_then(Value::as_str).and_then(seconds);
         }
@@ -130,6 +142,7 @@ pub fn facts(head: &[u8], tail: &[u8], whole: bool) -> Facts {
     if !whole {
         records(tail, true, false).for_each(|r| take(&r));
     }
+    facts.cwds = cwds;
     facts.title = custom.or(ai).or(last).or_else(|| first_typed.as_deref().and_then(tidy));
     facts
 }

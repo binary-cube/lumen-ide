@@ -26,7 +26,7 @@ fn a_session_s_name_and_start_are_read() {
         "message": {"content": [{"type": "text", "text": "  Fix   the\nlogin  "}]}}));
     let facts = facts(text.as_bytes(), &[], true);
     assert_eq!(facts.id.as_deref(), Some("s-1"));
-    assert_eq!(facts.cwd.as_deref(), Some("/p"));
+    assert_eq!(facts.cwds, ["/p"]);
     assert_eq!(facts.started, Some(1_794_581_721));
     assert_eq!(facts.title.as_deref(), Some("Fix the login"), "the first one typed");
     text += &line(serde_json::json!({"type": "last-prompt", "lastPrompt": "and the tests"}));

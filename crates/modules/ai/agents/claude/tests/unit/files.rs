@@ -84,3 +84,39 @@ fn a_session_is_renamed_in_its_file() {
     }
     let _ = std::fs::remove_dir_all(projects);
 }
+
+/// A session resumed after its project moved: it started in the old folder and works in
+/// the new one from then on (its end says so) — listed with the project where it is now.
+#[test]
+fn a_session_that_moved_with_its_project_is_listed_there() {
+    let projects = scratch();
+    let root = Path::new("/work/new/app");
+    let folder = projects.join(format::folder_name("/work/new/app"));
+    std::fs::create_dir_all(&folder).unwrap();
+    // Longer than the bytes read from its start: its end read apart.
+    let mut moved = session("moved", "/work/old/app", "Moved one");
+    let filler = serde_json::json!({"type": "user", "cwd": "/work/old/app",
+        "message": {"content": "x".repeat(1024)}})
+    .to_string();
+    while moved.len() < format::HEAD + format::TAIL {
+        moved.push_str(&filler);
+        moved.push('\n');
+    }
+    moved.push_str(
+        &serde_json::json!({"type": "user", "cwd": "/work/new/app/crates",
+            "message": {"content": "here"}})
+        .to_string(),
+    );
+    moved.push('\n');
+    moved.push_str(
+        &serde_json::json!({"type": "user", "cwd": "/work/new/app", "message": {"content": "here"}})
+            .to_string(),
+    );
+    moved.push('\n');
+    std::fs::write(folder.join("moved.jsonl"), moved).unwrap();
+    std::fs::write(folder.join("old.jsonl"), session("old", "/work/old/app", "Old only")).unwrap();
+    let found = Sessions::default().of(&projects, root, 10);
+    let titles: Vec<&str> = found.iter().map(|s| s.title.as_str()).collect();
+    assert_eq!(titles, ["Moved one"]);
+    let _ = std::fs::remove_dir_all(projects);
+}

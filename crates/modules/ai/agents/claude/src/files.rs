@@ -127,11 +127,10 @@ impl Sessions {
                 break;
             }
             let Some(facts) = self.facts(&file, stamp) else { continue };
-            // Another path written the same way: not this project's.
-            if facts
-                .cwd
-                .as_deref()
-                .is_some_and(|cwd| !agent_files::same_folder(Path::new(cwd), root))
+            // Another path written the same way: not this project's (unless it worked here
+            // too: resumed after the project moved).
+            if !facts.cwds.is_empty()
+                && !facts.cwds.iter().any(|cwd| agent_files::same_folder(Path::new(cwd), root))
             {
                 continue;
             }
