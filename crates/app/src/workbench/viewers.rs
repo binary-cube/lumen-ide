@@ -168,9 +168,9 @@ impl Workbench {
             return Vec::new();
         }
         let floating = self.floating_areas();
-        // What floats over a page shows through it where pages can have holes (macOS):
-        // nothing to make room for then, only what covers more (files dragged in) hides
-        // it. Elsewhere a window that stays (the bar's, pinned; the resources' pills in the
+        // What floats over a page shows through it where pages can have holes (macOS,
+        // Windows): nothing to make room for then, only what covers more (files dragged in)
+        // hides it. Elsewhere a window that stays (the bar's, pinned; the resources' pills in the
         // corner) over a page's lower half makes it shorter, ending above it — hidden, it
         // would stay hidden as long as it's pinned — and any other window over a page hides
         // it while it's open (a page is the system's view, always over what the app draws).

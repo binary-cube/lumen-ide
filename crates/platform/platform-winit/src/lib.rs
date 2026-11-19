@@ -28,6 +28,9 @@ mod titlebar;
 mod web_app;
 #[cfg(target_os = "macos")]
 mod web_holes;
+#[cfg(target_os = "windows")]
+#[path = "web_holes_windows.rs"]
+mod web_holes;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 mod web_view;
 
@@ -480,7 +483,7 @@ impl Window for WinitWindow {
     }
 
     fn web_view_holes(&self) -> bool {
-        cfg!(target_os = "macos")
+        cfg!(any(target_os = "macos", target_os = "windows"))
     }
 
     #[cfg(any(target_os = "macos", target_os = "windows"))]

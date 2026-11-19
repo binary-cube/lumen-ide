@@ -31,10 +31,8 @@ pub(crate) struct WryWebView {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     window: Arc<winit::window::Window>,
     /// Where it is (physical pixels, in the window): its holes' places are relative to it.
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     area: std::cell::Cell<Rect>,
-    /// What floats over it shows through (macOS).
-    #[cfg(target_os = "macos")]
+    /// What floats over it shows through (macOS, Windows).
     holes: Option<crate::web_holes::Holes>,
     /// Where the engine keeps its files (WebView2's user data): kept while the page is,
     /// let go after it (the fields' order).
@@ -102,12 +100,16 @@ impl WryWebView {
                         .into();
                     crate::web_holes::Holes::new(window, page)
                 };
+                #[cfg(target_os = "windows")]
+                let holes = {
+                    use wry::WebViewExtWindows;
+                    Some(crate::web_holes::Holes::new(view.hwnd().0 as isize))
+                };
                 Some(Self {
                     view,
                     app,
                     window: Arc::clone(window),
                     area: std::cell::Cell::new(bounds),
-                    #[cfg(target_os = "macos")]
                     holes,
                     _context: context,
                 })
@@ -231,13 +233,11 @@ impl platform_api::WebView for WryWebView {
             tracing::debug!("the page wasn't moved: {e}");
         }
         self.area.set(bounds);
-        #[cfg(target_os = "macos")]
         if let Some(holes) = &self.holes {
             holes.moved(bounds);
         }
     }
 
-    #[cfg(target_os = "macos")]
     fn set_holes(&self, holes: &[(Rect, f32)]) {
         if let Some(h) = &self.holes {
             h.set(holes, self.area.get());
