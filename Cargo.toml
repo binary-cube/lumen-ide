@@ -170,7 +170,7 @@ default-members = ["crates/app"]
 exclude = ["third_party"]
 
 [workspace.package]
-version = "1.0.0-beta.15"
+version = "1.0.0-beta.16"
 edition = "2024"
 rust-version = "1.99"
 publish = false
@@ -180,7 +180,7 @@ repository = "https://github.com/binary-cube/lumen-ide"
 [workspace.metadata.release]
 # When the version above was released (`YYYY-MM-DD`): written with it at each release, shown
 # as the modules' that come with the app last change.
-date = "2026-11-20"
+date = "2026-11-21"
 
 [workspace.dependencies]
 # Internal crates
