@@ -13,6 +13,7 @@
 
 mod checker;
 pub mod settings;
+pub mod snapshot;
 mod state;
 pub mod view;
 

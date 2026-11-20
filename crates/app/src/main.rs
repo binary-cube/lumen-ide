@@ -299,10 +299,12 @@ fn main() -> anyhow::Result<()> {
         Ok((options, Box::new(app)))
     };
     let ran = WinitPlatform.run_prepared(Box::new(move || prepare().map_err(|e| format!("{e:#}"))));
+    let ended = std::time::Instant::now();
     // The settings still being written behind reach the disk before the process ends.
     storage::settings::flush();
     // A normal exit: nothing left behind to note.
     left_behind::finish();
+    tracing::info!(after_the_loop = ?ended.elapsed(), "the app ends");
     ran?;
     Ok(())
 }

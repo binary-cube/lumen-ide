@@ -13,6 +13,7 @@
 //! A program that exits with an error isn't an error here: its [`Output`] says how it ended
 //! (callers decide what an exit code means — a checker reports problems that way).
 
+pub mod descendants;
 pub mod launched;
 
 use std::ffi::OsString;

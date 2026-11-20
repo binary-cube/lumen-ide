@@ -57,6 +57,10 @@ pub struct PushDialog {
     hover: Option<Hit>,
     action: Option<ViewerAction>,
     done: bool,
+    /// The table's scrollbar (more branches than shown): the app's, a row at a time.
+    bar: ui_components::EdgeScrollbar,
+    /// Where it goes: along the table, in the margin right of it; and how many rows.
+    bar_area: Option<(Rect, usize)>,
 }
 
 impl std::fmt::Debug for PushDialog {
@@ -66,7 +70,24 @@ impl std::fmt::Debug for PushDialog {
 }
 
 impl PushDialog {
+    /// The rows scrolled to `offset` (the scrollbar's, a row being `row_h`): the nearest
+    /// row first, within the ends. `true` if they moved.
+    fn scroll_to(&mut self, offset: f32) -> bool {
+        let Some(form) = &self.form else { return false };
+        let last = form.lines.len().saturating_sub(ROWS_SHOWN);
+        let first =
+            if self.row_h > 0.0 { (offset / self.row_h).round().max(0.0) as usize } else { 0 };
+        let first = first.min(last);
+        let moved = first != self.first;
+        self.first = first;
+        moved
+    }
+
     fn hit(&self, p: Point) -> Option<Hit> {
+        // On the table's scrollbar: no row under it.
+        if self.bar.contains(p) {
+            return None;
+        }
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
 
@@ -254,13 +275,12 @@ impl PushDialog {
             ds::checkbox(layer, text, ds, track_x + px(4.0), mid, state(line.track), true);
             self.hits.push((Rect::new(track_x, row_y, track_w, self.row_h), Hit::Track(i)));
         }
-        // How far it's scrolled, when they don't all fit.
-        if count > ROWS_SHOWN {
-            let thumb = (table.size.height * ROWS_SHOWN as f32 / count as f32).max(px(20.0));
-            let top = table.min_y() + (table.size.height - thumb) * first as f32 / last as f32;
-            let bar = Rect::new(right + px(6.0), top, px(4.0), thumb);
-            layer.quad(Quad::filled(bar, p.text_muted.with_alpha(0.35)).rounded(px(2.0)));
-        }
+        // How far it's scrolled, when they don't all fit: the app's scrollbar, in the margin
+        // right of the table (painted over everything, after).
+        self.bar_area = (count > ROWS_SHOWN).then(|| {
+            let lane = Rect::new(left, table.min_y(), right + px(16.0) - left, table.size.height);
+            (lane, count)
+        });
         y = table.max_y() + px(8.0);
         // The boxes under the table.
         let force_warning = form.force;
@@ -369,6 +389,14 @@ impl Viewer for PushDialog {
         let ds = Ctx::new(palette, scale);
         let layer = scene.push_layer(Some(bounds));
         self.paint_body(layer, text, icons, &ds, bounds, focused);
+        match self.bar_area {
+            Some((lane, count)) => {
+                let content = self.row_h * count as f32;
+                let offset = self.row_h * self.first as f32;
+                self.bar.paint(scene, palette, scale, lane, content, offset);
+            }
+            None => self.bar = ui_components::EdgeScrollbar::default(),
+        }
         if self.picker.is_open() {
             self.picker.paint(scene, text, icons, &ds, (self.remote_field, bounds), "");
         }
@@ -378,6 +406,11 @@ impl Viewer for PushDialog {
         if self.picker.is_open() {
             let event = self.picker.press(p);
             self.picked(event);
+            return None;
+        }
+        // The table's scrollbar: its thumb taken (a drag follows), or the rows moved there.
+        if let Some(offset) = self.bar.press(p) {
+            self.scroll_to(offset);
             return None;
         }
         if let Some(hit) = self.hit(p) {
@@ -391,6 +424,9 @@ impl Viewer for PushDialog {
     }
 
     fn drag(&mut self, p: Point) -> bool {
+        if self.bar.is_dragging() {
+            return self.bar.drag(p).is_some_and(|offset| self.scroll_to(offset));
+        }
         self.input().is_some_and(|input| {
             input.extend_to(p.x);
             true
@@ -402,9 +438,13 @@ impl Viewer for PushDialog {
             return self.picker.hover(p);
         }
         let hover = self.hit(p);
-        let changed = hover != self.hover;
+        let changed = hover != self.hover || self.bar.hover(p);
         self.hover = hover;
         changed
+    }
+
+    fn release(&mut self) -> bool {
+        self.bar.release()
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {

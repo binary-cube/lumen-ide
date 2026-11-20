@@ -137,6 +137,30 @@ pub struct DriverFactory {
     /// Not one of the app's: a program installed apart, speaking the drivers' protocol
     /// (listed with a mark saying so).
     pub external: bool,
+    /// How its sources are shown, when it says (none: a server's or a file's icon).
+    pub icon: Option<DriverIcon>,
+}
+
+/// A driver's icon: the name of a drawing in the app's icon set (the driver's module
+/// contributes it), and the tone it's drawn in — one of the theme's terminal colors, so it
+/// suits every theme (a theme's `icon.<name>` color comes first).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DriverIcon {
+    pub name: &'static str,
+    pub tone: IconTone,
+}
+
+/// A driver icon's tone: one of the theme's terminal colors, or the muted text's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum IconTone {
+    #[default]
+    Neutral,
+    Red,
+    Green,
+    Yellow,
+    Blue,
+    Magenta,
+    Cyan,
 }
 
 impl DriverFactory {
@@ -155,7 +179,14 @@ impl DriverFactory {
             default_port,
             create: Arc::new(create),
             external: false,
+            icon: None,
         }
+    }
+
+    /// The same, its sources shown with icon `name` in `tone`.
+    pub fn with_icon(mut self, name: &'static str, tone: IconTone) -> Self {
+        self.icon = Some(DriverIcon { name, tone });
+        self
     }
 }
 

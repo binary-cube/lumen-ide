@@ -233,3 +233,43 @@ fn it_draws_its_rows_and_closes_on_a_click_outside() {
     assert_eq!(view.click(inside), None);
     assert_eq!(view.click(Point::new(2.0, 2.0)), Some(ViewerAction::Close));
 }
+
+/// Many consoles: the app's scrollbar along the list's right edge; its thumb dragged moves
+/// the list a row at a time (never past its end) and picks nothing.
+#[test]
+fn the_list_s_thumb_is_dragged_a_row_at_a_time() {
+    let mut s = setup("jump-drag");
+    for i in 0..30 {
+        s.consoles.create(s.access.shop, &format!("SELECT {i};")).unwrap();
+    }
+    let mut view = popover(&mut s, false);
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1200.0, 900.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let first_row = view.hits.iter().find(|(_, h)| *h == Hit::Row(0)).map(|(r, _)| *r).unwrap();
+    let y = first_row.min_y() + 6.0;
+    let right = view.panel.max_x();
+    let x = (0..14)
+        .map(|dx| right - 1.0 - dx as f32)
+        .find(|x| {
+            let taken = Viewer::press(&mut view, Point::new(*x, y), 1).is_none() && view.first == 0;
+            taken && view.bar.is_dragging()
+        })
+        .expect("the thumb at the list's top, along the right edge");
+    assert!(view.drag(Point::new(x, y + 150.0)) && view.first > 0);
+    view.drag(Point::new(x, y + 10_000.0));
+    assert_eq!(view.first, view.rows() - VISIBLE, "at its end, no further");
+    assert!(view.release());
+    assert!(!view.closed(), "nothing picked");
+}

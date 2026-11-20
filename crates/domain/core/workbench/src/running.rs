@@ -295,6 +295,46 @@ pub struct RunningPrompt {
     pub modules: Vec<(String, String)>,
     /// The user chose to wait: the list follows the work until it ends.
     pub waiting: bool,
+    /// The app is ending and what it started is being stopped: the question is past, the
+    /// window shows how far that is (and can't be closed meanwhile).
+    pub stopping: Option<Stopping>,
+}
+
+/// The programs the app started, being stopped as it ends: each one and where it is.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Stopping {
+    pub programs: Vec<StoppingProgram>,
+}
+
+impl Stopping {
+    /// How many have ended (by themselves or made to).
+    pub fn ended(&self) -> usize {
+        self.programs.iter().filter(|p| p.state != ProgramState::Asked).count()
+    }
+
+    /// Every one has ended.
+    pub fn done(&self) -> bool {
+        self.ended() == self.programs.len()
+    }
+}
+
+/// A program being stopped: its name, its id, where it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoppingProgram {
+    pub name: String,
+    pub pid: u32,
+    pub state: ProgramState,
+}
+
+/// Where a program being stopped is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ProgramState {
+    /// Asked to end, not yet gone.
+    Asked,
+    /// Ended when asked.
+    Ended,
+    /// Didn't end in time: made to.
+    Forced,
 }
 
 impl RunningPrompt {

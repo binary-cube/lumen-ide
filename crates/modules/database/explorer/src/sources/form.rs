@@ -20,6 +20,8 @@ pub struct DriverInfo {
     pub id: String,
     pub name: String,
     pub icon: &'static str,
+    /// Its icon's tone (its engine's).
+    pub tone: database::IconTone,
     pub spec: ConnectionSpec,
     pub file_based: bool,
     /// Its tables are grouped in schemas (the Schemas tab lists them).

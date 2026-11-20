@@ -17,26 +17,41 @@ use super::{
 use crate::catalog::Listed;
 use crate::tree::{Group, NodeKey, Row, RowKind};
 
-/// A row's icon and its color.
-fn icon_of(row: &Row, source_icon: &'static str, p: &Palette) -> (&'static str, Rgba) {
+/// A row's icon and its color (`source`: its source's icon and tone).
+pub(super) fn icon_of(
+    row: &Row,
+    source: (&'static str, database::IconTone),
+    p: &Palette,
+) -> (&'static str, Rgba) {
     match &row.kind {
         RowKind::Folder => ("folder", p.folder_icon),
-        RowKind::Source => (source_icon, p.accent),
+        RowKind::Source => (source.0, crate::engine_icon::color(source.0, source.1, p, p.accent)),
         RowKind::Database => ("database", p.text_muted),
-        RowKind::Schema => ("layers", p.text_muted),
+        RowKind::Schema => ("schema", p.text_muted),
         RowKind::Group(Group::Tables) | RowKind::Group(Group::Views) | RowKind::Part(_) => {
             ("folder", p.folder_icon)
         }
         RowKind::Table(database::TableKind::Table) => ("table", p.accent),
-        RowKind::Table(database::TableKind::View) => ("eye", p.vcs_modified),
+        RowKind::Table(database::TableKind::View) => ("view", p.vcs_modified),
         RowKind::Column { key: true, .. } => ("key", p.warning),
-        RowKind::Column { foreign: true, .. } => ("link", p.accent),
+        RowKind::Column { foreign: true, .. } => ("key-foreign", p.accent),
         RowKind::Column { .. } => ("column", p.text_muted),
-        RowKind::Index { .. } => ("index", p.text_muted),
-        RowKind::Key => ("link", p.text_muted),
+        RowKind::Index { unique: true } => ("index-unique", p.text_muted),
+        RowKind::Index { unique: false } => ("index", p.text_muted),
+        RowKind::Key => ("key-foreign", p.text_muted),
         RowKind::Loading => ("clock", p.text_muted),
         RowKind::Error => ("alert", p.danger),
         RowKind::Hint => ("alert", p.warning),
+    }
+}
+
+/// The mark a source's session puts on its icon: green while open, red after it failed to
+/// open; none while closed.
+pub(super) fn link_color(link: crate::tree::Link, p: &Palette) -> Option<Rgba> {
+    match link {
+        crate::tree::Link::Closed => None,
+        crate::tree::Link::Open => Some(p.vcs_added),
+        crate::tree::Link::Failed => Some(p.danger),
     }
 }
 
@@ -59,7 +74,12 @@ impl DatabaseWindow {
         Some(match (&row.kind, &row.key) {
             (RowKind::Source, NodeKey::Source(id)) => {
                 let source = self.tree.source(*id)?;
-                i18n::tr!("datasources.tip_source", driver = source.driver_name.as_str())
+                let key = match source.link {
+                    crate::tree::Link::Closed => "datasources.tip_source",
+                    crate::tree::Link::Open => "datasources.tip_source_open",
+                    crate::tree::Link::Failed => "datasources.tip_source_failed",
+                };
+                i18n::tr!(key, driver = source.driver_name.as_str())
             }
             (RowKind::Schema, _) => t("datasources.tip_schema"),
             (RowKind::Table(database::TableKind::Table), _) => t("datasources.tip_table"),
@@ -319,8 +339,9 @@ impl DatabaseWindow {
                 let at = Rect::new(x.round(), center(chevron), chevron, chevron);
                 tree_row::chevron(layer, icons, at, row.expanded, p.text_muted);
             }
+            let source = row.key.source().and_then(|id| self.tree.source(id));
             let source_icon =
-                row.key.source().and_then(|id| self.tree.source(id)).map_or("database", |s| s.icon);
+                source.map_or(("database", database::IconTone::Neutral), |s| (s.icon, s.tone));
             let (icon, mut color) = icon_of(row, source_icon, p);
             // A folder's or a source's color: its icon in it, and a mark at the row's start.
             let mark = row.color.and_then(|c| ui_components::tag_colors::named(&c.name(), p));
@@ -333,6 +354,32 @@ impl DatabaseWindow {
             let icon_rect = self.icon_rect(i);
             if let Some(id) = icons.id(icon).or_else(|| icons.id("file")) {
                 draw_icon(layer, icons, id, icon_rect, color);
+            }
+            if let Some(dot) = link_color(row.marks.link, p) {
+                // At the icon's bottom right, ringed in the row's own color (over the icon).
+                let under = if self.selected.as_ref() == Some(&row.key) {
+                    Some(p.tree_selection)
+                } else if self.hover == Some(Hover::Row(i)) {
+                    Some(p.tree_hover)
+                } else {
+                    None
+                };
+                let (d, ring) = (px(7.0), px(1.5));
+                let at = Rect::new(
+                    icon_rect.max_x() - d + px(1.0),
+                    icon_rect.max_y() - d + px(1.0),
+                    d,
+                    d,
+                );
+                let outer =
+                    Rect::new(at.min_x() - ring, at.min_y() - ring, d + 2.0 * ring, d + 2.0 * ring);
+                layer.quad(
+                    Quad::filled(outer, p.sidebar_background).rounded(outer.size.width / 2.0),
+                );
+                if let Some(under) = under {
+                    layer.quad(Quad::filled(outer, under).rounded(outer.size.width / 2.0));
+                }
+                layer.quad(Quad::filled(at, dot).rounded(d / 2.0));
             }
             let baseline = centered_baseline(top, h, &metrics);
             let label_x = (icon_rect.max_x() + px(7.0)).round();

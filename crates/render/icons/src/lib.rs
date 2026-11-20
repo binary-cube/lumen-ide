@@ -392,6 +392,11 @@ const BUILTIN: &[(&str, &str)] = &[
     ("arrow-left-right", include_str!("../svg/arrow-left-right.svg")),
     ("archive-down", include_str!("../svg/archive-down.svg")),
     ("archive-up", include_str!("../svg/archive-up.svg")),
+    // A database's objects, as its tree lists them.
+    ("schema", include_str!("../svg/schema.svg")),
+    ("view", include_str!("../svg/view.svg")),
+    ("key-foreign", include_str!("../svg/key-foreign.svg")),
+    ("index-unique", include_str!("../svg/index-unique.svg")),
 ];
 
 /// Identifier of a registered icon.

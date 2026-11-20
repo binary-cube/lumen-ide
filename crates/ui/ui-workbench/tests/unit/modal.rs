@@ -14,6 +14,17 @@ fn content_sized(
     title: &str,
     hints: &[KeyHint<'_>],
 ) -> Rect {
+    content_titled(fit, fit_width, title, true, hints)
+}
+
+/// The same, the title widening it or not.
+fn content_titled(
+    fit: Option<f32>,
+    fit_width: Option<f32>,
+    title: &str,
+    title_widens: bool,
+    hints: &[KeyHint<'_>],
+) -> Rect {
     let mut modal = Modal::default();
     modal.set_viewport(Rect::new(0.0, 0.0, 1600.0, 1200.0), 1.0);
     modal.open();
@@ -31,6 +42,8 @@ fn content_sized(
         status: None,
         fit,
         fit_width,
+        title_widens,
+        closable: true,
         zoom: None,
     };
     let icons = Icons::builtin();
@@ -64,6 +77,9 @@ fn a_question_is_as_wide_as_its_title_needs_within_its_size() {
     // Inside the panel's border (a line each side): the panel as wide as its size.
     assert_eq!(huge.size.width, 878.0, "never wider than its size");
     assert_eq!(content_with(None, &[]).size.width, 878.0, "no width asked: the size's");
+    // Kept as wide as asked: the title cut instead.
+    let kept = content_titled(Some(100.0), Some(440.0), long, false, &[]);
+    assert_eq!(kept.size.width, 440.0, "a long title doesn't widen it");
 }
 
 /// A navigation taller than its room keeps its place on the left and scrolls (its bar in
@@ -99,6 +115,8 @@ fn a_navigation_taller_than_its_room_scrolls() {
             status: None,
             fit: None,
             fit_width: None,
+            title_widens: true,
+            closable: true,
             zoom: None,
         };
         let icons = Icons::builtin();
@@ -135,4 +153,56 @@ fn a_navigation_taller_than_its_room_scrolls() {
     assert!(
         !tall.scroll_nav(Point::new(tall.nav().min_x() + 40.0, tall.nav().min_y() + 20.0), 50.0)
     );
+}
+
+/// A window that mustn't be left (work under way): no `esc` in its header, nothing there
+/// that closes it; the same window closable has it.
+#[test]
+fn a_window_that_can_t_be_closed_has_no_esc_to_click() {
+    let header_esc = |closable: bool| {
+        let mut modal = Modal::default();
+        modal.set_viewport(Rect::new(0.0, 0.0, 1600.0, 1200.0), 1.0);
+        modal.open();
+        let spec = ModalSpec {
+            title: "Quitting",
+            subtitle: None,
+            icon: None,
+            size: ModalSize::Large,
+            sections: &[],
+            nav_header: 0.0,
+            header_field: 0.0,
+            active: None,
+            hints: &[],
+            buttons: &[],
+            status: None,
+            fit: Some(200.0),
+            fit_width: Some(540.0),
+            title_widens: true,
+            closable,
+            zoom: None,
+        };
+        let mut text = TextSystem::new();
+        let mut scene = Scene::default();
+        let (content, _) = modal
+            .paint(&spec, &Icons::builtin(), &mut text, &mut scene, &Palette::dark())
+            .expect("open");
+        // Along the header's right end, where `esc` sits.
+        let y = content.min_y() - 30.0;
+        (content.min_x()..content.max_x())
+            .step_by_f32(4.0)
+            .any(|x| modal.hit(Point::new(x, y)) == Some(ModalHit::Close))
+    };
+    assert!(header_esc(true), "closable: `esc` there");
+    assert!(!header_esc(false), "nothing closes it from its header");
+}
+
+trait StepByF32 {
+    fn step_by_f32(self, step: f32) -> impl Iterator<Item = f32>;
+}
+
+impl StepByF32 for std::ops::Range<f32> {
+    fn step_by_f32(self, step: f32) -> impl Iterator<Item = f32> {
+        let (start, end) = (self.start, self.end);
+        (0..).map(move |i| start + step * i as f32).take_while(move |x| *x < end)
+    }
 }

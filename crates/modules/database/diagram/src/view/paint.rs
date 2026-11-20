@@ -404,7 +404,7 @@ impl RelationsView {
         let icon = if c.in_key {
             Some(("key", p.terminal_ansi[3]))
         } else if points_to.is_some() {
-            Some(("link", tint))
+            Some(("key-foreign", tint))
         } else {
             None
         };

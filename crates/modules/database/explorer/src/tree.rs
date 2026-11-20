@@ -28,6 +28,8 @@ pub struct TreeSource {
     pub driver: String,
     pub driver_name: String,
     pub icon: &'static str,
+    /// The tone its icon is drawn in (its engine's).
+    pub tone: database::IconTone,
     /// Where it's listed; `None`: a file shown by itself, not configured (only while open).
     pub scope: Option<Scope>,
     /// A file-based source's file (absolute).
@@ -53,6 +55,8 @@ pub struct TreeSource {
     pub production: bool,
     /// A console of it has a transaction open (`TransactionChanged`).
     pub transaction: bool,
+    /// Its session: open, closed, or couldn't open (`ConnectionChanged`).
+    pub link: Link,
 }
 
 /// A group under a schema.
@@ -168,11 +172,24 @@ pub struct Row {
     pub marks: RowMarks,
 }
 
-/// A source's or a folder's badges: production, a console's transaction open on it.
+/// A source's or a folder's badges: production, a console's transaction open on it, its
+/// session's state (a source's).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct RowMarks {
     pub production: bool,
     pub transaction: bool,
+    pub link: Link,
+}
+
+/// A source's session, as its icon's mark shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Link {
+    /// Not connected (no mark).
+    #[default]
+    Closed,
+    Open,
+    /// The last try to open it failed.
+    Failed,
 }
 
 /// Something read, or being read.
@@ -367,6 +384,7 @@ impl SourceTree {
             color: None,
             production: false,
             transaction: false,
+            link: Link::Closed,
             ..s.clone()
         };
         for source in &sources {
@@ -696,6 +714,7 @@ impl SourceTree {
                     marks: RowMarks {
                         production: folders::folder_production(&self.folders, f.id),
                         transaction: false,
+                        link: Link::Closed,
                     },
                 });
                 out.extend(inside);
@@ -785,7 +804,11 @@ impl SourceTree {
             expandable: true,
             expanded: open,
             color: source.color,
-            marks: RowMarks { production: source.production, transaction: source.transaction },
+            marks: RowMarks {
+                production: source.production,
+                transaction: source.transaction,
+                link: source.link,
+            },
         });
         out.extend(children);
     }

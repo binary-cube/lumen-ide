@@ -61,9 +61,14 @@ pub struct Description {
     pub version: String,
     #[serde(default)]
     pub kind: Kind,
-    /// An icon of the editor's set (`database`, `server`); none: the one of its kind.
+    /// An icon of the editor's set (`database`, `server`, `hard-drive`, `cloud`…, see
+    /// `manifest::ICONS`); none or another: the one of its kind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    /// Its icon's tone: `red`, `green`, `yellow`, `blue`, `magenta`, `cyan` (the theme's
+    /// terminal colors); none or another: the muted text's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon_tone: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_port: Option<u16>,
     /// Who writes the SQL: the editor in one of its dialects, or nobody (`none`: the

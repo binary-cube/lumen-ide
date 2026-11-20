@@ -205,6 +205,8 @@ pub(super) struct Pending {
     /// An update to put in place once the app has quit (asked by the updates' module): its
     /// staged folder. A Quit of the user's own forgets it.
     pub update: Option<std::path::PathBuf>,
+    /// The app ending, what it started being stopped before the window goes.
+    pub ending: Option<super::ending::Ending>,
 }
 
 /// What follows once the work still running is let go: a closing (its tabs, then what it

@@ -3,6 +3,7 @@
 
 use super::*;
 use workbench_model::resources::ActivityKind;
+use workbench_model::running::ProgramState;
 use workbench_model::running::{StopVia, WorkProgress, grouped};
 use workbench_model::{ActionTarget, PartRef};
 
@@ -32,6 +33,7 @@ fn prompt(count: usize) -> RunningPrompt {
         projects: vec![(project, "shop".into())],
         modules: vec![("remote.projects".into(), "Remote projects".into())],
         waiting: false,
+        stopping: None,
     }
 }
 
@@ -138,4 +140,110 @@ fn the_buttons_are_the_footers_and_the_keys_start_on_cancel() {
     assert!(view.modal_buttons()[1].focused, "Wait");
     assert!(view.command("running.footer.cancel"));
     assert!(view.closed());
+}
+
+fn stopping(states: &[ProgramState]) -> RunningPrompt {
+    use workbench_model::running::{Stopping, StoppingProgram};
+    let programs = states
+        .iter()
+        .enumerate()
+        .map(|(i, state)| StoppingProgram {
+            name: format!("program-{i}"),
+            pid: 100 + u32::try_from(i).unwrap(),
+            state: *state,
+        })
+        .collect();
+    RunningPrompt { closing: Closing::App, stopping: Some(Stopping { programs }), ..prompt(0) }
+}
+
+/// While the programs are being stopped: no buttons, no `esc`, × and every key change
+/// nothing, it keeps turning until they've all ended.
+#[test]
+fn while_stopping_nothing_closes_or_answers_it() {
+    let mut view = RunningView::default();
+    view.set_data(&stopping(&[ProgramState::Asked, ProgramState::Ended]));
+    assert!(view.modal_buttons().is_empty());
+    assert!(!view.modal_closable() && !view.may_close());
+    for key in [ViewerKey::Escape, ViewerKey::Enter, ViewerKey::Tab] {
+        assert!(view.edit_key(key), "{key:?} kept");
+    }
+    assert!(!view.command("running.footer.cancel"));
+    assert_eq!(view.take_action(), None);
+    assert!(!view.closed());
+    assert!(view.is_loading());
+    assert_eq!(view.modal_icon(), Some("log-out"));
+    // All ended: nothing turns any more (the app goes on by itself).
+    view.set_data(&stopping(&[ProgramState::Forced, ProgramState::Ended]));
+    assert!(!view.is_loading());
+    assert!(!view.modal_closable());
+}
+
+/// The window as tall as the list (up to its visible rows); a longer list scrolls by the
+/// wheel, only as far as it goes.
+#[test]
+fn a_long_list_of_programs_scrolls_as_far_as_it_goes() {
+    let mut view = RunningView::default();
+    view.set_data(&stopping(&[ProgramState::Asked; 3]));
+    let three = view.modal_height().unwrap();
+    assert!(!view.scroll(0.0, 40.0), "all shown: nothing to scroll");
+    view.set_data(&stopping(&[ProgramState::Asked; 20]));
+    let twenty = view.modal_height().unwrap();
+    view.set_data(&stopping(&[ProgramState::Asked; 30]));
+    assert_eq!(view.modal_height().unwrap(), twenty, "past the visible rows, no taller");
+    assert!(twenty > three);
+    assert!(view.scroll(0.0, 1e6));
+    assert!(!view.scroll(0.0, 10.0), "at the end");
+    assert!(view.scroll(0.0, -1e6));
+    // The question's own view is as before.
+    let mut question = opened(1);
+    assert!(question.modal_closable());
+    assert!(!question.scroll(0.0, 10.0));
+}
+
+/// A list longer than its box: the app's scrollbar along its right edge, its thumb dragged
+/// scrolls it; a shorter one has none to take.
+#[test]
+fn the_list_s_scrollbar_thumb_is_dragged() {
+    use kernel::{Point, Rect};
+    use render_api::Scene;
+    use text_layout::TextSystem;
+    let icons = icons::Icons::builtin();
+    let palette = ui_components::Palette::dark();
+    let mut text = TextSystem::new();
+    let bounds = Rect::new(0.0, 0.0, 540.0, 420.0);
+    let paint = |view: &mut RunningView, text: &mut TextSystem| {
+        let mut scene = Scene::default();
+        view.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    let opened = |count: usize, text: &mut TextSystem| {
+        let mut view = RunningView::default();
+        view.set_data(&stopping(&vec![ProgramState::Asked; count]));
+        paint(&mut view, text);
+        view
+    };
+    // Along the box's right edge, near its top (the thumb at rest there).
+    let grab = |count: usize, text: &mut TextSystem| {
+        (100..200).step_by(4).any(|y| {
+            (0..40).any(|dx| {
+                let mut view = opened(count, text);
+                let p = Point::new(bounds.max_x() - 24.0 - dx as f32, y as f32);
+                view.hover(p);
+                Viewer::press(&mut view, p, 1);
+                let moved = view.drag(Point::new(p.x, p.y + 120.0)) && view.scroll > 0.0;
+                view.release();
+                moved
+            })
+        })
+    };
+    assert!(grab(30, &mut text), "the thumb dragged scrolls the list");
+    assert!(!grab(3, &mut text), "all shown: no scrollbar to take");
 }

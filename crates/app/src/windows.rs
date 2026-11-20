@@ -49,6 +49,9 @@ pub struct AppWindows {
     reopen_at_start: Option<u128>,
     /// An update in place (its staged folder): the app started again as it ends.
     update: Option<std::path::PathBuf>,
+    /// What the app started, taken as its last window goes (while the tree still hangs
+    /// together): stopped as it ends.
+    leaving: Option<process::descendants::Descendants>,
 }
 
 impl AppWindows {
@@ -77,6 +80,7 @@ impl AppWindows {
             waker: None,
             reopen_at_start: None,
             update: None,
+            leaving: None,
         }
     }
 
@@ -185,6 +189,9 @@ impl Application for AppWindows {
                 // A window's going is timed: its parts are what a slow close comes from.
                 let asked = started.elapsed();
                 let gone = std::time::Instant::now();
+                if self.windows.len() == 1 {
+                    self.leaving = leaving();
+                }
                 self.windows.remove(i);
                 if asked + gone.elapsed() >= std::time::Duration::from_millis(100) {
                     tracing::info!(?asked, dropped = ?gone.elapsed(), "a window's close was slow");
@@ -257,12 +264,47 @@ impl Application for AppWindows {
     /// already), the app started again (it waits for this process to end, then reopens
     /// this session).
     fn exiting(&mut self) {
+        crate::watchdog::exiting();
         storage::settings::flush();
+        // Before the app starts again after an update: that one isn't among them.
+        if let Some(left) = self.leaving.take().or_else(leaving) {
+            stop_leaving(&left);
+        }
         if let Some(staged) = self.update.take() {
             tracing::info!(session = %kernel::id::uuid_text(self.sessions.id), "started again after the update");
             crate::updating::restart(&staged, self.sessions.id);
         }
     }
+}
+
+/// What this app started and what those started (macOS): taken while they still hang
+/// together under it. An agent's helper that detached into its own process group would
+/// otherwise outlive the app, and the system, counting it as the app's, would show the app
+/// as running in the background and then close it itself, asking the user about it.
+/// Elsewhere nothing is taken (a browser a file was opened in can be a child there).
+fn leaving() -> Option<process::descendants::Descendants> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    Some(process::descendants::Descendants::of(std::process::id()))
+}
+
+/// How long what the app started has, once asked, to end by itself.
+const LEAVING_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
+
+/// Stops what [`leaving`] took (each still the same program), saying what in the log.
+fn stop_leaving(left: &process::descendants::Descendants) {
+    if left.is_empty() {
+        return;
+    }
+    let started = std::time::Instant::now();
+    let forced = left.stop(LEAVING_GRACE);
+    tracing::info!(
+        programs = left.len(),
+        forced,
+        took = ?started.elapsed(),
+        "the programs the app started stopped as it ends"
+    );
 }
 
 /// The pause between a reopened window's first frame and the next one.

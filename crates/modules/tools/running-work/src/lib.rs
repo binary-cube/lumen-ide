@@ -6,8 +6,11 @@
 //! itself once it ends) and "Cancel"; closed only by them, × or Esc (= Cancel) — never a
 //! click outside. The answer goes back to the app as
 //! [`ui_components::AppRequest::RunningAnswer`]; what runs is the modules' to say
-//! ([`workbench_model::ResourceReporter::running`]), not this one's.
+//! ([`workbench_model::ResourceReporter::running`]), not this one's. As the app ends, the same
+//! window shows the programs it started being stopped (`stopping`): a progress bar and
+//! the list, nothing to answer, nothing to close.
 
+mod stopping;
 mod view;
 
 use std::path::Path;

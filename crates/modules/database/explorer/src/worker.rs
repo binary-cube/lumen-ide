@@ -507,8 +507,9 @@ impl SessionWorker {
     /// Closes the session now: what waits is cancelled, what runs is told to stop (the
     /// session goes when it ends). The next request opens it again.
     pub fn close_now(&self) {
-        let (dropped, sessions) = {
+        let (dropped, sessions, was, now) = {
             let mut state = self.lock();
+            let was = state.main.connected || state.counts.connected;
             let mut dropped: Vec<Queued> = Vec::new();
             let mut sessions = Vec::new();
             for lane in [LaneId::Main, LaneId::Counts] {
@@ -522,8 +523,12 @@ impl SessionWorker {
                 }
                 sessions.extend(state.session.take());
             }
-            (dropped, sessions)
+            let now = state.main.connected || state.counts.connected;
+            (dropped, sessions, was, now)
         };
+        if was != now {
+            self.tell_connection(now, false);
+        }
         // Closed outside the lock and off the caller's thread (the app's, often): a server may
         // take its time to say goodbye.
         if !sessions.is_empty() {
@@ -570,11 +575,15 @@ impl SessionWorker {
         if let Ok(response) = &result {
             self.announce(&queued.request, response);
         }
+        // It couldn't open (the server unreachable, the login refused), not a query refused.
+        let result_failed = matches!(result, Err(DbError::Connect(_) | DbError::Auth(_)));
         // The reply first: the next request's can't overtake it.
         queued.inbox.push(Reply { ticket: queued.ticket, result });
 
-        let (more, closed) = {
+        let failed = lane == LaneId::Main && session.is_none() && result_failed;
+        let (more, closed, was, now) = {
             let mut state = self.lock();
+            let was = state.main.connected || state.counts.connected;
             state.used = self.shared.runtime.now();
             let mut closed = Vec::new();
             // Closing the source closes its counting session too (the one counting now
@@ -588,22 +597,30 @@ impl SessionWorker {
                     closed.extend(counts.session.take());
                 }
             }
-            let state = state.lane(lane);
-            state.running = None;
-            if std::mem::take(&mut state.close_after) || session.is_none() {
-                state.connected = false;
-                closed.extend(session);
-            } else {
-                state.connected = true;
-                state.session = session;
-            }
-            let more = !state.mailbox.is_empty();
-            if !more {
-                state.scheduled = false;
-            }
-            (more, closed)
+            let more = {
+                let state = state.lane(lane);
+                state.running = None;
+                if std::mem::take(&mut state.close_after) || session.is_none() {
+                    state.connected = false;
+                    closed.extend(session);
+                } else {
+                    state.connected = true;
+                    state.session = session;
+                }
+                let more = !state.mailbox.is_empty();
+                if !more {
+                    state.scheduled = false;
+                }
+                more
+            };
+            let now = state.main.connected || state.counts.connected;
+            (more, closed, was, now)
         };
         drop(closed);
+        // Told after the lock: what hears it may ask the worker again.
+        if was != now || failed {
+            self.tell_connection(now, failed);
+        }
         if more {
             self.schedule(lane);
         }
@@ -666,6 +683,13 @@ impl SessionWorker {
         for (table, structure) in crate::execute::changed_tables(request) {
             events.publish(&database::events::DataChanged { source, table, structure });
         }
+    }
+
+    /// Its session opened or closed (`failed`: it couldn't open), said on the project's bus.
+    fn tell_connection(&self, open: bool, failed: bool) {
+        let Some(events) = &self.shared.events else { return };
+        let source = self.shared.source.id;
+        events.publish(&database::events::ConnectionChanged { source, open, failed });
     }
 }
 

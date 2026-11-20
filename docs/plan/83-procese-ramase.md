@@ -166,3 +166,65 @@ fiecare eșantion (la 2 s) cerea ~14 cadre în fiecare fereastră vizibilă.
 
 - Un terminal rămas nu poate fi „reatașat” (PTY-ul lui a murit cu aplicația): doar oprit sau
   lăsat. De spus în fereastră.
+
+## La ieșire, pe macOS: ce a pornit aplicația se oprește (2026-11-20)
+
+**Ce s-a văzut.**
+- După închiderea ultimei ferestre, Dock-ul arăta aplicația „Running in Background”. Cam 20 s
+  mai târziu, macOS o închidea singur și întreba dacă are voie să ruleze în fundal.
+- Jurnalul arăta aplicația terminată în câteva milisecunde.
+- O urmărire din afară a arătat ce mai rula: ajutorul unui agent, pornit dintr-un terminal al
+  aplicației. Se desprinsese în propriul grup de procese și aștepta o vreme după ce părintele
+  lui se încheia. macOS socotește tot ce pornește din aplicație ca fiind al ei, deci și pe el.
+
+**Făcut.**
+- `process::descendants`: tot ce a pornit un proces și ce au pornit acelea, citit din tabelul
+  de părinți al sistemului (sysinfo).
+- Un copil e socotit copil doar dacă a pornit după părintele lui. Așa un id refolosit nu
+  adoptă un program mai vechi.
+- Oprirea: fiecare program e numit după id și ora pornirii. Întâi i se cere să se încheie
+  (`SIGTERM`). După 500 ms, cele rămase sunt oprite forțat (`SIGKILL`), doar dacă sunt încă
+  același program. Semnalul merge doar la procesul găsit, niciodată la grupul lui.
+- Lista se ia când pleacă ultima fereastră, înainte să cadă terminalele ei. Atunci arborele e
+  încă legat; mai târziu, ajutorul desprins ar fi adoptat de sistem și n-ar mai putea fi
+  recunoscut. La Quit, lista se ia la sfârșitul buclei.
+- Oprirea are loc înainte ca aplicația să repornească după o actualizare, deci noua instanță
+  nu e printre ele. Jurnalul spune câte au fost și câte au trebuit oprite forțat.
+- Doar pe macOS. Pe Linux, un browser deschis din aplicație poate fi copilul ei, iar pe
+  Windows nu există problema.
+- Teste: arborele sub o rădăcină; un id refolosit; un ciclu; un shell real cu două programe
+  pornite de el, găsite și oprite.
+
+**Fereastra de oprire (cerută după, 2026-11-20).**
+- Când pleacă ultima fereastră sau dai Quit din ea, aplicația nu mai iese pe loc dacă a pornit
+  programe care încă rulează. Fereastra întrebării „Ieși din aplicație?” (a modulului
+  `running-work`) se deschide cu titlul „Se închide aplicația” și arată:
+  - o bară de progres, „3 din 5”, cu procentul;
+  - lista programelor într-o casetă ca a unui câmp de formular: starea fiecăruia (un loader
+    cât se închide, ✓ închis, ⚡ oprit forțat), numele, pid-ul aliniat pe coloană. Peste 8
+    rânduri, lista se derulează cu rotița.
+- Cât lucrează, nimic nu închide fereastra: nu e niciun buton, `esc` nu e desenat, × nu face
+  nimic, tastele sunt luate fără efect. Cmd+Q și butonul de închidere al ferestrei sunt
+  ignorate. Fereastra se închide singură (sau aplicația iese) după ce s-au încheiat toate:
+  rămâne cel puțin 0,8 s și încă 0,45 s după ultimul, ca să se vadă cum se termină.
+- Oprirea rulează pe firul `app-ending`. Fiecare program primește 2 s ca să se închidă singur,
+  apoi e oprit forțat. Firul anunță fereastra după fiecare program încheiat.
+- Contractul: `RunningPrompt.stopping` (`Stopping`, `StoppingProgram`, `ProgramState`).
+  `Viewer::modal_closable()` și `ModalSpec.closable` ascund `esc` și opresc ×.
+
+**Ce nu atinge niciodată (grija cerută pentru mai multe proiecte).**
+- Altă instanță a aplicației sau alt program: se iau doar descendenții acestui proces.
+- Alt proiect deschis în aceeași aplicație: oprirea se face doar când pleacă **ultima**
+  fereastră. Închiderea unei ferestre dintre mai multe nu oprește nimic în plus, iar
+  programele ei se închid ca înainte, cu terminalele ei. La Quit cu mai multe ferestre se
+  închid oricum toate proiectele; oprirea se face atunci la ieșire, fără fereastră.
+- Testele și capturile: fără fereastră reală nu se oprește nimic. Altfel ar putea fi oprite
+  programele altor teste, care rulează în paralel.
+
+**Lăsat.**
+- **Oprirea ajutoarelor desprinse ale unui singur proiect** când i se închide fereastra, iar
+  altele rămân deschise. Registrul (`process-registry`) știe proiectul fiecărui program
+  pornit, deci se poate: rădăcinile acelui proiect și descendenții lor. E nevoie de multă
+  grijă: un proiect deschis în două ferestre, sau un proiect într-un dosar al altuia.
+  Până atunci, un asemenea ajutor trăiește până la ieșirea din aplicație.
+- Pe Linux și Windows: fără fereastră de oprire (vezi mai sus de ce).

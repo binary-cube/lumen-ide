@@ -8,6 +8,10 @@ publish.workspace = true
 [lib]
 doctest = false
 
+[dependencies]
+# The system's table of processes: what a process started (`descendants`).
+sysinfo.workspace = true
+
 # Stopping a program with everything it started (its process group).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

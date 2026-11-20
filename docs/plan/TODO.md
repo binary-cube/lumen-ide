@@ -5,6 +5,32 @@ făcute se șterg.
 
 ## Următorul (cerut)
 
+- **Jurnalul aplicației, organizat și sigur** (cerut 2026-11-20, foarte important). Ce
+  avem acum: `tracing` + `tracing-subscriber` scriu un singur fișier
+  (`~/.config/<id>/<id>.log`), golit de tot când trece de 5 MB. Nu există rotație, nici
+  ascunderea datelor sensibile; doar regula „secretele nu se loghează”, ținută de mână. Ce
+  vrem, ca la un logger matur (canale, handler-e, rotație):
+  - **Rotație după mărime și după zi:** `<id>.log`, `<id>.1.log` … până la N fișiere și o
+    limită totală. Cel mai vechi pleacă primul, nimic nu se pierde brusc ca acum. Scrierea
+    rămâne pe un fir al ei, cu o coadă mărginită; un disc plin nu blochează aplicația.
+    Variante: un writer mic al nostru (mărime + număr de fișiere), sau un crate
+    (`tracing-appender` face doar rotație după timp; `file-rotate`, `logroller` fac și după
+    mărime). De măsurat și de ales.
+  - **Ascunderea datelor sensibile** (Rust n-are ceva gata în `tracing`): un `Layer` care, la
+    scriere, ascunde după numele câmpului (`password`, `token`, `secret`, `authorization`,
+    `api_key`, `cookie`…) și după formă (`Bearer …`, `user:parolă@` în URL-uri, șiruri de
+    conexiune, chei private PEM). În plus, tipuri `Secret` al căror `Debug`/`Display` dă
+    `***`, ca să nu ajungă nimic întreg în jurnal din greșeală. Teste cu exemple reale din
+    toate modulele (baze de date, HTTP, remote, agenți).
+  - **Organizat:** un rând pe eveniment cu ora, nivelul, firul și modulul, plus câmpuri
+    structurate; opțional JSON lines, pentru citit cu unelte. Nivelul se alege per modul
+    din setări, nu doar prin `RUST_LOG`. Sesiunea fiecărei porniri are un id în fiecare rând
+    (mai multe instanțe scriu în același dosar). Panicile și blocajele (watchdog,
+    `hang.txt`) ajung acolo.
+  - **În aplicație:** „Show Log” deschide jurnalul (vizualizatorul de log existent),
+    „Reveal Log Folder”, și o arhivă de trimis la un raport de bug, cu datele deja ascunse.
+  - Să meargă pe Windows (fișier deschis de alt proces, căi lungi).
+
 - **Terminalul: istoricul comenzilor pe proiect** — **făcut 2026-11-18**, cu setarea
   „Istoricul comenzilor pe proiect” (implicit pornită): fișierul în
   `<date>/terminal-history/<cheia proiectului>/` (cheia: hash-ul căii rădăcinii, `0600`);

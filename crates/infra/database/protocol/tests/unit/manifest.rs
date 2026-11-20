@@ -170,3 +170,23 @@ fn a_manifest_says_what_its_profiles_hold() {
     let console: database::ConsoleCaps = m.driver.capabilities.console.unwrap().into();
     assert_eq!(console.profile, database::ProfileCaps::from_explain(console.explain));
 }
+
+/// A driver's icon: one of the editor's it names, in its tone; one the editor hasn't (or a
+/// path to a drawing of its own) isn't taken: its sources keep the icon of their kind.
+#[test]
+fn a_driver_s_icon_is_one_of_the_editor_s_in_its_tone() {
+    let with = |icon: &str, tone: &str| {
+        let text = format!(
+            "protocol = {{ min = 1, max = 1 }}\ncommand = \"x\"\n[driver]\nid = \"x\"\nname = \"X\"\nicon = \"{icon}\"\nicon_tone = \"{tone}\""
+        );
+        let m = Manifest::parse(&text).unwrap();
+        factory(&m, Arc::new(Never(AtomicUsize::new(0)))).icon
+    };
+    assert_eq!(
+        with("hard-drive", "yellow"),
+        Some(database::DriverIcon { name: "hard-drive", tone: database::IconTone::Yellow })
+    );
+    assert_eq!(with("cloud", "sepia").map(|i| i.tone), Some(database::IconTone::Neutral));
+    assert_eq!(with("icons/duck.svg", "blue"), None, "nothing of its folder is drawn");
+    assert_eq!(with("engine-postgres", "blue"), None, "another driver's isn't its");
+}

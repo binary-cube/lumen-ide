@@ -33,6 +33,8 @@ impl ProjectsPicker {
             status: None,
             fit: None,
             fit_width: None,
+            title_widens: true,
+            closable: true,
             zoom: None,
         };
         let Some((content, ctx)) = self.modal.paint(&spec, icons, text, scene, palette) else {

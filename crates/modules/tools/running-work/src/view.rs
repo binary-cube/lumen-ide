@@ -12,7 +12,9 @@ use text_layout::Font;
 use ui_components::ds::{self, Ctx};
 use ui_components::{AppRequest, Viewer, ViewerAction, ViewerKey, ViewerPaint};
 use ui_kit::draw_text;
-use workbench_model::running::{Closing, RunningPrompt, RunningWork, WorkGroup, WorkKind};
+use workbench_model::running::{
+    Closing, RunningPrompt, RunningWork, Stopping, WorkGroup, WorkKind,
+};
 use workbench_model::{CloseAnswer, StopImpact};
 
 const PAD: f32 = 24.0;
@@ -66,6 +68,12 @@ pub struct RunningView {
     done: bool,
     /// The intro's lines, as last wrapped (the most before the first paint).
     intro_lines: Option<usize>,
+    /// How far the stopping programs' list is scrolled (logical pixels).
+    scroll: f32,
+    /// The last paint's scale (a wheel's pixels are physical).
+    scale: f32,
+    /// The stopping programs' list's scrollbar (the app's).
+    bar: ui_components::EdgeScrollbar,
 }
 
 impl RunningView {
@@ -80,8 +88,25 @@ impl RunningView {
     }
 
     /// The buttons, left to right (while waiting, no "Wait").
+    /// The list scrolled to `offset` (physical pixels, as the scrollbar gives it), within
+    /// its end: `true` if it moved.
+    fn scroll_to(&mut self, offset: f32) -> bool {
+        let Some(most) = self.stopping().map(crate::stopping::max_scroll) else { return false };
+        let to = (offset / self.scale.max(1.0)).clamp(0.0, most);
+        let moved = (to - self.scroll).abs() > f32::EPSILON;
+        self.scroll = to;
+        moved
+    }
+
+    /// The app is ending, what it started being stopped (nothing to answer).
+    pub fn stopping(&self) -> Option<&Stopping> {
+        self.prompt.as_ref().and_then(|p| p.stopping.as_ref())
+    }
+
     fn buttons(&self) -> &'static [Button] {
-        if self.waiting() {
+        if self.stopping().is_some() {
+            &[]
+        } else if self.waiting() {
             &[Button::Cancel, Button::Stop]
         } else {
             &[Button::Cancel, Button::Wait, Button::Stop]
@@ -232,6 +257,9 @@ impl Viewer for RunningView {
     }
 
     fn modal_height(&self) -> Option<f32> {
+        if let Some(stopping) = self.stopping() {
+            return Some(crate::stopping::height(stopping));
+        }
         let (rows, more) = self.shown();
         let more = if more > 0 { MORE_H } else { 0.0 };
         Some(
@@ -248,7 +276,7 @@ impl Viewer for RunningView {
     }
 
     fn modal_icon(&self) -> Option<&'static str> {
-        Some("clock")
+        Some(if self.stopping().is_some() { "log-out" } else { "clock" })
     }
 
     fn closed(&self) -> bool {
@@ -257,10 +285,16 @@ impl Viewer for RunningView {
 
     /// While waiting: a loader's pace, the list following the work.
     fn is_loading(&self) -> bool {
-        self.waiting()
+        self.waiting() || self.stopping().is_some_and(|s| !s.done())
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
+        self.scale = ctx.scale;
+        if let Some(stopping) = self.prompt.as_ref().and_then(|p| p.stopping.as_ref()) {
+            self.scroll = self.scroll.clamp(0.0, crate::stopping::max_scroll(stopping));
+            crate::stopping::paint(ctx, stopping, self.scroll, &mut self.bar);
+            return;
+        }
         let ViewerPaint { bounds: b, scale, text, scene, palette: p, icons, .. } = ctx;
         let Some(prompt) = &self.prompt else { return };
         let ds = Ctx::new(p, scale);
@@ -381,6 +415,50 @@ impl Viewer for RunningView {
             .collect()
     }
 
+    /// While stopping: nothing to leave midway (no `esc`, × does nothing).
+    fn modal_closable(&self) -> bool {
+        self.stopping().is_none()
+    }
+
+    fn may_close(&mut self) -> bool {
+        self.stopping().is_none()
+    }
+
+    /// The stopping programs' list, by the wheel.
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        let Some(most) = self.stopping().map(crate::stopping::max_scroll) else { return false };
+        let to = (self.scroll + dy / self.scale.max(1.0)).clamp(0.0, most);
+        let moved = (to - self.scroll).abs() > f32::EPSILON;
+        self.scroll = to;
+        moved
+    }
+
+    /// A press on the list's scrollbar: its thumb taken, or the list moved there.
+    fn press(&mut self, p: kernel::Point, _clicks: u32) -> Option<ViewerAction> {
+        if self.stopping().is_some()
+            && let Some(offset) = self.bar.press(p)
+        {
+            self.scroll_to(offset);
+        }
+        None
+    }
+
+    fn drag(&mut self, p: kernel::Point) -> bool {
+        match self.bar.drag(p) {
+            Some(offset) => self.scroll_to(offset),
+            None => false,
+        }
+    }
+
+    fn release(&mut self) -> bool {
+        self.bar.release()
+    }
+
+    /// The scrollbar widens under the mouse.
+    fn hover(&mut self, p: kernel::Point) -> bool {
+        self.stopping().is_some() && self.bar.hover(p)
+    }
+
     fn command(&mut self, id: &str) -> bool {
         let Some(button) = self.buttons().iter().find(|b| b.id() == id).copied() else {
             return false;
@@ -390,6 +468,10 @@ impl Viewer for RunningView {
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
+        // Stopping: every key kept (Esc leaves nothing midway), none does anything.
+        if self.stopping().is_some() {
+            return true;
+        }
         let count = self.buttons().len();
         match key {
             ViewerKey::Escape => self.answer(CloseAnswer::Cancel),

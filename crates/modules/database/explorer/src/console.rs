@@ -70,7 +70,7 @@ pub fn brief(sessions: &Sessions, source: &DataSource) -> SourceBrief {
         id: source.id,
         name: source.name.clone(),
         driver: source.driver.clone(),
-        icon: crate::window::driver_icon(sessions, &source.driver),
+        icon: crate::window::driver_icon(&source.driver),
         color: sessions.catalog().color_of(source.id),
         production: sessions.catalog().production_of(source.id),
         read_only: source.read_only,

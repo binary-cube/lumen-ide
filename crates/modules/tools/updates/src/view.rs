@@ -109,6 +109,9 @@ const BODY_ROW: f32 = 22.0;
 const GAP_ROW: f32 = 10.0;
 const MIN_HEIGHT: f32 = 240.0;
 const MAX_HEIGHT: f32 = 520.0;
+/// As wide as the projects list (a medium modal): notes are short lines, read better
+/// narrow; a long title is cut with `…`, never widening it.
+const WIDTH: f32 = 680.0;
 /// Room under the notes for the download's progress (the buttons are the window's footer).
 const FOOTER: f32 = 48.0;
 const HEADER: f32 = 40.0;
@@ -180,6 +183,14 @@ impl Viewer for NotesView {
             date = notes.date.as_str(),
             size = i18n::bytes(notes.size)
         ))
+    }
+
+    fn modal_width(&self) -> Option<f32> {
+        Some(WIDTH)
+    }
+
+    fn modal_title_widens(&self) -> bool {
+        false
     }
 
     /// As tall as its notes (unwrapped: a long line taking two rows scrolls a little),

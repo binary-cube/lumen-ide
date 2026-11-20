@@ -390,8 +390,7 @@ pub(crate) fn reset() {
     *STATE.lock().unwrap_or_else(PoisonError::into_inner) = None;
 }
 
-/// The phase set as it is (tests).
-#[cfg(test)]
+/// The phase set as it is (tests, and a made-up version for the app's snapshot).
 pub(crate) fn set(phase: Phase, tell: Option<Tell>) {
     with(|s| {
         s.phase = phase;

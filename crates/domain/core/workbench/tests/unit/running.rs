@@ -136,6 +136,7 @@ fn work_is_grouped_by_project_then_module() {
         projects: Vec::new(),
         modules: Vec::new(),
         waiting: false,
+        stopping: None,
     };
     assert_eq!(prompt.count(), 5);
 }
@@ -162,6 +163,7 @@ fn owners_resolve_to_their_module() {
         projects: Vec::new(),
         modules: vec![("project-tree".into(), "Project".into())],
         waiting: false,
+        stopping: None,
     };
     assert_eq!(prompt.module_name("project.tree"), Some("Project"));
     assert_eq!(prompt.module_name("terminal"), None);

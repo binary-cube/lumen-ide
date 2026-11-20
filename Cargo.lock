@@ -6975,6 +6975,7 @@ name = "process"
 version = "0.0.0"
 dependencies = [
  "libc",
+ "sysinfo",
 ]
 
 [[package]]
@@ -7603,6 +7604,7 @@ dependencies = [
  "i18n",
  "icons",
  "kernel",
+ "render-api",
  "text-layout",
  "ui-components",
  "ui-kit",

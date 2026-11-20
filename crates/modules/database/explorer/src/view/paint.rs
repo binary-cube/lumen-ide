@@ -310,7 +310,7 @@ impl DataView {
             } else if self.hover == Some(Hit::Table(i)) {
                 layer.quad(Quad::filled(r, p.tree_hover).rounded(px(radius::SM)));
             }
-            let icon = if info.kind == TableKind::View { "eye" } else { "table" };
+            let icon = if info.kind == TableKind::View { "view" } else { "table" };
             let s = px(14.0);
             if let Some(id) = icons.id(icon) {
                 let color = if selected { p.accent } else { p.text_muted };
@@ -414,7 +414,7 @@ impl DataView {
         let Some(info) = self.table().cloned() else { return };
         let mut x = header.min_x() + px(16.0);
         let s = px(16.0);
-        let icon = if info.kind == TableKind::View { "eye" } else { "table" };
+        let icon = if info.kind == TableKind::View { "view" } else { "table" };
         if let Some(id) = icons.id(icon) {
             ui_kit::draw_icon(
                 layer,

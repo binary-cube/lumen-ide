@@ -16,7 +16,9 @@ workbench-model.workspace = true
 ui-kit.workspace = true
 ui-components.workspace = true
 text-layout.workspace = true
+render-api.workspace = true
 icons.workspace = true
+
 
 [lints]
 workspace = true

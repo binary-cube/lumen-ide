@@ -7,7 +7,7 @@ impl DatabaseWindow {
     pub fn add_menu(&self) -> Vec<ViewMenuEntry> {
         let all = database::drivers::all();
         let item = |f: &database::DriverFactory| {
-            let icon = self.sessions.as_ref().map_or("database", |s| driver_icon(s, &f.id));
+            let icon = driver_icon(&f.id);
             let entry =
                 ViewMenuEntry::item(format!("add:{}", f.id), f.name.clone()).with_icon(icon);
             // A program installed apart, speaking the drivers' protocol: marked so.

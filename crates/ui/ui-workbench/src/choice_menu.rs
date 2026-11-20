@@ -2,7 +2,7 @@
 //! a file's git history, the branches… Each row shows its name and, below it, a detail
 //! (monospace, shortened in the middle when long, so both ends stay visible). It uses the
 //! hover card's surface (tinted by the theme, distinct from the editor); long lists
-//! scroll. Keys: ↑ ↓, ↵ chooses, esc closes; a click outside closes it (nothing is lost).
+//! scroll, by the wheel or the app's scrollbar (its thumb dragged a row at a time). Keys: ↑ ↓, ↵ chooses, esc closes; a click outside closes it (nothing is lost).
 
 use std::time::Duration;
 
@@ -64,6 +64,10 @@ pub struct ChoiceMenu {
     rows: Vec<Rect>,
     esc: Rect,
     appear: Appear,
+    /// The list's scrollbar (long lists): the app's.
+    bar: ui_components::EdgeScrollbar,
+    /// The list's height per row, as last painted (the scrollbar's unit: a row).
+    unit: f32,
 }
 
 impl ChoiceMenu {
@@ -88,6 +92,7 @@ impl ChoiceMenu {
         self.icon = icon;
         self.action = action.to_owned();
         self.first = 0;
+        self.bar = ui_components::EdgeScrollbar::default();
         self.options = options;
         self.anchor = anchor;
         self.selected = 0;
@@ -147,6 +152,9 @@ impl ChoiceMenu {
         if !self.panel.contains(p) || self.esc.contains(p) {
             return Some(ChoiceAction::Close);
         }
+        if self.bar.contains(p) {
+            return Some(ChoiceAction::Inside);
+        }
         Some(match self.rows.iter().position(|r| r.contains(p)) {
             Some(i) => ChoiceAction::Pick(self.first + i),
             None => ChoiceAction::Inside,
@@ -156,13 +164,49 @@ impl ChoiceMenu {
     pub fn hover(&mut self, p: Point) -> bool {
         let hover = self.rows.iter().position(|r| r.contains(p)).map(|i| self.first + i);
         let esc = self.esc.contains(p);
-        let changed = hover != self.hover || esc != self.esc_hover;
+        let bar = self.bar.hover(p);
+        let changed = hover != self.hover || esc != self.esc_hover || bar;
         self.hover = hover;
         self.esc_hover = esc;
         if let Some(i) = hover {
             self.selected = i;
         }
         changed
+    }
+
+    /// A press on the list's scrollbar: `true` if it took it (a drag follows: the list
+    /// follows the thumb, a row at a time).
+    pub fn scrollbar_press(&mut self, p: Point) -> bool {
+        let Some(offset) = self.bar.press(p) else { return false };
+        self.scroll_to(offset);
+        true
+    }
+
+    /// The scrollbar's thumb is held.
+    pub fn scrollbar_held(&self) -> bool {
+        self.bar.is_dragging()
+    }
+
+    /// The held thumb dragged to `p`: `true` if the list moved.
+    pub fn scrollbar_drag(&mut self, p: Point) -> bool {
+        self.bar.drag(p).is_some_and(|offset| self.scroll_to(offset))
+    }
+
+    /// The mouse released: `true` if the scrollbar was held.
+    pub fn scrollbar_release(&mut self) -> bool {
+        self.bar.release()
+    }
+
+    /// The list scrolled to `offset` (the scrollbar's, a row being [`Self::unit`]): the
+    /// nearest row first, within the ends. `true` if it moved.
+    fn scroll_to(&mut self, offset: f32) -> bool {
+        let max = self.options.len().saturating_sub(VISIBLE);
+        let first =
+            if self.unit > 0.0 { (offset / self.unit).round().max(0.0) as usize } else { 0 };
+        let first = first.min(max);
+        let moved = first != self.first;
+        self.first = first;
+        moved
     }
 
     pub fn over_clickable(&self, p: Point) -> bool {
@@ -213,7 +257,6 @@ impl ChoiceMenu {
 
         self.paint_header(&frame, icons, text, layer, &ctx);
         let bottom = self.paint_rows(&frame, icons, text, layer, &ctx);
-        self.paint_scrollbar(&frame, bottom, layer, &ctx);
 
         // Footer: the keys.
         let foot = Rect::new(p.min_x(), p.max_y() - footer_h, p.size.width, footer_h);
@@ -221,6 +264,7 @@ impl ChoiceMenu {
         let hints: &[KeyHint<'_>] =
             &[(&["↑", "↓"], &choose), (&["↵"], &self.action), (&["esc"], &close)];
         ds::footer(layer, text, &ctx, foot, hints);
+        self.paint_scrollbar(&frame, bottom, scene, palette);
     }
 
     /// A row's height (logical): two lines when some row has a detail, one otherwise.
@@ -367,26 +411,28 @@ impl ChoiceMenu {
         top
     }
 
-    /// A scrollbar when the list is longer than what's shown (the list ends at `bottom`).
-    fn paint_scrollbar(&self, frame: &Frame, bottom: f32, layer: &mut Layer, ctx: &Ctx<'_>) {
-        if self.options.len() <= VISIBLE {
+    /// The app's scrollbar when the list is longer than what's shown (the list ends at
+    /// `bottom`): a row of the list is one of its units, whatever the gaps between groups.
+    fn paint_scrollbar(
+        &mut self,
+        frame: &Frame,
+        bottom: f32,
+        scene: &mut Scene,
+        palette: &Palette,
+    ) {
+        let count = self.options.len();
+        if count <= VISIBLE {
+            self.bar = ui_components::EdgeScrollbar::default();
             return;
         }
-        let px = |v: f32| ctx.px(v);
         let p = frame.panel;
         let list_top = p.min_y() + frame.header_h + frame.pad;
-        let list_h = bottom - list_top;
-        let track = Rect::new(p.max_x() - px(6.0), list_top, px(3.0), list_h);
-        let thumb_h = (list_h * VISIBLE as f32 / self.options.len() as f32).max(px(20.0));
-        let max_first = (self.options.len() - VISIBLE) as f32;
-        let y = track.min_y() + (list_h - thumb_h) * self.first as f32 / max_first;
-        layer.quad(
-            Quad::filled(
-                Rect::new(track.min_x(), y, track.size.width, thumb_h),
-                ctx.fade(ctx.palette.text.with_alpha(0.25)),
-            )
-            .rounded(px(1.5)),
-        );
+        let list =
+            Rect::new(p.min_x(), list_top, p.size.width - self.scale.round(), bottom - list_top);
+        self.unit = list.size.height / VISIBLE as f32;
+        let content = self.unit * count as f32;
+        let offset = self.unit * self.first as f32;
+        self.bar.paint(scene, palette, self.scale, list, content, offset);
     }
 }
 

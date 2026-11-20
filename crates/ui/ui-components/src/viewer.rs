@@ -947,6 +947,11 @@ pub trait Viewer: Send {
     fn modal_width(&self) -> Option<f32> {
         None
     }
+    /// With [`Self::modal_width`]: whether a long title widens the window (`true`, as a
+    /// question's); `false` keeps it as wide as asked, the title cut with `…`.
+    fn modal_title_widens(&self) -> bool {
+        true
+    }
     /// In a modal window: the icon before its title (a name from the app's set).
     fn modal_icon(&self) -> Option<&'static str> {
         None
@@ -957,6 +962,11 @@ pub trait Viewer: Send {
     fn accent(&self, palette: &Palette) -> Option<kernel::Rgba> {
         let _ = palette;
         None
+    }
+    /// In a modal window: it can be closed from its header (`esc`); `false` while work under
+    /// way mustn't be left (nothing to click there; the view ignores Esc itself).
+    fn modal_closable(&self) -> bool {
+        true
     }
     /// In a modal window: asked when its × is clicked; `false` keeps it open (the view asks
     /// first — unsaved changes — and closes itself once answered).

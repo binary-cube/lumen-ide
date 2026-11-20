@@ -139,7 +139,10 @@ impl Workbench {
         let view_hints = modal.viewer.key_hints();
         let mut hints: Vec<ui_kit::KeyHint<'_>> =
             view_hints.iter().map(|(keys, what)| (keys.as_slice(), what.as_str())).collect();
-        hints.push((&["esc"], close.as_str()));
+        // Nothing to close it with (work under way): no `esc` said either.
+        if modal.viewer.modal_closable() {
+            hints.push((&["esc"], close.as_str()));
+        }
         if modal.viewer.draws_footer() {
             hints.clear();
         }
@@ -160,7 +163,9 @@ impl Workbench {
             status: status.as_ref(),
             fit: modal.viewer.modal_height(),
             fit_width: modal.viewer.modal_width(),
+            title_widens: modal.viewer.modal_title_widens(),
             zoom: modal.viewer.zoom_level(),
+            closable: modal.viewer.modal_closable(),
         };
         let Some((content, _)) = frame.paint(&spec, &self.icons, text, scene, &self.palette) else {
             return;
@@ -247,7 +252,7 @@ impl Workbench {
             match frame.hit(p) {
                 Some(ui_workbench::ModalHit::Close) => {
                     // The view may ask first (unsaved changes): then it closes itself.
-                    if modal.viewer.may_close() {
+                    if modal.viewer.modal_closable() && modal.viewer.may_close() {
                         self.modal_view = None;
                     }
                     return Some(MouseResult::Redraw);

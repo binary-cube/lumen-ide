@@ -96,6 +96,9 @@ impl Workbench {
         if self.dialogs.dialog.scrollbar_held() {
             return self.dialogs.dialog.scrollbar_drag(p);
         }
+        if self.choice_menu.scrollbar_held() {
+            return self.choice_menu.scrollbar_drag(p);
+        }
         // A scrollbar of the settings, held: the navigation or the content follows.
         if self.settings.scrollbar_held() {
             return self.settings.drag_scrollbar(p);
@@ -309,6 +312,7 @@ impl Workbench {
             || self.completion.scrollbar_release()
             || self.code_hover.scrollbar_release()
             || self.dialogs.dialog.scrollbar_release()
+            || self.choice_menu.scrollbar_release()
         {
             return true;
         }

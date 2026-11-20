@@ -38,6 +38,17 @@ pub struct TransactionChanged {
 
 impl DomainEvent for TransactionChanged {}
 
+/// `source`'s session opened (`open`) or closed; `failed`: it couldn't open (or was lost)
+/// — what shows a source's state (the "Database" window's mark on its icon) hears it here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ConnectionChanged {
+    pub source: DataSourceId,
+    pub open: bool,
+    pub failed: bool,
+}
+
+impl DomainEvent for ConnectionChanged {}
+
 /// What's known of `source`'s schema is stale (a console ran DDL, the "Database" window's
 /// Refresh, its connection changed): what keeps an index of it reads it again.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

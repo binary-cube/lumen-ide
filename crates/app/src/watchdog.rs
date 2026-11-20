@@ -46,6 +46,25 @@ pub fn waiting_for_user<R>(f: impl FnOnce() -> R) -> R {
     result
 }
 
+/// The event loop has ended: what follows (dropping the windows' parts, the process's own
+/// end) is watched as one last event, never finished; slower than [`SLOW`], it is logged
+/// and its stacks saved, so what keeps a closed app running can be seen. Still running at
+/// [`EXIT_DEADLINE`], the process ends there: with no window left, the system would show it
+/// as running in the background and close it itself, asking the user about it.
+pub fn exiting() {
+    std::mem::forget(busy("exiting"));
+    let _ = std::thread::Builder::new().name("exit-deadline".into()).spawn(|| {
+        std::thread::sleep(EXIT_DEADLINE);
+        tracing::error!(after = ?EXIT_DEADLINE, "the app was still ending: ended now");
+        storage::settings::flush();
+        std::process::exit(0);
+    });
+}
+
+/// How long ending the app may take once the event loop has ended (its stacks are sampled
+/// from [`SLOW`] for 2 s, before it).
+const EXIT_DEADLINE: Duration = Duration::from_secs(5);
+
 /// End of handling the event (on drop).
 pub struct Busy;
 

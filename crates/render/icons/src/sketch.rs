@@ -1,6 +1,7 @@
 //! The sketch style: an icon drawn again as if by hand — each line traced twice, a little
 //! off and wavering, past its ends; each closed shape hatched with fine diagonal strokes; the
-//! small filled shapes (dots) kept filled. The drawing is read with `usvg` (every shape as
+//! small filled shapes (dots) kept filled, a tint (a fill seen through) as light as it was.
+//! The drawing is read with `usvg` (every shape as
 //! points, its transforms applied), so any icon of the set comes out so. The same icon is
 //! always drawn the same (its wobble seeded by its own text), and only once: what's drawn
 //! is rasterized and kept like every other style's.
@@ -31,11 +32,13 @@ impl Wobble {
     }
 }
 
-/// A shape as points: closed or not, filled (no stroke of its own) or not, its line's width.
+/// A shape as points: closed or not, filled (no stroke of its own) or not — then how
+/// opaque (a tint under the lines: less than 1) —, its line's width.
 struct Shape {
     points: Vec<Point>,
     closed: bool,
     filled: bool,
+    opacity: f32,
     width: f32,
 }
 
@@ -68,7 +71,8 @@ pub fn sketch(svg: &str) -> Option<String> {
     for shape in &shapes {
         if shape.filled {
             out.push_str(&format!(
-                "<path stroke=\"none\" fill=\"#000\" d=\"{}\"/>",
+                "<path stroke=\"none\" fill=\"#000\" fill-opacity=\"{}\" d=\"{}\"/>",
+                num(shape.opacity),
                 path(&shape.points, true)
             ));
             continue;
@@ -108,10 +112,11 @@ fn collect(group: &usvg::Group, shapes: &mut Vec<Shape>) {
                 let transform = p.abs_transform();
                 let width = p.stroke().map_or(2.0, |s| s.width().get());
                 let filled = p.stroke().is_none() && p.fill().is_some();
+                let opacity = p.fill().map_or(1.0, |f| f.opacity().get());
                 for (mut points, closed) in subpaths(p.data()) {
                     transform.map_points(&mut points);
                     if points.len() >= 2 {
-                        shapes.push(Shape { points, closed, filled, width });
+                        shapes.push(Shape { points, closed, filled, opacity, width });
                     }
                 }
             }

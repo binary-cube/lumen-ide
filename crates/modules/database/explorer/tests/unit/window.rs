@@ -787,3 +787,46 @@ fn opened_source(action: Option<ToolPanelAction>) -> crate::view::OpenSource {
     };
     view.data.downcast_ref::<crate::view::OpenSource>().unwrap().clone()
 }
+
+/// Each row's icon: a source's its engine's (in its tone), the objects' their own — a
+/// schema, a view, a foreign key and a unique index told apart from a table, a column and
+/// an index.
+#[test]
+fn each_row_kind_has_its_own_icon() {
+    use crate::tree::{Group, Part};
+    let p = ui_components::Palette::dark();
+    let row = |kind: RowKind| Row {
+        key: NodeKey::Folder(database::FolderId::new()),
+        depth: 0,
+        kind,
+        label: String::new(),
+        detail: String::new(),
+        count: None,
+        expandable: false,
+        expanded: false,
+        color: None,
+        marks: crate::tree::RowMarks::default(),
+    };
+    let icon = |kind: RowKind| {
+        super::paint::icon_of(&row(kind), ("engine-x", database::IconTone::Blue), &p).0
+    };
+    assert_eq!(
+        super::paint::icon_of(&row(RowKind::Source), ("engine-x", database::IconTone::Blue), &p),
+        ("engine-x", p.terminal_ansi[4])
+    );
+    assert_eq!(icon(RowKind::Schema), "schema");
+    assert_eq!(icon(RowKind::Table(database::TableKind::Table)), "table");
+    assert_eq!(icon(RowKind::Table(database::TableKind::View)), "view");
+    assert_eq!(icon(RowKind::Group(Group::Tables)), "folder");
+    assert_eq!(icon(RowKind::Part(Part::Columns)), "folder");
+    assert_eq!(icon(RowKind::Column { key: true, foreign: false }), "key");
+    assert_eq!(icon(RowKind::Column { key: false, foreign: true }), "key-foreign");
+    assert_eq!(icon(RowKind::Column { key: false, foreign: false }), "column");
+    assert_eq!(icon(RowKind::Index { unique: true }), "index-unique");
+    assert_eq!(icon(RowKind::Index { unique: false }), "index");
+    assert_eq!(icon(RowKind::Key), "key-foreign");
+    // The session's mark: none while closed, green open, red after it failed.
+    assert_eq!(super::paint::link_color(crate::tree::Link::Closed, &p), None);
+    assert_eq!(super::paint::link_color(crate::tree::Link::Open, &p), Some(p.vcs_added));
+    assert_eq!(super::paint::link_color(crate::tree::Link::Failed, &p), Some(p.danger));
+}

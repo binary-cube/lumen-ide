@@ -267,7 +267,7 @@ pub fn build(
         // Its indexes: the server's statistics', else its structure's.
         for index in indexes_of(tf) {
             let cells = cols.iter().map(|c| index_cell(u, &index, *c)).collect();
-            let icon = if index.unique { "key" } else { "index" };
+            let icon = if index.unique { "index-unique" } else { "index" };
             rows.push(TableRow::new(Some(at), cells).with_icon(icon));
             kinds.push(TablesRow::Index(ui, index.name.clone()));
         }

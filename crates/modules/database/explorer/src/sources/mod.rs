@@ -125,17 +125,12 @@ pub fn drivers(sessions: &Sessions) -> Vec<DriverInfo> {
 /// What the modal knows of `driver`.
 pub fn info(id: &str, name: &str, driver: &dyn Driver) -> DriverInfo {
     let capabilities = driver.capabilities();
-    let text = database::drivers::files().iter().any(|f| f.driver == id && f.text);
+    let (icon, tone) = crate::engine_icon::of(id);
     DriverInfo {
         id: id.to_owned(),
         name: name.to_owned(),
-        icon: if !capabilities.file_based {
-            "server"
-        } else if text {
-            "file-text"
-        } else {
-            "database"
-        },
+        icon,
+        tone,
         spec: driver.connection(),
         file_based: capabilities.file_based,
         schemas: capabilities.schemas,

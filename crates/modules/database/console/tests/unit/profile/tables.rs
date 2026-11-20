@@ -62,7 +62,7 @@ fn each_table_with_its_reads_its_statistics_and_its_indexes() {
     let never = texts(&t, 2);
     assert_eq!(never[1], i18n::t("profile.tables.never_used"));
     assert_eq!(t.rows[2].parent, Some(0));
-    assert_eq!(t.rows[1].icon, Some("key"), "unique");
+    assert_eq!(t.rows[1].icon, Some("index-unique"), "unique");
     assert!(texts(&t, 1)[1].is_empty(), "scanned elsewhere, not here: nothing said");
 }
 

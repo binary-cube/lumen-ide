@@ -13,6 +13,9 @@ fn the_notes_are_the_part_written_for_the_app() {
     assert_eq!(texts, ["New", "", "tabs"], "the download section left out");
     assert_eq!(notes.date, "2026-12-01");
     assert!(notes.title().contains("2.0.0"));
+    let view = NotesView::default();
+    assert_eq!(view.modal_width(), Some(WIDTH), "narrower than a large modal");
+    assert!(!view.modal_title_widens(), "a long title cut, the window as wide");
 }
 
 /// Painted, the window's footer does the choosing: ready, the main button restarts (the
@@ -72,4 +75,50 @@ fn its_buttons_close_or_choose() {
     let mut other = opened(&mut text);
     assert!(other.command("close"));
     assert!(matches!(other.take_action(), Some(ViewerAction::Close)));
+}
+
+/// Notes longer than the window scroll: by the wheel, and by the bar's thumb dragged
+/// (pressed at the top of its track, then moved down).
+#[test]
+fn long_notes_scroll_by_the_wheel_and_the_thumb() {
+    let mut text = TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let bounds = Rect::new(0.0, 0.0, 640.0, 520.0);
+    let long = || {
+        let mut view = NotesView::default();
+        let lines =
+            (0..80).map(|i| Block::new(BlockKind::Point { depth: 0 }, format!("Change {i}")));
+        view.read.set_blocks(lines.collect());
+        view
+    };
+    let paint = |view: &mut NotesView, text: &mut TextSystem| {
+        let mut scene = render_api::Scene::default();
+        view.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    let mut view = long();
+    paint(&mut view, &mut text);
+    assert!(view.scroll(0.0, 120.0), "the wheel moves it");
+    assert!(view.read.scroll() > 0.0);
+    assert!(view.scroll(0.0, -10_000.0) && view.read.scroll() == 0.0, "back to its top");
+    // The thumb: somewhere along the right edge, at the top of the notes.
+    let dragged = (0..40).rev().map(|dx| bounds.max_x() - 1.0 - dx as f32).any(|x| {
+        let mut view = long();
+        paint(&mut view, &mut text);
+        view.hover(Point::new(x, 60.0));
+        Viewer::press(&mut view, Point::new(x, 60.0), 1);
+        let moved = view.drag(Point::new(x, 260.0)) && view.read.scroll() > 0.0;
+        view.release();
+        moved && !view.read.has_selection()
+    });
+    assert!(dragged, "the thumb dragged scrolls the notes");
 }

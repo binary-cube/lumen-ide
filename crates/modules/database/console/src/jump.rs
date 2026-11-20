@@ -249,6 +249,10 @@ pub struct JumpView {
     action: Option<ViewerAction>,
     done: bool,
     reading: bool,
+    /// The list's scrollbar (more rows than shown): the app's, a row at a time.
+    bar: ui_components::EdgeScrollbar,
+    /// A row's height, as last painted (physical pixels: the scrollbar's unit).
+    unit: f32,
 }
 
 impl std::fmt::Debug for JumpView {
@@ -376,6 +380,18 @@ impl JumpView {
     }
 
     /// Row `row`'s console renamed / deleted (its buttons, its menu).
+    /// The list scrolled to `offset` (the scrollbar's, a row being [`Self::unit`]): the
+    /// nearest row first, within the ends. `true` if it moved.
+    fn scroll_to(&mut self, offset: f32) -> bool {
+        let max = self.rows().saturating_sub(VISIBLE);
+        let first =
+            if self.unit > 0.0 { (offset / self.unit).round().max(0.0) as usize } else { 0 };
+        let first = first.min(max);
+        let moved = first != self.first;
+        self.first = first;
+        moved
+    }
+
     pub fn rename(&mut self, row: usize) -> bool {
         self.console_at(row).is_some_and(|id| self.finish(JumpPick::Rename(id)))
     }
@@ -387,6 +403,10 @@ impl JumpView {
     fn hit(&self, p: Point) -> Option<Hit> {
         if !self.panel.contains(p) {
             return None;
+        }
+        // On the list's scrollbar: no row under it.
+        if self.bar.contains(p) {
+            return Some(Hit::Inside);
         }
         Some(self.hits.iter().rev().find(|(r, _)| r.contains(p)).map_or(Hit::Inside, |(_, h)| *h))
     }
@@ -688,21 +708,16 @@ impl Viewer for JumpView {
             }
             self.hits.push((rect, Hit::Row(row)));
         }
-        // A scrollbar when there are more rows than shown.
-        let layer = scene.push_layer(Some(panel));
+        // The app's scrollbar when there are more rows than shown (a row its unit).
+        self.unit = px(ROW_H);
         if rows > VISIBLE {
-            let track_h = list.size.height;
-            let thumb_h = (track_h * VISIBLE as f32 / rows as f32).max(px(20.0));
-            let max_first = (rows - VISIBLE) as f32;
-            let ty = list.min_y() + (track_h - thumb_h) * self.first as f32 / max_first;
-            layer.quad(
-                Quad::filled(
-                    Rect::new(panel.max_x() - px(6.0), ty, px(3.0), thumb_h),
-                    p.text.with_alpha(0.25),
-                )
-                .rounded(px(1.5)),
-            );
+            let content = self.unit * rows as f32;
+            let offset = self.unit * self.first as f32;
+            self.bar.paint(scene, p, scale, list, content, offset);
+        } else {
+            self.bar = ui_components::EdgeScrollbar::default();
         }
+        let layer = scene.push_layer(Some(panel));
         // Nothing found: said under "New Query Console".
         if self.found.is_empty() && !self.filter.text().trim().is_empty() && shown == 1 {
             let note = i18n::tr!("console.jump_none", query = self.filter.text().trim());
@@ -721,6 +736,23 @@ impl Viewer for JumpView {
         let (choose, open, close) = (t("keys.choose"), t("console.choose_open"), t("keys.close"));
         let hints: &[KeyHint<'_>] = &[(&["↑", "↓"], &choose), (&["↵"], &open), (&["esc"], &close)];
         ds::footer(layer, text, &ds, foot, hints);
+    }
+
+    /// A press on the list's scrollbar takes its thumb (a drag follows); elsewhere a click.
+    fn press(&mut self, p: Point, _clicks: u32) -> Option<ViewerAction> {
+        if let Some(offset) = self.bar.press(p) {
+            self.scroll_to(offset);
+            return None;
+        }
+        self.click(p)
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.bar.drag(p).is_some_and(|offset| self.scroll_to(offset))
+    }
+
+    fn release(&mut self) -> bool {
+        self.bar.release()
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
@@ -760,7 +792,7 @@ impl Viewer for JumpView {
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
-        let changed = hover != self.hover;
+        let changed = hover != self.hover || self.bar.hover(p);
         self.hover = hover;
         changed
     }

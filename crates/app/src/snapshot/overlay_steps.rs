@@ -332,6 +332,59 @@ impl Steps<'_> {
         settle(200);
     }
 
+    /// The app ending: made-up programs being stopped, some ended, one made to, the rest
+    /// still asked (`many`: more than the list shows, so it scrolls).
+    pub(super) fn ending(&mut self, many: bool) {
+        use workbench_model::running::{
+            Closing, ProgramState, RunningPrompt, Stopping, StoppingProgram,
+        };
+        let names: &[&str] = if many {
+            &[
+                "zsh",
+                "claude",
+                "node",
+                "node",
+                "caffeinate",
+                "intelephense",
+                "zsh",
+                "npm",
+                "node",
+                "php",
+                "zsh",
+                "git",
+            ]
+        } else {
+            &["zsh", "claude", "node", "node", "caffeinate"]
+        };
+        let programs = names
+            .iter()
+            .enumerate()
+            .map(|(i, name)| StoppingProgram {
+                name: (*name).to_owned(),
+                pid: 20146 + u32::try_from(i * 11).unwrap_or(0),
+                state: match i {
+                    0 | 2 => ProgramState::Ended,
+                    4 => ProgramState::Forced,
+                    _ => ProgramState::Asked,
+                },
+            })
+            .collect();
+        let prompt = RunningPrompt {
+            closing: Closing::App,
+            groups: Vec::new(),
+            projects: Vec::new(),
+            modules: Vec::new(),
+            waiting: false,
+            stopping: Some(Stopping { programs }),
+        };
+        if !self.wb.open_ending_prompt(&prompt) {
+            tracing::error!("the ending's window didn't open");
+        }
+        self.frame();
+        settle(300);
+        self.frame();
+    }
+
     pub(super) fn side_panel(&mut self, panel: &str) {
         // The side panel (e.g. `structure`), with usages searched in the background.
         self.wb.toggle_side_panel(panel);

@@ -34,6 +34,7 @@ fn source(name: &str) -> TreeSource {
         driver: "sqlite".into(),
         driver_name: "SQLite".into(),
         icon: "database",
+        tone: database::IconTone::Neutral,
         scope: Some(Scope::Project),
         file: None,
         configured: true,
@@ -47,6 +48,7 @@ fn source(name: &str) -> TreeSource {
         color: None,
         production: false,
         transaction: false,
+        link: Link::Closed,
     }
 }
 
@@ -329,7 +331,7 @@ fn production_and_a_console_s_transaction_are_marked() {
     let rows = tree.rows(&ListFilter::default(), &words());
     assert_eq!(labels(&rows), ["prod", "  eu", "    shop", "loose"]);
     assert!(rows[0].marks.production && rows[1].marks.production, "a subfolder too");
-    assert_eq!(rows[2].marks, RowMarks { production: true, transaction: true });
+    assert_eq!(rows[2].marks, RowMarks { production: true, transaction: true, link: Link::Closed });
     assert_eq!(rows[3].marks, RowMarks::default());
     // Its transaction ended: the same source, nothing read again.
     tree.set_tables(shop.id, Ok(Vec::new()));

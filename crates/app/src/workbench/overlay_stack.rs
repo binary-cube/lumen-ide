@@ -308,6 +308,10 @@ impl OverlaySlot for ChoiceMenuSlot {
     }
 
     fn click(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point, _: u32) -> MouseResult {
+        // On its list's scrollbar: the list follows the thumb (a drag goes on).
+        if wb.choice_menu.scrollbar_press(p) {
+            return MouseResult::StartDrag;
+        }
         match wb.choice_menu.hit(p) {
             Some(ui_workbench::ChoiceAction::Pick(i)) => {
                 wb.choice_menu.close();

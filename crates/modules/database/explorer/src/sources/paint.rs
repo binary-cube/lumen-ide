@@ -179,8 +179,11 @@ impl SourcesView {
         match self.dragging? {
             Item::Source(id) => {
                 let e = editor.entries.iter().find(|e| e.source.id == id)?;
-                let icon = editor.driver(&e.source.driver).map_or("database", |d| d.icon);
-                Some((icon, p.accent, named(&e.source.name)))
+                let (icon, tone) = editor
+                    .driver(&e.source.driver)
+                    .map_or(("database", database::IconTone::Neutral), |d| (d.icon, d.tone));
+                let color = crate::engine_icon::color(icon, tone, p, p.accent);
+                Some((icon, color, named(&e.source.name)))
             }
             Item::Folder(id) => {
                 let folder = editor.folder(id)?;
@@ -489,7 +492,9 @@ impl SourcesView {
                         );
                         pen.layer.quad(Quad::filled(bar, color).rounded(px(1.5)));
                     }
-                    let icon = editor.driver(&e.source.driver).map_or("database", |d| d.icon);
+                    let (icon, tone) = editor
+                        .driver(&e.source.driver)
+                        .map_or(("database", database::IconTone::Neutral), |d| (d.icon, d.tone));
                     let s = px(15.0);
                     if let Some(id) = pen.icons.id(icon) {
                         let at = Rect::new(
@@ -498,7 +503,8 @@ impl SourcesView {
                             s,
                             s,
                         );
-                        let tint = if selected { p.accent } else { color.unwrap_or(p.text_muted) };
+                        let engine = || crate::engine_icon::color(icon, tone, p, p.text_muted);
+                        let tint = if selected { p.accent } else { color.unwrap_or_else(engine) };
                         ui_kit::draw_icon(pen.layer, pen.icons, id, at, tint);
                     }
                     let x = row_rect.min_x() + px(34.0) + shift;

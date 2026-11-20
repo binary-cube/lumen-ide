@@ -63,32 +63,8 @@ impl workbench_model::SystemHost for Host {
 
 /// A version found: `2.0.0`, with its notes.
 pub(crate) fn found() -> Arc<Available> {
-    let version = app_updates::Version::parse("2.0.0").unwrap();
-    let file = app_updates::ManifestFile {
-        platform: "windows-x64".into(),
-        name: "app-2.0.0-windows-x64.zip".into(),
-        size: 70 * 1024 * 1024,
-        sha256: "0".repeat(64),
-    };
-    Arc::new(Available {
-        release: app_updates::Release {
-            version: version.clone(),
-            tag: "v2.0.0".into(),
-            name: "App 2.0.0".into(),
-            notes: "<!-- app -->\n## New\n- tabs\n<!-- /app -->\n## Download".into(),
-            prerelease: false,
-            published: "2026-12-01T10:00:00Z".into(),
-            page: "https://github.com/o/r/releases/tag/v2.0.0".into(),
-            assets: Vec::new(),
-        },
-        manifest: app_updates::Manifest {
-            version,
-            date: "2026-12-01".into(),
-            files: vec![file.clone()],
-        },
-        file,
-        url: "https://github.com/o/r/releases/download/v2.0.0/app-2.0.0-windows-x64.zip".into(),
-    })
+    crate::snapshot::made_up("2.0.0", "<!-- app -->\n## New\n- tabs\n<!-- /app -->\n## Download")
+        .unwrap()
 }
 
 /// A version found is told once, its notification offering What's New and Update; later

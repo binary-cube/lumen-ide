@@ -97,8 +97,14 @@ pub struct ModalSpec<'a> {
     /// question): the window then as wide as that or as its title needs, never wider than its
     /// size. `None`: the size's width.
     pub fit_width: Option<f32>,
+    /// With `fit_width`: whether a long title widens the window (a question's does); `false`
+    /// keeps it as wide as asked, its title cut with `…`.
+    pub title_widens: bool,
     /// The content's zoom (1 = 100%), when it has one: `− 100% +` on the footer's right.
     pub zoom: Option<f32>,
+    /// It can be closed from its header (`esc`, clickable); `false`: no `esc` drawn and
+    /// nothing there to click (work under way that mustn't be left).
+    pub closable: bool,
 }
 
 /// What is under the mouse.
@@ -347,12 +353,16 @@ impl Modal {
                 // The title's own width with what's beside it: the margins, the icon's tile,
                 // the gap before `esc` and its cap.
                 let title_font = ctx.ui_font(3.0).with_weight(Font::SEMIBOLD);
-                let title = text.shape_line(spec.title, &title_font).width;
+                let title = if spec.title_widens {
+                    text.shape_line(spec.title, &title_font).width
+                } else {
+                    0.0
+                };
                 let tile = if spec.icon.is_some() { px(38.0 + 14.0) } else { 0.0 };
                 let chrome = px(22.0) * 2.0 + tile + px(16.0) + px(40.0);
                 // The content inside the panel's border on both sides: as wide as it asked.
                 let least = (px(least.min(w)) + 2.0 * ctx.line()).min(px(w));
-                (title + chrome).clamp(least, px(w))
+                if spec.title_widens { (title + chrome).clamp(least, px(w)) } else { least }
             }
             None => px(w),
         }
@@ -464,7 +474,11 @@ impl Modal {
         let mid = p.min_y() + header_h / 2.0;
         // Close: the `esc` key, clickable (with hover); the field left of it.
         let hovered = self.hover == Some(ModalHit::Close);
-        self.close = ds::keycap(layer, text, ctx, "esc", p.max_x() - pad, mid, hovered);
+        self.close = if spec.closable {
+            ds::keycap(layer, text, ctx, "esc", p.max_x() - pad, mid, hovered)
+        } else {
+            Rect::new(p.max_x() - pad, mid, 0.0, 0.0)
+        };
         self.header_field = if spec.header_field > 0.0 {
             let w = px(spec.header_field).min(p.size.width * 0.45);
             Rect::new(

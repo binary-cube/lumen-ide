@@ -21,6 +21,7 @@ pub mod console;
 pub mod credentials;
 pub mod diagram;
 pub mod edits;
+pub mod engine_icon;
 pub mod execute;
 pub mod export;
 pub mod grid_source;

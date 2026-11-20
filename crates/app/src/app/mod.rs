@@ -32,6 +32,7 @@ mod actions;
 mod alt_tap;
 mod closing;
 mod double_shift;
+mod ending;
 mod events;
 mod file_drop;
 mod input;
@@ -1149,6 +1150,8 @@ impl EditorApp {
         // A closing waiting on work still running: its question closed without an answer,
         // or the work done.
         self.follow_running(Instant::now());
+        // The app ending: what it started stopped, then the window closes (or the app quits).
+        self.follow_ending(Instant::now());
         self.sync_recent_menu();
         self.sync_menu_states();
         self.sync_system_sign();

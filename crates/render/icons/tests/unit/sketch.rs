@@ -33,3 +33,14 @@ fn the_hatching_stays_inside() {
     let inside = |p: Point| (-0.01..=10.01).contains(&p.x) && (-0.01..=10.01).contains(&p.y);
     assert!(strokes.iter().all(|(a, b)| inside(*a) && inside(*b)));
 }
+
+/// A tint (a fill seen through, as an engine's plate) stays as light as it was, under the
+/// lines drawn by hand; a dot stays whole.
+#[test]
+fn a_tint_stays_as_light_as_it_was() {
+    let plate = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.25"><rect x="2" y="2" width="20" height="20" rx="5" fill="#000" fill-opacity="0.2" stroke="none"/><path d="M7 16V8"/></svg>"##;
+    let drawn = sketch(plate).expect("drawn");
+    assert!(drawn.contains("fill-opacity=\"0.2\""), "{drawn}");
+    assert!(drawn.matches("stroke-opacity=\"1\"").count() == 1, "the line traced");
+    assert!(sketch(SQUARE).unwrap().contains("fill-opacity=\"1\""), "the dot whole");
+}

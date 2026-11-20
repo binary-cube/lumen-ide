@@ -83,7 +83,14 @@ impl Workbench {
                 (id, name)
             })
             .collect();
-        RunningPrompt { closing, groups: running::grouped(items), projects, modules, waiting }
+        RunningPrompt {
+            closing,
+            groups: running::grouped(items),
+            projects,
+            modules,
+            waiting,
+            stopping: None,
+        }
     }
 
     /// This window's project: its identity and its name.
@@ -104,6 +111,12 @@ impl Workbench {
             Closing::Restart => "running.title_restart",
         });
         self.open_modal_view(&title, running::PROMPT_VIEW, prompt)
+    }
+
+    /// The app ending, what it started being stopped (the question's window, its stopping
+    /// view; nothing to answer). `false`: no module shows it.
+    pub fn open_ending_prompt(&mut self, prompt: &RunningPrompt) -> bool {
+        self.open_modal_view(&i18n::t("running.title_stopping"), running::PROMPT_VIEW, prompt)
     }
 
     /// A module's question before restarting its work, once (asked by the app after the

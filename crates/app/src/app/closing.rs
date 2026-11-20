@@ -98,9 +98,15 @@ impl EditorApp {
             }
             Final::CloseWindow => {
                 tracing::info!("the tabs are closed; closing the window");
-                self.pending.exit_request = Some(Control::Close);
+                if !self.begin_ending(Control::Close) {
+                    self.pending.exit_request = Some(Control::Close);
+                }
             }
-            Final::Quit => self.pending.exit_request = Some(Control::Exit),
+            Final::Quit => {
+                if !self.begin_ending(Control::Exit) {
+                    self.pending.exit_request = Some(Control::Exit);
+                }
+            }
             Final::CloseProject => {
                 self.workbench.close_project();
                 // Its own theme (if it had one) gives way to the global one.
@@ -252,6 +258,10 @@ impl EditorApp {
     /// theirs.
     pub(super) fn quit(&mut self) -> Control {
         use workbench_model::running::Closing;
+        // Already ending: it quits by itself once what it started has ended.
+        if self.ending() {
+            return Control::Continue;
+        }
         if self.ask_running(workbench_model::CloseScope::quit(), Closing::App, Final::Quit) {
             return Control::Continue;
         }
@@ -275,6 +285,10 @@ impl EditorApp {
     /// work still running is asked about first (the app's too, when it's the last window).
     pub(super) fn close_window(&mut self) -> Control {
         use workbench_model::running::Closing;
+        // Already ending: the window closes by itself once what the app started has ended.
+        if self.ending() {
+            return Control::Continue;
+        }
         let project = self.workbench.project_identity().map(|(id, _)| id);
         let scope = workbench_model::CloseScope::window(project, self.shared.windows.get() <= 1);
         if self.ask_running(scope, Closing::Window, Final::CloseWindow) {

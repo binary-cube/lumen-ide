@@ -31,6 +31,8 @@
 //! | `ZOOM=<factor>` | the editor zoomed |
 //! | `LEVEL=1` | the language level picker |
 //! | `ABOUT=1` | the About window |
+//! | `ENDING=some\|many` | The app ending: what it started being stopped, made up (`many`: more than the list shows) |
+//! | `UPDATES=notes\|long` | What's New of a made-up version found (nothing downloaded): its notes short, or `long`, more than the window holds (its scrollbar; `HOVER` over it widens it) |
 //! | `COMMAND=<id>,<id>…` | those commands run, in order, after the window's other steps (`focus.toggle`: Focus mode on; with `HOVER`, the region under the mouse in color) |
 //! | `PROJECT_WINDOWS=<name>,<name>…` | other windows open with these projects (made up; the first is this window's), numbered 1… as the app does (`COMMAND=projects.switcher`: their list) |
 //! | `VIEW_COMMAND=<id>,<id>…` | then those sent to the view in front (a modal's or an overlay's first): a module's own snapshot steps (`snapshot:dimmed`: Keep awake's screen as after its fade) |
@@ -177,6 +179,10 @@ pub struct Options {
     zoom: Option<f32>,
     level: bool,
     about: bool,
+    /// `UPDATES`: What's New of a made-up version (`long`: notes that scroll).
+    updates: Option<String>,
+    /// `ENDING`: the app ending, what it started being stopped (`many`: a list that scrolls).
+    ending: Option<String>,
     /// `RESOURCES=1`: the bar's CPU, memory and GPU, made-up values (no sampling here).
     resources: bool,
     /// `STATUS_MORE=1`: the list of the bar's items that didn't fit (its `…` clicked).
@@ -335,6 +341,8 @@ impl Options {
             zoom: parsed("ZOOM"),
             level: flag("LEVEL"),
             about: flag("ABOUT"),
+            updates: var("UPDATES"),
+            ending: var("ENDING"),
             resources: flag("RESOURCES"),
             status_more: flag("STATUS_MORE"),
             status_popover: var("STATUS_POPOVER"),
@@ -1118,6 +1126,18 @@ impl Steps<'_> {
             self.wb.open_about();
             self.frame();
             settle(220);
+        }
+        if let Some(kind) = o.updates.as_deref() {
+            updates::snapshot::found(kind == "long");
+            if self.wb.run_command(updates::WHATS_NEW).is_none() {
+                tracing::error!("What's New didn't open");
+            }
+            self.frame();
+            settle(300);
+            self.frame();
+        }
+        if let Some(kind) = o.ending.as_deref() {
+            self.ending(kind == "many");
         }
         if let Some(panel) = &o.panel {
             self.side_panel(panel);

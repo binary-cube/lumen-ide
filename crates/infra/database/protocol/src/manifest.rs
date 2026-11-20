@@ -12,6 +12,8 @@
 //! [driver]                           # what it is and can do (see `dto::Description`)
 //! id = "duckdb"
 //! name = "DuckDB"
+//! icon = "hard-drive"                # one of the editor's (`ICONS`), in a tone (optional)
+//! icon_tone = "yellow"
 //! sql = "none"
 //! [driver.capabilities]
 //! edit_rows = true
@@ -40,6 +42,11 @@ use crate::dto;
 
 /// A driver's manifest's file name.
 pub const FILE: &str = "driver.toml";
+
+/// The icons of the editor's set a driver may name for its sources (a drawing of its own
+/// isn't read: nothing of a driver's folder is drawn).
+pub const ICONS: &[&str] =
+    &["database", "server", "hard-drive", "file-text", "table", "cloud", "globe", "layers"];
 
 /// A manifest, as written.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
@@ -256,7 +263,24 @@ pub fn factory(manifest: &Manifest, launch: Arc<dyn Launch>) -> DriverFactory {
             Arc::new(ProtocolDriver::new(Arc::clone(&made), speaks, timeout, Arc::clone(&launch)))
         }),
         external: true,
+        icon: icon(&description),
     }
+}
+
+/// The icon `description` names, if it's one of [`ICONS`], in its tone (unknown: neutral).
+fn icon(description: &dto::Description) -> Option<database::DriverIcon> {
+    use database::IconTone;
+    let name = ICONS.iter().copied().find(|i| description.icon.as_deref() == Some(*i))?;
+    let tone = match description.icon_tone.as_deref() {
+        Some("red") => IconTone::Red,
+        Some("green") => IconTone::Green,
+        Some("yellow") => IconTone::Yellow,
+        Some("blue") => IconTone::Blue,
+        Some("magenta") => IconTone::Magenta,
+        Some("cyan") => IconTone::Cyan,
+        _ => IconTone::Neutral,
+    };
+    Some(database::DriverIcon { name, tone })
 }
 
 /// The files it opens by themselves, if any.

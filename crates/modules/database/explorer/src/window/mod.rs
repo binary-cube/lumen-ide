@@ -15,7 +15,7 @@
 mod paint;
 
 use database::diagram::FileTable;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -34,7 +34,7 @@ use workbench_model::ProjectView;
 use crate::catalog::Listed;
 use crate::grid_source::message;
 use crate::sessions::Sessions;
-use crate::tree::{Group, Need, NodeKey, Part, Row, RowKind, SourceTree, TreeSource, Words};
+use crate::tree::{Group, Link, Need, NodeKey, Part, Row, RowKind, SourceTree, TreeSource, Words};
 use crate::worker::{Client, Request, Response, Ticket};
 
 mod menus;
@@ -117,6 +117,8 @@ pub struct DatabaseWindow {
     loaders: HashMap<DataSourceId, Loader>,
     waker: Arc<Mutex<Option<Waker>>>,
     changes: Arc<Mutex<Coalescing<Change>>>,
+    /// The sources whose session last failed to open (said by `ConnectionChanged`).
+    failed: Arc<Mutex<HashSet<DataSourceId>>>,
     subscriptions: Vec<Subscription>,
     action: Option<ToolPanelAction>,
     adding: Option<Adding>,
@@ -185,6 +187,7 @@ impl DatabaseWindow {
                 Duration::ZERO,
                 Duration::from_secs(1),
             ))),
+            failed: Arc::default(),
             subscriptions: Vec::new(),
             action: None,
             adding: None,
@@ -260,6 +263,23 @@ impl DatabaseWindow {
                 wake();
             },
         ));
+        // A session opened, closed or failed: its source's mark.
+        let (changes, wake, failed) =
+            (Arc::clone(&self.changes), self.wake(), Arc::clone(&self.failed));
+        self.subscriptions.push(sessions.events().subscribe(
+            move |e: &database::events::ConnectionChanged| {
+                {
+                    let mut failed = failed.lock().unwrap_or_else(PoisonError::into_inner);
+                    if e.failed {
+                        failed.insert(e.source);
+                    } else if e.open {
+                        failed.remove(&e.source);
+                    }
+                }
+                push(&changes, Change::Sources);
+                wake();
+            },
+        ));
         let (changes, wake) = (Arc::clone(&self.changes), self.wake());
         self.subscriptions.push(sessions.events().subscribe(move |e: &DataChanged| {
             if e.structure {
@@ -290,6 +310,16 @@ impl DatabaseWindow {
         }
         let root = sessions.root().to_path_buf();
         let folders = catalog.folders();
+        let failed = self.failed.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        let link = |id: DataSourceId| {
+            if sessions.get(id).is_some_and(|w| w.connected()) {
+                Link::Open
+            } else if failed.contains(&id) {
+                Link::Failed
+            } else {
+                Link::Closed
+            }
+        };
         let mut sources: Vec<TreeSource> = catalog
             .all()
             .iter()
@@ -298,6 +328,7 @@ impl DatabaseWindow {
                 source.color = database::folders::effective_color(s, &folders);
                 source.production = database::folders::effective_production(s, &folders);
                 source.transaction = sessions.console_transaction(s.id);
+                source.link = link(s.id);
                 source
             })
             .collect();
@@ -314,7 +345,9 @@ impl DatabaseWindow {
             let mut source = DataSource::new(name, driver, Scope::Project);
             source.id = id;
             source.file = Some(path.clone());
-            sources.push(tree_source(&sessions, &source, None, Some(path)));
+            let mut shown = tree_source(&sessions, &source, None, Some(path));
+            shown.link = link(source.id);
+            sources.push(shown);
         }
         // The readers of sources gone go too (a server's databases' with their source).
         let tree = &self.tree;
@@ -857,14 +890,9 @@ fn push(changes: &Mutex<Coalescing<Change>>, change: Change) {
     changes.lock().unwrap_or_else(PoisonError::into_inner).push(change, Instant::now());
 }
 
-/// A driver's icon: a server's, a database file's, a text file's.
-pub(crate) fn driver_icon(sessions: &Sessions, driver: &str) -> &'static str {
-    let file_based = sessions.driver(driver).is_some_and(|d| d.capabilities().file_based);
-    if !file_based {
-        return "server";
-    }
-    let text = database::drivers::files().iter().any(|f| f.driver == driver && f.text);
-    if text { "file-text" } else { "database" }
+/// A driver's icon: the one it names, else the database's.
+pub(crate) fn driver_icon(driver: &str) -> &'static str {
+    crate::engine_icon::of(driver).0
 }
 
 /// `source` as the tree shows it.
@@ -876,6 +904,7 @@ fn tree_source(
 ) -> TreeSource {
     let driver = sessions.driver(&source.driver);
     let capabilities = driver.as_ref().map(|d| d.capabilities()).unwrap_or_default();
+    let (icon, tone) = crate::engine_icon::of(&source.driver);
     let driver_name = database::drivers::find(&source.driver)
         .map_or_else(|| source.driver.clone(), |f| f.name.into_owned());
     TreeSource {
@@ -883,7 +912,8 @@ fn tree_source(
         name: source.name.clone(),
         driver: source.driver.clone(),
         driver_name,
-        icon: driver_icon(sessions, &source.driver),
+        icon,
+        tone,
         scope,
         file: file.filter(|_| capabilities.file_based),
         configured: driver.is_some() && source.is_configured(capabilities.file_based),
@@ -905,6 +935,7 @@ fn tree_source(
         color: source.color,
         production: source.production,
         transaction: sessions.console_transaction(source.id),
+        link: Link::Closed,
     }
 }
 

@@ -399,3 +399,34 @@ fn a_read_is_an_operation_stopped_from_the_task_manager() {
         .unwrap();
     assert_eq!(done.done, 5, "its rows");
 }
+
+/// A session opened, closed, or refused is said on the project's bus (once per change, not
+/// per request): what shows a source's state hears it.
+#[test]
+fn a_session_opened_closed_or_refused_is_said_on_the_projects_bus() {
+    use database::events::ConnectionChanged;
+    let manual = Manual::new();
+    let driver = FakeDriver::new(FakeDb::users(3), false);
+    let bus = EventBus::new();
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let _sub = {
+        let seen = Arc::clone(&seen);
+        bus.subscribe(move |e: &ConnectionChanged| seen.lock().unwrap().push(*e))
+    };
+    let id = DataSourceId::new();
+    let worker = SessionWorker::new(driver.source(id), manual.runtime(), Some(bus), None);
+    let (wake, _) = counted_wake();
+    let client = worker.client(wake);
+    client.send(read(0, false));
+    client.send(read(0, false));
+    manual.run_all();
+    worker.close_now();
+    driver.db.lock().unwrap().refuse = Some(DbError::Connect("no route".into()));
+    client.send(read(0, false));
+    manual.run_all();
+    let open = |open, failed| ConnectionChanged { source: id, open, failed };
+    assert_eq!(
+        *seen.lock().unwrap(),
+        vec![open(true, false), open(false, false), open(false, true)]
+    );
+}
