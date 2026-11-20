@@ -25,6 +25,7 @@ impl Workbench {
         for (g, bounds) in places.into_iter().enumerate() {
             let Some(window) = self.tools.window_mut() else { return };
             if let Some(view) = window.groups[g].active_view_mut() {
+                let _busy = kernel::probe::time(view.provider, "paint");
                 view.viewer.paint(ui_workbench::ViewerPaint {
                     bounds,
                     scale,

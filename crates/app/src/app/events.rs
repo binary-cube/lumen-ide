@@ -7,6 +7,23 @@ impl EditorApp {
         if self.frames.renderer.is_none() {
             return Control::Close;
         }
+        // A profile recording counts what the user did and what the window went through
+        // (a wake isn't counted: the poll it leads to names who had something new).
+        if kernel::probe::recording() {
+            use kernel::probe::{Cause, trigger};
+            match &event {
+                PlatformEvent::RedrawRequested | PlatformEvent::Wake => {}
+                PlatformEvent::Resized(_)
+                | PlatformEvent::ScaleFactorChanged(_)
+                | PlatformEvent::Occluded(_)
+                | PlatformEvent::Focused(_)
+                | PlatformEvent::CloseRequested
+                | PlatformEvent::SystemAppearanceChanged(..)
+                | PlatformEvent::MenuOpening
+                | PlatformEvent::ScreenColor(..) => trigger("window", Cause::Window),
+                _ => trigger("input", Cause::Input),
+            }
+        }
         match event {
             PlatformEvent::CloseRequested => return self.close_window(),
             PlatformEvent::RedrawRequested => return self.on_redraw_requested(),

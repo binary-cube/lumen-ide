@@ -144,7 +144,9 @@ git = ["vcs-git"]
 history-fs = ["local-history"]
 lsp-client = ["language-servers"]
 web-fetch = ["viewer-markdown"]
-process-stats = ["task-manager"]
+process-stats = ["task-manager", "profiler"]
+# A profile recording made: the profiler's.
+profiling-collect = ["profiler"]
 power-system = ["keep-awake"]
 pty = ["terminal-panel"]
 # An agent talked to as a graphical conversation: the conversation's.

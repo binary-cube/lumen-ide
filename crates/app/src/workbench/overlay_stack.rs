@@ -343,7 +343,9 @@ impl OverlaySlot for DropdownListSlot {
     }
 
     fn hover(&self, wb: &mut Workbench, p: Point) -> (bool, CursorIcon) {
-        (wb.dropdown_list.hover(p), CursorIcon::Default)
+        // Its own cursor (a hand on its rows, the text's in its search), never what's under.
+        let cursor = wb.dropdown_list.cursor_at(p).map_or(CursorIcon::Default, super::cursor_icon);
+        (wb.dropdown_list.hover(p), cursor)
     }
 
     fn scroll(&self, wb: &mut Workbench, _: f32, dy: f32) -> Option<bool> {

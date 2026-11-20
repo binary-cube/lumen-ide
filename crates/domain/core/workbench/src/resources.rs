@@ -168,6 +168,35 @@ impl DiskIo {
     }
 }
 
+/// What a part sent and received over the network (bytes), counted as it goes (from any
+/// thread), for its [`ResourceUse::sent`] / [`ResourceUse::received`]: only how much,
+/// never to where or what.
+#[derive(Debug, Default)]
+pub struct NetIo {
+    sent: AtomicU64,
+    received: AtomicU64,
+}
+
+impl NetIo {
+    pub const fn new() -> Self {
+        Self { sent: AtomicU64::new(0), received: AtomicU64::new(0) }
+    }
+
+    pub fn sent(&self, bytes: u64) {
+        self.sent.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    pub fn received(&self, bytes: u64) {
+        self.received.fetch_add(bytes, Ordering::Relaxed);
+    }
+
+    /// Its totals on `part`.
+    pub fn report(&self, part: &mut ResourceUse) {
+        part.sent = Some(self.sent.load(Ordering::Relaxed));
+        part.received = Some(self.received.load(Ordering::Relaxed));
+    }
+}
+
 /// The CPU time a part's work took, measured on the thread doing it (two clock reads per
 /// piece of work, not per byte), for its [`ResourceUse::cpu`].
 #[derive(Debug, Default)]
@@ -652,6 +681,11 @@ pub struct ResourceSnapshot {
     /// system's libraries), when the allocator counts them.
     pub heap: Option<u64>,
     pub parts: Vec<ResourceUse>,
+    /// What draws it: the driver, its backend and the graphics adapter, as the system names
+    /// them (`wgpu / Metal / Apple M3`), when known; the window's scale (percent: 200 on a
+    /// Retina screen).
+    pub renderer: Option<String>,
+    pub scale_percent: Option<u32>,
 }
 
 /// Where the Task Manager reads the picture from (the app gives it; it gathers the app's

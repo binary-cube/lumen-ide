@@ -14,6 +14,7 @@ fn top_and_bottom_groups_are_hit_tested() {
             bottom: false,
             badge: None,
             group: "",
+            tone: None,
         },
         ToolButton {
             id: "terminal",
@@ -22,6 +23,7 @@ fn top_and_bottom_groups_are_hit_tested() {
             bottom: true,
             badge: Some(crate::ds::BadgeKind::Count),
             group: "",
+            tone: None,
         },
     ];
     strip.paint(&buttons, &icons, &Palette::dark(), &mut Scene::default());
@@ -52,6 +54,7 @@ fn a_dot_sits_on_the_icons_corner() {
             bottom: false,
             badge: Some(kind),
             group: "",
+            tone: None,
         };
         let mut scene = Scene::default();
         strip.paint(&[button], &icons, &palette, &mut scene);
@@ -75,6 +78,7 @@ fn a_dot_sits_on_the_icons_corner() {
         bottom: false,
         badge: None,
         group: "",
+        tone: None,
     };
     let mut scene = Scene::default();
     strip.paint(&[button], &icons, &palette, &mut scene);
@@ -97,6 +101,7 @@ fn a_lit_button_s_dot_is_ringed_in_its_color() {
         bottom: false,
         badge: Some(BadgeKind::Count),
         group: "",
+        tone: None,
     };
     let mut scene = Scene::default();
     strip.paint(&[button], &icons, &palette, &mut scene);
@@ -120,6 +125,7 @@ fn a_line_parts_the_groups() {
         bottom,
         badge: None,
         group,
+        tone: None,
     };
     let lines = |scene: &Scene| {
         scene.layers()[0]

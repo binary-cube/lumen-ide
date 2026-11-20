@@ -71,8 +71,8 @@ pub use per_project::PerProject;
 pub use queries::{EntriesRequest, ProjectQueries, ProjectView};
 pub use resources::{
     ActOutcome, ActionKind, ActionTarget, Activities, Activity, ActivityKind, ActivityUnit,
-    CpuMeter, DiskIo, ModuleCounters, ModuleThreads, OpenProject, Outcome, PartAction, PartRef,
-    ResourceData, ResourceReporter, ResourceSnapshot, ResourceSource, ResourceUse,
+    CpuMeter, DiskIo, ModuleCounters, ModuleThreads, NetIo, OpenProject, Outcome, PartAction,
+    PartRef, ResourceData, ResourceReporter, ResourceSnapshot, ResourceSource, ResourceUse,
 };
 pub use running::{CloseAnswer, CloseScope, RunningPrompt, RunningWork, StopImpact, StopVia};
 pub use services::{LanguageOf, ProjectContext, ProjectEdit, ProjectKind, ProjectService};

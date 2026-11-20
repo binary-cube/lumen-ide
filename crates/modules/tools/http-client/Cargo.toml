@@ -19,6 +19,7 @@ http-environments.workspace = true
 http-scripts.workspace = true
 i18n.workspace = true
 kernel.workspace = true
+contracts.workspace = true
 render-api.workspace = true
 serde_json.workspace = true
 text-layout.workspace = true

@@ -219,6 +219,9 @@ pub struct Runs {
     headers: Mutex<std::collections::BTreeMap<String, String>>,
     /// The project's OAuth tokens.
     pub(crate) tokens: crate::auth::Tokens,
+    /// What its requests sent and received (bytes: how much only), for its row in the
+    /// Task Manager and a profile recording.
+    pub(crate) traffic: workbench_model::NetIo,
     /// What a run asks of the app (a page opened in the system's browser for an OAuth
     /// sign-in, a message for the user), taken by the first of the module's views to poll.
     asked: Mutex<Vec<Asked>>,
@@ -256,6 +259,7 @@ impl Runs {
             return runs;
         }
         let runs = Arc::new(Self {
+            traffic: workbench_model::NetIo::new(),
             project,
             root: Mutex::new(root.map(Path::to_path_buf)),
             state: Mutex::default(),
@@ -354,6 +358,14 @@ impl Runs {
     }
 
     /// The runs, oldest first.
+    /// How many runs it keeps and how many are going (counted where they are, nothing
+    /// copied).
+    pub fn counts(&self) -> (usize, usize) {
+        let state = self.state();
+        let going = state.runs.iter().filter(|r| matches!(r.state, RunState::Running)).count();
+        (state.runs.len(), going)
+    }
+
     pub fn runs(&self) -> Vec<Run> {
         self.state().runs.clone()
     }

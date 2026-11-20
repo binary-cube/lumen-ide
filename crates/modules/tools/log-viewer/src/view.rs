@@ -56,8 +56,8 @@ pub struct LogFileView {
     details_raw: String,
 }
 
-/// The details' right-click menu: what's selected, the message, the line as written.
-const COPY_SELECTION: &str = "log.copy_selection";
+/// The details' right-click menu beyond the text's own (Copy, Copy All): the message, the
+/// line as written.
 const COPY_MESSAGE: &str = "log.copy_message";
 const COPY_LINE: &str = "log.copy_line";
 
@@ -456,14 +456,12 @@ impl Viewer for LogFileView {
     fn context_menu(&mut self, p: Point) -> Option<Vec<ui_components::ViewMenuEntry>> {
         use ui_components::ViewMenuEntry;
         if self.in_details(p) {
-            let selected = self.details.as_ref().is_some_and(|(_, r)| r.has_selection());
-            return Some(vec![
-                ViewMenuEntry::item(COPY_SELECTION, t("log_viewer.copy_selection"))
-                    .with_icon("copy")
-                    .disabled_if(!selected),
-                ViewMenuEntry::item(COPY_MESSAGE, t("log_viewer.copy_message")),
-                ViewMenuEntry::item(COPY_LINE, t("log_viewer.copy_line")),
-            ]);
+            // The text's own menu (Copy, Copy All), then the line's.
+            let mut menu = self.details.as_ref().map(|(_, r)| r.menu()).unwrap_or_default();
+            menu.push(ViewMenuEntry::Separator);
+            menu.push(ViewMenuEntry::item(COPY_MESSAGE, t("log_viewer.copy_message")));
+            menu.push(ViewMenuEntry::item(COPY_LINE, t("log_viewer.copy_line")));
+            return Some(menu);
         }
         self.grid.as_mut()?.context_menu(p)
     }
@@ -471,7 +469,9 @@ impl Viewer for LogFileView {
     fn command(&mut self, id: &str) -> bool {
         // The details' menu: what it copies.
         let copied = match id {
-            COPY_SELECTION => self.details.as_ref().and_then(|(_, r)| r.selected_text()),
+            _ if self.details.as_ref().is_some_and(|(_, r)| r.copied(id).is_some()) => {
+                self.details.as_ref().and_then(|(_, r)| r.copied(id))
+            }
             COPY_MESSAGE => self
                 .details
                 .is_some()

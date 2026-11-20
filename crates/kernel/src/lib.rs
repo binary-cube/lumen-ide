@@ -13,6 +13,7 @@ pub mod geometry;
 pub mod id;
 pub mod memory;
 pub mod paths;
+pub mod probe;
 pub mod queue;
 pub mod request;
 pub mod secret;

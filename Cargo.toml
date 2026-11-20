@@ -41,6 +41,7 @@ members = [
     "crates/domain/code/stylesheet",
     "crates/domain/code/markup",
     "crates/domain/tools/power",
+    "crates/domain/tools/profiling",
     "crates/domain/tools/diagram-model",
     "crates/infra/code/syntax-treesitter",
     "crates/infra/code/lsp-client",
@@ -129,6 +130,7 @@ members = [
     "crates/infra/remote/remote-ftp",
     "crates/infra/system/secrets",
     "crates/infra/system/process-stats",
+    "crates/infra/system/profiling-collect",
     "crates/infra/system/process-registry",
     "crates/infra/system/power",
     "crates/infra/database/postgres",
@@ -148,6 +150,7 @@ members = [
     "crates/modules/tools/relax",
     "crates/modules/tools/focus",
     "crates/modules/tools/keep-awake",
+    "crates/modules/tools/profiler",
     "crates/modules/tools/updates",
     "crates/modules/ai/agents/claude",
     "crates/modules/ai/agents/cline",
@@ -207,6 +210,7 @@ fs-local = { path = "crates/infra/files/fs-local" }
 stylesheet = { path = "crates/domain/code/stylesheet" }
 markup = { path = "crates/domain/code/markup" }
 power = { path = "crates/domain/tools/power" }
+profiling = { path = "crates/domain/tools/profiling" }
 diagram-model = { path = "crates/domain/tools/diagram-model" }
 power-system = { path = "crates/infra/system/power" }
 diagram-text = { path = "crates/domain/viewers/diagram-text" }
@@ -285,6 +289,7 @@ remote-sftp = { path = "crates/infra/remote/remote-sftp" }
 remote-ftp = { path = "crates/infra/remote/remote-ftp" }
 secrets = { path = "crates/infra/system/secrets" }
 process-stats = { path = "crates/infra/system/process-stats" }
+profiling-collect = { path = "crates/infra/system/profiling-collect" }
 process-registry = { path = "crates/infra/system/process-registry" }
 logging = { path = "crates/infra/system/logging" }
 log-viewer = { path = "crates/modules/tools/log-viewer" }
@@ -307,6 +312,7 @@ task-manager = { path = "crates/modules/tools/task-manager" }
 relax = { path = "crates/modules/tools/relax" }
 focus-mode = { path = "crates/modules/tools/focus" }
 keep-awake = { path = "crates/modules/tools/keep-awake" }
+profiler = { path = "crates/modules/tools/profiler" }
 updates = { path = "crates/modules/tools/updates" }
 agent-claude = { path = "crates/modules/ai/agents/claude" }
 agent-cline = { path = "crates/modules/ai/agents/cline" }

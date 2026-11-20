@@ -220,6 +220,8 @@
   help.keyboard_shortcuts | Keyboard Shortcuts… | 
   ---
   view.debug_overlay | Diagnostic Overlay | F12
+  profiler.record | Record a Profile… | 
+  profiler.recordings | Profile Recordings… | 
   log.show_log | Show Log | 
   help.reveal_log_folder | Reveal Log Folder | 
 = Windows =
@@ -430,6 +432,8 @@
   help.keyboard_shortcuts | Keyboard Shortcuts… | 
   ---
   view.debug_overlay | Diagnostic Overlay | F12
+  profiler.record | Record a Profile… | 
+  profiler.recordings | Profile Recordings… | 
   log.show_log | Show Log | 
   help.reveal_log_folder | Reveal Log Folder | 
   ---
@@ -643,6 +647,8 @@
   help.keyboard_shortcuts | Keyboard Shortcuts… | 
   ---
   view.debug_overlay | Diagnostic Overlay | F12
+  profiler.record | Record a Profile… | 
+  profiler.recordings | Profile Recordings… | 
   log.show_log | Show Log | 
   help.reveal_log_folder | Reveal Log Folder | 
   ---

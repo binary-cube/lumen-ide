@@ -1438,6 +1438,10 @@ impl ToolPanel for SessionsPanel {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        // The agents' list open: its own cursor, never what's under it.
+        if self.filter_list.is_open() {
+            return Some(self.filter_list.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
+        }
         if self.clear.is_some_and(|r| r.contains(p)) {
             return Some(ViewerCursor::Pointer);
         }

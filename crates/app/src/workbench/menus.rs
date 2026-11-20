@@ -262,7 +262,7 @@ impl Workbench {
             workbench_model::BadgeKind::Error => ui_workbench::ds::BadgeKind::Error,
         });
         let (icon, group) = (self.icons.id_or_file(tool.icon()), tool.group());
-        ToolButton { id, icon, active, bottom, badge, group }
+        ToolButton { id, icon, active, bottom, badge, group, tone: tool.active_tone() }
     }
 
     /// The count a module put on tool window `id`'s button.

@@ -19,6 +19,11 @@ use ui_kit::draw_text;
 use crate::EdgeScrollbar;
 use crate::ds::{self, Ctx};
 
+/// Its menu's row copying what's selected.
+pub const COPY: &str = "read-text.copy";
+/// Its menu's row copying all of it.
+pub const COPY_ALL: &str = "read-text.copy_all";
+
 /// A block's kind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BlockKind {
@@ -123,6 +128,45 @@ impl ReadText {
             self.scroll = 0.0;
             self.anchor = TextPos::default();
             self.head = TextPos::default();
+        }
+    }
+
+    /// Whether `p` is over it (as last drawn).
+    pub fn contains(&self, p: Point) -> bool {
+        self.area.contains(p)
+    }
+
+    /// Its right-click menu, the same wherever a text is read: Copy (what's selected;
+    /// greyed out with nothing), Copy All. A row chosen is told to [`Self::copied`].
+    pub fn menu(&self) -> Vec<crate::ViewMenuEntry> {
+        vec![
+            crate::ViewMenuEntry::item(COPY, i18n::t("read_text.copy"))
+                .with_icon("copy")
+                .disabled_if(!self.has_selection()),
+            crate::ViewMenuEntry::item(COPY_ALL, i18n::t("read_text.copy_all")),
+        ]
+    }
+
+    /// What a row of [`Self::menu`] copies (`None`: not one of its rows, or nothing to copy).
+    pub fn copied(&self, id: &str) -> Option<String> {
+        match id {
+            COPY => self.selected_text(),
+            // As it reads: a point with its bullet and its indent, a gap as an empty line.
+            COPY_ALL => {
+                let lines: Vec<String> = self
+                    .blocks
+                    .iter()
+                    .map(|b| match b.kind {
+                        BlockKind::Gap => String::new(),
+                        BlockKind::Point { depth } => {
+                            format!("{}• {}", "  ".repeat(usize::from(depth)), b.text)
+                        }
+                        _ => b.text.clone(),
+                    })
+                    .collect();
+                lines.iter().any(|l| !l.is_empty()).then(|| lines.join("\n"))
+            }
+            _ => None,
         }
     }
 

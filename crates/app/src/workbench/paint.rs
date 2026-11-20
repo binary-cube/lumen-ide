@@ -309,16 +309,20 @@ impl Workbench {
             let painter = Painter { text, scene, palette, icons: &self.icons };
             side.header.paint(icon, &title, &groups, painter);
         }
-        side.panel.paint(ui_workbench::ViewerPaint {
-            bounds: side.content,
-            scale: self.scale,
-            text,
-            scene,
-            palette,
-            icons: &self.icons,
-            focused: self.focus == Focus::Side(side.dock) && !keyboard_in_overlay,
-            waker: self.waker.as_ref().map(|w| Arc::clone(&w.0)),
-        });
+        {
+            // Timed for a profile: the view's own paint only.
+            let _busy = kernel::probe::time(side.id, "paint");
+            side.panel.paint(ui_workbench::ViewerPaint {
+                bounds: side.content,
+                scale: self.scale,
+                text,
+                scene,
+                palette,
+                icons: &self.icons,
+                focused: self.focus == Focus::Side(side.dock) && !keyboard_in_overlay,
+                waker: self.waker.as_ref().map(|w| Arc::clone(&w.0)),
+            });
+        }
         self.round_card_corners(scene, b, side.content.min_y());
     }
 

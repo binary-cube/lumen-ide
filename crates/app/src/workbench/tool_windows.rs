@@ -847,6 +847,42 @@ impl Workbench {
         bottom.chain(sides).chain(tabs).chain(editors).min()
     }
 
+    /// For a profile recording only (`kernel::probe`): each part that asks for the next frame
+    /// told by its name — moving (an animation: counted now, it draws this frame), or a time
+    /// of its own (`asked`: counted once by the frame that comes for it). Nothing is looked at
+    /// unless one records.
+    pub fn probe_frame_askers(&self, asked: &mut Vec<(&'static str, std::time::Instant)>) {
+        use kernel::probe::{Cause, trigger};
+        if !kernel::probe::recording() {
+            return;
+        }
+        let mut ask = |owner: &'static str, moving: bool, due: Option<std::time::Instant>| {
+            if moving {
+                trigger(owner, Cause::Animation);
+            }
+            if let Some(at) = due {
+                asked.push((owner, at));
+            }
+        };
+        if let Some(w) = self.tools.window() {
+            for v in w.groups.iter().filter_map(|g| g.active_view()) {
+                ask(v.provider, v.viewer.is_animating(), v.viewer.frame_deadline());
+            }
+        }
+        for s in &self.tools.sides {
+            ask(s.id, s.panel.is_animating(), s.panel.frame_deadline());
+        }
+        for t in super::tab::all_tabs(&self.tabs, &self.editors.groups) {
+            if let Some(v) = &t.viewer {
+                ask(v.provider, v.viewer.is_animating(), v.viewer.frame_deadline());
+            }
+            ask("editor", t.view.is_animating(), t.view.scrollbar_deadline());
+        }
+        ask("tooltips", self.tooltips.is_animating(), None);
+        ask("code-hover", self.code_hover.is_animating(), None);
+        ask("toolbars", self.toolbars_animating(), None);
+    }
+
     pub(super) fn tool_window_animating(&self) -> bool {
         self.tools.window().is_some_and(|w| {
             w.split.animating()

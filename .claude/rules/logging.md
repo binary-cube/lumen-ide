@@ -1,6 +1,6 @@
 # The log
 
-Part of the project's rules: [index](project-conventions.md). Related: [writing code](code.md), [performance](performance.md).
+Part of the project's rules: [index](project-conventions.md). Related: [writing code](code.md), [performance](performance.md), [privacy](privacy.md).
 
 - **Everything goes through `tracing`**, written by the app's `logging` crate: one JSON
   object a line in `<log folder>/app-<day>.jsonl`, turned over by day and size, secrets

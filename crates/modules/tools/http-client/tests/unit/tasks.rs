@@ -29,3 +29,16 @@ fn a_project_with_runs_has_its_part_and_a_request_going_is_work() {
     assert_eq!(going.len(), 1);
     assert_eq!(going[0].title, "Log in");
 }
+
+/// Its figures for a profile recording: numbers only (the runs kept, the requests going),
+/// by the module's id; nothing of a request.
+#[test]
+fn its_profile_figures_are_numbers_only() {
+    use contracts::profiling::{ProfileSource, ReadingKind};
+    let source = Profile;
+    assert_eq!(source.owner(), OWNER);
+    let read = source.read();
+    let names: Vec<&str> = read.iter().map(|r| r.what).collect();
+    assert_eq!(names, ["runs-kept", "requests-going"]);
+    assert!(read.iter().all(|r| r.kind == ReadingKind::Level));
+}

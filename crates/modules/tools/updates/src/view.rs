@@ -349,7 +349,16 @@ impl Viewer for NotesView {
         true
     }
 
+    /// A right-click on the notes: the text's own menu (Copy, Copy All).
+    fn context_menu(&mut self, p: kernel::Point) -> Option<Vec<ui_components::ViewMenuEntry>> {
+        self.read.contains(p).then(|| self.read.menu())
+    }
+
     fn command(&mut self, id: &str) -> bool {
+        if let Some(text) = self.read.copied(id) {
+            self.action = Some(ViewerAction::Request(ui_components::AppRequest::CopyText(text)));
+            return true;
+        }
         match id {
             "go" => self.press(Hit::Go),
             "skip" => self.press(Hit::Skip),

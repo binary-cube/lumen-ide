@@ -31,7 +31,7 @@ where a component exists is replaced by it (as the scrollbars were).
 | Columns fitted to a width by priority | `columns` |
 | Charts, sparklines, an icicle (flame graph), a ring | `chart`, `icicle`, `progress_ring` |
 | A metric's card | `metric_card` |
-| A text to read (release notes, details: headings, paragraphs, points) | `read_text` (`Block`) |
+| A text to read (release notes, details: headings, paragraphs, points), its selection and its right-click menu (`ReadText::menu` / `copied`: Copy, Copy All) | `read_text` (`Block`) |
 | A log's lines (Output) | `log_view` |
 | Tooltips (one manager; wide items show by the mouse) | `tooltip::{Tip, Tooltips}` |
 | Toasts | `toast` (a view returns `Notification`s, never draws them) |
@@ -45,6 +45,18 @@ where a component exists is replaced by it (as the scrollbars were).
 Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
 ([modals](modals.md)), the status bar the app's (below).
 
+## Scrolling (it went wrong each time: check it every time)
+
+- **A scrollbar is wired whole, never only drawn**: `paint` with the content's height and
+  the offset, `hover` (it widens), and its thumb taken and followed — `press` first in the
+  view's `click` (a tab and a modal both reach `click`), then `drag` and `release` (the
+  `Viewer`'s own). A bar that shows but can't be dragged is a bug.
+- **A test drags its thumb** (press on the bar, drag down, the offset grew), beside the one
+  for the wheel.
+- **An open list takes the pointer**: while a picker or a menu is open over a view, the
+  cursor is the list's (`Picker::cursor_at`: a hand on its rows, the text's in its search,
+  the arrow elsewhere), never what's under it.
+
 ## Dropdowns
 
 - **A dropdown is always the field (`ds::dropdown`) and the shared picker under it**: the
@@ -54,6 +66,8 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
   app for one (`ToolbarAction::List`). Rows that act instead of choosing ("Add an
   environment…") go at the end, each with its icon.
 - A context menu is for a right-click and a row's "⋮" only.
+- **What a user reads can be copied**: a view showing a `ReadText` offers its menu on a
+  right-click over it (`ReadText::menu`, the row told to `ReadText::copied`).
 
 ## Tables
 

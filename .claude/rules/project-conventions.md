@@ -14,6 +14,7 @@ you're about to do; when two differ, the more specific wins, and `CLAUDE.md` ove
 | Modals and windows over the editor (footer buttons and keys, closing, progress) | [modals.md](modals.md) |
 | The UI thread, budgets, caching, locks | [performance.md](performance.md) |
 | The log (`tracing`, fields, levels, secrets) | [logging.md](logging.md) |
+| Privacy: no telemetry, anonymous recordings, consent | [privacy.md](privacy.md) |
 | Working on a step (plans, gate, commits, review, snapshots, replies) | [workflow.md](workflow.md) |
 | Features with rules of their own (HTTP client, diagrams) | [features.md](features.md) |
 

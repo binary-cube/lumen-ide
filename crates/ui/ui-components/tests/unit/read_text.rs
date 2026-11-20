@@ -89,3 +89,19 @@ fn a_long_text_scrolls_by_the_wheel_and_its_bar() {
     assert!(read.release());
     assert!(!read.press(Point::new(500.0, 500.0), 1, false), "outside it");
 }
+
+/// Its menu, the same wherever a text is read: Copy greyed out with nothing selected, Copy
+/// All gives every block's text (gaps left out); a row not its own copies nothing.
+#[test]
+fn its_menu_copies_the_selection_or_all_of_it() {
+    let read = ReadText::new(vec![
+        Block::new(BlockKind::Heading, "What's new"),
+        Block::new(BlockKind::Gap, ""),
+        Block::new(BlockKind::Point { depth: 0 }, "One table look"),
+    ]);
+    let menu = read.menu();
+    assert_eq!(menu.len(), 2);
+    assert_eq!(read.copied(COPY), None, "nothing selected");
+    assert_eq!(read.copied(COPY_ALL).as_deref(), Some("What's new\n\n• One table look"));
+    assert_eq!(read.copied("other"), None);
+}

@@ -123,7 +123,7 @@ fn a_row_chosen_shows_its_details() {
     // A right-click on them: Copy (greyed out with nothing selected), the message, the line
     // as written.
     let menu = view.context_menu(view.details_area.center()).expect("the details' menu");
-    assert_eq!(menu.len(), 3);
+    assert_eq!(menu.len(), 5, "Copy, Copy All, a line, the message, the line");
     assert!(view.command(COPY_LINE));
     let copied = |view: &mut LogFileView| match view.take_action() {
         Some(ViewerAction::Request(ui_components::AppRequest::CopyText(text))) => text,
@@ -132,7 +132,7 @@ fn a_row_chosen_shows_its_details() {
     assert_eq!(copied(&mut view), line(1, &long).trim_end());
     assert!(view.command(COPY_MESSAGE));
     assert_eq!(copied(&mut view), format!("{long} 1"));
-    assert!(!view.command(COPY_SELECTION), "nothing selected: nothing copied");
+    assert!(!view.command(ui_components::read_text::COPY), "nothing selected: nothing copied");
     // ×: closed, until another row is chosen.
     let close = view.details_close;
     view.pointer_down(close.center(), 1, PressMods::default());

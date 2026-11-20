@@ -87,6 +87,9 @@ pub(super) struct Floating {
 /// the input latency and the resize diagnostic.
 pub(super) struct Frames {
     pub renderer: Option<Box<dyn Renderer>>,
+    /// While a profile records: the times handed to the window for a frame, each with whose
+    /// it is — counted once, by the frame that comes for them.
+    pub asked: Vec<(&'static str, Instant)>,
     /// The layer over the pages, what floats drawn there (only while a page is on screen).
     pub floating: Option<Floating>,
     /// No floating layer could be made here (none, or not transparent): holes are cut out
@@ -131,6 +134,7 @@ impl Frames {
                 .map(|steps| ResizeTest { steps, frames: Vec::new(), skipped: 0 }),
             dirty: true,
             full_due: None,
+            asked: Vec::new(),
             other_due: None,
             decoration_frames: 0,
             whole_frames: 0,

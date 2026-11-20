@@ -204,6 +204,7 @@ pub fn builtin() -> ModuleRegistry {
     add(&mut registry, Box::new(relax::RelaxModule), "relax");
     add(&mut registry, Box::new(path_marks::PathMarksModule), "path_marks");
     add(&mut registry, Box::new(keep_awake::KeepAwakeModule), "keep_awake");
+    add(&mut registry, Box::new(profiler::ProfilerModule), "profiler");
     add(&mut registry, Box::new(updates::UpdatesModule), "updates");
     add(&mut registry, Box::new(log_viewer::LogViewerModule), "log_viewer");
     add(&mut registry, Box::new(project_switcher::SwitcherModule), "project_switcher");
@@ -396,6 +397,11 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
     }
     for agent in contributions.take::<agents::PlannedAgent>() {
         agents::register_planned(agent);
+    }
+    // The modules' own figures for a profile recording: found there by the recorder (it
+    // never names a module).
+    for source in contributions.take::<Arc<dyn contracts::profiling::ProfileSource>>() {
+        contracts::profiling::register(source);
     }
     // The tools the modules offer the agents (the MCP server's): found there by whoever
     // serves them (the server never names a module).

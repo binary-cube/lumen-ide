@@ -67,6 +67,8 @@ impl Module for HttpClientModule {
     }
 
     fn activate(&self, ctx: &mut ModuleContext<'_>) -> Result<(), ModuleError> {
+        // Its figures for a profile recording (read only while one runs).
+        ctx.contribute::<Arc<dyn contracts::profiling::ProfileSource>>(Arc::new(tasks::Profile));
         ctx.contribute::<Arc<dyn EditorToolbarProvider>>(Arc::new(BarProvider));
         ctx.contribute::<Arc<dyn ui_components::ViewerProvider>>(Arc::new(
             chain_view::ChainProvider,

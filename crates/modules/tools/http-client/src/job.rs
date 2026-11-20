@@ -554,7 +554,19 @@ fn execute(
         return websocket_run(resolved, file, &options, live, cancel);
     }
     // Its body told as it comes (a stream of events shown while it lasts).
-    let sent = transport().send_streaming(&outgoing, &options, jar.as_mut(), cancel, live);
+    // A profile recording counts the requests sent: how many, never what or where.
+    kernel::probe::count("http-client", "requests", 1);
+    let sent = {
+        // Its time on this worker (in the flame graph's ways down, never the interface's).
+        let _timed = kernel::probe::time("http-client", "request");
+        transport().send_streaming(&outgoing, &options, jar.as_mut(), cancel, live)
+    };
+    // What went and came, once it went (a refused connection sent nothing); the body as
+    // read (a compressed one counts as unpacked: an estimate of the traffic).
+    if let Ok(response) = &sent {
+        runs.traffic.sent(outgoing_bytes(&outgoing));
+        runs.traffic.received(incoming_bytes(response));
+    }
     if let (Some(before), Some(after)) = (before, jar) {
         keep_cookies(runs, &folder, &before, &after);
     }
@@ -629,6 +641,29 @@ fn execute(
     }
 }
 
+/// How much a request sends: its line, its headers, its body (a file part by its size).
+fn outgoing_bytes(outgoing: &http_requests::transport::Outgoing) -> u64 {
+    let head = outgoing.method.len() + outgoing.url.len() + 12;
+    let headers: usize = outgoing.headers.iter().map(|h| h.name.len() + h.value.len() + 4).sum();
+    let body: u64 = outgoing
+        .body
+        .iter()
+        .map(|part| match part {
+            http_requests::transport::OutgoingPart::Bytes(b) => b.len() as u64,
+            http_requests::transport::OutgoingPart::File(path) => {
+                std::fs::metadata(path).map_or(0, |m| m.len())
+            }
+        })
+        .sum();
+    (head + headers) as u64 + body
+}
+
+/// How much a response brought: its status line, its headers, its body.
+fn incoming_bytes(response: &http_requests::transport::Incoming) -> u64 {
+    let headers: usize = response.headers.iter().map(|h| h.name.len() + h.value.len() + 4).sum();
+    (response.reason.len() + 16 + headers) as u64 + response.body.len()
+}
+
 /// A WebSocket request run: its session's transcript as its response (`→` sent, `←`
 /// received).
 fn websocket_run(
@@ -653,6 +688,7 @@ fn websocket_run(
     let started = Instant::now();
     let event = |received: bool, text: &str| live(line(received, text).as_bytes());
     let (url, headers) = (&resolved.url, &resolved.headers);
+    kernel::probe::count("http-client", "websockets", 1);
     match transport().websocket(url, headers, &messages, options, cancel, &event) {
         Ok(transcript) => {
             let text: String = transcript.iter().map(|(r, t)| line(*r, t)).collect();

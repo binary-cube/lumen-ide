@@ -578,6 +578,8 @@ pub struct Workbench {
     palette: Palette,
     /// The window's renderer draws backdrop blurs (else Glass backdrops are drawn simple).
     blur: bool,
+    /// What draws the window (`wgpu / Metal / Apple M3`), for the resources.
+    renderer: Option<String>,
     /// The disk, the session and settings stores, watching: the domain's ports.
     ports: Ports,
     project: Option<FileTree>,
@@ -849,6 +851,7 @@ impl Workbench {
             code_font: palette.code_font.clone(),
             palette,
             blur: true,
+            renderer: None,
             ports,
             project: None,
             tabs: Vec::new(),
@@ -1086,6 +1089,11 @@ impl Workbench {
         self.palette = Palette { code_font, backdrop, floating, ..palette };
         // The icons' colors come from the palette.
         self.file_icons.purge();
+    }
+
+    /// What draws the window, as its driver says.
+    pub fn set_renderer(&mut self, description: String) {
+        self.renderer = Some(description);
     }
 
     /// Whether the window's renderer draws backdrop blurs.
@@ -1423,16 +1431,20 @@ fn paint_viewer(
             Rect::new(v.bounds.min_x(), v.bounds.min_y(), w, v.bounds.size.height)
         });
         let first = scene.layers().len();
-        v.viewer.paint(ui_workbench::ViewerPaint {
-            bounds,
-            scale,
-            text,
-            scene,
-            palette,
-            icons,
-            focused: true,
-            waker,
-        });
+        {
+            // Timed for a profile: the view's own paint only.
+            let _busy = kernel::probe::time(v.provider, "paint");
+            v.viewer.paint(ui_workbench::ViewerPaint {
+                bounds,
+                scale,
+                text,
+                scene,
+                palette,
+                icons,
+                focused: true,
+                waker,
+            });
+        }
         // The view's color (its data source's): a thin strip along its top.
         if let Some(accent) = v.viewer.accent(palette) {
             let strip = Rect::new(v.bounds.min_x(), v.bounds.min_y(), v.bounds.size.width, px(2.0));

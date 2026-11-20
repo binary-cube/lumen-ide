@@ -157,6 +157,7 @@ fn paint(icicle: &mut Icicle, width: f32) -> Scene {
         scene: &mut scene,
         palette: &palette,
         icons: &icons,
+        clip: None,
     });
     scene
 }

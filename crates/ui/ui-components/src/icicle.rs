@@ -500,7 +500,7 @@ impl Icicle {
 
     /// Draws it in `bounds`: the band (back, the crumbs, the legend), the axis, the bars.
     pub fn paint(&mut self, ctx: IciclePaint<'_>) {
-        let IciclePaint { bounds: b, scale, text, scene, palette: p, icons } = ctx;
+        let IciclePaint { bounds: b, scale, text, scene, palette: p, icons, clip } = ctx;
         let ds = Ctx::new(p, scale);
         let px = |v: f32| ds.px(v);
         self.scale = scale;
@@ -521,7 +521,7 @@ impl Icicle {
             (b.max_y() - axis.max_y() - px(2.0)).max(0.0),
         );
         self.crumbs.clear();
-        let base = scene.push_layer(Some(b));
+        let base = scene.push_layer(Some(cut(b, clip)));
         base.quad(Quad::filled(b, p.editor_background));
         // The band: back, the crumbs, the legend on the right.
         base.quad(Quad::filled(band, p.text.with_alpha(0.025)));
@@ -659,7 +659,7 @@ impl Icicle {
             ds::divider(base, &ds, axis.min_x(), axis.max_x(), axis.max_y() - ds.line());
         }
         // The bars in view.
-        let layer = scene.push_layer(Some(self.chart));
+        let layer = scene.push_layer(Some(cut(self.chart, clip)));
         let label_font = ds.ui_font(-1.5);
         let detail_font = ds.ui_font(-2.0);
         let gap = px(1.0).max(1.0);
@@ -787,6 +787,17 @@ pub struct IciclePaint<'a> {
     pub scene: &'a mut Scene,
     pub palette: &'a Palette,
     pub icons: &'a Icons,
+    /// What of it shows (a page scrolled under it): what's outside is cut off. `None`: all
+    /// of `bounds`.
+    pub clip: Option<Rect>,
+}
+
+/// `r` cut to `clip` (nothing of it when they don't meet).
+fn cut(r: Rect, clip: Option<Rect>) -> Rect {
+    match clip {
+        None => r,
+        Some(c) => r.intersect(&c).unwrap_or(Rect::new(r.min_x(), r.min_y(), 0.0, 0.0)),
+    }
 }
 
 impl std::fmt::Debug for IciclePaint<'_> {

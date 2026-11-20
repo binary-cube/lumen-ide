@@ -433,6 +433,8 @@ impl Workbench {
             heap: kernel::memory::live_heap().map(|bytes| bytes as u64),
             parts,
             projects,
+            renderer: self.renderer.clone(),
+            scale_percent: Some((self.scale * 100.0).round() as u32),
             ..ResourceSnapshot::default()
         });
     }

@@ -1,0 +1,21 @@
+[package]
+name = "profiling-collect"
+description = "A profile recording made (plan 91): a thread of its own sampling this process (each thread's CPU and the memory, read by what it's given; what the probes gathered: frames, who asked for them, the parts' time), stopped when asked or after its time, written as one JSON file (a temporary file renamed over it); the system's basics read once."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+profiling.workspace = true
+sysinfo.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[lints]
+workspace = true

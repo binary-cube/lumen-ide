@@ -935,10 +935,15 @@ impl SettingsView {
 
     /// Something clickable is under the mouse (the cursor becomes a hand).
     pub fn over_clickable(&self, p: Point) -> bool {
+        // A dropdown's list open: a hand on its rows only (never what's under it).
+        if self.picker.is_open() {
+            return self.picker.cursor_at(p) == Some(ui_components::ViewerCursor::Pointer);
+        }
         let in_content = self.modal.hit(p) == Some(ModalHit::Content);
         matches!(self.modal.hit(p), Some(ModalHit::Section(_)))
             || (in_content
                 && (self.content_hit(p).is_some()
+                    || self.dropdowns.iter().any(|d| d.field.contains(p))
                     || self.shortcuts.over(p)
                     || self.result_rects.iter().any(|r| r.contains(p))
                     || self.filter_rects.iter().any(|r| r.contains(p))))

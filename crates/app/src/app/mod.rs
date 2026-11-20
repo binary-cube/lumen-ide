@@ -249,6 +249,9 @@ pub struct EditorApp {
     web_views: web_views::WebViews,
 }
 
+/// The views' soonest time, counted per view (`probe_frame_askers`), not as one more.
+const VIEWS: &str = "views";
+
 impl EditorApp {
     pub fn new(workbench: Workbench, shared: Rc<Shared>) -> anyhow::Result<Self> {
         // A new window opens in front.
@@ -367,6 +370,9 @@ impl EditorApp {
             self.capture_window(true);
         }
         let frame_start = Instant::now();
+        // A profile recording's outermost step: what each view drew nests under it.
+        let _frame = kernel::probe::time("app", "frame");
+        self.count_due_askers(frame_start);
         // A view's own deadline came (a save due a moment after typing): its work is done
         // now, by its poll, not only at the next wake — or the frames it asked for would
         // follow one another until something else woke the loop.
@@ -593,6 +599,9 @@ impl EditorApp {
         match result {
             Ok(stats) => {
                 self.frames.overlay.record(frame_start.elapsed(), stats);
+                if !stats.skipped {
+                    kernel::probe::frame(frame_start.elapsed());
+                }
                 if stats.retry {
                     window.request_redraw();
                     full_due = frame_start;
@@ -641,62 +650,76 @@ impl EditorApp {
         self.window_state.ime_area = area;
         // A caret on screen blinks: one redraw when it next turns on / off (only in the
         // focused window; background windows don't wake up for it).
-        let mut due = |at: Instant| {
+        // Each one named: while a profile records, whose time each is is kept, and counted
+        // once by the frame that comes for it (`count_due_askers`).
+        let recording = kernel::probe::recording();
+        let mut asked: Vec<(&'static str, Instant)> = Vec::new();
+        if recording {
+            self.workbench.probe_frame_askers(&mut asked);
+        }
+        let mut due = |owner: &'static str, at: Instant| {
+            if recording && owner != VIEWS {
+                asked.push((owner, at));
+            }
             window.request_redraw_at(at);
             full_due = full_due.min(at);
         };
         if let Some(at) = ui_kit::caret::take_next_frame()
             && self.window_state.focused
         {
-            due(at);
+            due("caret", at);
         }
         // The code hover card / a tooltip appears after the mouse rests: one redraw then.
         if let Some(at) = self.workbench.hover_deadline() {
-            due(at);
+            due("hover", at);
         }
         if let Some(at) = self.workbench.autosave_deadline() {
-            due(at);
+            due("autosave", at);
         }
         // A language server's answer waited for: the built-in engine's when its grace ends.
         if let Some(at) = self.workbench.served_deadline() {
-            due(at);
+            due("served", at);
         }
         // A notification's ring or spinner: a frame when it next changes (no faster than
         // about 30 a second), none while nothing counts down.
         if let Some(at) = self.workbench.toast_deadline() {
-            due(at);
+            due("toast", at);
         }
         // The status bar's meter gliding to new heights.
         if let Some(at) = self.workbench.status_deadline() {
-            due(at);
+            due("status", at);
         }
         // A view over the window animating at its own pace (a full-window scene).
         if let Some(at) = self.workbench.modal_view_deadline() {
-            due(at);
+            due("modal-view", at);
         }
         if let Some(at) = self.workbench.idle_deadline() {
-            due(at);
+            due("idle", at);
         }
         // The views at their pace (a scrollbar fading in or out).
+        // (Each view's own is counted under its name by `probe_frame_askers`: not again here.)
         if let Some(at) = self.workbench.views_deadline() {
-            due(at);
+            due(VIEWS, at);
         }
         // A hidden page let go when its time's up (its engine holds hundreds of MB).
         if let Some(at) = self.web_views.deadline() {
-            due(at);
+            due("web-views", at);
         }
         // The windows over the editor at theirs (a popover's scrollbar fading).
         if let Some(at) = self.workbench.overlays_deadline() {
-            due(at);
+            due("overlays", at);
         }
         // A settings card playing its picture (Relax mode's scenes), at its pace.
         if let Some(at) = self.workbench.settings_card_deadline() {
-            due(at);
+            due("settings-card", at);
         }
         // The overlay shows what the frames drawn anyway measured (never a frame to measure
         // itself: idle stays idle); only its ×'s tooltip asks for one.
         if let Some(at) = self.frames.overlay.frame_deadline() {
-            due(at);
+            due("diagnostic-overlay", at);
+        }
+        if recording {
+            self.frames.asked = asked;
         }
         if only_decorations {
             // The deadlines the last whole frame set still hold.
@@ -710,6 +733,22 @@ impl EditorApp {
         // window is hidden, unfocused or idle).
         if let Some(at) = self.workbench.decorations_deadline(Instant::now()) {
             window.request_redraw_at(at);
+        }
+    }
+
+    /// While a profile records: the times handed for a frame that came (one a little late
+    /// still counts), each owner once — who made this frame come.
+    fn count_due_askers(&mut self, now: Instant) {
+        if self.frames.asked.is_empty() {
+            return;
+        }
+        let late = now + Duration::from_millis(2);
+        let mut counted: Vec<&'static str> = Vec::new();
+        for (owner, at) in self.frames.asked.drain(..) {
+            if at <= late && !counted.contains(&owner) {
+                counted.push(owner);
+                kernel::probe::trigger(owner, kernel::probe::Cause::Deadline);
+            }
         }
     }
 
@@ -973,6 +1012,7 @@ impl EditorApp {
                 Ok(renderer) => {
                     let description = renderer.description();
                     tracing::info!(renderer = %description, elapsed = ?self.shared.started.elapsed(), "rendering driver active");
+                    self.workbench.set_renderer(description.clone());
                     self.frames.overlay = DebugOverlay::new(description);
                     self.workbench.set_backdrop_blur(renderer.backdrop_blur());
                     self.frames.renderer = Some(renderer);

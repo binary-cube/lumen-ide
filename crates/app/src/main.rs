@@ -118,6 +118,8 @@ fn main() -> anyhow::Result<()> {
     // The release's version: only this package carries it (the others' builds stay as they
     // are across releases); every crate reads it from here.
     kernel::brand::set_version(env!("CARGO_PKG_VERSION"));
+    // This thread runs the windows: its timed work is the interface's (a profile's).
+    kernel::probe::mark_interface_thread();
     #[cfg(all(windows, not(feature = "system-allocator")))]
     kernel::memory::set_allocator_release(release_allocator);
     #[cfg(target_os = "macos")]

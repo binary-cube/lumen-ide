@@ -60,6 +60,8 @@ pub struct ToolButton {
     pub badge: Option<crate::ds::BadgeKind>,
     /// Its group (`ToolWindowProvider::group`): a line between neighbors of different ones.
     pub group: &'static str,
+    /// Lit in this tone instead of the accent (`ToolWindowProvider::active_tone`).
+    pub tone: Option<crate::ds::Tone>,
 }
 
 #[derive(Debug, Default)]
@@ -175,8 +177,10 @@ impl ToolStrip {
         }
 
         for (rect, button) in place {
+            // Lit: the accent, or the tone the button asks for (a recording's red).
+            let lit = button.tone.map_or(st.active_background, |t| t.color(palette));
             let color = if button.active {
-                layer.quad(Quad::filled(rect, st.active_background).rounded(px(8.0)));
+                layer.quad(Quad::filled(rect, lit).rounded(px(8.0)));
                 st.active_icon
             } else {
                 if self.hover == Some(button.id) {
@@ -203,7 +207,7 @@ impl ToolStrip {
                 );
                 let strip = palette.window_background;
                 let outline = if button.active {
-                    st.active_background
+                    lit
                 } else if self.hover == Some(button.id) {
                     strip.mix(st.hover.with_alpha(1.0), st.hover.a)
                 } else {

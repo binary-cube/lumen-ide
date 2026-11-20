@@ -365,6 +365,7 @@ dependencies = [
  "process",
  "process-registry",
  "process-stats",
+ "profiler",
  "project-switcher",
  "project-tree",
  "quality",
@@ -4230,6 +4231,7 @@ version = "0.0.0"
 dependencies = [
  "code-intelligence",
  "command-model",
+ "contracts",
  "extensions",
  "files",
  "http-environments",
@@ -7044,10 +7046,55 @@ dependencies = [
 ]
 
 [[package]]
+name = "profiler"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "command-model",
+ "contracts",
+ "extensions",
+ "fs-local",
+ "i18n",
+ "icons",
+ "kernel",
+ "languages",
+ "process-stats",
+ "profiling 0.0.0",
+ "profiling-collect",
+ "render-api",
+ "storage",
+ "text-layout",
+ "tracing",
+ "ui-components",
+ "ui-kit",
+ "uuid",
+ "workbench-model",
+]
+
+[[package]]
+name = "profiling"
+version = "0.0.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
+
+[[package]]
+name = "profiling-collect"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "kernel",
+ "profiling 0.0.0",
+ "sysinfo",
+ "uuid",
+]
 
 [[package]]
 name = "project-switcher"
@@ -10425,7 +10472,7 @@ dependencies = [
  "naga",
  "parking_lot",
  "portable-atomic",
- "profiling",
+ "profiling 1.0.18",
  "raw-window-handle",
  "smallvec",
  "static_assertions",
@@ -10458,7 +10505,7 @@ dependencies = [
  "once_cell",
  "parking_lot",
  "portable-atomic",
- "profiling",
+ "profiling 1.0.18",
  "raw-window-handle",
  "rustc-hash 1.1.0",
  "smallvec",
@@ -10536,7 +10583,7 @@ dependencies = [
  "parking_lot",
  "portable-atomic",
  "portable-atomic-util",
- "profiling",
+ "profiling 1.0.18",
  "range-alloc",
  "raw-window-handle",
  "raw-window-metal",

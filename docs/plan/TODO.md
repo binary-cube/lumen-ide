@@ -5,6 +5,19 @@ făcute se șterg.
 
 ## Următorul (cerut)
 
+- **Fișierele foarte lungi, analizate și sparte** (cerut 2026-11-20, după profilare). De
+  găsit fișierele cele mai lungi din `crates/` (de numărat liniile, cele peste ~800 întâi),
+  apoi pentru fiecare: ce face, dacă face optim (nimic pe firul interfeței, nimic refăcut pe
+  cadru, fără copii inutile), și împărțit în fișiere mici, pe blocuri cu un rost fiecare
+  (`code.md`: un dosar pentru o funcție mare). Ținta: cod de calitate, ușor de urmărit și de
+  extins. Fără să se schimbe ce vede utilizatorul; testele rămân verzi după fiecare fișier.
+
+- **Profilarea aplicației — prioritate mare** (cerut 2026-11-20; planul:
+  `docs/plan/91-profilarea-aplicatiei.md`). Pornită cu acordul utilizatorului, anonimă,
+  oprită singură după o durată aleasă, un fișier JSON mic de trimis, un tab cu
+  înregistrările (axa de timp, flame graph). Primul folos: CPU-ul de ~60% în repaus de pe
+  Ubuntu.
+
 - **Terminalul: istoricul comenzilor pe proiect** — **făcut 2026-11-18**, cu setarea
   „Istoricul comenzilor pe proiect” (implicit pornită): fișierul în
   `<date>/terminal-history/<cheia proiectului>/` (cheia: hash-ul căii rădăcinii, `0600`);

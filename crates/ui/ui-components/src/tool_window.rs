@@ -67,6 +67,11 @@ pub trait ToolWindowProvider: Send + Sync + Debug {
         ""
     }
     fn content(&self) -> ToolContent;
+    /// The color its button is lit in while [`Self::active`] (a recording's red); `None`
+    /// (the default): the accent, as every other.
+    fn active_tone(&self) -> Option<crate::ds::Tone> {
+        None
+    }
     /// A command's button lit: what it turns on is on (a mode: Focus mode). Asked as the
     /// strip is drawn: cheap. A window's button is lit while its window shows, whatever
     /// this says.

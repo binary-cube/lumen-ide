@@ -672,13 +672,17 @@ impl Workbench {
 
     /// Viewers with new content after a wake (e.g. a decoded image). `true`: redraw.
     pub fn poll_viewers(&mut self) -> bool {
-        let mut changed = self.poll_settings_blocks()
-            | self.poll_tool_windows()
-            | self.poll_modal_view()
-            | self.poll_fetching()
-            | self.poll_notifications()
-            | self.poll_indicators()
-            | self.poll_side_panel();
+        // A profile recording's outermost step: each view's poll nests under it.
+        let _polls = kernel::probe::time("app", "poll");
+        // Each named: a profile recording counts whose poll asked for a frame.
+        use kernel::probe::{Cause, asked};
+        let mut changed = asked("settings", Cause::Poll, self.poll_settings_blocks())
+            | asked("tool-windows", Cause::Poll, self.poll_tool_windows())
+            | asked("modal-view", Cause::Poll, self.poll_modal_view())
+            | asked("fetching", Cause::Poll, self.poll_fetching())
+            | asked("notifications", Cause::Poll, self.poll_notifications())
+            | asked("indicators", Cause::Poll, self.poll_indicators())
+            | asked("side-panel", Cause::Poll, self.poll_side_panel());
         // The Task Manager reads the app's parts: kept fresh while it's open.
         self.refresh_task_data_if_watched();
         // The project services' background work, back here (a message, a comparison).
@@ -699,11 +703,18 @@ impl Workbench {
                 // tab bar shows of it changed (its unsaved mark): a request streaming, a
                 // console running in a tab behind another doesn't redraw what's shown.
                 let dirty = v.viewer.is_dirty();
-                let polled = v.viewer.poll();
-                changed |= polled && (v.shown || v.viewer.is_dirty() != dirty);
+                let polled = {
+                    let _busy = kernel::probe::time(v.provider, "poll");
+                    v.viewer.poll()
+                };
+                changed |= asked(
+                    v.provider,
+                    Cause::Poll,
+                    polled && (v.shown || v.viewer.is_dirty() != dirty),
+                );
             }
         }
-        changed |= self.poll_toolbars();
+        changed |= asked("toolbars", Cause::Poll, self.poll_toolbars());
         self.poll_view_notifications();
         changed
     }

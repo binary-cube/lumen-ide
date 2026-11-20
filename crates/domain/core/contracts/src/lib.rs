@@ -4,5 +4,6 @@
 
 pub mod agents;
 pub mod decorations;
+pub mod profiling;
 pub mod scenes;
 pub mod terminal;

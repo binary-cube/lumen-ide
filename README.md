@@ -244,6 +244,18 @@ turned off). It connects only to:
 
 The MCP server, off until you turn it on, listens only on your own machine.
 
+Your data stays yours, on your machine:
+
+- **No telemetry, no metrics, ever.** Nothing about how you use the editor is sent
+  anywhere.
+- **The app's log** stays in a folder you choose. Passwords, tokens, keys and cookies are
+  hidden before anything is written, and you can turn the log off.
+- **Profiling the app** (coming) only ever starts when you ask for it, after you agree to
+  what it records. It records only the app's own figures (CPU, memory, GPU, frames, its
+  threads) and the system's basics (version, cores, graphics). Nothing about you, your
+  projects, files, code or connections is recorded. A recording stops by itself after the
+  time you pick, stays on your machine, and is shared only if you choose to send the file.
+
 ## License
 
 Lumen is under the [MIT license](LICENSE).

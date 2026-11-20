@@ -118,7 +118,15 @@ impl FlameView {
         if self.icicle.selected() != selected {
             self.icicle.select(selected);
         }
-        self.icicle.paint(IciclePaint { bounds: area, scale, text, scene, palette, icons });
+        self.icicle.paint(IciclePaint {
+            bounds: area,
+            scale,
+            text,
+            scene,
+            palette,
+            icons,
+            clip: None,
+        });
     }
 
     /// A press: the step chosen (and zoomed into).

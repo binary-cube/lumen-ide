@@ -1,0 +1,16 @@
+[package]
+name = "profiling"
+description = "A profile recording of the app (plan 91): its JSON format (the system's basics, samples of CPU per thread, memory, GPU, frames, who asked for them and what each part took), anonymous by construction, kept small, and what it says (the busiest threads and modules, who wakes the app up). Pure: no disk, no threads."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
