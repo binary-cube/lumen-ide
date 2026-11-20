@@ -5747,6 +5747,7 @@ paused_count = "{shown} linii, în pauză · {new} noi"
 off = "Jurnalul e oprit: nu se scrie nimic pe disc (Setări → Jurnal)."
 
 [profiler]
+system_workers = "ale sistemului (driver GPU, cadre)"
 more_rows = "{count, plural, one {încă un rând} few {încă # rânduri} other {încă # de rânduri}}"
 no_folder = "nu există un dosar pentru datele aplicației"
 already = "altă înregistrare e în curs"

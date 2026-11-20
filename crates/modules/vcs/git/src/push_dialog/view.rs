@@ -6,25 +6,28 @@ use i18n::{t, tr};
 use kernel::{Point, Rect};
 use render_api::{Layer, Quad};
 use text_layout::TextSystem;
+use ui_components::control::{Control, Controls, OneClick, Thumb};
 use ui_components::ds::{self, Check, Ctx};
 use ui_components::picker::{Picker, PickerEvent, PickerItem};
 use ui_components::{
     KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint, WithHost,
 };
-use ui_kit::{TextInput, draw_text};
+use ui_kit::draw_text;
 use version_control::Repository;
 use version_control::application::SyncOp;
 
+use super::parts::NameFields;
 use super::{PushForm, PushRequest};
+use crate::parts::{Tune, Tuned};
 
 /// The rows' height and how many are shown before the table scrolls (logical pixels, rows).
 const ROW_H: f32 = 34.0;
 /// The room between the columns' line and the first row (logical pixels).
 const TABLE_TOP: f32 = 6.0;
-const ROWS_SHOWN: usize = 7;
+pub(super) const ROWS_SHOWN: usize = 7;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Hit {
+pub(super) enum Hit {
     Remote,
     Push(usize),
     Name(usize),
@@ -57,11 +60,19 @@ pub struct PushDialog {
     hover: Option<Hit>,
     action: Option<ViewerAction>,
     done: bool,
+    /// Where the mouse was last (the wheel goes to the part there).
+    pointer: Point,
     /// The table's scrollbar (more branches than shown): the app's, a row at a time.
     bar: ui_components::EdgeScrollbar,
     /// Where it goes: along the table, in the margin right of it; and how many rows.
     bar_area: Option<(Rect, usize)>,
+    /// Its parts' state of use (see [`PushDialog::with_controls`]).
+    controls: Controls,
 }
+
+/// The places of its parts in [`PushDialog::with_controls`].
+const REMOTES: usize = 0;
+const NAMES: usize = 2;
 
 impl std::fmt::Debug for PushDialog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -83,17 +94,42 @@ impl PushDialog {
         moved
     }
 
+    /// Its parts used as controls, the topmost first, with their state of use: the remotes'
+    /// list (over everything while open, a press on it a single click), the table's scrollbar
+    /// (its offset in rows: where the thumb goes, the nearest row comes first), the rows'
+    /// names to type ([`NameFields`]).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let shown = self.row_h * self.first as f32;
+        let mut offset = shown;
+        let tune = Tune { keeps_wheel: true, ..Tune::default() };
+        let mut remotes = Tuned { part: &mut self.picker, tune };
+        let mut remotes = OneClick(&mut remotes);
+        let mut table = Thumb { bar: &mut self.bar, offset: &mut offset };
+        let lines = self.form.as_mut().map_or(&mut [][..], |f| &mut f.lines[..]);
+        let mut names = NameFields {
+            lines,
+            hits: &self.hits,
+            typing: &mut self.typing,
+            first: &mut self.first,
+            confirming: &mut self.confirming,
+        };
+        let mut parts: [&mut dyn Control; 3] = [&mut remotes, &mut table, &mut names];
+        let answer = f(&mut self.controls, &mut parts);
+        if offset != shown {
+            self.scroll_to(offset);
+        }
+        answer
+    }
+
     fn hit(&self, p: Point) -> Option<Hit> {
         // On the table's scrollbar: no row under it.
         if self.bar.contains(p) {
             return None;
         }
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
-    }
-
-    fn input(&mut self) -> Option<&mut TextInput> {
-        let row = self.typing?;
-        Some(&mut self.form.as_mut()?.lines.get_mut(row)?.remote_name)
     }
 
     /// The push sent (a force push only the second time): the dialog closes, the status bar
@@ -132,40 +168,23 @@ impl PushDialog {
         }
     }
 
-    /// What a press on `hit` does to the form.
-    fn apply(&mut self, hit: Hit, p: Point, clicks: u32) {
-        self.typing = None;
+    /// What a press on `hit` does to the form (a name's field is a part of its own:
+    /// [`NameFields`]). The remotes' list opened has the keys.
+    fn apply(&mut self, hit: Hit) {
         let Some(form) = self.form.as_mut() else { return };
         match hit {
-            Hit::Remote => self.open_remotes(),
+            Hit::Remote => {
+                self.open_remotes();
+                self.with_controls(|c, parts| c.focus(parts, Some(REMOTES)));
+            }
             Hit::Push(i) => form.lines[i].push = !form.lines[i].push,
             Hit::Track(i) => form.lines[i].track = !form.lines[i].track,
-            Hit::Name(i) => {
-                form.lines[i].remote_name.press(p.x, clicks);
-                self.typing = Some(i);
-            }
+            Hit::Name(_) => {}
             Hit::All => form.toggle_all(),
             Hit::Tags => form.tags = !form.tags,
             Hit::Force => form.force = !form.force,
         }
         self.confirming = false;
-    }
-
-    /// The next (or previous) row's name to type, keeping it shown.
-    fn tab(&mut self, back: bool) {
-        let Some(form) = &self.form else { return };
-        let count = form.lines.len();
-        if count == 0 {
-            return;
-        }
-        let at =
-            self.typing.map_or(0, |i| if back { (i + count - 1) % count } else { (i + 1) % count });
-        self.typing = Some(at);
-        if at < self.first {
-            self.first = at;
-        } else if at >= self.first + ROWS_SHOWN {
-            self.first = at + 1 - ROWS_SHOWN;
-        }
     }
 
     fn paint_body(
@@ -365,23 +384,26 @@ impl Viewer for PushDialog {
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        if self.picker.is_open() {
-            return self.picker.text_input(typed);
+        let took = self.with_controls(|c, parts| c.text(parts, typed)).is_some();
+        // Typed with nowhere to take it: still a change of mind about a force push.
+        if !took {
+            self.confirming = false;
         }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.confirming = false;
-        self.input().is_some_and(|input| {
-            input.insert(&typed);
-            true
-        })
+        took
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.text_input(text.lines().next().unwrap_or_default())
+        let line = text.lines().next().unwrap_or_default();
+        let took = self.with_controls(|c, parts| c.paste(parts, line)).is_some();
+        // Pasted with nowhere to take it: still a change of mind about a force push.
+        if !took {
+            self.confirming = false;
+        }
+        took
     }
 
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.picker.next_frame()
+        self.controls.next_frame()
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -400,21 +422,26 @@ impl Viewer for PushDialog {
         if self.picker.is_open() {
             self.picker.paint(scene, text, icons, &ds, (self.remote_field, bounds), "");
         }
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        if self.picker.is_open() {
-            let event = self.picker.press(p);
+        // The remotes' list, the table's scrollbar (its thumb: a drag follows, or the rows
+        // moved there), a row's name (the caret put). A press on nothing keeps the focus.
+        let missed = self.hit(p).is_none();
+        let pressed = self.with_controls(|c, parts| {
+            if missed && !parts.iter().any(|part| part.hit(p)) {
+                return None;
+            }
+            c.press(parts, p, clicks)
+        });
+        if pressed.is_some() {
+            let event = self.picker.take_event();
             self.picked(event);
             return None;
         }
-        // The table's scrollbar: its thumb taken (a drag follows), or the rows moved there.
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll_to(offset);
-            return None;
-        }
         if let Some(hit) = self.hit(p) {
-            self.apply(hit, p, clicks);
+            self.apply(hit);
         }
         self.action.take()
     }
@@ -424,42 +451,38 @@ impl Viewer for PushDialog {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if self.bar.is_dragging() {
-            return self.bar.drag(p).is_some_and(|offset| self.scroll_to(offset));
-        }
-        self.input().is_some_and(|input| {
-            input.extend_to(p.x);
-            true
-        })
+        let first = self.first;
+        let dragged = self.with_controls(|c, parts| c.drag(parts, p));
+        dragged.is_some_and(|(_, moved)| moved || self.first != first)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        if self.picker.is_open() {
-            return self.picker.hover(p);
+        self.pointer = p;
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        // A part under the mouse (the remotes' list open has it over everything): the
+        // form's own hover stays as it was.
+        if self.controls.hovered().is_some() {
+            return parts;
         }
         let hover = self.hit(p);
-        let changed = hover != self.hover || self.bar.hover(p);
+        let changed = hover != self.hover || parts;
         self.hover = hover;
         changed
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.picker.is_open() {
-            return Some(self.picker.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
-        }
-        match self.hit(p)? {
-            Hit::Name(_) => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
-        }
+        self.controls.cursor_at(p).or_else(|| self.hit(p).map(|_| ViewerCursor::Pointer))
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        if self.picker.is_open() {
-            return self.picker.scroll(dy);
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        // The remotes' list open takes the wheel (it's over everything).
+        let pointer = self.pointer;
+        if self.with_controls(|c, parts| c.scroll(parts, pointer, dx, dy)).is_some() {
+            return true;
         }
         let Some(form) = &self.form else { return false };
         self.wheel += dy;
@@ -477,37 +500,32 @@ impl Viewer for PushDialog {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if self.picker.is_open() {
-            let event = self.picker.key(key, reach);
+        // The remotes' list open has every key; a row's name its editing keys and Tab.
+        if self.with_controls(|c, parts| c.key(parts, key, reach)).is_some() {
+            let event = self.picker.take_event();
             self.picked(event);
             return true;
         }
         match key {
             // No key pushes: only its button, clicked.
-            ViewerKey::Enter => return false,
-            ViewerKey::Escape => self.action = Some(ViewerAction::Close),
-            ViewerKey::Tab => self.tab(reach.extend),
-            _ => {
-                let Some(input) = self.input() else { return false };
-                match key {
-                    ViewerKey::Left => input.move_left(reach.word, reach.extend),
-                    ViewerKey::Right => input.move_right(reach.word, reach.extend),
-                    ViewerKey::Home => input.home(reach.extend),
-                    ViewerKey::End => input.end(reach.extend),
-                    ViewerKey::Backspace => input.backspace(reach.word),
-                    ViewerKey::Delete => input.delete(),
-                    _ => return false,
-                }
-                self.confirming = false;
+            ViewerKey::Enter => false,
+            ViewerKey::Escape => {
+                self.action = Some(ViewerAction::Close);
+                true
             }
+            // No rows to type in.
+            ViewerKey::Tab => true,
+            _ => false,
         }
-        true
     }
 
+    /// Read from `&self`: the names' part lends the row typed in (only it has one: the
+    /// focus leaving it lets the row go).
     fn selected_text(&self) -> Option<String> {
-        let form = self.form.as_ref()?;
-        let selected = form.lines.get(self.typing?)?.remote_name.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| {
+            let row = (i == NAMES).then_some(self.typing?)?;
+            Some(&self.form.as_ref()?.lines.get(row)?.remote_name as &dyn Control)
+        })
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -522,18 +540,7 @@ impl Viewer for PushDialog {
             }
             _ => {}
         }
-        if self.picker.is_open() {
-            return self.picker.command(id);
-        }
-        let Some(input) = self.input() else { return false };
-        match id {
-            "select_all" => input.select_all(),
-            "undo" => return input.undo(),
-            "redo" => return input.redo(),
-            "cut" => input.insert(""),
-            _ => return false,
-        }
-        true
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {

@@ -112,7 +112,7 @@ impl Studio {
                 scene.push_layer(Some(clip)),
                 text,
                 field,
-                self.editing_name,
+                self.editing_name(),
                 &t("studio.default_name"),
                 &field_style(&ds, 12.0),
             );
@@ -225,6 +225,7 @@ impl Studio {
                 detail: at.detail.as_deref(),
                 control_w,
                 control_h,
+                icon: None,
                 modified: at.reset.is_some(),
                 reset_hovered,
                 highlight,
@@ -468,7 +469,7 @@ impl Studio {
                         .rounded(px(radius::MD))
                         .bordered(
                             ds.line(),
-                            if self.editing_name { p.accent.with_alpha(0.7) } else { p.border },
+                            if self.editing_name() { p.accent.with_alpha(0.7) } else { p.border },
                         ),
                 );
                 self.push_list_hit(field, Hit::Name);

@@ -193,7 +193,7 @@ fn typing_goes_into_the_filter_its_caret_moves_there_only() {
     assert_eq!(view.focus, Focus::Tool(Tool::Filter));
     assert_eq!(view.selected(), Some("app/Interface"));
     // ← / → in the table don't touch the filter.
-    view.focus = Focus::Table;
+    view.focus_on(Focus::Table);
     let before = view.filter.cursor();
     press(&mut view, ViewerKey::Right);
     assert_eq!(view.filter.cursor(), before);
@@ -239,7 +239,7 @@ fn tab_goes_through_the_controls_with_a_ring_after_a_key_only() {
         assert_eq!(view.focus, Focus::Table, "{w}: round");
         // Each one's ring drawn around it (the cards draw their own).
         for &stop in &stops {
-            view.focus = stop;
+            view.focus_on(stop);
             pen.paint(&mut view, w, 1400.0, 1.0);
             assert!(view.shows_ring(), "{w}: after a key");
             if !matches!(stop, Focus::Card(_)) {
@@ -261,18 +261,18 @@ fn enter_and_arrows_work_the_controls() {
     let mut pen = Pen::new();
     let mut view = demo("plain");
     pen.paint(&mut view, 1300.0, 900.0, 1.0);
-    view.focus = Focus::Tool(Tool::Scope);
+    view.focus_on(Focus::Tool(Tool::Scope));
     press(&mut view, ViewerKey::Right);
     assert!(view.shows_all(), "→ on the scope: every project");
     press(&mut view, ViewerKey::Enter);
     assert!(!view.shows_all(), "Enter: the other one");
-    view.focus = Focus::Tool(Tool::Grouping);
+    view.focus_on(Focus::Tool(Tool::Grouping));
     press(&mut view, ViewerKey::Enter);
     assert_eq!(view.grouping(), Grouping::List, "Enter: the next grouping");
-    view.focus = Focus::Tool(Tool::Pause);
+    view.focus_on(Focus::Tool(Tool::Pause));
     press(&mut view, ViewerKey::Enter);
     assert!(view.is_paused());
-    view.focus = Focus::Card(Card::Cpu);
+    view.focus_on(Focus::Card(Card::Cpu));
     press(&mut view, ViewerKey::Right);
     assert_eq!(view.focus, Focus::Card(Card::Memory), "→ the next card");
     press(&mut view, ViewerKey::Enter);
@@ -286,7 +286,7 @@ fn a_popover_is_worked_by_its_keys() {
     let mut pen = Pen::new();
     let mut view = demo("plain");
     pen.paint(&mut view, 1300.0, 900.0, 1.0);
-    view.focus = Focus::Tool(Tool::Interval);
+    view.focus_on(Focus::Tool(Tool::Interval));
     press(&mut view, ViewerKey::Enter);
     assert_eq!(view.popover(), Some(Popover::Interval));
     pen.paint(&mut view, 1300.0, 900.0, 1.0);
@@ -298,7 +298,7 @@ fn a_popover_is_worked_by_its_keys() {
     assert!(view.popover().is_none(), "chosen: closed");
     assert_eq!(crate::view::preferences().interval, 2);
     // The columns' chooser stays open while its rows are chosen.
-    view.focus = Focus::Chooser;
+    view.focus_on(Focus::Chooser);
     press(&mut view, ViewerKey::Enter);
     assert_eq!(view.popover(), Some(Popover::Columns));
     press(&mut view, ViewerKey::End);
@@ -327,4 +327,95 @@ fn the_app_s_editing_commands_reach_the_filter() {
     press(&mut view, ViewerKey::Escape);
     press(&mut view, ViewerKey::Escape);
     assert!(!view.command("select_all"));
+}
+
+/// The ring reaching the filter's stop gives its part the keys, leaving it takes them away;
+/// the parts' own Tab never stops at it.
+#[test]
+fn the_ring_gives_the_filter_the_keys_and_takes_them_back() {
+    let mut pen = Pen::new();
+    let mut view = demo("plain");
+    pen.paint(&mut view, 1300.0, 900.0, 1.0);
+    let stops: Vec<Focus> = view.stops.iter().map(|(_, f)| *f).collect();
+    let filter = stops.iter().position(|s| *s == Focus::Tool(Tool::Filter)).expect("its stop");
+    assert!(!view.wants_text(), "the table has the keys");
+    // From the stop before it, Tab reaches it.
+    view.focus_on(stops[(filter + stops.len() - 1) % stops.len()]);
+    assert!(!view.wants_text());
+    press(&mut view, ViewerKey::Tab);
+    assert_eq!(view.focus, Focus::Tool(Tool::Filter));
+    assert!(view.wants_text(), "reached: the filter has the keys");
+    press(&mut view, ViewerKey::Tab);
+    assert_ne!(view.focus, Focus::Tool(Tool::Filter));
+    assert!(!view.wants_text(), "left: no longer");
+    back_tab(&mut view);
+    assert!(view.wants_text(), "⇧Tab back to it");
+    // Esc leaves it for the table: the keys go with it.
+    press(&mut view, ViewerKey::Escape);
+    assert_eq!(view.focus, Focus::Table);
+    assert!(!view.wants_text());
+    // A click on the field gives them, one elsewhere takes them.
+    let field = area(&view, |h| *h == Hit::Filter).expect("the field");
+    view.click(center(field));
+    assert!(view.wants_text(), "clicked: the filter");
+    let row = area(&view, |h| matches!(h, Hit::Row(_))).expect("a row");
+    view.click(center(row));
+    assert!(!view.wants_text(), "a row clicked: the table");
+}
+
+/// Typing and the editing keys in the filter: the caret moved, by word, a selection
+/// extended and typed over, Delete; the rows filtered again each time.
+#[test]
+fn the_filter_s_editing_keys_go_through_its_part() {
+    let word = KeyReach { word: true, extend: false };
+    let extend = KeyReach { word: false, extend: true };
+    let mut pen = Pen::new();
+    let mut view = manager();
+    pen.paint(&mut view, 1300.0, 900.0, 1.0);
+    assert!(!view.text_input("\n"), "nothing to type: the keys stay");
+    assert_eq!(view.focus, Focus::Table);
+    view.text_input("app inter");
+    assert!(view.wants_text());
+    assert!(view.edit_key_with(ViewerKey::Backspace, word));
+    assert_eq!(view.filter.text(), "app ", "⌥⌫: the word");
+    press(&mut view, ViewerKey::Home);
+    assert!(view.edit_key_with(ViewerKey::End, extend));
+    assert_eq!(view.filter.selected_text(), "app ", "⇧End: selected");
+    view.text_input("inter");
+    assert_eq!(view.filter.text(), "inter", "typed over the selection");
+    press(&mut view, ViewerKey::Home);
+    press(&mut view, ViewerKey::Delete);
+    assert_eq!(view.filter.text(), "nter", "Delete: the next one");
+    assert_eq!(view.shown_names(), ["Interface"], "filtered again");
+    // Backspace with the keys on the table still erases what was typed, the focus stays.
+    press(&mut view, ViewerKey::End);
+    view.focus_on(Focus::Table);
+    press(&mut view, ViewerKey::Backspace);
+    assert_eq!(view.filter.text(), "nte");
+    assert_eq!(view.focus, Focus::Table);
+    assert!(!view.wants_text());
+}
+
+/// ⌘A selects the filter, ⌘C copies its selection (else the keys' row), what's pasted goes
+/// in on one line — only while it has the keys.
+#[test]
+fn select_all_copy_and_paste_in_the_filter() {
+    let mut pen = Pen::new();
+    let mut view = manager();
+    pen.paint(&mut view, 1300.0, 900.0, 1.0);
+    view.text_input("inter");
+    assert_eq!(view.selected_text(), None, "nothing selected, no row");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("inter"), "⌘C: the filter's");
+    assert!(view.paste("Inter\nface"));
+    assert_eq!(view.filter.text(), "Interface", "pasted over it, on one line");
+    assert_eq!(view.shown_names(), ["Interface"]);
+    // The table with the keys: nothing pasted, the row copied.
+    press(&mut view, ViewerKey::Down);
+    view.focus_on(Focus::Table);
+    assert!(!view.paste("x"));
+    assert_eq!(view.filter.text(), "Interface");
+    assert!(!view.command("select_all"));
+    let row = view.selected_text().expect("the keys' row");
+    assert!(row.contains("Interface"), "{row}");
 }

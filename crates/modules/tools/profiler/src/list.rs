@@ -13,6 +13,7 @@ use std::time::SystemTime;
 use i18n::{t, tr};
 use kernel::{Point, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Press, Thumb};
 use ui_components::ds::{self, Ctx};
 use ui_components::{
     AppRequest, EdgeScrollbar, KeyReach, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor,
@@ -79,7 +80,6 @@ pub struct RecordingsView {
     /// The recordings' count last seen written (a new one: listed again).
     seen: u64,
     filter: TextInput,
-    typing: bool,
     field: Rect,
     clear: Option<Rect>,
     /// The rows as drawn (their place in the filtered list), the one under the mouse, the
@@ -92,6 +92,8 @@ pub struct RecordingsView {
     content_h: f32,
     view_h: f32,
     bar: EdgeScrollbar,
+    /// Its parts' state of use (see [`RecordingsView::with_controls`]).
+    controls: Controls,
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
     action: Option<ViewerAction>,
 }
@@ -116,7 +118,6 @@ impl RecordingsView {
             copying: None,
             seen: crate::recording::written(),
             filter: TextInput::default(),
-            typing: false,
             field: Rect::default(),
             clear: None,
             drawn: Vec::new(),
@@ -126,9 +127,28 @@ impl RecordingsView {
             content_h: 0.0,
             view_h: 0.0,
             bar: EdgeScrollbar::default(),
+            controls: Controls::default(),
             waker: None,
             action: None,
         }
+    }
+
+    /// Its parts (the page's scrollbar with its offset, the filter), the topmost first,
+    /// with their state of use: the one with the focus has the keys.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut page = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut filter =
+            FilterField { input: &mut self.filter, field: self.field, clear: self.clear };
+        let mut parts: [&mut dyn Control; 2] = [&mut page, &mut filter];
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// A part has the keys (the filter: the only one that takes them).
+    fn typing(&self) -> bool {
+        self.controls.focused().is_some()
     }
 
     /// The folder read again, on a worker.
@@ -289,7 +309,7 @@ impl Viewer for RecordingsView {
                 &mut pen,
                 self.field,
                 &self.filter,
-                self.typing && focused,
+                self.typing() && focused,
                 &t("profiler.filter"),
             );
             self.clear = None;
@@ -364,19 +384,10 @@ impl Viewer for RecordingsView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // On its scrollbar: the thumb taken (or the page jumped there); a drag follows.
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            return None;
-        }
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            self.filter = TextInput::default();
-            self.typing = true;
-            return None;
-        }
-        self.typing = self.field.contains(p);
-        if self.typing {
-            self.filter.press(p.x, 1);
+        // On its parts: the scrollbar's thumb taken (or the page jumped there, a drag
+        // follows), the filter's caret put or the filter cleared (it has the keys then);
+        // elsewhere none has them.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return None;
         }
         let path = self.path_of(self.row_at(p)?)?;
@@ -387,14 +398,12 @@ impl Viewer for RecordingsView {
         let lit = self.row_at(p);
         let changed = lit != self.lit;
         self.lit = lit;
-        self.bar.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
+    /// A part's (the filter's text cursor), else a hand on a row.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.field.contains(p) {
-            return Some(ViewerCursor::Text);
-        }
-        self.row_at(p).map(|_| ViewerCursor::Pointer)
+        self.controls.cursor_at(p).or_else(|| self.row_at(p).map(|_| ViewerCursor::Pointer))
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -432,48 +441,97 @@ impl Viewer for RecordingsView {
     }
 
     fn wants_text(&self) -> bool {
-        self.typing
+        self.typing()
     }
 
+    /// Typed into the part with the keys (the filter): the list back at its top.
     fn text_input(&mut self, typed: &str) -> bool {
-        if !self.typing {
-            return false;
+        let taken = self.with_controls(|c, parts| c.text(parts, typed)).is_some();
+        if taken {
+            self.scroll = 0.0;
         }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.filter.insert(&typed);
-        self.scroll = 0.0;
-        true
+        taken
     }
 
+    /// To the part with the keys; Esc on an empty filter gives them up.
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if !self.typing {
-            return false;
-        }
-        if key == ViewerKey::Escape {
-            if self.filter.text().is_empty() {
-                self.typing = false;
-            } else {
-                self.filter = TextInput::default();
+        let leaves = key == ViewerKey::Escape && self.filter.text().is_empty();
+        self.with_controls(|c, parts| {
+            let used = c.key(parts, key, reach).is_some();
+            if used && leaves {
+                c.focus(parts, None);
             }
-            return true;
-        }
-        reach.edit(&mut self.filter, key)
+            used
+        })
     }
 
     /// Its scrollbar's thumb dragged: the page follows.
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != self.scroll;
-        self.scroll = offset;
-        changed
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, changed)| changed)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {
         self.action.take()
+    }
+}
+
+/// The filter as a control: a press puts its caret (or, on its clear button, empties it),
+/// with the focus it takes the text typed (one line, no control characters) and its editing
+/// keys; Esc empties it. Tab is kept (it does nothing here, the focus stays).
+struct FilterField<'a> {
+    input: &'a mut TextInput,
+    field: Rect,
+    clear: Option<Rect>,
+}
+
+impl Control for FilterField<'_> {
+    fn area(&self) -> Option<Rect> {
+        Some(self.field)
+    }
+
+    fn hit(&self, p: Point) -> bool {
+        self.field.contains(p) || self.clear.is_some_and(|r| r.contains(p))
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        if self.clear.is_some_and(|r| r.contains(p)) {
+            *self.input = TextInput::default();
+        } else {
+            TextInput::press(self.input, p.x, clicks);
+        }
+        Press::Took
+    }
+
+    fn cursor(&self, _p: Point) -> Option<ViewerCursor> {
+        Some(ViewerCursor::Text)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        if key == ViewerKey::Escape {
+            if !TextInput::text(self.input).is_empty() {
+                *self.input = TextInput::default();
+            }
+            return true;
+        }
+        reach.edit(self.input, key)
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
+        TextInput::insert(self.input, &typed);
+        true
     }
 }
 

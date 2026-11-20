@@ -41,6 +41,7 @@ use workbench_model::{
 
 mod diff_job;
 mod paint;
+mod parts;
 mod select;
 mod view;
 
@@ -49,6 +50,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Compare",
     description: "The differences between two files and composing a new one from them",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "compare", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 pub const COMPARE_CLIPBOARD: CommandId = CommandId("compare.clipboard");
@@ -389,7 +391,7 @@ struct Compare {
     columns_w: f32,
     /// What the app does next (the result saved from the file's tab).
     pending: Option<ViewerAction>,
-    /// Where the mouse last was (the wheel over the field written by hand).
+    /// Where the mouse last was (⌘A selects the column under it).
     pointer: Point,
     /// The overview's thumb held: where in it (pixels from its top) it was taken.
     overview_grab: Option<f32>,
@@ -404,6 +406,12 @@ struct Compare {
     advance: f32,
     /// The clicks in a row of the press being handled (a word with two, a line with three).
     press_clicks: u32,
+    /// Its parts' state of use (see [`Compare::with_controls`]).
+    controls: ui_components::control::Controls,
+    /// The button a press took (told by its part, handled by the view).
+    pressed: Option<Hit>,
+    /// A separator is held (its resize cursor wherever the pointer goes).
+    resizing: bool,
 }
 
 /// A conflicted file being resolved.
@@ -491,6 +499,7 @@ impl Compare {
             base: input.base.lines().map(str::to_owned).collect(),
             ..Resolving::default()
         });
+        self.follow_field();
         self.scroll = 0.0;
         self.loaded = false;
         self.diff_in_background();
@@ -717,6 +726,13 @@ impl Compare {
                 }
             };
         }
+        self.follow_field();
+    }
+
+    /// The focus follows the field written by hand (opened or gone), so what's asked from
+    /// `&self` (the text it wants, what it has selected) reads the part with the keys.
+    pub(crate) fn follow_field(&mut self) {
+        self.with_controls(|_, _| ());
     }
 
     /// Every difference to `pick` ("all from…"); resolving, only the conflicts (what one side

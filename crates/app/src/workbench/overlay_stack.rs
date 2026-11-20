@@ -116,6 +116,38 @@ pub(super) trait OverlaySlot: Sync {
         }
     }
 
+    /// When something of it waits for the mouse to rest (a card about to show, a menu's
+    /// category the mouse lingers on): one redraw then; open or not yet. `None` by default.
+    fn rest_deadline(&self, _wb: &Workbench) -> Option<std::time::Instant> {
+        None
+    }
+
+    /// The mouse pressed somewhere else (a popover that goes then: the editor's cards);
+    /// nothing by default.
+    fn press_elsewhere(&self, _wb: &mut Workbench) {}
+
+    /// The wheel turned somewhere else; nothing by default.
+    fn scroll_elsewhere(&self, _wb: &mut Workbench) {}
+
+    /// A press of its own is held (the mouse's moves must reach [`Self::drag`]); `false` by
+    /// default.
+    fn held(&self, _wb: &mut Workbench) -> bool {
+        false
+    }
+
+    /// The mouse moved while a press of its own is held (a scrollbar's thumb, a slider, a
+    /// view's drag): `Some(redraw)` if it holds one; `None` (the default): nothing held here,
+    /// the move goes on to what's under it.
+    fn drag(&self, _wb: &mut Workbench, _text: &mut TextSystem, _p: Point) -> Option<bool> {
+        None
+    }
+
+    /// The mouse let go: `Some(redraw)` if it held something (what a release decides is
+    /// acted on); `None` (the default): nothing held here.
+    fn release(&self, _wb: &mut Workbench, _text: &mut TextSystem) -> Option<bool> {
+        None
+    }
+
     /// Draws it (called every frame, open or not: a closing one may still fade out).
     fn paint(&self, wb: &mut Workbench, text: &mut TextSystem, scene: &mut Scene);
 
@@ -132,6 +164,41 @@ pub(super) trait OverlaySlot: Sync {
     fn has_input(&self, _wb: &Workbench) -> bool {
         false
     }
+
+    /// Its text field with the keyboard, when the app edits it (the clipboard, the cursor
+    /// keys, a click's caret); `None` (the default): none, or the view edits its own.
+    fn input<'a>(&self, _wb: &'a Workbench) -> Option<&'a ui_kit::TextInput> {
+        None
+    }
+
+    /// [`Self::input`], to change it.
+    fn input_mut<'a>(&self, _wb: &'a mut Workbench) -> Option<&'a mut ui_kit::TextInput> {
+        None
+    }
+
+    /// What it has selected, when it answers the clipboard itself (a module's view: its
+    /// field's or its own selection, never what's behind it): `Some` (perhaps nothing
+    /// selected); `None` (the default): it doesn't.
+    fn selected_text(&self, _wb: &Workbench) -> Option<Option<String>> {
+        None
+    }
+
+    /// An edit command (`undo`, `redo`, `cut`, `select_all`) for its own field or view:
+    /// `Some(used)` if it takes it; `None` (the default): it doesn't.
+    fn edit_command(&self, _wb: &mut Workbench, _id: &str) -> Option<bool> {
+        None
+    }
+
+    /// Text pasted while it's on top: `Some(used)` if it takes it (its view decides);
+    /// `None` (the default): what's under it does.
+    fn paste(&self, _wb: &mut Workbench, _text: &mut TextSystem, _line: &str) -> Option<bool> {
+        None
+    }
+
+    /// Its work isn't done yet (a spinner turns); `false` by default.
+    fn loading(&self, _wb: &Workbench) -> bool {
+        false
+    }
 }
 
 /// The cursor over something clickable or not.
@@ -140,14 +207,30 @@ fn pointer_if(clickable: bool) -> CursorIcon {
 }
 
 impl Workbench {
-    /// When a window over the editor next wants a frame at its own pace (a scrollbar fading
-    /// in a popover or a modal, in the completion list or the code's hover card): the soonest; `None` at rest.
-    pub fn overlays_deadline(&self) -> Option<std::time::Instant> {
-        let stack = Overlay::ALL
+    /// When each window over the editor next wants a frame at its own pace (a scrollbar
+    /// fading, a notification's ring, a modal view's scene, a settings card's picture), by
+    /// its name (a profile recording says whose); none at rest.
+    pub fn overlays_due(&self) -> impl Iterator<Item = (&'static str, std::time::Instant)> + '_ {
+        Overlay::ALL
             .into_iter()
             .filter(|o| self.overlay_is_open(*o))
-            .filter_map(|o| o.slot().frame_deadline(self));
-        stack.chain(self.completion.frame_deadline()).chain(self.code_hover.frame_deadline()).min()
+            .filter_map(|o| Some((o.name(), o.slot().frame_deadline(self)?)))
+    }
+
+    /// The mouse pressed or the wheel turned at `p`: each window over the editor not under
+    /// it is told, open or about to open (a card waiting for its delay goes too).
+    pub(super) fn elsewhere(&mut self, p: Point, press: bool) {
+        for o in Overlay::ALL {
+            let slot = o.slot();
+            if slot.is_open(self) && slot.holds(self, p) {
+                continue;
+            }
+            if press {
+                slot.press_elsewhere(self);
+            } else {
+                slot.scroll_elsewhere(self);
+            }
+        }
     }
 
     /// The overlays a key goes through, topmost first: the open ones, down to the first
@@ -164,9 +247,34 @@ impl Workbench {
 }
 
 impl Overlay {
+    /// Its name where one is said (a profile recording's frame askers).
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Overlay::CodeHover => "code-hover",
+            Overlay::Completion => "completion",
+            Overlay::ParamHint => "param-hint",
+            Overlay::FileDrop => "file-drop",
+            Overlay::Toasts => "toast",
+            Overlay::StatusPopover => "status-popover",
+            Overlay::MenuDrawer => "menu-drawer",
+            Overlay::ContextMenu => "context-menu",
+            Overlay::DropdownList => "dropdown-list",
+            Overlay::ChoiceMenu => "choice-menu",
+            Overlay::Dialog => "dialog",
+            Overlay::ModalView => "modal-view",
+            Overlay::About => "about",
+            Overlay::Settings => "settings",
+            Overlay::ProjectsMenu => "projects-menu",
+            Overlay::ResourcePills => "resource-pills",
+        }
+    }
+
     /// The overlay's behavior.
     pub(super) fn slot(self) -> &'static dyn OverlaySlot {
         match self {
+            Overlay::CodeHover => &super::editor_popups::CodeHoverSlot,
+            Overlay::Completion => &super::editor_popups::CompletionSlot,
+            Overlay::ParamHint => &super::editor_popups::ParamHintSlot,
             Overlay::FileDrop => &super::file_drop::FileDropSlot,
             Overlay::Toasts => &super::toasts::ToastsSlot,
             Overlay::StatusPopover => &super::status::StatusPopoverSlot,
@@ -305,6 +413,10 @@ impl DropdownListSlot {
 }
 
 impl OverlaySlot for DropdownListSlot {
+    fn held(&self, wb: &mut Workbench) -> bool {
+        wb.dropdown_list.dragging()
+    }
+
     fn kind(&self, _wb: &Workbench) -> OverlayKind {
         OverlayKind::Popover
     }
@@ -352,6 +464,14 @@ impl OverlaySlot for DropdownListSlot {
         Some(wb.dropdown_list.scroll(dy))
     }
 
+    fn drag(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point) -> Option<bool> {
+        wb.dropdown_list.dragging().then(|| wb.dropdown_list.drag(p))
+    }
+
+    fn release(&self, wb: &mut Workbench, _: &mut TextSystem) -> Option<bool> {
+        wb.dropdown_list.release().then_some(true)
+    }
+
     fn paint(&self, wb: &mut Workbench, text: &mut TextSystem, scene: &mut Scene) {
         if !wb.dropdown_list.is_open() {
             return;
@@ -374,6 +494,18 @@ impl OverlaySlot for DropdownListSlot {
 struct ChoiceMenuSlot;
 
 impl OverlaySlot for ChoiceMenuSlot {
+    fn held(&self, wb: &mut Workbench) -> bool {
+        wb.choice_menu.scrollbar_held()
+    }
+
+    fn drag(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point) -> Option<bool> {
+        wb.choice_menu.scrollbar_held().then(|| wb.choice_menu.scrollbar_drag(p))
+    }
+
+    fn release(&self, wb: &mut Workbench, _: &mut TextSystem) -> Option<bool> {
+        wb.choice_menu.scrollbar_release().then_some(true)
+    }
+
     fn kind(&self, _wb: &Workbench) -> OverlayKind {
         OverlayKind::Popover
     }
@@ -439,6 +571,18 @@ impl OverlaySlot for ChoiceMenuSlot {
 struct DialogSlot;
 
 impl OverlaySlot for DialogSlot {
+    fn held(&self, wb: &mut Workbench) -> bool {
+        wb.dialogs.dialog.held()
+    }
+
+    fn drag(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point) -> Option<bool> {
+        wb.dialogs.dialog.held().then(|| wb.dialogs.dialog.drag(p))
+    }
+
+    fn release(&self, wb: &mut Workbench, _: &mut TextSystem) -> Option<bool> {
+        wb.dialogs.dialog.release().then_some(true)
+    }
+
     fn is_open(&self, wb: &Workbench) -> bool {
         wb.dialogs.dialog.is_open()
     }
@@ -496,8 +640,8 @@ impl OverlaySlot for DialogSlot {
 
     /// It gets all clicks (outside it: none).
     fn click(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point, _: u32) -> MouseResult {
-        // On its list's scrollbar: the list follows the thumb (a drag goes on).
-        if wb.dialogs.dialog.scrollbar_press(p) {
+        // On a part that holds the mouse (its list's thumb): a drag goes on.
+        if wb.dialogs.dialog.press(p) {
             return MouseResult::StartDrag;
         }
         if wb.dialogs.dialog.check_at(p) {
@@ -527,12 +671,40 @@ impl OverlaySlot for DialogSlot {
     fn has_input(&self, wb: &Workbench) -> bool {
         wb.dialogs.dialog.input.is_some()
     }
+
+    fn input<'a>(&self, wb: &'a Workbench) -> Option<&'a ui_kit::TextInput> {
+        wb.dialogs.dialog.input.as_ref()
+    }
+
+    fn input_mut<'a>(&self, wb: &'a mut Workbench) -> Option<&'a mut ui_kit::TextInput> {
+        wb.dialogs.dialog.input.as_mut()
+    }
 }
 
 /// A module's view in a modal window (the remote project wizard).
 struct ModalViewSlot;
 
 impl OverlaySlot for ModalViewSlot {
+    /// Its view at its own pace (a full-window scene).
+    fn frame_deadline(&self, wb: &Workbench) -> Option<std::time::Instant> {
+        wb.modal_view_deadline()
+    }
+
+    fn held(&self, wb: &mut Workbench) -> bool {
+        wb.modal_view_dragging()
+    }
+
+    fn drag(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point) -> Option<bool> {
+        wb.drag_modal_view(p)
+    }
+
+    /// Its view's press let go: what the view decided on it is acted on.
+    fn release(&self, wb: &mut Workbench, text: &mut TextSystem) -> Option<bool> {
+        let changed = wb.release_modal_view()?;
+        wb.take_modal_action(text);
+        Some(changed)
+    }
+
     /// A popover when the view opened as one (the color picker), a modal otherwise.
     fn kind(&self, wb: &Workbench) -> OverlayKind {
         if wb.modal_view.as_ref().is_some_and(|m| m.popover) {
@@ -599,6 +771,27 @@ impl OverlaySlot for ModalViewSlot {
     fn has_input(&self, wb: &Workbench) -> bool {
         wb.modal_view_has_input()
     }
+
+    fn loading(&self, wb: &Workbench) -> bool {
+        wb.modal_view_loading()
+    }
+
+    fn selected_text(&self, wb: &Workbench) -> Option<Option<String>> {
+        let modal = wb.modal_view.as_ref()?;
+        Some(modal.viewer.selected_text().filter(|s| !s.is_empty()))
+    }
+
+    /// ⌘A goes to its view; undo, redo and cut to its field, while it has one.
+    fn edit_command(&self, wb: &mut Workbench, id: &str) -> Option<bool> {
+        match id {
+            "select_all" => wb.modal_view_command(id),
+            _ => wb.modal_view_field_command(id),
+        }
+    }
+
+    fn paste(&self, wb: &mut Workbench, text: &mut TextSystem, line: &str) -> Option<bool> {
+        wb.modal_view_text(text, line)
+    }
 }
 
 struct AboutSlot;
@@ -654,6 +847,44 @@ impl OverlaySlot for AboutSlot {
 struct SettingsSlot;
 
 impl OverlaySlot for SettingsSlot {
+    fn input<'a>(&self, wb: &'a Workbench) -> Option<&'a ui_kit::TextInput> {
+        Some(wb.settings.query_input())
+    }
+
+    fn input_mut<'a>(&self, wb: &'a mut Workbench) -> Option<&'a mut ui_kit::TextInput> {
+        Some(wb.settings.query_input_mut())
+    }
+
+    /// A settings card playing its picture (Relax mode's scenes), at its pace.
+    fn frame_deadline(&self, wb: &Workbench) -> Option<std::time::Instant> {
+        wb.settings_card_deadline()
+    }
+
+    fn held(&self, wb: &mut Workbench) -> bool {
+        wb.settings.slider_held() || wb.settings.scrollbar_held()
+    }
+
+    /// A scrollbar held (the navigation's, the content's, a dropdown list's) follows; a held
+    /// slider chooses each stop it reaches (saved, shown).
+    fn drag(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point) -> Option<bool> {
+        if wb.settings.scrollbar_held() {
+            return Some(wb.settings.drag_scrollbar(p));
+        }
+        if !wb.settings.slider_held() {
+            return None;
+        }
+        let Some(SettingsAction::Choose { block, key, value }) = wb.settings.drag(p) else {
+            return Some(false);
+        };
+        wb.settings_choose(block, key, value);
+        wb.settings_model.blocks = wb.settings_blocks();
+        Some(true)
+    }
+
+    fn release(&self, wb: &mut Workbench, _: &mut TextSystem) -> Option<bool> {
+        wb.settings.release().then_some(true)
+    }
+
     fn is_open(&self, wb: &Workbench) -> bool {
         wb.settings.is_open()
     }
@@ -767,6 +998,29 @@ impl OverlaySlot for SettingsSlot {
 struct ProjectsMenuSlot;
 
 impl OverlaySlot for ProjectsMenuSlot {
+    /// A row pressed: it may be dragged into a group (the moves follow it).
+    fn held(&self, wb: &mut Workbench) -> bool {
+        wb.home.projects_menu.pressed()
+    }
+
+    fn drag(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point) -> Option<bool> {
+        let menu = &mut wb.home.projects_menu;
+        menu.pressed().then(|| menu.drag(p))
+    }
+
+    /// The press ends: the row's action (a click) or a move (a drop).
+    fn release(&self, wb: &mut Workbench, _: &mut TextSystem) -> Option<bool> {
+        wb.release_projects_list(true)
+    }
+
+    fn input<'a>(&self, wb: &'a Workbench) -> Option<&'a ui_kit::TextInput> {
+        Some(&wb.home.projects_menu.query)
+    }
+
+    fn input_mut<'a>(&self, wb: &'a mut Workbench) -> Option<&'a mut ui_kit::TextInput> {
+        Some(&mut wb.home.projects_menu.query)
+    }
+
     fn is_open(&self, wb: &Workbench) -> bool {
         wb.home.projects_menu.is_open()
     }

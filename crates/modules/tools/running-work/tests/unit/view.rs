@@ -231,10 +231,14 @@ fn the_list_s_scrollbar_thumb_is_dragged() {
         view
     };
     // Along the box's right edge, near its top (the thumb at rest there).
-    let grab = |count: usize, text: &mut TextSystem| {
+    let grab = |count: usize, asked: bool, text: &mut TextSystem| {
         (100..200).step_by(4).any(|y| {
             (0..40).any(|dx| {
                 let mut view = opened(count, text);
+                if asked {
+                    // Back to the question: the bar drawn before isn't shown any more.
+                    view.set_data(&prompt(1));
+                }
                 let p = Point::new(bounds.max_x() - 24.0 - dx as f32, y as f32);
                 view.hover(p);
                 Viewer::press(&mut view, p, 1);
@@ -244,6 +248,7 @@ fn the_list_s_scrollbar_thumb_is_dragged() {
             })
         })
     };
-    assert!(grab(30, &mut text), "the thumb dragged scrolls the list");
-    assert!(!grab(3, &mut text), "all shown: no scrollbar to take");
+    assert!(grab(30, false, &mut text), "the thumb dragged scrolls the list");
+    assert!(!grab(3, false, &mut text), "all shown: no scrollbar to take");
+    assert!(!grab(30, true, &mut text), "the question has no list: its bar isn't hit");
 }

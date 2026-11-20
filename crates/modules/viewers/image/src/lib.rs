@@ -39,6 +39,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Images",
     description: "Opens images (PNG, JPEG, GIF, WebP, BMP, ICO, SVG) as images, with zoom, rotation, flipping and saving",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "image", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 const ICONS: &[IconSvg] = &[

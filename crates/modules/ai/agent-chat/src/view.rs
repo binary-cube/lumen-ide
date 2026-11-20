@@ -20,12 +20,14 @@ use contracts::terminal::{RunInTerminal, TerminalPlace};
 use i18n::t;
 use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
     Asked, EdgeScrollbar, KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
 };
 use ui_kit::{TextInput, draw_text};
 
+use crate::field::ChatField;
 use crate::layout::{self, Ink, Laid, Link};
 
 /// What the tab is opened with.
@@ -74,6 +76,11 @@ const COLUMN: f32 = 820.0;
 const FIELD_H: f32 = 44.0;
 const LINE: f32 = 1.55;
 
+/// The places of the conversation's scrollbar and of the field among its controls (see
+/// [`ChatView::with_controls`]).
+const BAR: usize = 0;
+const FIELD: usize = 1;
+
 pub struct ChatView {
     start: Option<ChatStart>,
     phase: Phase,
@@ -90,6 +97,8 @@ pub struct ChatView {
     /// Following the end while it grows (scrolled up: left where it is).
     following: bool,
     bar: EdgeScrollbar,
+    /// Its controls' state of use (see [`ChatView::with_controls`]).
+    controls: Controls,
     area: Rect,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
@@ -119,6 +128,8 @@ impl Default for ChatView {
             max_scroll: 0.0,
             following: true,
             bar: EdgeScrollbar::default(),
+            // A press beside the field leaves it the keys (and its selection the copy's).
+            controls: Controls::sticky(),
             area: Rect::default(),
             hits: Vec::new(),
             hover: None,
@@ -141,6 +152,22 @@ impl std::fmt::Debug for ChatView {
 }
 
 impl ChatView {
+    /// Its controls (the conversation's scrollbar, the field to write in), the topmost
+    /// first. The field is its only one with keys: given them the first time, it keeps them
+    /// whatever is pressed (sticky).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut conversation = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut field = ChatField { input: &mut self.input, area: self.field, buttons: &self.hits };
+        let mut parts: [&mut dyn Control; 2] = [&mut conversation, &mut field];
+        if self.controls.focused().is_none() {
+            self.controls.focus(&mut parts, Some(FIELD));
+        }
+        f(&mut self.controls, &mut parts)
+    }
+
     fn agent(&self) -> Option<Arc<dyn agents::AgentProvider>> {
         agents::provider(self.start.as_ref()?.agent)
     }
@@ -696,10 +723,15 @@ impl Viewer for ChatView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            self.following = false;
-            return None;
+        match self.with_controls(|c, parts| c.press(parts, p, 1)) {
+            // The scrollbar's thumb held (or jumped to): no longer following the end.
+            Some((BAR, _)) => {
+                self.following = false;
+                return None;
+            }
+            // The field: its caret put there.
+            Some(_) => return self.action.take(),
+            None => {}
         }
         match self.hit_at(p) {
             Some(Hit::Send) => {
@@ -712,25 +744,25 @@ impl Viewer for ChatView {
             Some(Hit::Link(Link::Diff { item, diff })) => self.compare(item, diff),
             Some(Hit::Install) => self.install(),
             Some(Hit::Terminal) => self.move_to_terminal(),
-            None if self.field.contains(p) => self.input.press(p.x, 1),
             None => {}
         }
         self.action.take()
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        self.scroll = offset;
+        if self.with_controls(|c, parts| c.drag(parts, p)).is_none() {
+            return false;
+        }
         self.following = self.scroll >= self.max_scroll - 1.0;
         true
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let mut changed = self.bar.hover(p);
+        let mut changed = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         let hit = self.hit_at(p);
         changed |= hit != self.hover;
         self.hover = hit;
@@ -741,7 +773,7 @@ impl Viewer for ChatView {
         if self.hit_at(p).is_some() {
             return Some(ViewerCursor::Pointer);
         }
-        self.field.contains(p).then_some(ViewerCursor::Text)
+        self.controls.cursor_at(p)
     }
 
     fn wants_text(&self) -> bool {
@@ -749,43 +781,29 @@ impl Viewer for ChatView {
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.input.insert(&typed);
-        true
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.input.insert(&text.replace(['\r', '\n'], " "));
-        true
+        self.with_controls(|c, parts| c.paste(parts, text)).is_some()
     }
 
+    /// What the field has selected (it has the keys): lent read-only as the bare field,
+    /// whose selection reads as the chat field's.
     fn selected_text(&self) -> Option<String> {
-        let selected = self.input.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| (i == FIELD).then_some(&self.input as &dyn Control))
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         match key {
             ViewerKey::Enter => self.send(),
             ViewerKey::Escape => self.stop(),
-            _ => reach.edit(&mut self.input, key),
+            _ => self.with_controls(|c, parts| c.key(parts, key, reach)).is_some(),
         }
     }
 
     fn command(&mut self, id: &str) -> bool {
-        match id {
-            "select_all" => {
-                self.input.select_all();
-                true
-            }
-            "undo" => self.input.undo(),
-            "redo" => self.input.redo(),
-            "cut" if !self.input.selected_text().is_empty() => {
-                self.input.insert("");
-                true
-            }
-            _ => false,
-        }
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {

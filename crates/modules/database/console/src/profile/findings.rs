@@ -135,35 +135,17 @@ impl FindingsList {
         Some(ui_components::Tip::new(*r, tip.clone()))
     }
 
-    /// The bar's press (`true`: on it).
-    pub fn press_bar(&mut self, p: Point) -> bool {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            return true;
-        }
-        false
+    /// Its scrollbar and the offset it moves, as a control of the view's.
+    pub fn thumb(&mut self) -> ui_components::control::Thumb<'_> {
+        ui_components::control::Thumb { bar: &mut self.bar, offset: &mut self.scroll }
     }
 
-    pub fn drag(&mut self, p: Point) -> bool {
-        match self.bar.drag(p) {
-            Some(offset) => {
-                self.scroll = offset;
-                true
-            }
-            None => false,
-        }
-    }
-
-    pub fn release(&mut self) -> bool {
-        self.bar.release()
-    }
-
+    /// The mouse at `p`: the row under it lit (its scrollbar is the view's control).
     pub fn hover(&mut self, p: Point) -> bool {
-        let bar = self.bar.hover(p);
         let hit = self.hit(p);
         let changed = hit != self.hover;
         self.hover = hit;
-        changed || bar
+        changed
     }
 
     pub fn scroll_by(&mut self, dy: f32) -> bool {

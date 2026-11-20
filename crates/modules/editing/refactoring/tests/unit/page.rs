@@ -1,4 +1,37 @@
 use super::*;
+use render_api::Scene;
+use text_layout::TextSystem;
+use ui_components::{Viewer, ViewerPaint};
+
+/// How far in from the page's right edge its scrollbar's lane is pressed.
+const LANE_INSET: f32 = 4.0;
+/// How far below the page's top its thumb (scrolled to the top) is pressed.
+const THUMB_INSET: f32 = 6.0;
+
+/// Paints `view` in a `w` × `h` group at scale 1.
+pub(crate) fn paint(view: &mut dyn Viewer, w: f32, h: f32) {
+    let (palette, icons) = (ui_components::Palette::dark(), icons::Icons::builtin());
+    let (mut text, mut scene) = (TextSystem::new(), Scene::default());
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, w, h),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+}
+
+/// Presses the page's thumb (scrolled to the top) of a view `w` wide, drags it `by` down
+/// and lets go, through the view's own methods.
+pub(crate) fn drag_thumb(view: &mut dyn Viewer, w: f32, by: f32) {
+    let thumb = Point::new(w - LANE_INSET, THUMB_INSET);
+    assert_eq!(view.click(thumb), None, "the thumb takes the press");
+    assert!(view.drag(Point::new(thumb.x, thumb.y + by)), "the page moved");
+    assert!(view.release(), "the thumb let go");
+}
 
 /// A page too short for its form and the list: down, the form goes up first, then the list
 /// would scroll; up, the form comes back. A page that fits doesn't scroll.

@@ -630,6 +630,94 @@ impl MultilineField {
     }
 }
 
+/// A field of several lines as a form's control: a press puts the caret (⇧ extends, two a
+/// word, three a line), a drag selects, its scrollbar's thumb is held; with the focus it
+/// takes the text, the editing keys (↵ a new line) and the edit commands.
+impl crate::control::Control for MultilineField {
+    fn hit(&self, p: Point) -> bool {
+        self.contains(p)
+    }
+
+    fn press_with(
+        &mut self,
+        p: Point,
+        clicks: u32,
+        mods: crate::PressMods,
+    ) -> crate::control::Press {
+        if MultilineField::press(self, p, clicks, mods.shift) {
+            crate::control::Press::Held
+        } else {
+            crate::control::Press::Ignored
+        }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        MultilineField::drag(self, p)
+    }
+
+    fn release(&mut self) -> bool {
+        MultilineField::release(self)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        MultilineField::hover(self, p.unwrap_or(crate::control::NOWHERE))
+    }
+
+    fn cursor(&self, _p: Point) -> Option<crate::ViewerCursor> {
+        Some(crate::ViewerCursor::Text)
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        self.scroll_by(dy)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: crate::ViewerKey, reach: crate::KeyReach) -> bool {
+        use crate::ViewerKey;
+        let crate::KeyReach { word, extend } = reach;
+        match key {
+            ViewerKey::Backspace => self.backspace(word),
+            ViewerKey::Delete => self.delete(),
+            ViewerKey::Left => self.left(word, extend),
+            ViewerKey::Right => self.right(word, extend),
+            ViewerKey::Up => self.vertical(false, extend),
+            ViewerKey::Down => self.vertical(true, extend),
+            ViewerKey::Home => self.home(word, extend),
+            ViewerKey::End => self.end(word, extend),
+            ViewerKey::Enter => self.newline(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.insert(typed);
+        true
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Some(MultilineField::selected_text(self).to_owned()).filter(|s| !s.is_empty())
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        match id {
+            "select_all" => self.select_all(),
+            "cut" => self.insert(""),
+            "undo" => return self.undo(),
+            "redo" => return self.redo(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        self.next_frame()
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/multiline.rs"]
 mod tests;

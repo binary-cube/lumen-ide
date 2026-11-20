@@ -2,6 +2,212 @@
 
 use super::*;
 
+use ui_components::control::{Control, Controls, Divider, ScrollThumb, Shown, Thumb};
+use ui_components::date_range::{RangeAnswer, RangePart};
+
+use super::parts::{BarField, DatePart, FilesSeam};
+use crate::parts::{Tune, Tuned};
+
+/// The places of its parts in [`LogView::with_controls`]: the Date picker (over everything
+/// while open), the files' separator, the files' tree, the panels' scrollbars, the
+/// separators between the panels, then the filter bar's field (never hit: it only takes the
+/// keys while typed in).
+const DATE: usize = 0;
+const SPLIT: usize = 1;
+const TREE: usize = 2;
+const SEPARATORS: std::ops::Range<usize> = 6..8;
+const FIELD: usize = 8;
+
+impl LogView {
+    /// Its parts used as controls, the topmost first, with their state of use (see the
+    /// places above). The separators between the panels take the pointer only where nothing
+    /// of the view is (`free`); the files' separator, the tree and the scrollbars only while
+    /// no filter's list is open over them (`listless`: a press then only closes it). Where a
+    /// separator was dragged to, the panels follow. The open Date picker has the focus (the
+    /// part that had it gets it back when it closes). The bar's field typed in takes the keys
+    /// over the focus, the text typed going on to the files' search while it has it. The
+    /// bar's presses and its lists keep their own way.
+    fn with_controls<R>(
+        &mut self,
+        (free, listless): (bool, bool),
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut at = [None; 2];
+        let mut split_at = None;
+        let files = !self.chosen.is_empty() && self.hits.iter().any(|(_, h)| *h == Hit::Files);
+        let open = self.bar.picker.is_some();
+        // The focus as it will be once the Date picker has taken it or given it back (below):
+        // the files' search has the text while their tree has it.
+        let refocus = match self.controls.focused() {
+            Some(DATE) if !open => Some(self.before_picker.take()),
+            focused if open && focused != Some(DATE) => {
+                self.before_picker = focused;
+                Some(Some(DATE))
+            }
+            _ => None,
+        };
+        let tree_shown = listless && files;
+        let tree_focused = refocus.unwrap_or(self.controls.focused()) == Some(TREE);
+        let text_elsewhere = tree_shown && tree_focused && self.tree.searching;
+        let answer = {
+            // The Date picker closed, the files' separator not made yet: their places take
+            // nothing.
+            let mut date = self.bar.picker.as_mut().map(|picker| DatePart {
+                part: RangePart { picker, answer: &mut self.date_answer },
+            });
+            let mut seam = self.files_split.as_mut().map(|splitter| FilesSeam {
+                splitter,
+                at: &mut split_at,
+                reset: &mut self.split_reset,
+            });
+            let split_shown = listless && !self.chosen.is_empty();
+            let mut split = Shown { part: &mut seam, shown: split_shown };
+            let mut tree = ui_components::changed_files::TreePart {
+                tree: &mut self.tree,
+                event: &mut self.opened,
+            };
+            let tune = Tune { keeps_tab: true, ..Tune::default() };
+            let mut tree = Tuned { part: &mut tree, tune };
+            let mut tree = Shown { part: &mut tree, shown: tree_shown };
+            let mut details =
+                ScrollThumb { bar: &mut self.detail_bar, scroll: &mut self.detail_scroll };
+            let mut details = Shown { part: &mut details, shown: listless };
+            let mut commits = Thumb { bar: &mut self.list_bar, offset: &mut self.scroll };
+            let mut commits = Shown { part: &mut commits, shown: listless };
+            let mut branches =
+                Thumb { bar: &mut self.branches_bar, offset: &mut self.branches_scroll };
+            let mut branches = Shown { part: &mut branches, shown: listless };
+            let [first, second] = &mut self.splitters;
+            let [at_first, at_second] = &mut at;
+            let mut left = Divider { splitter: first, at: at_first };
+            let mut left = Shown { part: &mut left, shown: free && listless };
+            let mut right = Divider { splitter: second, at: at_second };
+            let mut right = Shown { part: &mut right, shown: free && listless };
+            let mut field = BarField {
+                focus: &mut self.bar.focus,
+                text: &mut self.bar.text,
+                branches: &mut self.bar.branch_query,
+                popup: &mut self.bar.popup,
+                picker_open: open,
+                text_elsewhere,
+                answer: &mut self.field_answer,
+            };
+            let mut parts: [&mut dyn Control; 9] = [
+                &mut date,
+                &mut split,
+                &mut tree,
+                &mut details,
+                &mut commits,
+                &mut branches,
+                &mut left,
+                &mut right,
+                &mut field,
+            ];
+            if let Some(to) = refocus {
+                self.controls.focus(&mut parts, to);
+            }
+            f(&mut self.controls, &mut parts)
+        };
+        for (i, x) in at.into_iter().enumerate() {
+            if let Some(x) = x {
+                self.drag_separator(i, x);
+            }
+        }
+        if let Some(y) = split_at {
+            self.drag_files_split(y);
+        }
+        answer
+    }
+
+    /// The details' files have the keys.
+    pub(super) fn files_focused(&self) -> bool {
+        self.controls.focused() == Some(TREE)
+    }
+
+    /// The keys given to the details' files (a file's menu asked for).
+    pub(super) fn focus_files(&mut self) {
+        self.with_controls((true, true), |c, parts| c.focus(parts, Some(TREE)));
+    }
+
+    /// The keys taken from the details' files (a press elsewhere).
+    fn unfocus_files(&mut self) {
+        if self.files_focused() {
+            self.with_controls((true, true), |c, parts| c.focus(parts, None));
+        }
+    }
+
+    /// What the Date picker answered: a press outside it closes it (on another pill, that
+    /// one's list opens).
+    fn take_date_answer(&mut self, p: Point) {
+        match self.date_answer.take() {
+            Some(RangeAnswer::Chose(event)) => self.picker_event(event),
+            Some(RangeAnswer::Outside) => {
+                self.close_popup();
+                if let Some(Hit::Pill(kind)) = self.hit(p)
+                    && kind != filters::FilterKind::Date
+                {
+                    self.toggle_popup(kind);
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// What the files' tree opened: the change beside.
+    fn take_opened(&mut self) -> Option<ViewerAction> {
+        match self.opened.take()? {
+            crate::files_tree::TreeEvent::Open(i) => self.compare_file(i),
+        }
+    }
+
+    /// Text typed or `pasted`: to the bar's field typed in (unless the files' search has
+    /// it), else to the part with the focus; the Date picker open takes all of it. `true` if
+    /// one took it.
+    fn take_text(&mut self, text: &str, pasted: bool) -> bool {
+        let took = self.with_controls((true, true), |c, parts| {
+            if !pasted {
+                return c.text(parts, text);
+            }
+            // A paste the field leaves (the files' search has the text) goes on to the part
+            // with the focus, as typed text does.
+            c.paste(parts, text).or_else(|| c.text(parts, text))
+        });
+        self.take_field_answer();
+        took.is_some()
+    }
+
+    /// A key for the part taking the keys (the Date picker, the bar's field typed in, the
+    /// files' tree): `true` if it took it.
+    fn part_key(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
+        // Nothing has the focus nor takes the keys (the open picker gets the focus as its
+        // parts are made): Tab doesn't give it to a part either.
+        if self.controls.focused().is_none()
+            && self.bar.picker.is_none()
+            && self.bar.focus.is_none()
+        {
+            return false;
+        }
+        let Some(part) = self.with_controls((true, true), |c, parts| c.key(parts, key, reach))
+        else {
+            return false;
+        };
+        match part {
+            DATE => {
+                if let Some(RangeAnswer::Chose(event)) = self.date_answer.take() {
+                    self.picker_event(event);
+                }
+            }
+            FIELD => self.take_field_answer(),
+            _ => {
+                if self.opened.is_some() {
+                    self.pending = self.take_opened();
+                }
+            }
+        }
+        true
+    }
+}
+
 impl Viewer for LogView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
         if let Some(sizes) = data.downcast_ref::<workbench_model::LayoutSizes>() {
@@ -141,59 +347,40 @@ impl Viewer for LogView {
     fn wants_text(&self) -> bool {
         self.bar.focus.is_some()
             || self.bar.picker.is_some()
-            || (self.files_focus && self.tree.searching)
+            || (self.files_focused() && self.tree.searching)
     }
 
+    /// To the part with the focus (the Date picker: its field, or Space picking the day
+    /// the keys are on; the files' search), else to the filter bar's field with the keys.
     fn text_input(&mut self, typed: &str) -> bool {
-        // The picker: its field, or Space picking the day the keys are on.
-        if let Some(picker) = &mut self.bar.picker {
-            return picker.text_input(typed) || (typed == " " && picker.space());
-        }
-        if self.files_focus && self.tree.text_input(typed) {
-            return true;
-        }
-        self.filter_text_input(typed)
+        self.take_text(typed, false)
     }
 
+    /// Its first line, as typed (to the part with the focus as pasted).
     fn paste(&mut self, text: &str) -> bool {
-        let line = text.lines().next().unwrap_or_default();
-        if let Some(picker) = &mut self.bar.picker {
-            return picker.text_input(line);
-        }
-        if self.files_focus && self.tree.text_input(line) {
-            return true;
-        }
-        self.filter_text_input(line)
+        self.take_text(text.lines().next().unwrap_or_default(), true)
     }
 
-    /// What's selected in the field with the keys.
+    /// What's selected in the field with the keys (read from `&self`: each its own).
     fn selected_text(&self) -> Option<String> {
         if let Some(picker) = &self.bar.picker {
             return picker.selected_text();
         }
-        if self.files_focus && self.tree.searching {
+        if self.files_focused() && self.tree.searching {
             return self.tree.selected_text();
         }
         self.field_selection()
     }
 
+    /// The Date picker open has every key; then the filter bar's field typed in; the files'
+    /// search with its reach (⌥ by word, ⇧ selecting).
     fn edit_key_with(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
-        if let Some(picker) = &mut self.bar.picker {
-            if let Some(event) = picker.key(key, reach) {
-                self.picker_event(event);
-            }
+        // The picker open (it has the focus as its parts are made).
+        if self.bar.picker.is_some() {
+            self.part_key(key, reach);
             return true;
         }
-        if self.filter_key(key, reach) {
-            return true;
-        }
-        if self.files_focus
-            && self.tree.searching
-            && let Some(event) = self.tree.key_with(key, reach)
-        {
-            if let Some(crate::files_tree::TreeEvent::Open(i)) = event {
-                self.pending = self.compare_file(i);
-            }
+        if (self.bar.focus.is_some() || self.tree.searching) && self.part_key(key, reach) {
             return true;
         }
         self.edit_key(key)
@@ -203,8 +390,9 @@ impl Viewer for LogView {
         if self.bar.picker.is_some() {
             return self.edit_key_with(key, ui_components::KeyReach::default());
         }
+        // A field of the bar typed in: it has every key.
         if self.bar.focus.is_some() {
-            return self.filter_key(key, ui_components::KeyReach::default());
+            return self.part_key(key, ui_components::KeyReach::default());
         }
         // A list open without a search (the order's): its keys, as its footer says.
         if let Some(popup) = &self.bar.popup {
@@ -225,12 +413,7 @@ impl Viewer for LogView {
             return true;
         }
         // The files' tree has the keys: its own (↵: the change beside).
-        if self.files_focus
-            && let Some(event) = self.tree.key(key)
-        {
-            if let Some(crate::files_tree::TreeEvent::Open(i)) = event {
-                self.pending = self.compare_file(i);
-            }
+        if self.part_key(key, ui_components::KeyReach::default()) {
             return true;
         }
         let last = self.rows.len().saturating_sub(1);
@@ -266,15 +449,14 @@ impl Viewer for LogView {
             self.reload();
             return true;
         }
-        // The app's edit commands, for the field with the keys (the picker's, the files'
-        // search too).
-        if let Some(picker) = &mut self.bar.picker {
-            return picker.command(id);
+        // The app's edit commands, for the part taking the keys (the picker's fields, the
+        // bar's field typed in, the files' search).
+        if self.bar.picker.is_some() {
+            return self.with_controls((true, true), |c, parts| c.command(parts, id)).is_some();
         }
-        if self.field_command(id) {
-            return true;
-        }
-        if self.files_focus && self.tree.command(id) {
+        let took = self.with_controls((true, true), |c, parts| c.command(parts, id));
+        self.take_field_answer();
+        if took.is_some() {
             return true;
         }
         // A filter's list opened (`filter:branch`…), the text filter set (`filter-text:…`).
@@ -302,16 +484,21 @@ impl Viewer for LogView {
         self.pending.take()
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
         // Over the open list: it scrolls.
         if let Some(popup) = self.bar.popup.as_mut().filter(|p| p.rect.contains(self.pointer)) {
             let before = popup.scroll;
             popup.scroll = (popup.scroll + dy).max(0.0);
             return popup.scroll != before;
         }
-        // Over the files: they scroll.
-        if self.tree.contains(self.pointer) && !self.chosen.is_empty() {
-            return self.tree.scroll_by(dy);
+        // Over the files: they scroll (at their end, nothing under them does).
+        let pointer = self.pointer;
+        let (scrolled, over_files) = self.with_controls((true, true), |c, parts| {
+            let over_files = parts[TREE].hit(pointer);
+            (c.scroll(parts, pointer, dx, dy), over_files)
+        });
+        if scrolled.is_some() || over_files {
+            return scrolled.is_some();
         }
         // Over the details: they scroll (never past their end).
         if self.details_panel.contains(self.pointer) {
@@ -334,43 +521,19 @@ impl Viewer for LogView {
         if self.drag_field(p) {
             return true;
         }
-        if self.tree.drag(p) {
-            return true;
-        }
-        if self.detail_bar.is_dragging() {
-            return self.detail_bar.drag(p).is_some_and(|o| self.detail_scroll.scroll_to(o));
-        }
-        if let Some(offset) = self.list_bar.drag(p) {
-            self.scroll = offset;
-            return true;
-        }
-        if let Some(offset) = self.branches_bar.drag(p) {
-            self.branches_scroll = offset;
-            return true;
-        }
-        if let Some(y) = self.files_split.as_ref().and_then(|s| s.drag_to(p)) {
-            self.drag_files_split(y);
-            return true;
-        }
-        let Some(i) = self.splitters.iter().position(Splitter::is_dragging) else { return false };
-        if let Some(x) = self.splitters[i].drag_to(p) {
-            self.drag_separator(i, x);
-        }
-        true
+        // A separator held follows the pointer even where it can't go further.
+        let dragged = self.with_controls((true, true), |c, parts| c.drag(parts, p));
+        dragged.is_some_and(|(i, moved)| moved || SEPARATORS.contains(&i))
     }
 
     fn release(&mut self) -> bool {
         self.field_drag = false;
-        if self.tree.release()
-            | self.detail_bar.release()
-            | self.list_bar.release()
-            | self.branches_bar.release()
-        {
-            return true;
-        }
-        let released = self.splitters.iter_mut().fold(false, |any, s| s.end_drag() | any)
-            | self.files_split.as_mut().is_some_and(Splitter::end_drag);
-        if released {
+        let Some((i, released)) = self.with_controls((true, true), |c, parts| c.release(parts))
+        else {
+            return false;
+        };
+        // A separator let go: the widths and the files' share are kept.
+        if released && (SEPARATORS.contains(&i) || i == SPLIT) {
             self.keep_widths();
         }
         released
@@ -378,17 +541,12 @@ impl Viewer for LogView {
 
     fn is_animating(&self) -> bool {
         // Typing in the text filter: frames until it applies.
-        self.splitters.iter().any(Splitter::is_animating)
-            || self.files_split.as_ref().is_some_and(Splitter::is_animating)
-            || self.bar.typed_at.is_some()
+        self.controls.is_animating() || self.bar.typed_at.is_some()
     }
 
     /// Its scrollbars fading in or out: a frame when they next change.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        [self.list_bar.next_frame(), self.branches_bar.next_frame(), self.tree.next_frame()]
-            .into_iter()
-            .flatten()
-            .min()
+        self.controls.next_frame()
     }
 
     fn is_loading(&self) -> bool {
@@ -410,36 +568,50 @@ impl Viewer for LogView {
         clicks: u32,
         mods: ui_components::PressMods,
     ) -> Option<ViewerAction> {
-        // The Date filter's picker: its parts; a press outside closes it (another pill: that
-        // one opens).
-        if let Some(picker) = &mut self.bar.picker {
-            match picker.press(p) {
-                Some(Some(event)) => self.picker_event(event),
-                Some(None) => {}
-                None => {
-                    self.close_popup();
-                    if let Some(Hit::Pill(kind)) = self.hit(p)
-                        && kind != filters::FilterKind::Date
-                    {
-                        self.toggle_popup(kind);
-                    }
-                }
-            }
-            return None;
-        }
-        // The separator between the details' files and the commit (over both).
-        if self.bar.popup.is_none()
-            && !self.chosen.is_empty()
-            && let Some(split) = self.files_split.as_mut().filter(|s| s.contains(p))
-        {
-            if clicks >= 2 {
-                self.reset_files_split();
-            } else {
-                split.begin_drag(p);
-            }
-            return None;
-        }
+        // Its parts: the Date filter's picker (a press outside closes it; another pill: that
+        // one opens), the separator between the details' files and the commit (over both),
+        // the files' tree (a double click: the change beside; Tree / List kept), a panel's
+        // scrollbar (its thumb taken, or the content jumped there), where nothing else is a
+        // separator grabbed. An open filter's list keeps them from a press (it closes).
         let hit = self.hit(p);
+        let gates = (hit.is_none(), self.bar.popup.is_none());
+        let flat = self.tree.flat;
+        let pressed = self.with_controls(gates, |c, parts| {
+            let had = c.focused();
+            let pressed = c.press(parts, p, clicks);
+            if pressed.is_none() {
+                c.focus(parts, had);
+            }
+            pressed
+        });
+        match pressed {
+            Some((DATE, _)) => {
+                self.take_date_answer(p);
+                return None;
+            }
+            Some((SPLIT, _)) => {
+                if std::mem::take(&mut self.split_reset) {
+                    self.reset_files_split();
+                }
+                return None;
+            }
+            Some((TREE, _)) => {
+                self.bar.focus = None;
+                if self.tree.flat != flat
+                    && let Some(sizes) = &self.sizes
+                {
+                    let mode = if self.tree.flat { 1.0 } else { 0.0 };
+                    sizes.set(crate::files_tree::LIST_MODE, mode);
+                }
+                return self.take_opened();
+            }
+            Some(_) => {
+                self.bar.focus = None;
+                self.unfocus_files();
+                return None;
+            }
+            None => {}
+        }
         // Outside the open list: it closes (and the press does nothing else).
         if self.bar.popup.is_some()
             && !matches!(
@@ -467,46 +639,16 @@ impl Viewer for LogView {
         if let Some(hit) = hit
             && self.press_filter(hit, p, clicks)
         {
-            self.files_focus = false;
+            self.unfocus_files();
             return None;
         }
-        // The files: their tree (a double click: the change beside); Tree / List kept.
+        // The files where their tree takes nothing: they keep the keys.
         if hit == Some(Hit::Files) {
-            self.files_focus = true;
-            let flat = self.tree.flat;
-            let event = self.tree.press(p, clicks).flatten();
-            if self.tree.flat != flat
-                && let Some(sizes) = &self.sizes
-            {
-                sizes.set(crate::files_tree::LIST_MODE, if self.tree.flat { 1.0 } else { 0.0 });
-            }
-            return match event {
-                Some(crate::files_tree::TreeEvent::Open(i)) => self.compare_file(i),
-                None => None,
-            };
-        }
-        self.files_focus = false;
-        // The details' scrollbar: its thumb taken (or the content jumped there).
-        if let Some(offset) = self.detail_bar.press(p) {
-            self.detail_scroll.scroll_to(offset);
+            self.focus_files();
             return None;
         }
-        // The commits' and the branches' bars (when shown).
-        if let Some(offset) = self.list_bar.press(p) {
-            self.scroll = offset;
-            return None;
-        }
-        if let Some(offset) = self.branches_bar.press(p) {
-            self.branches_scroll = offset;
-            return None;
-        }
-        let Some(hit) = hit else {
-            // On a separator: grabbed.
-            if let Some(s) = self.splitters.iter_mut().find(|s| s.contains(p)) {
-                s.begin_drag(p);
-            }
-            return None;
-        };
+        self.unfocus_files();
+        let hit = hit?;
         match hit {
             // A folder opens / closes; a branch is chosen, its log shown; a double click
             // switches to it.
@@ -547,7 +689,7 @@ impl Viewer for LogView {
 
     /// A branch's commits to push and to pull, over its arrows; the files' buttons.
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
-        if let Some(tip) = self.tree.tooltip_at(p) {
+        if let Some(tip) = self.controls.tooltip_at(p) {
             return Some(tip);
         }
         let (r, i) = self.hits.iter().rev().find_map(|(r, h)| match h {
@@ -569,24 +711,12 @@ impl Viewer for LogView {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if let Some(picker) = &self.bar.picker {
-            return picker.rect().contains(p).then_some(if picker.over_field(p) {
-                ViewerCursor::Text
-            } else {
-                ViewerCursor::Pointer
-            });
+        // The Date picker open (the arrow outside it), the separators (one dragged keeps its
+        // cursor wherever the pointer goes: the drag notes it).
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
-        if let Some(split) = &self.files_split
-            && !self.chosen.is_empty()
-            && (split.is_dragging() || split.contains(p))
-        {
-            return Some(ViewerCursor::ResizeVertical);
-        }
-        let dragging = self.splitters.iter().any(Splitter::is_dragging);
         let hit = self.hit(p);
-        if dragging || (hit.is_none() && self.splitters.iter().any(|s| s.contains(p))) {
-            return Some(ViewerCursor::ResizeHorizontal);
-        }
         hit.map(|hit| match hit {
             Hit::TextField | Hit::PopupQuery | Hit::BranchSearch => ViewerCursor::Text,
             _ => ViewerCursor::Pointer,
@@ -595,28 +725,15 @@ impl Viewer for LogView {
 
     fn hover(&mut self, p: Point) -> bool {
         self.pointer = p;
-        if let Some(picker) = &mut self.bar.picker {
-            return picker.hover(p);
-        }
         let hover = self.hit(p);
-        let mut changed = (hover != self.hover)
-            | self.detail_bar.hover(p)
-            | self.tree.hover(p)
-            | self.list_bar.hover(p)
-            | self.branches_bar.hover(p);
-        self.hover = hover;
         // A separator lights up only where nothing else is.
-        let at = if hover.is_some() { Point::new(f32::MIN, f32::MIN) } else { p };
-        for s in &mut self.splitters {
-            changed |= s.hover(at);
+        let parts = self.with_controls((hover.is_none(), true), |c, parts| c.hover(parts, Some(p)));
+        // The Date picker open has the mouse over everything.
+        if self.controls.hovered() == Some(DATE) {
+            return parts;
         }
-        if let Some(split) = &mut self.files_split {
-            changed |= split.hover(if self.chosen.is_empty() {
-                Point::new(f32::MIN, f32::MIN)
-            } else {
-                p
-            });
-        }
+        let changed = (hover != self.hover) | parts;
+        self.hover = hover;
         changed
     }
 
@@ -808,5 +925,6 @@ impl Viewer for LogView {
         if let (Some((_, anchor)), Some(picker)) = (anchor.copied(), self.bar.picker.as_mut()) {
             picker.paint(ctx.scene, ctx.text, ctx.icons, &ds, anchor, b);
         }
+        self.with_controls((true, true), |c, parts| c.settle(parts));
     }
 }

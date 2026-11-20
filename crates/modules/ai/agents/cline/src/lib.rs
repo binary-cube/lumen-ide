@@ -24,6 +24,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Cline",
     description: "Cline as an agent the editor hosts: its sessions listed, started and taken up again",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "sparkles", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

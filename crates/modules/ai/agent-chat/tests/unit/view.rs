@@ -96,6 +96,43 @@ fn a_tool_s_change_and_another_width_are_laid_out() {
     assert!(v.laid[1].lines.len() > said.lines.len(), "wrapped narrower");
 }
 
+/// A conversation taller than its tab, scrolled to its top: the scrollbar's thumb, pressed
+/// and dragged, scrolls it (and it no longer follows the end).
+#[test]
+fn the_conversation_scrolls_by_its_thumb() {
+    let mut v = view();
+    // Already over (nothing started at the paint).
+    v.phase = Phase::Failed("stopped".into());
+    let said: String = (0..80).map(|i| format!("line {i}\n\n")).collect();
+    v.conversation.update(&json!({"sessionUpdate": "agent_message_chunk",
+        "content": {"type": "text", "text": said}}));
+    let (palette, icons) = (ui_components::Palette::dark(), icons::Icons::builtin());
+    let (mut text, bounds) = (text_layout::TextSystem::new(), Rect::new(0.0, 0.0, 900.0, 500.0));
+    let mut paint = |v: &mut ChatView| {
+        let mut scene = render_api::Scene::default();
+        v.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut v);
+    assert!(v.max_scroll > 0.0, "taller than its tab");
+    v.scroll(0.0, -v.max_scroll);
+    paint(&mut v);
+    let thumb = Point::new(bounds.max_x() - 4.0, bounds.min_y() + 6.0);
+    assert_eq!(v.click(thumb), None);
+    assert!(v.drag(Point::new(thumb.x, thumb.y + 40.0)));
+    assert!(v.scroll > 0.0, "scrolled down");
+    assert!(!v.following);
+    assert!(v.release());
+}
+
 /// A resumed session's weight: 20 edits of 2,000 lines, a long message streaming. Timed:
 /// one more chunk laid out, then another width (run with
 /// `cargo test -p agent-chat --release -- --ignored measure_ --nocapture`).
@@ -139,4 +176,16 @@ fn measure_laying_out_a_long_session() {
     let chunk = timed(&mut v, &mut text, 700.0, true);
     let width = timed(&mut v, &mut text, 701.0, false);
     eprintln!("lay_out: one more chunk {chunk:.2} ms, another width {width:.2} ms");
+}
+
+/// A paste reaches the field on one line; what it has selected is copied, still after a
+/// press beside it (it keeps the keys).
+#[test]
+fn a_paste_and_the_selection_are_the_field_s() {
+    let mut view = view();
+    assert!(view.paste("fix\nit"));
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("fix it"));
+    let _ = view.click(Point::new(-1000.0, -1000.0));
+    assert_eq!(view.selected_text().as_deref(), Some("fix it"), "the field kept the keys");
 }

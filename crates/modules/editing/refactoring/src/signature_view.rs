@@ -13,12 +13,15 @@ use refactor::signature::{Calls, NewParam, Param, SignatureContext, find_calls, 
 use refactor::{NameStyle, Plan, valid_name};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx, Tone, radius, space};
+use ui_components::tool_panel::KeyReach;
 use ui_components::{Viewer, ViewerAction, ViewerKey, ViewerPaint};
 use ui_kit::{TextInput, TextInputStyle, draw_text};
 
 use crate::page::{MIN_LIST, PageScroll};
-use crate::plan_list::PlanList;
+use crate::param_fields::{NAME, ParamFields, ParamRow, VALUE};
+use crate::plan_list::{Places, PlanList};
 use ui_components::ds::Pen;
 
 /// The extension of the view's virtual tab.
@@ -30,55 +33,12 @@ pub struct SignatureData {
     pub context: SignatureContext,
 }
 
-/// The table's columns.
-const NAME: usize = 0;
-const TYPE: usize = 1;
-const DEFAULT: usize = 2;
-const VALUE: usize = 3;
-
-/// A parameter's row: what it becomes and its fields.
-#[derive(Debug, Clone)]
-struct ParamRow {
-    new: NewParam,
-    fields: [TextInput; 4],
-}
-
-impl ParamRow {
-    fn new(new: NewParam) -> Self {
-        let p = new.param();
-        let value = match &new {
-            NewParam::Added { value, .. } => value.clone(),
-            NewParam::Kept { .. } => String::new(),
-        };
-        let field = |text: &str| TextInput::new(text);
-        let fields = [field(&p.name), field(&p.type_hint), field(&p.default), field(&value)];
-        Self { new, fields }
-    }
-
-    fn is_added(&self) -> bool {
-        matches!(self.new, NewParam::Added { .. })
-    }
-
-    /// The fields' text into the parameter.
-    fn sync(&mut self) {
-        let name = self.fields[NAME].text().trim().trim_start_matches('$').to_owned();
-        let type_hint = self.fields[TYPE].text().trim().to_owned();
-        let default = self.fields[DEFAULT].text().trim().to_owned();
-        let typed_value = self.fields[VALUE].text().trim().to_owned();
-        let param = self.new.param_mut();
-        param.name = name;
-        param.type_hint = type_hint;
-        param.default = default;
-        if let NewParam::Added { value, .. } = &mut self.new {
-            *value = typed_value;
-        }
-    }
-}
+/// The fields' place among the controls (see [`SignatureView::with_controls`]).
+const FIELDS: usize = 2;
 
 /// What a click hit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
-    Field(usize, usize),
     Up(usize),
     Down(usize),
     Remove(usize),
@@ -93,12 +53,20 @@ pub struct SignatureView {
     rows: Vec<ParamRow>,
     /// The field with the keyboard (row, column).
     focus: (usize, usize),
+    /// Each field drawn last, with its (row, column).
+    field_areas: Vec<(Rect, (usize, usize))>,
+    /// A key or a text reached a field: the parameter and the calls follow it.
+    typed: bool,
     calls: Option<Calls>,
     finding: Option<Receiver<Calls>>,
     cancel: Arc<AtomicBool>,
     plan: Option<Plan>,
     list: PlanList,
     page: PageScroll,
+    /// Its controls' state of use (see [`SignatureView::with_controls`]).
+    controls: Controls,
+    /// What a press on the places decided, taken by the click.
+    clicked: Option<ViewerAction>,
     action: Option<ViewerAction>,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
@@ -171,7 +139,11 @@ impl SignatureView {
         self.plan = Some(plan);
     }
 
+    /// A key or a text reached a field: its parameter and the calls follow it.
     fn edited(&mut self) {
+        if !std::mem::take(&mut self.typed) {
+            return;
+        }
         if let Some(row) = self.rows.get_mut(self.focus.0) {
             row.sync();
         }
@@ -179,39 +151,19 @@ impl SignatureView {
     }
 
     fn field(&mut self) -> Option<&mut TextInput> {
-        let (row, col) = self.focus;
-        self.rows.get_mut(row).map(|r| &mut r.fields[col])
+        crate::param_fields::field(&mut self.rows, self.focus)
     }
 
     /// Types `text` into the focused field.
     pub fn type_text(&mut self, text: &str) {
-        if let Some(field) = self.field() {
-            field.insert(text.lines().next().unwrap_or_default());
-        }
+        self.with_controls(|c, parts| c.text(parts, text));
         self.edited();
     }
 
     /// Focuses a field (`col` 3, the calls' value, only for a new parameter).
+    #[cfg(test)]
     fn focus_field(&mut self, row: usize, col: usize) {
-        let col =
-            if self.rows.get(row).is_some_and(ParamRow::is_added) { col } else { col.min(DEFAULT) };
-        self.focus = (row.min(self.rows.len().saturating_sub(1)), col);
-        if let Some(field) = self.field() {
-            field.end(false);
-        }
-    }
-
-    /// Tab: the next field (row by row).
-    fn next_field(&mut self) {
-        let (row, col) = self.focus;
-        let last = if self.rows.get(row).is_some_and(ParamRow::is_added) { VALUE } else { DEFAULT };
-        if col < last {
-            self.focus_field(row, col + 1);
-        } else if row + 1 < self.rows.len() {
-            self.focus_field(row + 1, NAME);
-        } else {
-            self.focus_field(0, NAME);
-        }
+        crate::param_fields::focus_field(&mut self.rows, &mut self.focus, row, col);
     }
 
     /// Moves a parameter by `delta` places.
@@ -290,10 +242,34 @@ impl SignatureView {
         let params = render_params(&self.new_params(), "", context.syntax.as_ref());
         format!("{}({params})", context.target.name)
     }
+
+    /// Its controls (the page's scrollbar, the places, the table's fields), the topmost
+    /// first. The fields are the page's only ones with keys: they have the focus from
+    /// `set_data` on.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut places =
+            Places { list: &mut self.list, plan: self.plan.as_mut(), clicked: &mut self.clicked };
+        let mut fields = ParamFields {
+            rows: &mut self.rows,
+            focus: &mut self.focus,
+            areas: &self.field_areas,
+            edited: &mut self.typed,
+        };
+        let mut parts: [&mut dyn Control; 3] = [&mut self.page, &mut places, &mut fields];
+        f(&mut self.controls, &mut parts)
+    }
 }
 
 impl Viewer for SignatureView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
+        // The keys' part from the first data on: a press beside it leaves it the focus.
+        if self.controls.focused().is_none() {
+            self.controls = Controls::sticky();
+            self.with_controls(|c, parts| c.focus(parts, Some(FIELDS)));
+        }
         let Some(data) = data.downcast_ref::<SignatureData>() else { return };
         let old = &data.context.target.old;
         self.rows = old
@@ -345,42 +321,15 @@ impl Viewer for SignatureView {
                 self.action = Some(ViewerAction::Close);
                 return true;
             }
-            ViewerKey::Tab => {
-                self.next_field();
-                return true;
-            }
-            ViewerKey::Up => {
-                self.focus_field(self.focus.0.saturating_sub(1), self.focus.1);
-                return true;
-            }
-            ViewerKey::Down => {
-                self.focus_field(self.focus.0 + 1, self.focus.1);
-                return true;
-            }
             _ => {}
         }
-        let Some(field) = self.field() else { return false };
-        match key {
-            ViewerKey::Backspace => field.backspace(false),
-            ViewerKey::Delete => field.delete(),
-            ViewerKey::Left => field.move_left(false, false),
-            ViewerKey::Right => field.move_right(false, false),
-            ViewerKey::Home => field.home(false),
-            ViewerKey::End => field.end(false),
-            _ => return false,
-        }
+        let used = self.with_controls(|c, parts| c.key(parts, key, KeyReach::default()));
         self.edited();
-        true
+        used.is_some()
     }
 
     fn command(&mut self, id: &str) -> bool {
-        if id == "select_all"
-            && let Some(field) = self.field()
-        {
-            field.select_all();
-            return true;
-        }
-        false
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {
@@ -388,21 +337,16 @@ impl Viewer for SignatureView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // The page's scrollbar; nothing under the keys.
-        if self.page.press(p) || !self.page.contains(p) {
+        // Nothing under the keys.
+        if !self.page.contains(p) {
             return None;
         }
-        if self.list.contains(p) {
-            return self.list.click(self.plan.as_mut()?, p);
+        // The page's scrollbar, a place, a field.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            return self.clicked.take();
         }
         let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
         match hit {
-            Hit::Field(row, col) => {
-                self.focus = (row, col);
-                if let Some(field) = self.field() {
-                    field.click(p.x);
-                }
-            }
             Hit::Up(row) => self.move_row(row, -1),
             Hit::Down(row) => self.move_row(row, 1),
             Hit::Remove(row) => self.remove_row(row),
@@ -417,7 +361,7 @@ impl Viewer for SignatureView {
         let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
         let changed = hover != self.hover;
         self.hover = hover;
-        self.list.hover(p) | self.page.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -425,11 +369,11 @@ impl Viewer for SignatureView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.page.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.page.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -437,6 +381,7 @@ impl Viewer for SignatureView {
             self.waker.clone_from(&ctx.waker);
         }
         self.hits.clear();
+        self.field_areas.clear();
         let ds = Ctx::new(ctx.palette, ctx.scale);
         let p = ctx.palette;
         let px = |v: f32| ds.px(v);
@@ -651,7 +596,7 @@ impl SignatureView {
             let placeholder =
                 if c == VALUE { t("refactor.param_value_hint") } else { String::new() };
             row.fields[c].paint(layer, text, field, focused, &placeholder, &style(border));
-            self.hits.push((field, Hit::Field(i, c)));
+            self.field_areas.push((field, (i, c)));
         }
         self.paint_row_buttons(Pen { layer, text, ds }, page, table, i, fy);
     }

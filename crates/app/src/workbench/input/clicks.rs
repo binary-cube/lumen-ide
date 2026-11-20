@@ -3,11 +3,10 @@
 use super::*;
 
 impl Workbench {
-    /// A click on the completion list, the empty screen, the top / status bar (no overlay
-    /// is open). `None`: not handled here.
+    /// A click on the empty screen, the top / status bar (no overlay is open). `None`: not handled here.
     pub(super) fn click_overlays(
         &mut self,
-        text: &mut TextSystem,
+        _text: &mut TextSystem,
         p: Point,
         clicks: u32,
     ) -> Option<MouseResult> {
@@ -16,21 +15,6 @@ impl Workbench {
             && let Some(result) = self.click_top_bar(p, clicks)
         {
             return Some(result);
-        }
-        if self.completion.is_open() {
-            // Its scrollbar: the list follows the thumb (a drag goes on).
-            if self.completion.scrollbar_press(p) {
-                return Some(MouseResult::StartDrag);
-            }
-            if self.completion.contains(p) {
-                self.completion.click(p);
-                return Some(if self.accept_completion(text) {
-                    MouseResult::Redraw
-                } else {
-                    MouseResult::None
-                });
-            }
-            self.completion.close();
         }
         // The empty screen: a click there gives it the keyboard (its search field), taking it
         // from the project panel's file search.
@@ -49,9 +33,6 @@ impl Workbench {
             return Some(result);
         }
         if let Some(action) = self.status.hit(p) {
-            if action == crate::commands::LANGUAGE_LEVEL.0 && self.open_level_picker() {
-                return Some(MouseResult::Redraw);
-            }
             // The `…`: what didn't fit, as rows doing what they do in the bar.
             // The resources: pinned (their pills in the editor's corner) or unpinned, as
             // their window's pin does.
@@ -173,15 +154,9 @@ impl Workbench {
             }
             return Some(MouseResult::Redraw);
         }
-        if self.tools.terminal_splitter.begin_drag(p) {
-            if clicks == 2 {
-                self.tools.terminal_splitter.end_drag();
-                self.tools.bottom_size = tool_windows::BottomSize::Kept;
-                self.data.sizes.remove(workbench_model::sizes::DOCK_BOTTOM);
-                self.layout();
-                return Some(MouseResult::Redraw);
-            }
-            return Some(MouseResult::StartDrag);
+        // A dock's separator: dragged, or back to its default size (a double click).
+        if let Some(result) = self.press_divider(p, clicks) {
+            return Some(result);
         }
         if let Some((_, id)) = self.tools.strip.hit_rect(p) {
             // A registered button on the left: its window at the bottom shown / hidden, or —
@@ -201,28 +176,7 @@ impl Workbench {
         if let Some(id) = self.tools.strip.hit(p).or_else(|| self.tools.right_strip.hit(p)) {
             return Some(self.tool_button(id));
         }
-        if self.tools.side_on(ui_workbench::Dock::Right).is_some()
-            && self.tools.side_splitter.begin_drag(p)
-        {
-            // Double click on the separator: the default width.
-            if clicks == 2 {
-                self.tools.side_splitter.end_drag();
-                self.data.sizes.remove(workbench_model::sizes::DOCK_RIGHT);
-                self.layout();
-                return Some(MouseResult::Redraw);
-            }
-            return Some(MouseResult::StartDrag);
-        }
-        if self.tools.splitter.begin_drag(p) {
-            // Double click on the separator: the default width.
-            if clicks == 2 {
-                self.tools.splitter.end_drag();
-                self.data.sizes.remove(workbench_model::sizes::DOCK_LEFT);
-                self.layout();
-                return Some(MouseResult::Redraw);
-            }
-            return Some(MouseResult::StartDrag);
-        }
+
         if let Some(hit) = self.tab_bar.hit(p) {
             return Some(match hit {
                 TabHit::Activate(i) => {

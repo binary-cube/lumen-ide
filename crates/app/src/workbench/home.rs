@@ -25,19 +25,6 @@ pub(super) struct HomeScreen {
     pub sessions_key: Option<(u64, String, u64)>,
 }
 
-impl HomeScreen {
-    /// The pressed list (a press on a project or a group) and whether it's the modal's.
-    pub fn pressed_picker(&mut self) -> Option<(&mut ProjectsPicker, bool)> {
-        if self.projects_menu.pressed() {
-            Some((&mut self.projects_menu, true))
-        } else if self.picker.pressed() {
-            Some((&mut self.picker, false))
-        } else {
-            None
-        }
-    }
-}
-
 impl Workbench {
     /// The app's past sessions as the projects list shows them (plan 78): read at start,
     /// they don't change; their rows are made again only when the theme (the files' icons),

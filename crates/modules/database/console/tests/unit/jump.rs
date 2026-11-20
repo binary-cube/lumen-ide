@@ -273,3 +273,46 @@ fn the_list_s_thumb_is_dragged_a_row_at_a_time() {
     assert!(view.release());
     assert!(!view.closed(), "nothing picked");
 }
+
+/// The filter is a control with the keys the whole time: a press on it is its own (nothing
+/// picked, nothing closed), what's typed and ⌫ go through the view's controls and filter
+/// again; a click on a row leaves it the keys.
+#[test]
+fn the_filter_keeps_the_keys_through_its_controls() {
+    let mut s = setup("jump-filter");
+    s.consoles.create(s.access.shop, "SELECT * FROM orders;").unwrap();
+    s.consoles.create(s.access.shop, "SELECT 1;").unwrap();
+    let mut view = popover(&mut s, false);
+    view.read_texts(None);
+    s.manual.run_all();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1200.0, 900.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let field = view.field;
+    let on_field = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
+    view.hover(on_field);
+    assert_eq!(view.cursor_at(on_field), Some(ViewerCursor::Text));
+    assert_eq!(Viewer::press(&mut view, on_field, 1), None);
+    assert!(!view.closed());
+    assert_eq!(view.controls.focused(), Some(FILTER));
+    assert!(view.text_input("ordersx"));
+    assert!(view.found_names().is_empty());
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.found_names(), ["console"]);
+    // A row clicked: the filter still types.
+    let row = view.hits.iter().find(|(_, h)| *h == Hit::Row(0)).map(|(r, _)| *r).unwrap();
+    view.click(Point::new(row.min_x() + 4.0, row.min_y() + 4.0));
+    assert!(view.text_input("q"));
+    assert!(view.found_names().is_empty());
+}

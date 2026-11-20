@@ -323,6 +323,8 @@ pub struct EditorView {
     vbar: Scrollbar,
     vauto: ui_components::AutoHide,
     hauto: ui_components::AutoHide,
+    /// Its bars' state of use (see `scroll::with_bars`).
+    bars: ui_components::control::Controls,
     /// Error marks on the vertical strip: (the mark's y, the error's offset).
     error_marks: Vec<(f32, usize)>,
     /// The lines of the warnings, errors and occurrences marked on the strip, for the
@@ -408,6 +410,7 @@ impl EditorView {
             vbar: Scrollbar::new(ScrollbarStyle::default(), Orientation::Vertical),
             vauto: ui_components::AutoHide::new(true),
             hauto: ui_components::AutoHide::new(true),
+            bars: ui_components::control::Controls::default(),
             error_marks: Vec::new(),
             mark_lines: kernel::Memo::default(),
             hbar: Scrollbar::new(ScrollbarStyle::default(), Orientation::Horizontal),
@@ -571,7 +574,7 @@ impl EditorView {
         let now = std::time::Instant::now();
         let (v_held, h_held) = self.bars_held();
         let (v_seen, h_seen) = (self.vauto.showing(now, v_held), self.hauto.showing(now, h_held));
-        let bars = self.vbar.hover(p) | self.hbar.hover(p);
+        let bars = self.hover_bars(p);
         let v_seen = self.vauto.pointer(self.vbar.is_hovered(), v_seen, true, now);
         let h_seen = self.hauto.pointer(self.hbar.is_hovered(), h_seen, true, now);
         let bars = bars && (v_seen || h_seen);

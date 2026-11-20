@@ -23,3 +23,18 @@ fn the_log_redraws_when_a_transfer_is_heard() {
     events.publish(&remote::events::TransfersChanged { running: 1, to_upload: 0 });
     assert!(log.poll());
 }
+
+/// The list's scrollbar: its thumb pressed and dragged down scrolls the list.
+#[test]
+fn the_list_scrolls_by_its_thumb() {
+    let mut log = TransferLog::default();
+    let area = Rect::new(0.0, 0.0, 400.0, 200.0);
+    let palette = ui_components::Palette::dark();
+    log.max_scroll = 800.0;
+    log.bar.paint(&mut render_api::Scene::default(), &palette, 1.0, area, 1000.0, 0.0);
+    let edge = area.max_x() - 4.0;
+    assert_eq!(log.click(Point::new(edge, 6.0)), None);
+    assert!(log.drag(Point::new(edge, 80.0)), "the thumb followed");
+    assert!(log.scroll > 0.0, "the list scrolled");
+    assert!(log.release());
+}

@@ -234,19 +234,16 @@ fn the_list_s_thumb_drags_it() {
     let mut dialog = listing(33, Rect::new(0.0, 0.0, 1200.0, 800.0));
     let top = dialog.list_bottom - (LIST_ROWS as f32 * 24.0 + 8.0);
     let x = dialog.card.max_x() - 3.0;
-    assert!(
-        !dialog.scrollbar_press(Point::new(dialog.card.min_x() + 30.0, top + 10.0)),
-        "not on it"
-    );
-    assert!(dialog.scrollbar_press(Point::new(x, top + 10.0)), "the thumb, at the top");
-    assert!(dialog.scrollbar_held());
+    assert!(!dialog.press(Point::new(dialog.card.min_x() + 30.0, top + 10.0)), "not on it");
+    assert!(dialog.press(Point::new(x, top + 10.0)), "the thumb, at the top");
+    assert!(dialog.held());
     assert_eq!(dialog.list_scroll, 0.0, "pressed on the thumb: it doesn't jump");
-    assert!(dialog.scrollbar_drag(Point::new(x, top + 60.0)));
+    assert!(dialog.drag(Point::new(x, top + 60.0)));
     let moved = dialog.list_scroll;
     assert!(moved > 0.0);
-    dialog.scrollbar_drag(Point::new(x, top + 5000.0));
+    dialog.drag(Point::new(x, top + 5000.0));
     assert_eq!(dialog.list_scroll, dialog.list_max, "no further than the last row");
-    assert!(dialog.scrollbar_release());
-    assert!(!dialog.scrollbar_held());
-    assert!(!dialog.scrollbar_drag(Point::new(x, top)), "released: nothing follows");
+    assert!(dialog.release());
+    assert!(!dialog.held());
+    assert!(!dialog.drag(Point::new(x, top)), "released: nothing follows");
 }

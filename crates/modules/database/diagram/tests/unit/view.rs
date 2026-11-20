@@ -679,3 +679,43 @@ fn each_row_s_link_is_known_from_its_layout() {
     assert!(v.row_links.get(&lines).is_some_and(|c| !c.contains_key("id")), "no link: none");
     assert!(!v.several_schemas, "one schema: the cards show their rows");
 }
+
+/// The filter is the view's control: a press on its pill gives it the keys (through the
+/// controls, its text cursor shown), its × empties it without taking them, a press on the
+/// diagram takes them back.
+#[test]
+fn a_press_on_the_filter_gives_it_the_keys_and_one_elsewhere_takes_them() {
+    let mut v = opened(None);
+    v.filter.set_text("o");
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    v.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1800.0, 900.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let field = v.filter_area;
+    let on = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
+    v.hover(on);
+    assert_eq!(v.cursor_at(on), Some(ViewerCursor::Text));
+    assert_eq!(v.pointer_down(on, 1, PressMods::default()), None);
+    v.release();
+    assert!(v.wants_text());
+    assert!(v.edit_key(ViewerKey::End));
+    assert!(v.text_input("rd"));
+    settle(&mut v);
+    assert_eq!(names(&v), ["orders"]);
+    // A press on the diagram: the keys back to it.
+    let canvas = Point::new(field.min_x() + 40.0, field.max_y() + 400.0);
+    v.pointer_down(canvas, 1, PressMods::default());
+    v.release();
+    assert!(!v.wants_text());
+    assert!(!v.text_input("x"));
+}

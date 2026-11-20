@@ -4,6 +4,7 @@
 //! the Git menu's, its outcome told in the status bar.
 
 mod form;
+mod parts;
 mod view;
 
 use std::path::Path;

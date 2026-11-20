@@ -6,7 +6,12 @@ use super::*;
 impl SettingsView {
     /// The "Module" section: the project's frameworks (switches, with why each is on) and
     /// the modules that are always on.
-    pub(super) fn paint_modules(&mut self, model: &SettingsModel, area: SectionArea<'_, '_>) {
+    pub(super) fn paint_modules(
+        &mut self,
+        model: &SettingsModel,
+        icons: &Icons,
+        area: SectionArea<'_, '_>,
+    ) {
         let SectionArea { layer, text, ctx, x0, top, width } = area;
         let bottom = paint_module_summary(model, SectionArea { layer, text, ctx, x0, top, width });
         let top = bottom + ctx.px(28.0);
@@ -15,6 +20,7 @@ impl SettingsView {
         let mut rows = ModuleRows {
             layer,
             text,
+            icons,
             ctx,
             x0,
             width,
@@ -137,7 +143,15 @@ impl SettingsView {
         }
         let mid = r.min_y() + r.size.height / 2.0;
         let switch = ds::switch(layer, ctx, rows.x0 + px(12.0), mid, row.enabled, row_hovered);
-        let tx = switch.max_x() + px(14.0);
+        // Its icon, then its name.
+        let icon_size = px(18.0);
+        let icon_x = switch.max_x() + px(14.0);
+        if let Some(id) = rows.icons.id(row.icon).or_else(|| rows.icons.id("modules")) {
+            let at = Rect::new(icon_x, (mid - icon_size / 2.0).round(), icon_size, icon_size);
+            let color = if row.enabled { palette.text } else { palette.text_muted };
+            ui_kit::draw_icon(layer, rows.icons, id, at, ctx.fade(color));
+        }
+        let tx = icon_x + icon_size + px(12.0);
         // On the right: "at startup", then the state.
         let preload = SettingsAction::TogglePreload(row.id.clone());
         let can_preload = row.enabled && !modules_at_startup;
@@ -232,6 +246,14 @@ impl SettingsView {
         let name = text.shape_line(&name, strong);
         let name_color = if row.enabled { palette.text } else { palette.text_muted };
         draw_text(layer, &name, tx, (mid - px(2.0)).round(), ctx.fade(name_color));
+        // Beside its name, muted: who made it, its version, when it last changed.
+        let about = module_about(row);
+        let ax = tx + name.width + px(10.0);
+        if !about.is_empty() && ax < right {
+            let about = ds::ellipsize(text, &about, small, (right - ax).max(0.0));
+            let about = text.shape_line(&about, small);
+            draw_text(layer, &about, ax, (mid - px(2.0)).round(), ctx.fade(palette.text_muted));
+        }
         let info = ds::ellipsize(text, &row.description, small, (right - tx).max(0.0));
         let info = text.shape_line(&info, small);
         draw_text(
@@ -358,6 +380,7 @@ impl SettingsView {
 pub(super) struct ModuleRows<'a, 'c> {
     layer: &'a mut Layer,
     text: &'a mut TextSystem,
+    icons: &'a Icons,
     ctx: &'a Ctx<'c>,
     x0: f32,
     width: f32,
@@ -365,6 +388,16 @@ pub(super) struct ModuleRows<'a, 'c> {
     strong: text_layout::Font,
     small: text_layout::Font,
     small_m: text_layout::FontMetrics,
+}
+
+/// What a module's row says of it beside its name: its author, version and date, those
+/// known (`Binary Cube · 1.0.0 · 2026-11-20`).
+pub(super) fn module_about(row: &ModuleRow) -> String {
+    [row.author.as_str(), row.version.as_str(), row.updated.as_str()]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
 }
 
 /// The "Module" section's summary at `area.top`: how many modules there are, how many work

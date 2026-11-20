@@ -14,6 +14,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use database::console::ConsoleId;
 use i18n::t;
 use kernel::{Point, ProjectId, Rect};
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx};
 use ui_components::{
     KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -21,6 +22,8 @@ use ui_components::{
 };
 use ui_kit::{TextInput, TextInputStyle, draw_icon, draw_text};
 use workbench_model::{Notification, Question, WorkbenchHost};
+
+use crate::field::KeyField;
 
 /// The modal's virtual extension (its view's kind).
 pub const EXTENSION: &str = "view-console-rename";
@@ -138,7 +141,6 @@ impl ViewerProvider for RenameProvider {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
-    Field,
     Go,
     Cancel,
 }
@@ -148,11 +150,18 @@ enum Hit {
 pub struct RenameView {
     request: Option<RenameRequest>,
     input: TextInput,
+    /// Where the name's field was drawn last.
+    field: Rect,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     action: Option<ViewerAction>,
     done: bool,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
+
+/// The name's field's place among the modal's parts.
+const FIELD: usize = 0;
 
 /// The modal's content (logical pixels).
 const HEIGHT: f32 = 150.0;
@@ -187,6 +196,24 @@ impl RenameView {
     fn hit(&self, p: Point) -> Option<Hit> {
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
+
+    /// Its parts (the name's field, which has the keys the whole time it's open), with their
+    /// state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut edited = false;
+        let mut name = KeyField {
+            input: &mut self.input,
+            area: self.field,
+            selects: true,
+            edited: &mut edited,
+        };
+        let mut parts: [&mut dyn Control; 1] = [&mut name];
+        self.controls.focus(&mut parts, Some(FIELD));
+        f(&mut self.controls, &mut parts)
+    }
 }
 
 impl Viewer for RenameView {
@@ -195,6 +222,9 @@ impl Viewer for RenameView {
             self.input = TextInput::new(&request.name);
             self.input.select_all();
             self.request = Some(request.clone());
+            // The name's field has the keys from now (its selection the copy's).
+            self.controls = Controls::sticky();
+            self.with_controls(|_, _| ());
         }
     }
 
@@ -228,8 +258,7 @@ impl Viewer for RenameView {
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.input.insert(&typed);
+        self.with_controls(|c, parts| c.text(parts, typed));
         true
     }
 
@@ -268,7 +297,7 @@ impl Viewer for RenameView {
             ds::optical_baseline(field.min_y(), field.size.height, &style.font),
             p.text_muted,
         );
-        self.hits.push((field, Hit::Field));
+        self.field = field;
         let small = ds.ui_font(-1.0);
         let note_y = field.max_y() + px(8.0);
         let (note, color) = match &problem {
@@ -316,8 +345,11 @@ impl Viewer for RenameView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
+        // The field: its caret put, a drag selecting.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            return None;
+        }
         match self.hit(p) {
-            Some(Hit::Field) => self.input.click(p.x),
             Some(Hit::Go) => {
                 self.give();
             }
@@ -328,22 +360,25 @@ impl Viewer for RenameView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.input.extend_to(p.x);
-        true
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        match self.hit(p)? {
-            Hit::Field => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
+        self.hit(p).map(|_| ViewerCursor::Pointer)
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -356,43 +391,29 @@ impl Viewer for RenameView {
                 self.give();
             }
             ViewerKey::Escape => self.action = Some(ViewerAction::Close),
-            ViewerKey::Left => self.input.move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.input.move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.input.home(reach.extend),
-            ViewerKey::End => self.input.end(reach.extend),
-            ViewerKey::Backspace => self.input.backspace(reach.word),
-            ViewerKey::Delete => self.input.delete(),
-            _ => return false,
+            ViewerKey::Tab => return false,
+            // The field's editing keys (⌦ at its end too: nothing to delete).
+            ViewerKey::Delete => {
+                self.with_controls(|c, parts| c.key(parts, key, reach));
+            }
+            key => return self.with_controls(|c, parts| c.key(parts, key, reach)).is_some(),
         }
         true
     }
 
     fn selected_text(&self) -> Option<String> {
-        let selected = self.input.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| (i == FIELD).then_some(&self.input as &dyn Control))
     }
 
     fn command(&mut self, id: &str) -> bool {
         match id {
             "go" => self.give(),
-            "select_all" => {
-                self.input.select_all();
-                true
-            }
-            "undo" => self.input.undo(),
-            "redo" => self.input.redo(),
-            "cut" => {
-                let had = !self.input.selected_text().is_empty();
-                if had {
-                    self.input.insert("");
-                }
-                had
-            }
             id if id.starts_with("name:") => {
                 self.set_name(&id["name:".len()..]);
                 true
             }
-            _ => false,
+            // The field's edit commands (⌘A, ⌘Z, ⇧⌘Z, ⌘X).
+            id => self.with_controls(|c, parts| c.command(parts, id)).is_some(),
         }
     }
 

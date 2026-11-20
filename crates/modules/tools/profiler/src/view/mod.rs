@@ -29,9 +29,10 @@ use kernel::{Point, Rect};
 use profiling::Recording;
 use render_api::Quad;
 use ui_components::chart::Plot;
+use ui_components::control::{Control, Controls, Shown, Thumb};
 use ui_components::ds::{self, Ctx};
 use ui_components::{
-    AppRequest, EdgeScrollbar, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
+    AppRequest, EdgeScrollbar, KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
 };
 
 use page::{Col, Hit, Page};
@@ -75,6 +76,8 @@ pub struct ProfileView {
     /// The flame graph (its zoom and hover kept), and where it was drawn.
     flame: ui_components::Icicle,
     flame_area: Option<Rect>,
+    /// Its parts' state of use (see [`ProfileView::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for ProfileView {
@@ -118,7 +121,21 @@ impl ProfileView {
             timeline: None,
             flame: flame::icicle(),
             flame_area: None,
+            controls: Controls::default(),
         }
+    }
+
+    /// Its parts (the page's scrollbar with its offset; the flame graph while it's drawn),
+    /// the topmost first, with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut page = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        // Tab with the flame graph alone to go to leaves its keys there (nowhere else).
+        let mut flame = Shown { part: &mut self.flame, shown: self.flame_area.is_some() };
+        let mut parts: [&mut dyn Control; 2] = [&mut page, &mut flame];
+        f(&mut self.controls, &mut parts)
     }
 
     /// The file asked to be read and made into its page, on a worker (once), waking the
@@ -292,10 +309,10 @@ impl Viewer for ProfileView {
         self.asked.is_some()
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        // Over the flame graph, a zoomed one scrolls itself first.
-        if self.mouse.is_some_and(|m| self.flame_area.is_some_and(|r| r.contains(m)))
-            && self.flame.scroll(dy)
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        // Over a part that scrolls (a zoomed flame graph), it scrolls itself first.
+        if let Some(m) = self.mouse
+            && self.with_controls(|c, parts| c.scroll(parts, m, dx, dy)).is_some()
         {
             return true;
         }
@@ -318,37 +335,31 @@ impl Viewer for ProfileView {
         let changed = hover != self.hover || on_timeline || was_on;
         self.hover = hover;
         self.mouse = Some(p);
-        let flame = if self.flame_area.is_some_and(|r| r.contains(p)) {
-            self.flame.hover(p)
-        } else {
-            self.flame.leave()
-        };
-        self.bar.hover(p) | changed | flame
+        // The keys go to the part under the mouse that takes them (the flame graph's walk).
+        self.with_controls(|c, parts| {
+            let changed = c.hover(parts, Some(p));
+            c.focus(parts, c.hovered());
+            changed
+        }) | changed
     }
 
+    /// A hand on what's clicked (a button, a part's own: a bar of the flame graph).
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        let on_flame =
-            self.flame_area.is_some_and(|r| r.contains(p)) && self.flame.node_at(p).is_some();
-        Some(if self.hit(p).is_some() || on_flame {
-            ViewerCursor::Pointer
-        } else {
-            ViewerCursor::Arrow
-        })
+        if self.hit(p).is_some() {
+            return Some(ViewerCursor::Pointer);
+        }
+        Some(self.controls.cursor_at(p).unwrap_or(ViewerCursor::Arrow))
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
-        self.flame_area.filter(|r| r.contains(p)).and_then(|_| self.flame.tooltip_at(p))
+        self.controls.tooltip_at(p)
     }
 
     /// A click (as a tab or a modal window sends it: both come here).
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // On its scrollbar: the thumb taken (or the page jumped there); a drag follows.
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            return None;
-        }
-        if self.flame_area.is_some_and(|r| r.contains(p)) {
-            self.flame.press(p);
+        // On its parts: the scrollbar's thumb taken (or the page jumped there, a drag
+        // follows), a bar of the flame graph chosen.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return None;
         }
         match self.hit(p)? {
@@ -362,20 +373,19 @@ impl Viewer for ProfileView {
 
     /// Its scrollbar's thumb dragged: the page follows.
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != self.scroll;
-        self.scroll = offset;
-        changed
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, changed)| changed)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
-    /// The keys: the flame graph's while the mouse is over it, else the page's scroll.
+    /// The keys: the part's under the mouse that takes them (the flame graph's), else the
+    /// page's scroll.
     fn edit_key(&mut self, key: ViewerKey) -> bool {
-        if self.mouse.is_some_and(|m| self.flame_area.is_some_and(|r| r.contains(m)))
-            && self.flame.key(key)
+        // Only a part that has them: with none, Tab isn't one to give them to one.
+        if self.controls.focused().is_some()
+            && self.with_controls(|c, parts| c.key(parts, key, KeyReach::default())).is_some()
         {
             return true;
         }

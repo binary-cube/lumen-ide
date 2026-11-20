@@ -32,6 +32,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Folder Sizes",
     description: "How much a folder holds, folder by folder: a ring of the biggest, a list to go down into, kept with when it was measured",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "hard-drive", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// A folder of the tree measured, in a tab.

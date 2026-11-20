@@ -8,7 +8,7 @@ fn main() {
     println!("cargo:rerun-if-changed={}", path.display());
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("brand.toml at the repository root: {e}"));
-    for key in ["name", "id", "project_dir", "bundle_id", "repository"] {
+    for key in ["name", "id", "project_dir", "bundle_id", "repository", "publisher"] {
         let value = text
             .lines()
             .map(str::trim)

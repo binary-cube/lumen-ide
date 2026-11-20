@@ -20,6 +20,9 @@ use version_control::application::compare_with;
 use version_control::{FileState, FileStatus, Repository, Revision};
 
 use crate::files_tree::{FilesTree, TreeEvent};
+use crate::parts::{Tune, Tuned};
+use ui_components::changed_files::TreePart;
+use ui_components::control::{Control, Controls};
 
 /// The extension of the view (in the Git tool window).
 pub const EXTENSION: &str = "view-git-changes";
@@ -68,6 +71,10 @@ pub struct ChangesList {
     /// The list's generation shown (0: not read yet).
     generation: u64,
     tree: FilesTree,
+    /// What the tree opened, as a control ([`TreePart`]).
+    opened: Option<TreeEvent>,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
     /// "Commit…" (from the last paint), under the mouse.
     commit: Rect,
     commit_hover: bool,
@@ -160,6 +167,32 @@ impl ChangesList {
     }
 }
 
+impl ChangesList {
+    /// Its parts used as controls, with their state of use: the files tree, which has the
+    /// keys and the text whatever else is pressed (given back the focus when it lost it),
+    /// and answers Tab itself.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut tree = TreePart { tree: &mut self.tree, event: &mut self.opened };
+        let tune = Tune { keeps_tab: true, ..Tune::default() };
+        let mut tree = Tuned { part: &mut tree, tune };
+        let mut parts: [&mut dyn Control; 1] = [&mut tree];
+        if self.controls.focused().is_none() {
+            self.controls.focus(&mut parts, Some(0));
+        }
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// What a press or a key on the tree opened.
+    fn take_opened(&mut self) -> Option<ViewerAction> {
+        match self.opened.take()? {
+            TreeEvent::Open(i) => self.open(i),
+        }
+    }
+}
+
 impl Viewer for ChangesList {
     fn set_data(&mut self, data: &dyn std::any::Any) {
         if let Some(sizes) = data.downcast_ref::<workbench_model::LayoutSizes>() {
@@ -230,8 +263,9 @@ impl Viewer for ChangesList {
         changed || ready || self.opening.is_busy()
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        self.tree.scroll_by(dy)
+    /// Anywhere over it, the wheel scrolls the part that scrolls (the tree).
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.with_controls(|_, parts| parts.iter_mut().any(|part| part.scroll(dx, dy)))
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
@@ -243,15 +277,13 @@ impl Viewer for ChangesList {
             return Some(ViewerAction::RunCommand(crate::COMMIT.0.to_owned()));
         }
         let flat = self.tree.flat;
-        let event = self.tree.press(p, clicks)?;
+        self.with_controls(|c, parts| c.press(parts, p, clicks))?;
         if self.tree.flat != flat
             && let Some(sizes) = &self.sizes
         {
             sizes.set(crate::files_tree::LIST_MODE, if self.tree.flat { 1.0 } else { 0.0 });
         }
-        match event? {
-            TreeEvent::Open(i) => self.open(i),
-        }
+        self.take_opened()
     }
 
     fn wants_text(&self) -> bool {
@@ -259,7 +291,7 @@ impl Viewer for ChangesList {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        self.tree.text_input(text)
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -267,14 +299,13 @@ impl Viewer for ChangesList {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
-        match self.tree.key_with(key, reach) {
-            Some(Some(TreeEvent::Open(i))) => {
-                self.pending = self.open(i);
-                true
-            }
-            Some(None) => true,
-            None => false,
+        if self.with_controls(|c, parts| c.key(parts, key, reach)).is_none() {
+            return false;
         }
+        if self.opened.is_some() {
+            self.pending = self.take_opened();
+        }
+        true
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {
@@ -287,7 +318,8 @@ impl Viewer for ChangesList {
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.tree.text_input(text.lines().next().unwrap_or_default())
+        let line = text.lines().next().unwrap_or_default();
+        self.with_controls(|c, parts| c.paste(parts, line)).is_some()
     }
 
     fn selected_text(&self) -> Option<String> {
@@ -296,7 +328,7 @@ impl Viewer for ChangesList {
 
     fn command(&mut self, id: &str) -> bool {
         // The app's edit commands, for the search.
-        if self.tree.command(id) {
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
             return true;
         }
         let file = |prefix: &str| id.strip_prefix(prefix).and_then(|i| i.parse::<usize>().ok());
@@ -317,27 +349,27 @@ impl Viewer for ChangesList {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.tree.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.tree.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let over = self.commit.contains(p);
         let changed = over != self.commit_hover;
         self.commit_hover = over;
-        self.tree.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     /// The files' scrollbar fading: a frame when it next changes.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.tree.next_frame()
+        self.controls.next_frame()
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
-        self.tree.tooltip_at(p)
+        self.controls.tooltip_at(p)
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -383,6 +415,7 @@ impl Viewer for ChangesList {
             if self.generation > 0 {
                 ds::empty_state(layer, ctx.text, &ds, list, &t("git.changes_none"), None);
             }
+            self.with_controls(|c, parts| c.settle(parts));
             return;
         }
         let queries = self.queries.clone();
@@ -394,6 +427,7 @@ impl Viewer for ChangesList {
             (list, ctx.focused),
             queries.as_deref(),
         );
+        self.with_controls(|c, parts| c.settle(parts));
     }
 }
 

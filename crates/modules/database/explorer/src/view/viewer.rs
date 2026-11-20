@@ -66,6 +66,8 @@ impl Viewer for DataView {
         self.hits.clear();
         self.tips.clear();
         self.paint_view(ctx);
+        // What its parts want of the frames (a scrollbar's fade, the splitter's).
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn poll(&mut self) -> bool {
@@ -100,7 +102,7 @@ impl Viewer for DataView {
     }
 
     fn is_animating(&self) -> bool {
-        self.splitter.is_animating()
+        self.controls.is_animating()
     }
 
     fn moved(&mut self, path: &Path) {
@@ -140,19 +142,15 @@ impl Viewer for DataView {
     }
 
     fn pointer_down(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
-        if self.splitter.begin_drag(p) {
-            return None;
-        }
-        // The tables' or the structure's scrollbar (when shown).
-        if let Some(offset) = self.list_bar.press(p) {
-            self.list_scroll = offset;
-            return None;
-        }
-        if self.tab == Tab::Structure
-            && let Some(offset) = self.structure_bar.press(p)
-        {
-            self.structure_scroll = offset;
-            return None;
+        // The splitter, the tables' or the structure's scrollbar (when shown), the grid (⇧ / ⌘
+        // extend its choice).
+        match self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods)) {
+            Some((GRID, _)) => {
+                self.take_grid_action();
+                return self.action.take();
+            }
+            Some(_) => return None,
+            None => {}
         }
         match self.hit(p) {
             Some(Hit::Table(i)) => {
@@ -199,12 +197,6 @@ impl Viewer for DataView {
             }
             None => {}
         }
-        if self.in_grid(p)
-            && let Some(grid) = &mut self.grid
-        {
-            grid.press(p, clicks, mods);
-        }
-        self.take_grid_action();
         self.action.take()
     }
 
@@ -213,39 +205,32 @@ impl Viewer for DataView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if self.splitter.is_dragging() {
-            if let Some(x) = self.splitter.drag_to(p) {
-                let left = self.list_area.min_x();
-                let width = (x - left) / self.scale().max(0.01);
-                self.list_width = width.clamp(LIST_MIN, LIST_MAX).round();
-                // The project's: its next data views (and its next session) as wide.
-                if let Some(sizes) = &self.sizes {
-                    sizes.set(LIST_SIZE, self.list_width);
-                }
+        let Some((part, moved)) = self.with_controls(|c, parts| c.drag(parts, p)) else {
+            return false;
+        };
+        if part == SPLITTER
+            && let Some(x) = self.split_at
+        {
+            let left = self.list_area.min_x();
+            let width = (x - left) / self.scale().max(0.01);
+            self.list_width = width.clamp(LIST_MIN, LIST_MAX).round();
+            // The project's: its next data views (and its next session) as wide.
+            if let Some(sizes) = &self.sizes {
+                sizes.set(LIST_SIZE, self.list_width);
             }
-            return true;
         }
-        if let Some(offset) = self.list_bar.drag(p) {
-            self.list_scroll = offset;
-            return true;
-        }
-        if let Some(offset) = self.structure_bar.drag(p) {
-            self.structure_scroll = offset;
-            return true;
-        }
-        self.grid.as_mut().is_some_and(|g| g.drag(p))
+        moved
     }
 
-    /// Its scrollbars fading: a frame when they next change.
+    /// Its parts fading (the scrollbars): a frame when they next change.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        [self.list_bar.next_frame(), self.structure_bar.next_frame()].into_iter().flatten().min()
+        self.controls.next_frame()
     }
 
     fn release(&mut self) -> bool {
-        if self.splitter.end_drag() | self.list_bar.release() | self.structure_bar.release() {
-            return true;
-        }
-        let released = self.grid.as_mut().is_some_and(DataGrid::release);
+        let released =
+            self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed);
+        // A column resized or moved: its layout kept.
         self.follow_layout();
         released
     }
@@ -256,7 +241,6 @@ impl Viewer for DataView {
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.last_hover = p;
         let hover = self.hit(p);
         let mut changed = hover != self.hover;
         // A table under the mouse: counted exactly (unless huge), its estimate until then.
@@ -264,13 +248,7 @@ impl Viewer for DataView {
             self.counts.want(i, self.open.as_ref().map(|o| &o.client), &self.tables);
         }
         self.hover = hover;
-        changed |= self.splitter.hover(p) | self.list_bar.hover(p);
-        if self.tab == Tab::Structure {
-            changed |= self.structure_bar.hover(p);
-        }
-        if let Some(grid) = &mut self.grid {
-            changed |= grid.hover(p);
-        }
+        changed |= self.with_controls(|c, parts| c.hover(parts, Some(p)));
         changed
     }
 
@@ -324,36 +302,33 @@ impl Viewer for DataView {
                 _ => None,
             };
         }
-        if self.in_grid(p) {
-            return self.grid.as_ref().and_then(|g| g.tooltip_at(p));
-        }
-        None
+        // The grid's.
+        self.controls.tooltip_at(p)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.splitter.contains(p) || self.splitter.is_dragging() {
-            return Some(ViewerCursor::ResizeHorizontal);
+        // Its parts' (the splitter's over the list's edge, the grid's).
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
-        if self.hit(p).is_some() {
-            return Some(ViewerCursor::Pointer);
-        }
-        if self.in_grid(p) {
-            return self.grid.as_ref().and_then(|g| g.cursor_at(p));
-        }
-        None
+        self.hit(p).map(|_| ViewerCursor::Pointer)
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
-        let at = self.hover_point();
-        if self.list_area.contains(at) {
-            self.list_scroll = (self.list_scroll + dy).max(0.0);
+        // The part under the mouse (the tables' list, even at its ends: never through to
+        // the grid; the grid).
+        let over = self.with_controls(|c, parts| {
+            c.scroll_hovered(parts, dx, dy).is_some() || c.hovered() == Some(LIST)
+        });
+        if over {
             return true;
         }
+        // Elsewhere: the tab's body (the structure, the grid).
         if self.tab == Tab::Structure {
             self.structure_scroll = (self.structure_scroll + dy).max(0.0);
             return true;
         }
-        self.grid.as_mut().is_some_and(|g| g.scroll(dx, dy))
+        self.with_controls(|c, parts| c.scroll_focused(parts, dx, dy)).is_some()
     }
 
     fn wants_text(&self) -> bool {
@@ -361,10 +336,11 @@ impl Viewer for DataView {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        self.grid.as_mut().is_some_and(|g| g.text_input(text))
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     /// A character typed on the grid (no field has the keys): the cell's editor starts.
+    /// The grid's control has no `char_key`: its typing starts here.
     fn key(&mut self, c: char) -> bool {
         self.tab == Tab::Data && self.grid.as_mut().is_some_and(|g| g.type_char(c))
     }
@@ -377,7 +353,7 @@ impl Viewer for DataView {
         if self.tab != Tab::Data {
             return false;
         }
-        self.grid.as_mut().is_some_and(|g| g.edit_key(key, reach))
+        self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
 
     fn select_all(&mut self) -> bool {
@@ -385,7 +361,7 @@ impl Viewer for DataView {
     }
 
     fn selected_text(&self) -> Option<String> {
-        self.grid.as_ref().filter(|_| self.tab == Tab::Data).and_then(DataGrid::selected_text)
+        self.controls.selected_text_with(|i| self.part(i))
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
@@ -397,10 +373,7 @@ impl Viewer for DataView {
         if self.list_area.contains(p) {
             return self.list_menu(None);
         }
-        if !self.in_grid(p) {
-            return None;
-        }
-        let mut entries = self.grid.as_mut()?.context_menu(p)?;
+        let (_, mut entries) = self.with_controls(|c, parts| c.menu(parts, p))?;
         // A key's cell (the engine's, or one accepted in the relations diagram): its row.
         if self.reference().is_some() {
             entries.push(ViewMenuEntry::Separator);
@@ -544,5 +517,53 @@ impl Viewer for DataView {
             Some(n) => i18n::tr!("database.status", table = info.table.to_string(), count = n),
             None => info.table.to_string(),
         })
+    }
+}
+
+/// The splitter's, the tables' list's and the grid's places among the view's parts.
+const SPLITTER: usize = 0;
+const LIST: usize = 1;
+const GRID: usize = 3;
+
+impl DataView {
+    /// Its parts (the splitter, the tables' list and its scrollbar, the structure's
+    /// scrollbar while its tab is shown, the grid while the data's is), the topmost first,
+    /// with their state of use. The grid has the keys, the text and the wheel without a
+    /// press (the tab's body): it's given the focus whenever it's shown, and a press on
+    /// the rest keeps it there.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let data = self.tab == Tab::Data;
+        let has_grid = data && self.grid.is_some();
+        let mut splitter = Divider { splitter: &mut self.splitter, at: &mut self.split_at };
+        let mut list = Scrolled {
+            bar: &mut self.list_bar,
+            offset: &mut self.list_scroll,
+            area: self.list_area,
+            max: self.list_max,
+        };
+        let mut bar = Thumb { bar: &mut self.structure_bar, offset: &mut self.structure_scroll };
+        let mut structure = Shown { part: &mut bar, shown: !data };
+        let mut none = Absent;
+        let grid: &mut dyn Control = match &mut self.grid {
+            Some(grid) => grid,
+            None => &mut none,
+        };
+        let mut grid = Shown { part: grid, shown: data };
+        let mut parts: [&mut dyn Control; 4] =
+            [&mut splitter, &mut list, &mut structure, &mut grid];
+        if has_grid {
+            self.controls.focus(&mut parts, Some(GRID));
+        }
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// Its part at `i`, read-only (the copy's selection asked from `&self`): the grid
+    /// while the data's tab is shown.
+    fn part(&self, i: usize) -> Option<&dyn Control> {
+        let grid = self.grid.as_ref().filter(|_| i == GRID && self.tab == Tab::Data)?;
+        Some(grid as &dyn Control)
     }
 }

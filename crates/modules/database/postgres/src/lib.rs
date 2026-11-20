@@ -16,6 +16,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "PostgreSQL",
     description: "PostgreSQL servers (9.2 to the newest) as data sources: their schemas, tables, structure and rows, changed in transactions, over TLS by sslmode",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "database", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// The driver (created only when a source connects).

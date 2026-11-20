@@ -21,7 +21,9 @@ fn a_color_pair_reaches_shapes_and_edges_as_one_step() {
     view.selection = vec!["start".into(), "e1".into()];
     // The mouse reads the bar as painted.
     paint_view(&mut view, &mut text);
-    let (_, buttons) = view.quick_layout().unwrap();
+    let (bar, buttons) = view.quick_layout().unwrap();
+    // Every button inside its bar, the last one too (pressable).
+    assert!(buttons.iter().all(|(r, _)| r.max_x() <= bar.max_x() + 0.5), "{buttons:?} {bar:?}");
     let (r, _) = buttons.iter().find(|(_, q)| *q == Quick::Scheme(5)).copied().unwrap();
     view.pointer_down(r.center(), 1, PressMods::default());
     view.release();

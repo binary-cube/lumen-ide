@@ -24,6 +24,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "C / C++",
     description: "C and C++: colors, folding, indentation, clangd as their language server",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-code", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

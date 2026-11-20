@@ -91,7 +91,8 @@ impl SettingsView {
             model.code_languages.iter().map(|(_, n)| ds::choice_width(rows.text, ctx, n)).collect();
         // The pills go the card's whole width, under the label.
         let lines = pill_lines(&widths, gap, width - 2.0 * px(form::ROW_PAD));
-        let row = Labelled { key: "language", label: &label, detail: &detail, reset: None };
+        let row =
+            Labelled { key: "language", label: &label, detail: &detail, reset: None, icon: None };
         let control_h = 32.0 * lines as f32 + 8.0 * lines.saturating_sub(1) as f32;
         // Under the label, the whole width: the list is long.
         let area = self.setting_row(&mut rows, &row, width, control_h);
@@ -195,44 +196,48 @@ impl SettingsView {
                 let reset = default.filter(|d| d != current);
                 self.paint_choices_row(
                     rows,
-                    Labelled { key, label, detail, reset },
+                    Labelled { key, label, detail, reset, icon: None },
                     choices,
                     *current,
                 );
             }
-            SettingsRow::Dropdown { key, label, detail, choices, current, default } => {
+            SettingsRow::Dropdown { key, label, detail, icon, choices, current, default } => {
                 let reset = default.filter(|d| d != current);
-                let row = Labelled { key, label, detail, reset };
+                let row = Labelled { key, label, detail, reset, icon: *icon };
                 self.paint_dropdown_row(rows, row, choices, *current);
             }
             SettingsRow::Segmented { key, label, detail, choices, current, default } => {
                 let reset = default.filter(|d| d != current);
-                let row = Labelled { key, label, detail, reset };
+                let row = Labelled { key, label, detail, reset, icon: None };
                 self.paint_segmented_row(rows, row, choices, *current);
             }
             SettingsRow::Slider { key, label, detail, stops, current, default } => {
                 let reset = default.filter(|d| d != current);
                 self.paint_slider_row(
                     rows,
-                    Labelled { key, label, detail, reset },
+                    Labelled { key, label, detail, reset, icon: None },
                     stops,
                     *current,
                 );
             }
             SettingsRow::Toggle { key, label, detail, on, default } => {
                 let reset = default.filter(|d| d != on).map(i64::from);
-                self.paint_toggle_row(rows, Labelled { key, label, detail, reset }, *on);
+                self.paint_toggle_row(
+                    rows,
+                    Labelled { key, label, detail, reset, icon: None },
+                    *on,
+                );
             }
             SettingsRow::Text { key, label, detail, value, placeholder } => {
-                let row = Labelled { key, label, detail, reset: None };
+                let row = Labelled { key, label, detail, reset: None, icon: None };
                 self.paint_text_row(rows, row, value, placeholder);
             }
             SettingsRow::Secret { key, label, detail, set, placeholder } => {
-                let row = Labelled { key, label, detail, reset: None };
+                let row = Labelled { key, label, detail, reset: None, icon: None };
                 self.paint_secret_row(rows, row, *set, placeholder);
             }
             SettingsRow::SwitchCard { key, label, detail, on, status, tone } => {
-                let row = Labelled { key, label, detail, reset: None };
+                let row = Labelled { key, label, detail, reset: None, icon: None };
                 self.paint_switch_card(rows, row, *on, (status, *tone));
             }
             SettingsRow::Status { text: status, button } => {
@@ -248,7 +253,7 @@ impl SettingsView {
             SettingsRow::Notes(lines) => rows.notes(lines),
             SettingsRow::Cards { key, label, detail, cards, current, default, preview } => {
                 let reset = default.filter(|d| d != current);
-                let row = Labelled { key, label, detail, reset };
+                let row = Labelled { key, label, detail, reset, icon: None };
                 self.paint_cards_row(rows, row, cards, *current, preview);
             }
         }
@@ -276,6 +281,7 @@ impl SettingsView {
             modified: reset.is_some(),
             reset_hovered: reset.is_some() && self.hover == reset,
             highlight: 0.0,
+            icon: row.icon,
         };
         let area = form::setting_row(rows.layer, rows.text, rows.ctx, rows.icons, spec);
         if let (Some(r), Some(action)) = (area.reset, reset) {
@@ -663,6 +669,8 @@ pub(super) struct Labelled<'a> {
     pub(super) label: &'a str,
     pub(super) detail: &'a str,
     pub(super) reset: Option<i64>,
+    /// An icon before its label.
+    pub(super) icon: Option<&'static str>,
 }
 
 /// How many lines pills `widths` wide take, `gap` apart, in `room`.

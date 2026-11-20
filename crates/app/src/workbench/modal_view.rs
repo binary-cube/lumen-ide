@@ -297,14 +297,18 @@ impl Workbench {
         self.modal_view.as_ref().is_some_and(|m| m.dragging)
     }
 
+    /// The view's press followed: `None` when it holds none (a move behind a popover goes
+    /// on to what's under it).
     pub(super) fn drag_modal_view(&mut self, p: Point) -> Option<bool> {
-        let modal = self.modal_view.as_mut()?;
-        Some(modal.dragging && modal.viewer.drag(p))
+        let modal = self.modal_view.as_mut().filter(|m| m.dragging)?;
+        Some(modal.viewer.drag(p))
     }
 
+    /// The view's press let go: `None` when it held none.
     pub(super) fn release_modal_view(&mut self) -> Option<bool> {
-        let modal = self.modal_view.as_mut()?;
-        Some(std::mem::take(&mut modal.dragging) && modal.viewer.release())
+        let modal = self.modal_view.as_mut().filter(|m| m.dragging)?;
+        modal.dragging = false;
+        Some(modal.viewer.release())
     }
 
     pub(super) fn hover_modal_view(&mut self, p: Point) -> Option<(bool, CursorIcon)> {

@@ -13,6 +13,7 @@ use std::time::Instant;
 use i18n::t;
 use kernel::{Point, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Divider, NOWHERE, Press, Shown};
 use ui_components::ds::{self, Ctx};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{
@@ -47,13 +48,181 @@ impl std::fmt::Debug for CollectionData {
     }
 }
 
-/// Which side has the keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Side {
-    #[default]
-    Tree,
-    Editor,
+/// The tree of the collection as a part of its tab: the tree's own input (its rows, its
+/// search, a name being typed in it), its keys while it has them (Tab its own too); losing
+/// them, its search stops and a name being typed is kept.
+struct TreeSide<'a> {
+    tree: Option<&'a mut RequestTree>,
+    area: Rect,
 }
+
+impl Control for TreeSide<'_> {
+    fn area(&self) -> Option<Rect> {
+        Some(self.area)
+    }
+
+    /// Held: the moves drag a request, the release activates a row.
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        if let Some(tree) = self.tree.as_deref_mut() {
+            tree.press(p, clicks);
+        }
+        Press::Held
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.tree.as_deref_mut().is_some_and(|t| t.drag(p))
+    }
+
+    fn release(&mut self) -> bool {
+        self.tree.as_deref_mut().is_some_and(RequestTree::release)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.tree.as_deref_mut().is_some_and(|t| t.hover(p.unwrap_or(NOWHERE)))
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.tree.as_deref()?.cursor_at(p)
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        self.tree.as_deref_mut().is_some_and(|t| t.scroll(dy))
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn set_focus(&mut self, focused: bool) {
+        if !focused && let Some(tree) = self.tree.as_deref_mut() {
+            tree.focus_lost();
+        }
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        self.tree.as_deref_mut().is_some_and(|t| t.edit_key(key, reach))
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.tree.as_deref_mut().is_some_and(|t| t.text_input(typed))
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        self.tree.as_deref()?.selected_text()
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        matches!(id, "select_all" | "select-all")
+            && self.tree.as_deref_mut().is_some_and(RequestTree::select_all)
+    }
+
+    fn tooltip(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
+        self.tree.as_deref()?.tooltip(p)
+    }
+
+    fn menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
+        self.tree.as_deref_mut()?.menu_at(p, false)
+    }
+
+    fn frame_deadline(&self) -> Option<Instant> {
+        self.tree.as_deref()?.frame_deadline()
+    }
+}
+
+/// The editor of the request chosen as a part of its tab (nothing while none is): a tab's
+/// view inside it, its press with the clicks and the modifiers, what it decided kept in
+/// `action` for the tab; its keys while it has them (Tab its own too).
+struct EditorSide<'a> {
+    editor: Option<&'a mut RequestEditor>,
+    area: Rect,
+    action: &'a mut Option<ViewerAction>,
+}
+
+impl Control for EditorSide<'_> {
+    fn area(&self) -> Option<Rect> {
+        Some(self.area)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        self.press_with(p, clicks, PressMods::default())
+    }
+
+    /// Held: the moves select in its fields or drag its separator.
+    fn press_with(&mut self, p: Point, clicks: u32, mods: PressMods) -> Press {
+        *self.action = self.editor.as_deref_mut().and_then(|e| e.pointer_down(p, clicks, mods));
+        Press::Held
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.editor.as_deref_mut().is_some_and(|e| e.drag(p))
+    }
+
+    fn release(&mut self) -> bool {
+        self.editor.as_deref_mut().is_some_and(|e| e.release())
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.editor.as_deref_mut().is_some_and(|e| e.hover(p.unwrap_or(NOWHERE)))
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.editor.as_deref()?.cursor_at(p)
+    }
+
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.editor.as_deref_mut().is_some_and(|e| e.scroll(dx, dy))
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        self.editor.as_deref_mut().is_some_and(|e| e.edit_key_with(key, reach))
+    }
+
+    /// What's typed or pasted (the editor takes both alike).
+    fn text(&mut self, typed: &str) -> bool {
+        self.editor.as_deref_mut().is_some_and(|e| e.text_input(typed))
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        self.editor.as_deref()?.selected_text()
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        self.editor.as_deref_mut().is_some_and(|e| e.command(id))
+    }
+
+    fn tooltip(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
+        self.editor.as_deref()?.tooltip_at(p)
+    }
+
+    fn menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
+        self.editor.as_deref_mut()?.context_menu(p)
+    }
+
+    fn animating(&self) -> bool {
+        self.editor.as_deref().is_some_and(|e| e.is_animating())
+    }
+
+    fn frame_deadline(&self) -> Option<Instant> {
+        self.editor.as_deref()?.frame_deadline()
+    }
+}
+
+/// The tree, after the separator among its parts (see [`CollectionView::with_controls`]).
+const TREE_SIDE: usize = 1;
+/// The editor, last among its parts.
+const EDITOR_SIDE: usize = 2;
 
 #[derive(Default)]
 pub struct CollectionView {
@@ -63,15 +232,17 @@ pub struct CollectionView {
     /// The tree's width (logical pixels).
     width: f32,
     splitter: Option<Splitter>,
+    /// Where the held separator's line was dragged to (physical pixels across).
+    split_at: Option<f32>,
+    /// Its parts' state of use (see [`CollectionView::with_controls`]).
+    controls: Controls,
     left: Rect,
     right: Rect,
-    side: Side,
-    /// Where the mouse is (the wheel goes there), and which side a press began on.
-    over: Side,
-    pressed: Option<Side>,
     /// The menu shown is the tree's.
     tree_menu: bool,
     action: Option<ViewerAction>,
+    /// What a press in the editor decided (the press hands it on).
+    editor_action: Option<ViewerAction>,
     /// The project's queries asked again (the app's answer lands here), and the ask itself,
     /// before anything else it asks.
     fresh: Arc<Mutex<Option<Arc<dyn ProjectQueries>>>>,
@@ -87,9 +258,48 @@ impl std::fmt::Debug for CollectionView {
 }
 
 impl CollectionView {
-    /// Request `index` of `file` in the editor (the same: kept as it is).
+    /// Its parts, the topmost first, with their state of use: the separator between the
+    /// tree and the editor (once drawn), the tree, the editor. The keys are the tree's at
+    /// first; a press gives them to the side pressed (a press on the separator leaves them),
+    /// a request opened gives them to the editor. What its parts are told is noted as it
+    /// goes (a part moving, the frame one wants), and what the tree asked is followed.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let answer = {
+            let drawn = self.splitter.is_some();
+            let mut unmade = Splitter::default();
+            let splitter = self.splitter.as_mut().unwrap_or(&mut unmade);
+            let mut divider = Divider { splitter, at: &mut self.split_at };
+            let mut seam = Shown { part: &mut divider, shown: drawn };
+            let mut tree = TreeSide { tree: self.tree.as_mut(), area: self.left };
+            let mut editor = EditorSide {
+                editor: self.editor.as_mut().map(|(_, _, e)| e),
+                area: self.right,
+                action: &mut self.editor_action,
+            };
+            let mut parts: [&mut dyn Control; 3] = [&mut seam, &mut tree, &mut editor];
+            let controls = &mut self.controls;
+            if controls.focused().is_none() {
+                controls.focus(&mut parts, Some(TREE_SIDE));
+            }
+            let answer = f(controls, &mut parts);
+            controls.settle(&parts);
+            answer
+        };
+        self.take_tree();
+        answer
+    }
+
+    /// The side with the keys is the editor's.
+    fn editor_has_keys(&self) -> bool {
+        self.controls.focused() == Some(EDITOR_SIDE)
+    }
+
+    /// Request `index` of `file` in the editor (the same: kept as it is), which has the keys.
     fn open_request(&mut self, file: PathBuf, index: usize) {
-        self.side = Side::Editor;
+        self.give_editor_keys();
         if self.editor.as_ref().is_some_and(|(f, i, _)| *f == file && *i == index) {
             return;
         }
@@ -108,6 +318,13 @@ impl CollectionView {
         editor.set_data(&data);
         tree.set_current(Some((file.clone(), index)));
         self.editor = Some((file, index, editor));
+    }
+
+    /// The keys to the editor (from the tree: its search stops, a name typed is kept).
+    fn give_editor_keys(&mut self) {
+        if !self.editor_has_keys() {
+            self.with_controls(|c, parts| c.focus(parts, Some(EDITOR_SIDE)));
+        }
     }
 
     /// What the tree asked: a view's action passed on, a request opened beside it, an
@@ -191,16 +408,6 @@ impl CollectionView {
         })));
     }
 
-    fn side_at(&self, p: Point) -> Option<Side> {
-        if self.left.contains(p) {
-            Some(Side::Tree)
-        } else if self.right.contains(p) {
-            Some(Side::Editor)
-        } else {
-            None
-        }
-    }
-
     fn editor(&mut self) -> Option<&mut RequestEditor> {
         self.editor.as_mut().map(|(_, _, e)| e)
     }
@@ -238,6 +445,7 @@ impl Viewer for CollectionView {
             (b.size.width - width - seam / 2.0).max(0.0),
             b.size.height,
         );
+        let editor_keys = self.editor_has_keys();
         if let Some(tree) = &mut self.tree {
             tree.paint(ViewerPaint {
                 bounds: self.left,
@@ -247,7 +455,7 @@ impl Viewer for CollectionView {
                 palette: p,
                 icons,
                 waker: waker.clone(),
-                focused: focused && self.side == Side::Tree,
+                focused: focused && !editor_keys,
             });
         }
         let layer = scene.push_layer(Some(self.right));
@@ -261,7 +469,7 @@ impl Viewer for CollectionView {
                 palette: p,
                 icons,
                 waker,
-                focused: focused && self.side == Side::Editor,
+                focused: focused && editor_keys,
             }),
             None => ds::empty_state(
                 layer,
@@ -281,6 +489,7 @@ impl Viewer for CollectionView {
             scale,
         );
         splitter.paint(scene);
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn set_shown(&mut self, shown: bool) {
@@ -306,62 +515,41 @@ impl Viewer for CollectionView {
         if let Some(editor) = self.editor() {
             changed |= editor.poll();
         }
+        // What its parts want of the frames now (a write due, a fade).
+        self.with_controls(|c, parts| c.settle(parts));
         changed
     }
 
+    /// Its parts' soonest frame (the tree's scrollbar fading, the editor's write due), as
+    /// noted at their last input, paint or poll.
     fn frame_deadline(&self) -> Option<Instant> {
-        let tree = self.tree.as_ref().and_then(RequestTree::frame_deadline);
-        let editor = self.editor.as_ref().and_then(|(_, _, e)| e.frame_deadline());
-        tree.into_iter().chain(editor).min()
+        self.controls.next_frame()
     }
 
     fn is_loading(&self) -> bool {
         self.editor.as_ref().is_some_and(|(_, _, e)| e.is_loading())
     }
 
+    /// The separator or the editor's moving.
     fn is_animating(&self) -> bool {
-        self.splitter.as_ref().is_some_and(Splitter::is_animating)
-            || self.editor.as_ref().is_some_and(|(_, _, e)| e.is_animating())
+        self.controls.is_animating()
     }
 
+    /// The wheel to the side under the mouse.
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
-        match self.over {
-            Side::Tree => self.tree.as_mut().is_some_and(|t| t.scroll(dy)),
-            Side::Editor => self.editor().is_some_and(|e| e.scroll(dx, dy)),
-        }
+        self.with_controls(|c, parts| c.scroll_hovered(parts, dx, dy)).is_some()
     }
 
+    /// The side pressed takes the press (and the keys); the separator is held.
     fn pointer_down(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
-        if self.splitter.as_mut().is_some_and(|s| s.begin_drag(p)) {
-            return None;
-        }
-        let side = self.side_at(p)?;
-        self.pressed = Some(side);
-        match side {
-            Side::Tree => {
-                self.side = Side::Tree;
-                if let Some(tree) = &mut self.tree {
-                    tree.press(p, clicks);
-                }
-                self.take_tree();
-                self.action.take()
-            }
-            Side::Editor => {
-                // The keyboard left the tree: a name typed there is kept.
-                if self.side == Side::Tree {
-                    if let Some(tree) = &mut self.tree {
-                        tree.focus_lost();
-                    }
-                    self.take_tree();
-                }
-                self.side = Side::Editor;
-                self.editor().and_then(|e| e.pointer_down(p, clicks, mods))
-            }
-        }
+        self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods));
+        self.editor_action.take().or_else(|| self.action.take())
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(at) = self.splitter.as_ref().and_then(|s| s.drag_to(p)) {
+        let moved = self.with_controls(|c, parts| c.drag(parts, p));
+        // The separator held: the tree's width follows it.
+        if let Some(at) = self.split_at.take() {
             let scale = if self.left.size.width > 0.0 && self.width > 0.0 {
                 (self.left.size.width / self.width.max(1.0)).max(0.1)
             } else {
@@ -370,112 +558,69 @@ impl Viewer for CollectionView {
             self.width = ((at - self.left.min_x()) / scale).max(LEAST);
             return true;
         }
-        match self.pressed {
-            Some(Side::Tree) => self.tree.as_mut().is_some_and(|t| t.drag(p)),
-            Some(Side::Editor) => self.editor().is_some_and(|e| e.drag(p)),
-            None => false,
-        }
+        moved.is_some_and(|(_, changed)| changed)
     }
 
     fn release(&mut self) -> bool {
-        if self.splitter.as_mut().is_some_and(Splitter::end_drag) {
-            return true;
-        }
-        let released = match self.pressed.take() {
-            Some(Side::Tree) => self.tree.as_mut().is_some_and(RequestTree::release),
-            Some(Side::Editor) => self.editor().is_some_and(|e| e.release()),
-            None => false,
-        };
-        self.take_tree();
-        released
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let mut changed = self.splitter.as_mut().is_some_and(|s| s.hover(p));
-        if let Some(side) = self.side_at(p) {
-            self.over = side;
-        }
-        changed |= self.tree.as_mut().is_some_and(|t| t.hover(p));
-        if let Some(editor) = self.editor() {
-            changed |= editor.hover(p);
-        }
-        changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.splitter.as_ref().is_some_and(|s| s.contains(p)) {
-            return Some(ViewerCursor::ResizeHorizontal);
-        }
-        match self.side_at(p)? {
-            Side::Tree => self.tree.as_ref()?.cursor_at(p),
-            Side::Editor => self.editor.as_ref()?.2.cursor_at(p),
-        }
+        self.controls.cursor_at(p)
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
-        match self.side_at(p)? {
-            Side::Tree => self.tree.as_ref()?.tooltip(p),
-            Side::Editor => self.editor.as_ref()?.2.tooltip_at(p),
-        }
+        self.controls.tooltip_at(p)
     }
 
     fn takes_keyboard(&self) -> bool {
         true
     }
 
+    /// The side with the keys wants the text typed.
     fn wants_text(&self) -> bool {
-        match self.side {
-            Side::Tree => self.tree.as_ref().is_some_and(RequestTree::wants_text),
-            Side::Editor => self.editor.as_ref().is_some_and(|(_, _, e)| e.wants_text()),
+        if self.editor_has_keys() {
+            self.editor.as_ref().is_some_and(|(_, _, e)| e.wants_text())
+        } else {
+            self.tree.as_ref().is_some_and(RequestTree::wants_text)
         }
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        match self.side {
-            Side::Tree => self.tree.as_mut().is_some_and(|t| t.text_input(typed)),
-            Side::Editor => self.editor().is_some_and(|e| e.text_input(typed)),
-        }
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        match self.side {
-            Side::Tree => self.tree.as_mut().is_some_and(|t| t.text_input(text)),
-            Side::Editor => self.editor().is_some_and(|e| e.paste(text)),
-        }
+        self.text_input(text)
     }
 
+    /// What the side with the keys has selected.
     fn selected_text(&self) -> Option<String> {
-        match self.side {
-            Side::Tree => self.tree.as_ref()?.selected_text(),
-            Side::Editor => self.editor.as_ref()?.2.selected_text(),
+        if self.editor_has_keys() {
+            self.editor.as_ref()?.2.selected_text()
+        } else {
+            self.tree.as_ref()?.selected_text()
         }
     }
 
     fn select_all(&mut self) -> bool {
-        match self.side {
-            Side::Tree => self.tree.as_mut().is_some_and(RequestTree::select_all),
-            Side::Editor => self.editor().is_some_and(|e| e.select_all()),
-        }
+        self.with_controls(|c, parts| c.command(parts, "select_all")).is_some()
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let used = match self.side {
-            Side::Tree => self.tree.as_mut().is_some_and(|t| t.edit_key(key, reach)),
-            Side::Editor => self.editor().is_some_and(|e| e.edit_key_with(key, reach)),
-        };
-        self.take_tree();
-        used
+        self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
 
+    /// The menu of the part under the mouse (its rows come back to it as commands).
     fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
         self.tree_menu = false;
-        match self.side_at(p)? {
-            Side::Tree => {
-                self.tree_menu = true;
-                self.tree.as_mut()?.menu_at(p, false)
-            }
-            Side::Editor => self.editor()?.context_menu(p),
-        }
+        let (part, menu) = self.with_controls(|c, parts| c.menu(parts, p))?;
+        self.tree_menu = part == TREE_SIDE;
+        Some(menu)
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -497,11 +642,7 @@ impl Viewer for CollectionView {
             self.take_tree();
             return true;
         }
-        match self.side {
-            Side::Tree if id == "select_all" || id == "select-all" => self.select_all(),
-            Side::Tree => false,
-            Side::Editor => self.editor().is_some_and(|e| e.command(id)),
-        }
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {

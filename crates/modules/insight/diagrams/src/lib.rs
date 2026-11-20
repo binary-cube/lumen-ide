@@ -42,6 +42,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Diagrams",
     description: "The type at the cursor with its parents, interfaces, traits, children and dependencies, as a diagram",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "graph", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 pub const SHOW_DIAGRAM: CommandId = workbench_model::SHOW_TYPE_DIAGRAM;

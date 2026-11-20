@@ -2,6 +2,7 @@
 //! narrowed by a filter), where it reads and lays out (in the background, never on the UI
 //! thread), and what it reacts to (clicks, double clicks, menus, keys, scrolling, zoom).
 
+mod filter;
 mod paint;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -13,12 +14,15 @@ use database::relations::{Candidate, RelationKinds, RelationNotes, VirtualKey, i
 use database::{Cancel, DbError, TableRef};
 use i18n::{t, tr};
 use kernel::{Point, Rect, Subscription};
+use ui_components::control::{Control, Controls};
 use ui_components::diagram::{History, Insets, Release, Viewport};
 use ui_components::{
     AppRequest, PressMods, Tip, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey,
     ViewerPaint,
 };
 use ui_kit::TextInput;
+
+use self::filter::FilterField;
 
 use crate::THREAD;
 use crate::layout::{DiagramLayout, Shown, lay_out};
@@ -182,8 +186,12 @@ pub struct RelationsView {
     focus: Option<usize>,
     depth: usize,
     filter: TextInput,
-    /// The filter has the keys.
-    typing: bool,
+    /// Where the filter's pill and its × were drawn last (none: not drawn).
+    filter_area: Rect,
+    clear_area: Rect,
+    /// Its parts' state of use (see `with_controls`): the filter has the keys while it has
+    /// the focus.
+    controls: Controls,
     /// The table clicked last (outlined, its lines and their labels shown).
     selected: Option<usize>,
     shown: Shown,
@@ -243,7 +251,9 @@ impl Default for RelationsView {
             focus: None,
             depth: 1,
             filter: TextInput::new(""),
-            typing: false,
+            filter_area: Rect::default(),
+            clear_area: Rect::default(),
+            controls: Controls::default(),
             selected: None,
             shown: Shown::default(),
             layout: Arc::default(),
@@ -858,10 +868,41 @@ impl RelationsView {
 
     /// Ends typing in the filter; Enter centers the first table it matches.
     fn stop_typing(&mut self, center: bool) {
-        self.typing = false;
+        self.with_controls(|c, parts| c.focus(parts, None));
         if center && let Some(&t) = self.shown.tables.first() {
             self.select(t);
         }
+    }
+
+    /// The filter has the keys.
+    fn typing(&self) -> bool {
+        self.controls.focused().is_some()
+    }
+
+    /// Its parts (the filter), with their state of use. The diagram (panned, zoomed, its
+    /// cards and lines), its bars, its list and its popovers are its own drawing; what the
+    /// filter changed is followed after.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let (mut edited, mut left) = (false, None);
+        let mut filter = FilterField {
+            input: &mut self.filter,
+            area: self.filter_area,
+            clear: self.clear_area,
+            edited: &mut edited,
+            left: &mut left,
+        };
+        let mut parts: [&mut dyn Control; 1] = [&mut filter];
+        let answer = f(&mut self.controls, &mut parts);
+        if edited {
+            self.filtered();
+        }
+        if let Some(center) = left {
+            self.stop_typing(center);
+        }
+        answer
     }
 }
 
@@ -934,24 +975,8 @@ impl Viewer for RelationsView {
 
     fn command(&mut self, id: &str) -> bool {
         // The search has the keys: the app's editing commands are its (⌘A, ⌘Z, ⌘⇧Z, ⌘X).
-        if self.typing {
-            let edited = match id {
-                "select_all" => {
-                    self.filter.select_all();
-                    return true;
-                }
-                "undo" => self.filter.undo(),
-                "redo" => self.filter.redo(),
-                "cut" => {
-                    self.filter.insert("");
-                    true
-                }
-                _ => false,
-            };
-            if edited {
-                self.filtered();
-                return true;
-            }
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
+            return true;
         }
         match id {
             "fit" => {
@@ -960,7 +985,7 @@ impl Viewer for RelationsView {
             }
             "back" => self.back(),
             "find" => {
-                self.typing = true;
+                self.with_controls(|c, parts| c.focus(parts, Some(FILTER)));
                 self.filter.select_all();
                 true
             }
@@ -1092,12 +1117,10 @@ impl Viewer for RelationsView {
         if !hit.is_some_and(Hit::in_popover) {
             self.popover = None;
         }
-        if hit == Some(Hit::Field) {
-            self.typing = true;
-            self.filter.press(p.x, clicks);
+        // The filter (its caret put): it has the keys; any other press takes them back.
+        if self.with_controls(|c, parts| c.press(parts, p, clicks)).is_some() {
             return None;
         }
-        self.typing = false;
         // The second click of a double click: the card the first one centered opens.
         if clicks >= 2
             && let Some(t) = self.clicked.take()
@@ -1120,9 +1143,8 @@ impl Viewer for RelationsView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if self.typing {
-            self.filter.extend_to(p.x);
-            return true;
+        if let Some((_, moved)) = self.with_controls(|c, parts| c.drag(parts, p)) {
+            return moved;
         }
         // Pressed on the list or a control: no pan.
         let at = self.view.press.and_then(|at| self.hit(at));
@@ -1133,6 +1155,9 @@ impl Viewer for RelationsView {
     }
 
     fn release(&mut self) -> bool {
+        if self.with_controls(|c, parts| c.release(parts)).is_some() {
+            return false;
+        }
         match self.view.release() {
             Release::None => false,
             Release::Panned => {
@@ -1165,6 +1190,9 @@ impl Viewer for RelationsView {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
+        }
         match self.hit(p)? {
             Hit::Field => Some(ViewerCursor::Text),
             Hit::Bar | Hit::Popover | Hit::List => None,
@@ -1182,25 +1210,21 @@ impl Viewer for RelationsView {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn wants_text(&self) -> bool {
-        self.typing
+        self.typing()
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        if !self.typing {
-            return false;
-        }
-        self.filter.insert(text);
-        self.filtered();
-        true
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
-        if self.typing {
-            return self.edit_key(key);
+        // The filter's keys while it has them.
+        if self.typing() {
+            return self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
         }
         match key {
             // Esc: the popover closed, then the line let go.
@@ -1222,33 +1246,11 @@ impl Viewer for RelationsView {
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
-        if !self.typing {
-            return self.edit_key_with(key, ui_components::KeyReach::default());
-        }
-        let before = self.filter.text().to_owned();
-        match key {
-            ViewerKey::Backspace => self.filter.backspace(false),
-            ViewerKey::Delete => self.filter.delete(),
-            ViewerKey::Left => self.filter.move_left(false, false),
-            ViewerKey::Right => self.filter.move_right(false, false),
-            ViewerKey::Home => self.filter.home(false),
-            ViewerKey::End => self.filter.end(false),
-            ViewerKey::Escape if !before.is_empty() => self.filter.set_text(""),
-            ViewerKey::Escape => self.stop_typing(false),
-            ViewerKey::Enter => self.stop_typing(true),
-            _ => return false,
-        }
-        if self.filter.text() != before {
-            self.filtered();
-        }
-        true
+        self.edit_key_with(key, ui_components::KeyReach::default())
     }
 
     fn select_all(&mut self) -> bool {
-        self.typing && {
-            self.filter.select_all();
-            true
-        }
+        self.with_controls(|c, parts| c.command(parts, "select_all")).is_some()
     }
 
     fn status(&self) -> Option<String> {
@@ -1264,9 +1266,15 @@ impl Viewer for RelationsView {
         if let Some(waker) = &ctx.waker {
             *self.waker.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(waker));
         }
+        // Only what's drawn now can be pressed.
+        self.filter_area = Rect::default();
+        self.clear_area = Rect::default();
         self.paint_view(ctx);
     }
 }
+
+/// The filter's place among the view's parts.
+const FILTER: usize = 0;
 
 /// The width of the list of the relations found (physical pixels) in an area `width` wide.
 pub(crate) fn list_width(width: f32, scale: f32) -> f32 {

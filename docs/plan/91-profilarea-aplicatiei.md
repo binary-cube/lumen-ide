@@ -270,3 +270,22 @@ Trei recenzii separate (nucleul, modulul, integrările); ce s-a confirmat a fost
   cronometre: unul e „cine”, celălalt „unde”, iar un tabel derivat din drumuri ar pierde
   apelurile și cel mai lung apel.
 
+## Făcut, după primul profil real (2026-11-21)
+
+- **Fazele unui cadru cronometrate:**
+  - fiecare fază a desenării e cronometrată sub `app·frame` (editoarele, panourile, bara
+    de stare, overlay-urile…, numite de marcajul care le încheie: `Timer::set_what`);
+  - la fel randarea pe GPU (`app·render`);
+  - flame graph-ul spune acum care parte face un cadru lent; înainte, 95% din timpul unui
+    cadru nu era atribuit nimănui.
+- **Firele fără nume:** eșantionate cu `sample` pe aplicația pornită izolat, sunt
+  worker-ele sistemului (pe macOS cozile GCD):
+  - Metal predă cadrele driver-ului (`com.Metal.CommandQueueDispatch`) și le primește
+    înapoi (`com.Metal.CompletionQueueDispatch`);
+  - ritmul cadrelor (`FramePacing`).
+
+  Aplicația își numește toate firele ei (niciun `thread::spawn` fără nume, runtime-urile
+  tokio pe un singur fir). În înregistrări apar acum ca `system-workers`, iar profilul le
+  arată „ale sistemului (driver GPU, cadre)”; timpul lor crește cu cadrele desenate. Un
+  `unnamed` dintr-o înregistrare veche se citește la fel.
+

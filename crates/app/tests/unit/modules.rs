@@ -1053,3 +1053,92 @@ fn a_hidden_module_still_answers_requests() {
     assert!(shown.tools.iter().any(|t| t.id() == "terminal"));
     assert!(shown.commands.iter().any(|c| c.spec.id == terminal_panel::NEW));
 }
+
+/// Generic code names no module and no language (`.claude/rules/ui-components.md`): the
+/// app's and the components' sources hold none of their ids as a literal, but where one is
+/// something else that happens to be spelled so (a key, an extension, a phase's name) or
+/// the app's own sample — each such place listed here on purpose. A module or a language
+/// named in new generic code fails this until it goes through a contract (or is added here
+/// with its reason).
+#[test]
+fn generic_code_names_no_module_and_no_language() {
+    /// `(file, id)`: why each may hold the id.
+    const ALLOWED: &[(&str, &str)] = &[
+        // The `c` key (Ctrl+C) and a completion kind's letter.
+        ("app/src/app/input.rs", "c"),
+        ("ui/ui-workbench/src/completion_popup.rs", "c"),
+        // An icon's name in the icons' preview (the terminal's icon, not the module).
+        ("ui/ui-workbench/src/settings_view/appearance.rs", "terminal"),
+        // A paint phase's name.
+        ("app/src/workbench/paint.rs", "decorations"),
+        // The data grid's value editor for JSON values and its extractor menu.
+        ("ui/ui-components/src/data_grid/value_editor.rs", "json"),
+        ("ui/ui-components/src/data_grid/grid/menus.rs", "extractor"),
+        // The user's themes' folder and their files' extension.
+        ("app/src/themes.rs", "themes"),
+        ("app/src/themes.rs", "toml"),
+    ];
+    /// Where the ids belong: the modules' registration, the snapshots (a test harness), an
+    /// old saved id kept working (an alias).
+    const SKIPPED: &[&str] =
+        &["app/src/modules.rs", "app/src/snapshot", "app/src/storage/session.rs"];
+    let mut ids: Vec<String> = builtin().manifests().map(|m| m.id.as_str().to_owned()).collect();
+    ids.extend(support().languages.languages().iter().map(|l| l.id.as_str().to_owned()));
+    ids.sort();
+    ids.dedup();
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut sources = Vec::new();
+    let mut dirs = vec![crates.join("app/src")];
+    for ui in ["ui-components", "ui-workbench", "ui-kit"] {
+        dirs.push(crates.join("ui").join(ui).join("src"));
+    }
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if path.extension().is_some_and(|e| e == "rs") {
+                sources.push(path);
+            }
+        }
+    }
+    let mut named = Vec::new();
+    for path in sources {
+        let short = path.strip_prefix(&crates).unwrap().to_string_lossy().replace('\\', "/");
+        if SKIPPED.iter().any(|s| short.starts_with(s)) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path).unwrap();
+        for id in &ids {
+            if text.contains(&format!("\"{id}\"")) && !ALLOWED.contains(&(short.as_str(), id)) {
+                named.push(format!("{short}: \"{id}\""));
+            }
+        }
+    }
+    assert!(named.is_empty(), "generic code naming a module or a language:\n{}", named.join("\n"));
+}
+
+/// The file icons' preview shows the files the languages give, in their order (the same
+/// five as always), each with its language's icon.
+#[test]
+fn the_icons_preview_shows_the_languages_sample_files() {
+    let support = support();
+    let mut samples: Vec<(u8, &str, &str)> = support
+        .languages
+        .languages()
+        .iter()
+        .filter_map(|l| l.icon_sample.map(|(order, name)| (order, name, l.icon)))
+        .collect();
+    samples.sort_by_key(|(order, ..)| *order);
+    let names: Vec<(&str, &str)> = samples.iter().map(|(_, n, i)| (*n, *i)).collect();
+    assert_eq!(
+        names,
+        [
+            ("index.php", "file-code"),
+            ("app.js", "file-code"),
+            ("style.css", "file-style"),
+            ("package.json", "file-json"),
+            ("README.md", "file-text"),
+        ]
+    );
+}

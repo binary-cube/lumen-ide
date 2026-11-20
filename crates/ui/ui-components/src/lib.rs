@@ -13,6 +13,7 @@ pub mod chart;
 pub mod code_tokens;
 pub mod color_picker;
 pub mod columns;
+pub mod control;
 pub mod data_grid;
 pub mod date_range;
 pub mod decorations;

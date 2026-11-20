@@ -1,8 +1,86 @@
 //! Scrolling: the scrollbars (pressed, dragged), the cursor kept in view, the visible lines.
 
 use super::*;
+use ui_components::AutoHide;
+use ui_components::control::{Control, Controls, NOWHERE, Press};
+
+/// One of the editor's bars as a control: its thumb held (or the text jumps where its
+/// track is pressed), the offsets kept whole pixels; let go, it stays a moment, then fades.
+struct EditorBar<'a> {
+    bar: &'a mut Scrollbar,
+    metrics: ScrollMetrics,
+    offset: &'a mut f32,
+    auto: &'a mut AutoHide,
+}
+
+impl Control for EditorBar<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.bar.contains(p)
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> Press {
+        match self.bar.begin_drag(p, self.metrics) {
+            Some(offset) => {
+                *self.offset = offset.round();
+                Press::Held
+            }
+            None => Press::Ignored,
+        }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        let Some(offset) = self.bar.drag_to(p, self.metrics) else { return false };
+        let offset = offset.round();
+        let changed = offset != *self.offset;
+        *self.offset = offset;
+        changed
+    }
+
+    fn release(&mut self) -> bool {
+        let released = self.bar.end_drag();
+        if released {
+            self.auto.touch(std::time::Instant::now());
+        }
+        released
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.bar.hover(p.unwrap_or(NOWHERE))
+    }
+}
 
 impl EditorView {
+    /// Its bars as controls (the lane on the right, the bar at the bottom) with the
+    /// metrics they move by, and their state of use: pressed, held, hovered alike.
+    fn with_bars<R>(
+        &mut self,
+        (v, h): (ScrollMetrics, ScrollMetrics),
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut lane = EditorBar {
+            bar: &mut self.vbar,
+            metrics: v,
+            offset: &mut self.scroll_y,
+            auto: &mut self.vauto,
+        };
+        let mut across = EditorBar {
+            bar: &mut self.hbar,
+            metrics: h,
+            offset: &mut self.scroll_x,
+            auto: &mut self.hauto,
+        };
+        let mut parts: [&mut dyn Control; 2] = [&mut lane, &mut across];
+        f(&mut self.bars, &mut parts)
+    }
+
+    /// The mouse at `p` over its bars (they widen under it, narrow when it leaves): `true`
+    /// if one changed.
+    pub(super) fn hover_bars(&mut self, p: Point) -> bool {
+        // The metrics move a bar, not light it.
+        let none = ScrollMetrics::default();
+        self.with_bars((none, none), |c, parts| c.hover(parts, Some(p)))
+    }
+
     /// Scroll by `(dx, dy)` physical pixels. Returns `true` if it moved.
     pub fn scroll_by(&mut self, dx: f32, dy: f32, doc: &Document, folds: &Folds) -> bool {
         let before = (self.scroll_x, self.scroll_y);
@@ -122,12 +200,7 @@ impl EditorView {
         let (v, h) = self.scroll_metrics(doc, folds);
         let on_thumb = self.vbar.thumb_rect(v).is_some_and(|t| t.contains(p));
         self.press_mark = on_thumb.then(|| self.error_mark_at(p).map(|m| (m, p.y))).flatten();
-        if let Some(offset) = self.vbar.begin_drag(p, v) {
-            self.scroll_y = offset.round();
-            return true;
-        }
-        if let Some(offset) = self.hbar.begin_drag(p, h) {
-            self.scroll_x = offset.round();
+        if self.with_bars((v, h), |c, parts| c.press(parts, p, 1)).is_some() {
             return true;
         }
         self.over_scrollbar(p)
@@ -140,15 +213,7 @@ impl EditorView {
         if self.press_mark.is_some_and(|(_, y)| (p.y - y).abs() > 3.0 * self.scale) {
             self.press_mark = None;
         }
-        if let Some(offset) = self.vbar.drag_to(p, v) {
-            self.scroll_y = offset.round();
-            return true;
-        }
-        if let Some(offset) = self.hbar.drag_to(p, h) {
-            self.scroll_x = offset.round();
-            return true;
-        }
-        false
+        self.with_bars((v, h), |c, parts| c.drag(parts, p)).is_some()
     }
 
     /// The mark the lane's thumb was pressed on and let go of without moving: its offset
@@ -157,18 +222,10 @@ impl EditorView {
         self.press_mark.take().map(|(offset, _)| offset)
     }
 
+    /// The mouse let go: the bar that held it stays a moment, then goes. `true` if one did.
     pub fn scrollbar_release(&mut self) -> bool {
-        let now = std::time::Instant::now();
-        let v = self.vbar.end_drag();
-        let h = self.hbar.end_drag();
-        // Let go: it stays a moment, then goes.
-        if v {
-            self.vauto.touch(now);
-        }
-        if h {
-            self.hauto.touch(now);
-        }
-        v | h
+        let none = ScrollMetrics::default();
+        self.with_bars((none, none), |c, parts| c.release(parts)).is_some()
     }
 
     /// The scrollbars: on the right a lane of its own, always shown (as the comparison's

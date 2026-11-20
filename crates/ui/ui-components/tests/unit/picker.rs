@@ -148,3 +148,27 @@ fn suggestions_light_the_first_when_typed_and_the_value_when_clicked() {
     p.open_suggestions(Vec::new(), None, true);
     assert_eq!(p.highlighted(), None, "nothing to light");
 }
+
+/// More rows than fit: its scrollbar's thumb pressed and dragged down scrolls them (as the
+/// wheel does), and the press chooses nothing.
+#[test]
+fn its_scrollbar_thumb_is_dragged() {
+    let palette = crate::palette::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut scene = Scene::default();
+    let mut p = Picker::default();
+    p.open((0..40).map(|i| PickerItem::person(format!("row {i}"), "")).collect(), None);
+    let bounds = Rect::new(0.0, 0.0, 800.0, 900.0);
+    let anchor = Rect::new(10.0, 10.0, 300.0, 30.0);
+    p.paint(&mut scene, &mut text, &icons, &ctx, (anchor, bounds), "");
+    let edge = p.list.max_x() - 4.0;
+    let thumb = Point::new(edge, p.list.min_y() + 6.0);
+    p.hover(thumb);
+    assert_eq!(p.press(thumb), None, "the bar takes the press: nothing chosen");
+    assert!(p.is_open());
+    assert!(p.drag(Point::new(edge, p.list.min_y() + 120.0)));
+    assert!(p.scroll > 0.0, "dragged down: the rows follow");
+    assert!(p.release());
+}

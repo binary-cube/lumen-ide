@@ -17,6 +17,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "MySQL / MariaDB",
     description: "MySQL (5.7 to the newest) and MariaDB (10.2 to the newest) servers as data sources: their databases, tables, structure and rows, changed in transactions, the console's plans and profiles, over TLS by sslmode",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "database", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// The drivers (created only when a source connects): MySQL's, then MariaDB's.

@@ -56,6 +56,7 @@ impl SourcesView {
         let ds = Ctx::new(p, scale);
         let px = |v: f32| ds.px(v);
         self.anchors.clear();
+        self.bounds = b;
         // The footer (its buttons, the test's outcome) is the window's.
         let body = b;
         if self.editor.is_none() {

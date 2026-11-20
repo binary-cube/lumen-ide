@@ -4,6 +4,7 @@
 
 use kernel::{Point, Rect};
 use render_api::Scene;
+use ui_components::control::{Control, NOWHERE, Press};
 use ui_components::{Orientation, Splitter, SplitterStyle, ViewerCursor};
 use workbench_model::LayoutSizes;
 
@@ -179,6 +180,48 @@ impl Divider {
         if self.shown {
             self.splitter.paint(scene);
         }
+    }
+}
+
+/// A divider and the project's sizes it keeps its share in, as one control: pressed on its
+/// strip it's held (two clicks: back to where it starts), the pointer moves it, let go its
+/// share is kept.
+pub(crate) struct Grip<'a> {
+    pub divider: &'a mut Divider,
+    pub sizes: Option<&'a LayoutSizes>,
+}
+
+impl Control for Grip<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.divider.shown && self.divider.splitter.contains(p)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        match self.divider.press(p, clicks, self.sizes) {
+            true if clicks >= 2 => Press::Took,
+            true => Press::Held,
+            false => Press::Ignored,
+        }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.divider.drag(p)
+    }
+
+    fn release(&mut self) -> bool {
+        self.divider.release(self.sizes)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.divider.hover(p.unwrap_or(NOWHERE))
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.divider.cursor(p)
+    }
+
+    fn animating(&self) -> bool {
+        self.divider.is_animating()
     }
 }
 

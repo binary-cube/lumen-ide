@@ -38,6 +38,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "PHP",
     description: "PHP: colors, embedded HTML / JS / CSS / JSON, heredocs, folding",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-code", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -83,9 +84,12 @@ impl Module for PhpModule {
         ctx.contribute(workbench_model::ModuleThreads(&["php-input", "php-output", DETECT_THREAD]));
         ctx.contribute(
             LanguageDescriptor::new("php", "PHP")
+                .icon_sample(0, "index.php")
                 .word_chars("$")
                 // Its HTML (outside `<?php`).
                 .closing_tags(markup::unclosed_tag)
+                // A fragment without its opening tag would read as HTML.
+                .fragment_opening("<?php\n", "<?")
                 .extensions(&[
                     "php", "phtml", "inc", "php3", "php4", "php5", "php7", "php8", "phps",
                 ])

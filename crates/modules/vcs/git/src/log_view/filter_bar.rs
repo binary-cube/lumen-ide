@@ -1,10 +1,10 @@
 //! The filter bar painted (over the commits, in their column): the text field with its `.*`
-//! and `Cc`, the pills, and the open pill's list over the log; and the keys and text its
-//! fields take.
+//! and `Cc`, the pills, and the open pill's list over the log; its presses, and what its
+//! field typed in answered as a control (`parts::BarField` takes the keys and the text).
 
 use super::filters::{Choice, Field, FilterKind};
+use super::parts::FieldAnswer;
 use super::*;
-use ui_components::KeyReach;
 use ui_kit::TextInput;
 
 /// A line of the bar (logical pixels): it takes one, or two when narrow.
@@ -474,30 +474,6 @@ impl LogView {
         (!selected.is_empty()).then(|| selected.to_owned())
     }
 
-    /// An edit command for the field with the keys (the app's ⌘A, ⌘X, ⌘Z, ⇧⌘Z): `true` if
-    /// one has the keys.
-    pub(super) fn field_command(&mut self, id: &str) -> bool {
-        let Some(field) = self.bar.focus else { return false };
-        let Some(input) = self.focused_input() else { return false };
-        let edited = match id {
-            "select_all" => {
-                input.select_all();
-                false
-            }
-            "cut" => {
-                input.insert("");
-                true
-            }
-            "undo" => input.undo(),
-            "redo" => input.redo(),
-            _ => return false,
-        };
-        if edited {
-            self.typed_into(field);
-        }
-        true
-    }
-
     /// The mouse dragged from a press in a field: its selection follows. `true` if one is
     /// being selected in.
     pub(super) fn drag_field(&mut self, p: Point) -> bool {
@@ -541,93 +517,39 @@ impl LogView {
         }
     }
 
-    /// Text typed into the field with the keys. `true` if one took it.
-    pub(super) fn filter_text_input(&mut self, typed: &str) -> bool {
-        let Some(field) = self.bar.focus else { return false };
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        let Some(input) = self.focused_input() else { return false };
-        input.insert(&typed);
-        self.typed_into(field);
-        true
+    /// What the bar's field typed in answered as a control ([`super::parts::BarField`]):
+    /// the filter it is follows, `↵` applies or chooses, the list moves or closes.
+    pub(super) fn take_field_answer(&mut self) {
+        let Some(answer) = self.field_answer.take() else { return };
+        match answer {
+            FieldAnswer::Typed(field) => self.typed_into(field),
+            FieldAnswer::Entered(field) => self.enter_field(field),
+            FieldAnswer::Stepped(by) => self.step_popup(by),
+            FieldAnswer::Closed => self.close_popup(),
+        }
     }
 
-    /// A key for the field with the keys (and the open list): editing, `↑ ↓` among the
-    /// list's rows, `↵` choosing (the text: applied now), Esc closing the list or leaving
-    /// the field. `false` if no field has the keys.
-    pub(super) fn filter_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let Some(field) = self.bar.focus else { return false };
-        let in_list = matches!(field, Field::Query) && self.bar.popup.is_some();
-        match key {
-            ViewerKey::Escape => {
-                if self.bar.popup.is_some() {
-                    self.close_popup();
-                } else {
-                    self.bar.focus = None;
+    /// `↵` in field `field`: the text applied now, the list's row with the keys (else its
+    /// first) chosen, the first branch shown.
+    fn enter_field(&mut self, field: Field) {
+        match field {
+            Field::Text => self.apply_text(),
+            Field::Query => {
+                let first = self.bar.popup.as_ref().and_then(|p| {
+                    p.active.or_else(|| p.rows.iter().position(|r| r.choice != Choice::Header))
+                });
+                if let Some(i) = first {
+                    self.choose_row(i);
                 }
-                return true;
             }
-            ViewerKey::Enter => {
-                match field {
-                    Field::Text => self.apply_text(),
-                    Field::Query => {
-                        let first = self.bar.popup.as_ref().and_then(|p| {
-                            p.active
-                                .or_else(|| p.rows.iter().position(|r| r.choice != Choice::Header))
-                        });
-                        if let Some(i) = first {
-                            self.choose_row(i);
-                        }
-                    }
-                    Field::Branches => {
-                        let first = self
-                            .branch_rows
-                            .iter()
-                            .position(|r| matches!(r.item, BranchItem::Ref { .. }));
-                        if let Some(i) = first {
-                            self.choose_branch(i);
-                        }
-                    }
+            Field::Branches => {
+                let first =
+                    self.branch_rows.iter().position(|r| matches!(r.item, BranchItem::Ref { .. }));
+                if let Some(i) = first {
+                    self.choose_branch(i);
                 }
-                return true;
             }
-            ViewerKey::Up | ViewerKey::Down if in_list => {
-                self.step_popup(if key == ViewerKey::Up { -1 } else { 1 });
-                return true;
-            }
-            _ => {}
         }
-        let Some(input) = self.focused_input() else { return false };
-        let edited = match key {
-            ViewerKey::Left => {
-                input.move_left(reach.word, reach.extend);
-                false
-            }
-            ViewerKey::Right => {
-                input.move_right(reach.word, reach.extend);
-                false
-            }
-            ViewerKey::Home => {
-                input.home(reach.extend);
-                false
-            }
-            ViewerKey::End => {
-                input.end(reach.extend);
-                false
-            }
-            ViewerKey::Backspace => {
-                input.backspace(reach.word);
-                true
-            }
-            ViewerKey::Delete => {
-                input.delete();
-                true
-            }
-            _ => return true,
-        };
-        if edited {
-            self.typed_into(field);
-        }
-        true
     }
 
     /// The list's chosen row moved by `by` (headers skipped), kept in view.

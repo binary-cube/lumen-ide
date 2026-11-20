@@ -4,6 +4,7 @@
 //! ([`OpenAgentChat`]: the sessions' panel asks, never naming this module); the agent's process
 //! lives as long as the tab.
 
+mod field;
 mod layout;
 mod view;
 
@@ -26,6 +27,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Agent Chat",
     description: "An AI agent's session as a graphical conversation: its tools, its changes compared, its permissions answered",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "comment", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

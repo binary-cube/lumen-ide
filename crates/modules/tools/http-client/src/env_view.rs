@@ -13,6 +13,7 @@ use http_requests::env_edit::{self, Row, Table};
 use i18n::t;
 use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Press};
 use ui_components::ds::{self, Check, Ctx, ToolbarButton};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{
@@ -119,6 +120,8 @@ pub struct EnvView {
     menu_tab: Option<usize>,
     /// An environment the user said to delete (the question's answer comes here).
     deleting: Arc<Mutex<Option<String>>>,
+    /// Its parts' state of use (see [`EnvView::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for EnvView {
@@ -127,7 +130,285 @@ impl std::fmt::Debug for EnvView {
     }
 }
 
+/// The name being typed on an environment's tab, as a control: a press puts its caret (a
+/// drag selects nothing), ↵ and ⇥ take it if it can be one, Esc gives it up, ⌘A selects
+/// it; what it has selected isn't copied.
+struct Naming<'a> {
+    renaming: &'a mut Option<(usize, TextInput)>,
+    names: &'a mut Vec<String>,
+    error: &'a mut Option<String>,
+    changed: &'a mut Option<Instant>,
+    /// Where its field was drawn.
+    area: Option<Rect>,
+}
+
+impl Naming<'_> {
+    /// The typed name taken, if it can be one; else why not, and it stays typed.
+    fn finish(&mut self) {
+        let Some((i, input)) = &*self.renaming else { return };
+        let (i, name) = (*i, input.text().trim().to_owned());
+        let others =
+            self.names.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, n)| n.as_str());
+        if let Some(why) = env_edit::valid_name(&name, others) {
+            *self.error = Some(t(match why {
+                env_edit::NameError::Empty => "http.env_name_empty",
+                env_edit::NameError::Reserved => "http.env_name_reserved",
+                env_edit::NameError::Taken => "http.env_name_taken",
+            }));
+            return;
+        }
+        *self.renaming = None;
+        *self.error = None;
+        if self.names.get(i).is_some_and(|n| *n != name) {
+            self.names[i] = name;
+            *self.changed = Some(Instant::now());
+        }
+    }
+}
+
+impl Control for Naming<'_> {
+    fn area(&self) -> Option<Rect> {
+        self.area.filter(|_| self.renaming.is_some())
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let Some((_, input)) = self.renaming else { return Press::Ignored };
+        input.press(p.x, clicks);
+        Press::Took
+    }
+
+    /// It has the keys while it's typed.
+    fn focusable(&self) -> bool {
+        self.renaming.is_some()
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        match key {
+            ViewerKey::Enter | ViewerKey::Tab => self.finish(),
+            ViewerKey::Escape => {
+                *self.renaming = None;
+                *self.error = None;
+            }
+            _ => {
+                let Some((_, input)) = self.renaming else { return false };
+                return reach.edit(input, key);
+            }
+        }
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let Some((_, input)) = self.renaming else { return false };
+        let one_line: String = typed.chars().filter(|c| !c.is_control()).collect();
+        input.insert(&one_line);
+        true
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        let Some((_, input)) = self.renaming.as_mut().filter(|_| id == "select_all") else {
+            return false;
+        };
+        input.select_all();
+        true
+    }
+}
+
+/// The shown environment's variables as a control: a press on a cell puts its caret there;
+/// with the keys, ⇥ and ↵ go on to the next cell (the value after the name, the next row's
+/// name after the value: scrolled into view), Esc leaves the table; what's typed goes in,
+/// and the last row typed in gets an empty one after it.
+struct Cells<'a> {
+    lines: Option<&'a mut Vec<Line>>,
+    focus: &'a mut Option<(usize, bool)>,
+    changed: &'a mut Option<Instant>,
+    hits: &'a [(Rect, Hit)],
+    rows: Rows<'a>,
+}
+
+/// How the rows are scrolled (as last drawn), for the row the keys move to.
+struct Rows<'a> {
+    scroll: &'a mut f32,
+    row_px: f32,
+    visible_rows: usize,
+}
+
+impl Rows<'_> {
+    /// Row `row` scrolled into view (whole rows, as they're drawn).
+    fn keep_visible(&mut self, row: usize) {
+        if self.row_px <= 0.0 || self.visible_rows == 0 {
+            return;
+        }
+        let first = (*self.scroll / self.row_px).round() as usize;
+        if row < first {
+            *self.scroll = row as f32 * self.row_px;
+        } else if row >= first + self.visible_rows {
+            *self.scroll = (row + 1 - self.visible_rows) as f32 * self.row_px;
+        }
+    }
+}
+
+impl Cells<'_> {
+    /// The cell drawn topmost at `p`.
+    fn cell_at(&self, p: Point) -> Option<(usize, bool)> {
+        match top_hit(self.hits, p)? {
+            Hit::Cell(row, value) => Some((row, value)),
+            _ => None,
+        }
+    }
+
+    fn input(&mut self, (row, value): (usize, bool)) -> Option<&mut TextInput> {
+        let line = self.lines.as_deref_mut()?.get_mut(row)?;
+        Some(if value { &mut line.value } else { &mut line.name })
+    }
+
+    /// A row typed in: the last one gets an empty one after it; written a moment after.
+    fn typed(&mut self, (row, _): (usize, bool)) {
+        if let Some(lines) = self.lines.as_deref_mut()
+            && row + 1 == lines.len()
+        {
+            lines.push(Line::empty());
+        }
+        *self.changed = Some(Instant::now());
+    }
+}
+
+impl Control for Cells<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.cell_at(p).is_some()
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let Some(cell) = self.cell_at(p) else { return Press::Ignored };
+        *self.focus = Some(cell);
+        if let Some(input) = self.input(cell) {
+            input.press(p.x, clicks);
+        }
+        Press::Took
+    }
+
+    fn cursor(&self, _p: Point) -> Option<ViewerCursor> {
+        Some(ViewerCursor::Text)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let Some(focus) = *self.focus else { return false };
+        match key {
+            ViewerKey::Escape => {
+                *self.focus = None;
+                true
+            }
+            ViewerKey::Tab | ViewerKey::Enter => {
+                let (row, value) = focus;
+                let len = self.lines.as_deref().map_or(0, Vec::len);
+                let next = if !value {
+                    (row, true)
+                } else if row + 1 < len {
+                    (row + 1, false)
+                } else {
+                    focus
+                };
+                *self.focus = Some(next);
+                self.rows.keep_visible(next.0);
+                true
+            }
+            _ => {
+                let edits = matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
+                let Some(input) = self.input(focus) else { return false };
+                let used = reach.edit(input, key);
+                if used && edits {
+                    self.typed(focus);
+                }
+                used
+            }
+        }
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let Some(focus) = *self.focus else { return false };
+        let one_line: String = typed.chars().filter(|c| !c.is_control()).collect();
+        let Some(input) = self.input(focus) else { return false };
+        input.insert(&one_line);
+        self.typed(focus);
+        true
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        let Some(focus) = (*self.focus).filter(|_| id == "select_all") else { return false };
+        self.input(focus).map(TextInput::select_all).is_some()
+    }
+}
+
+/// What's drawn topmost at `p`.
+fn top_hit(hits: &[(Rect, Hit)], p: Point) -> Option<Hit> {
+    hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
+}
+
+/// The shown environment's cells' place among the view's parts (after the name being typed).
+const CELLS: usize = 1;
+
 impl EnvView {
+    /// The cell typed in, read-only (what it has selected): a private value is never lent
+    /// (it isn't copied out).
+    fn typed_cell(&self) -> Option<&dyn Control> {
+        let (row, value) = self.focus?;
+        let line = self.lines.get(self.tab)?.get(row)?;
+        if value && line.private {
+            return None;
+        }
+        Some(if value { &line.value } else { &line.name })
+    }
+
+    /// Its parts (the name being typed on a tab, the shown environment's cells), with their
+    /// state of use. The keys are the first's that takes them: the name's while it's typed
+    /// (a cell pressed meanwhile doesn't take them from it), else the table's.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let named = self.renaming.as_ref().map(|(i, _)| Hit::Tab(*i));
+        let area = self.hits.iter().rev().find(|(_, h)| Some(*h) == named).map(|(r, _)| *r);
+        let mut naming = Naming {
+            renaming: &mut self.renaming,
+            names: &mut self.names,
+            error: &mut self.error,
+            changed: &mut self.changed,
+            area,
+        };
+        let mut typed = None;
+        let mut cells = Cells {
+            lines: self.lines.get_mut(self.tab),
+            focus: &mut self.focus,
+            changed: &mut typed,
+            hits: &self.hits,
+            rows: Rows {
+                scroll: &mut self.scroll,
+                row_px: self.row_px,
+                visible_rows: self.visible_rows,
+            },
+        };
+        let mut parts: [&mut dyn Control; 2] = [&mut naming, &mut cells];
+        let controls = &mut self.controls;
+        crate::parts::keys_to_first(controls, &mut parts);
+        let answer = f(controls, &mut parts);
+        crate::parts::keys_to_first(controls, &mut parts);
+        if typed.is_some() {
+            self.changed = typed;
+        }
+        answer
+    }
+
     fn load(&mut self) {
         let Some(data) = self.data.clone() else { return };
         self.loading.start(THREAD, move || {
@@ -231,31 +512,11 @@ impl EnvView {
         changed
     }
 
-    fn input(&mut self, (row, value): (usize, bool)) -> Option<&mut TextInput> {
-        let line = self.lines.get_mut(self.tab)?.get_mut(row)?;
-        Some(if value { &mut line.value } else { &mut line.name })
-    }
-
-    fn typed(&mut self, (row, _): (usize, bool)) {
-        if let Some(lines) = self.lines.get_mut(self.tab)
-            && row + 1 == lines.len()
-        {
-            lines.push(Line::empty());
-        }
-        self.changed = Some(Instant::now());
-    }
-
     /// Row `row` scrolled into view (whole rows, as they're drawn).
+    #[cfg(test)]
     fn keep_visible(&mut self, row: usize) {
-        if self.row_px <= 0.0 || self.visible_rows == 0 {
-            return;
-        }
-        let first = (self.scroll / self.row_px).round() as usize;
-        if row < first {
-            self.scroll = row as f32 * self.row_px;
-        } else if row >= first + self.visible_rows {
-            self.scroll = (row + 1 - self.visible_rows) as f32 * self.row_px;
-        }
+        let (row_px, visible_rows) = (self.row_px, self.visible_rows);
+        Rows { scroll: &mut self.scroll, row_px, visible_rows }.keep_visible(row);
     }
 
     /// Environment `i`'s name typed on its tab (`$shared` keeps its own).
@@ -272,24 +533,14 @@ impl EnvView {
 
     /// The typed name taken (Enter), if it can be one; else why not, and it stays typed.
     fn finish_rename(&mut self) {
-        let Some((i, input)) = &self.renaming else { return };
-        let (i, name) = (*i, input.text().trim().to_owned());
-        let others =
-            self.names.iter().enumerate().filter(|(j, _)| *j != i).map(|(_, n)| n.as_str());
-        if let Some(why) = env_edit::valid_name(&name, others) {
-            self.error = Some(t(match why {
-                env_edit::NameError::Empty => "http.env_name_empty",
-                env_edit::NameError::Reserved => "http.env_name_reserved",
-                env_edit::NameError::Taken => "http.env_name_taken",
-            }));
-            return;
+        Naming {
+            renaming: &mut self.renaming,
+            names: &mut self.names,
+            error: &mut self.error,
+            changed: &mut self.changed,
+            area: None,
         }
-        self.renaming = None;
-        self.error = None;
-        if self.names.get(i).is_some_and(|n| *n != name) {
-            self.names[i] = name;
-            self.changed = Some(Instant::now());
-        }
+        .finish();
     }
 
     /// Environment `i` deleted once the user says so (its variables go from both files).
@@ -336,7 +587,7 @@ impl EnvView {
     }
 
     fn tab_at(&self, p: Point) -> Option<usize> {
-        match self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)? {
+        match top_hit(&self.hits, p)? {
             Hit::Tab(i) => Some(i),
             _ => None,
         }
@@ -576,14 +827,11 @@ impl Viewer for EnvView {
         clicks: u32,
         _mods: ui_components::PressMods,
     ) -> Option<ViewerAction> {
-        let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
-        match hit {
-            // On the name being typed: the cursor moves in it.
-            Some(Hit::Tab(i)) if self.renaming.as_ref().is_some_and(|(r, _)| *r == i) => {
-                if let Some((_, input)) = &mut self.renaming {
-                    input.press(p.x, clicks);
-                }
-            }
+        // Its parts: the name being typed (its caret moves), a cell (it takes the keys).
+        if self.with_controls(|c, parts| c.press(parts, p, clicks)).is_some() {
+            return self.action.take();
+        }
+        match top_hit(&self.hits, p) {
             Some(Hit::Tab(i)) => {
                 self.finish_rename();
                 if clicks >= 2 {
@@ -607,12 +855,8 @@ impl Viewer for EnvView {
             }
             Some(Hit::OpenPublic) => self.open(http_requests::env::PUBLIC),
             Some(Hit::OpenPrivate) => self.open(http_requests::env::PRIVATE),
-            Some(Hit::Cell(row, value)) => {
-                self.focus = Some((row, value));
-                if let Some(input) = self.input((row, value)) {
-                    input.press(p.x, clicks);
-                }
-            }
+            // Taken by the cells (above).
+            Some(Hit::Cell(..)) => {}
             Some(Hit::Private(row)) => {
                 if let Some(line) = self.lines.get_mut(self.tab).and_then(|l| l.get_mut(row)) {
                     line.private = !line.private;
@@ -647,15 +891,15 @@ impl Viewer for EnvView {
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
-        std::mem::replace(&mut self.hover, hover) != hover
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        let hover = top_hit(&self.hits, p);
+        (std::mem::replace(&mut self.hover, hover) != hover) | parts
     }
 
+    /// A part's (a cell's text cursor), else a hand on what's clickable.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        match self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)? {
-            Hit::Cell(..) => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
-        }
+        let own = top_hit(&self.hits, p).filter(|h| !matches!(h, Hit::Cell(..)));
+        self.controls.cursor_at(p).or_else(|| own.map(|_| ViewerCursor::Pointer))
     }
 
     fn takes_keyboard(&self) -> bool {
@@ -675,42 +919,26 @@ impl Viewer for EnvView {
         ])
     }
 
+    /// To the part with the keys (the name being typed, else the cell).
     fn text_input(&mut self, typed: &str) -> bool {
-        if let Some((_, input)) = &mut self.renaming {
-            let one_line: String = typed.chars().filter(|c| !c.is_control()).collect();
-            input.insert(&one_line);
-            return true;
-        }
-        let Some(focus) = self.focus else { return false };
-        let one_line: String = typed.chars().filter(|c| !c.is_control()).collect();
-        let Some(input) = self.input(focus) else { return false };
-        input.insert(&one_line);
-        self.typed(focus);
-        true
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
         self.text_input(text)
     }
 
+    /// What the part with the keys has selected: the cell typed in (the name being typed on
+    /// a tab is never copied out).
     fn selected_text(&self) -> Option<String> {
-        let (row, value) = self.focus?;
-        let line = self.lines.get(self.tab)?.get(row)?;
-        // A private value isn't copied out.
-        if value && line.private {
-            return None;
-        }
-        let text = if value { line.value.selected_text() } else { line.name.selected_text() };
-        (!text.is_empty()).then(|| text.to_owned())
+        self.controls.selected_text_with(|part| match part {
+            CELLS => self.typed_cell(),
+            _ => None,
+        })
     }
 
     fn select_all(&mut self) -> bool {
-        if let Some((_, input)) = &mut self.renaming {
-            input.select_all();
-            return true;
-        }
-        let Some(focus) = self.focus else { return false };
-        self.input(focus).map(TextInput::select_all).is_some()
+        self.with_controls(|c, parts| c.command(parts, "select_all")).is_some()
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -722,48 +950,10 @@ impl Viewer for EnvView {
         true
     }
 
+    /// To the part with the keys: the name being typed takes ↵ ⇥ Esc, a cell moves on with
+    /// ⇥ and ↵.
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if let Some((_, input)) = &mut self.renaming {
-            match key {
-                ViewerKey::Enter | ViewerKey::Tab => self.finish_rename(),
-                ViewerKey::Escape => {
-                    self.renaming = None;
-                    self.error = None;
-                }
-                _ => return reach.edit(input, key),
-            }
-            return true;
-        }
-        let Some(focus) = self.focus else { return false };
-        match key {
-            ViewerKey::Escape => {
-                self.focus = None;
-                true
-            }
-            ViewerKey::Tab | ViewerKey::Enter => {
-                let (row, value) = focus;
-                let len = self.lines.get(self.tab).map_or(0, Vec::len);
-                let next = if !value {
-                    (row, true)
-                } else if row + 1 < len {
-                    (row + 1, false)
-                } else {
-                    focus
-                };
-                self.focus = Some(next);
-                self.keep_visible(next.0);
-                true
-            }
-            _ => {
-                let edits = matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
-                let Some(input) = self.input(focus) else { return false };
-                let used = reach.edit(input, key);
-                if used && edits {
-                    self.typed(focus);
-                }
-                used
-            }
-        }
+        self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {

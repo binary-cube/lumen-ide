@@ -22,6 +22,7 @@ mod changes_view;
 mod commit_view;
 mod conflicts_view;
 mod decorations;
+mod dialog_field;
 mod divider;
 mod files_tree;
 mod gutter_diff;
@@ -29,6 +30,7 @@ mod ignored;
 mod local_time;
 mod log_view;
 mod operation;
+mod parts;
 mod push_dialog;
 mod ref_dialog;
 mod ref_menu;
@@ -67,6 +69,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Git",
     description: "Lines changed since the last commit, comparisons with revisions and branches, blame, commits",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "git", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 pub const COMPARE_HEAD: CommandId = CommandId("git.compare_head");

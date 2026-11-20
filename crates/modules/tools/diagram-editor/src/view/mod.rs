@@ -28,6 +28,7 @@ mod export;
 mod gesture;
 mod menu;
 mod palette;
+mod parts;
 mod properties;
 mod quick;
 mod text;
@@ -123,6 +124,8 @@ pub struct DiagramView {
     action: Option<ViewerAction>,
     /// Every tile in view was there at the last paint.
     whole: bool,
+    /// Its parts' state of use (see [`DiagramView::with_controls`]).
+    controls: ui_components::control::Controls,
 }
 
 impl std::fmt::Debug for DiagramView {
@@ -205,6 +208,7 @@ impl DiagramView {
             exported: Arc::default(),
             action: None,
             whole: true,
+            controls: ui_components::control::Controls::default(),
         };
         view.start_reading();
         view
@@ -487,6 +491,100 @@ impl DiagramView {
     }
 }
 
+impl DiagramView {
+    /// What a press does once its part is known (`None`: none took it, the sheet's): a zone's
+    /// own, a number typed let go past the bar, the palette's search past the quick bar.
+    fn press_part(
+        &mut self,
+        part: Option<usize>,
+        p: Point,
+        clicks: u32,
+        mods: PressMods,
+    ) -> Option<ViewerAction> {
+        match part {
+            Some(parts::BAR) => {
+                self.press_toolbar(p, clicks);
+                return None;
+            }
+            Some(parts::PANEL) => {
+                self.press_properties(p);
+                return None;
+            }
+            Some(parts::QUICK) => {
+                self.end_typing(false);
+                self.press_quick(p);
+                return None;
+            }
+            Some(parts::PALETTE_BUTTONS) => {
+                self.end_typing(false);
+                self.press_palette(p, clicks);
+                return None;
+            }
+            Some(parts::TABS) => {
+                self.leave_fields();
+                if let Some(&(_, page)) = self.tabs.iter().find(|(r, _)| r.contains(p))
+                    && self.show_page(page)
+                {
+                    self.selection.clear();
+                }
+                return None;
+            }
+            // A field's (the text edited in place).
+            Some(_) => return None,
+            None => self.leave_fields(),
+        }
+        if !self.sheet().contains(p) {
+            return None;
+        }
+        // A double click on a cell: its text edited.
+        let near = 5.0 / self.camera.k(self.scale);
+        let at = self.camera.to_diagram(p, self.sheet(), self.scale);
+        if clicks >= 2
+            && let Some(d) = self.drawing.as_ref().map(|(d, _)| Arc::clone(d))
+            && let Some(id) = crate::edit::hit(&d, at, near)
+        {
+            self.gesture = None;
+            self.edit_text(&id);
+            return None;
+        }
+        // A second click on an arrow (its first made a shape): nothing more.
+        if clicks >= 2 && self.arrow_at(p).is_some() {
+            return None;
+        }
+        // On the sheet, where nothing is: a text there (with Select: a drawing tool draws).
+        if clicks >= 2 && !self.locked && self.draw == draw::Draw::Select {
+            self.gesture = None;
+            self.new_text_at(at);
+            return None;
+        }
+        self.press_sheet(p, mods);
+        None
+    }
+
+    /// The field at part `part`'s place, lent read-only while it's open (the parts
+    /// themselves hold it to change it).
+    fn field_part(&self, part: usize) -> Option<&dyn ui_components::control::Control> {
+        use ui_components::control::Control;
+        match part {
+            parts::TYPING => self.props.typing.as_ref().map(|(_, input)| input as &dyn Control),
+            parts::PALETTE => {
+                self.palette.searching.then_some(&self.palette.search as &dyn Control)
+            }
+            parts::TEXT => self.editing.as_ref().map(text::Editing::field_control),
+            _ => None,
+        }
+    }
+
+    /// A press beside the panel and the palette: the number typed let go, and the palette's
+    /// search while it's shown.
+    fn leave_fields(&mut self) {
+        self.end_typing(false);
+        if self.show_palette {
+            self.palette.searching = false;
+        }
+    }
+}
+
 impl Viewer for DiagramView {
     fn paint(&mut self, mut ctx: ViewerPaint<'_>) {
         if let (Some(w), Ok(mut slot)) = (&ctx.waker, self.waker.lock()) {
@@ -586,9 +684,10 @@ impl Viewer for DiagramView {
         self.loading || !self.whole
     }
 
+    /// The wheel: the part under the mouse's (the palette's sections), else the sheet panned.
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
-        if self.palette.over {
-            return self.scroll_palette(dy);
+        if self.with_controls(|c, parts| c.scroll_hovered(parts, dx, dy)).is_some() {
+            return true;
         }
         if self.diagram.is_none() {
             return false;
@@ -611,63 +710,37 @@ impl Viewer for DiagramView {
             && self.camera.zoom_at(1.0 / self.camera.zoom, center, self.sheet(), self.scale)
     }
 
+    /// A press: its parts first (the text edited in place; a press elsewhere ends it), then
+    /// the bar, the panel, the quick bar, the palette, the page tabs (each done by the view),
+    /// the sheet. Past the bar, the number typed is let go; past the palette, its search.
     fn pointer_down(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
-        if self.text_press(p, clicks, mods.shift)
-            || self.press_toolbar(p, clicks)
-            || self.press_properties(p)
-            || self.press_quick(p)
-        {
-            return None;
-        }
-        if self.show_palette && self.press_palette(p, clicks) {
-            return None;
-        }
-        if let Some(&(_, page)) = self.tabs.iter().find(|(r, _)| r.contains(p)) {
-            if self.show_page(page) {
-                self.selection.clear();
+        let pressed = self.with_controls(|c, parts| {
+            let pressed = c.press_with(parts, p, clicks, mods);
+            // A zone's press is beside every field: the text edited in place ends.
+            if pressed.is_some_and(|(part, _)| part >= parts::BAR) {
+                c.focus(parts, None);
             }
-            return None;
-        }
-        if !self.sheet().contains(p) {
-            return None;
-        }
-        // A double click on a cell: its text edited.
-        let near = 5.0 / self.camera.k(self.scale);
-        let at = self.camera.to_diagram(p, self.sheet(), self.scale);
-        if clicks >= 2
-            && let Some(d) = self.drawing.as_ref().map(|(d, _)| Arc::clone(d))
-            && let Some(id) = crate::edit::hit(&d, at, near)
-        {
-            self.gesture = None;
-            self.edit_text(&id);
-            return None;
-        }
-        // A second click on an arrow (its first made a shape): nothing more.
-        if clicks >= 2 && self.arrow_at(p).is_some() {
-            return None;
-        }
-        // On the sheet, where nothing is: a text there (with Select: a drawing tool draws).
-        if clicks >= 2 && !self.locked && self.draw == draw::Draw::Select {
-            self.gesture = None;
-            self.new_text_at(at);
-            return None;
-        }
-        self.press_sheet(p, mods);
-        None
+            pressed
+        });
+        let action = self.press_part(pressed.map(|(part, _)| part), p, clicks, mods);
+        // What the press opened or closed (a field, a text) has the keys from now.
+        self.sync_focus();
+        action
     }
 
+    /// The part holding the pointer follows it, else the gesture.
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(field) = self.text_field() {
-            return field.drag(p);
+        match self.with_controls(|c, parts| c.drag(parts, p)) {
+            Some((_, changed)) => changed,
+            None => self.drag_to(p),
         }
-        self.drag_to(p)
     }
 
     fn release(&mut self) -> bool {
-        if let Some(field) = self.text_field() {
-            return field.release();
+        match self.with_controls(|c, parts| c.release(parts)) {
+            Some((_, changed)) => changed,
+            None => self.finish(),
         }
-        self.finish()
     }
 
     /// While a text is edited: its typing.
@@ -680,50 +753,35 @@ impl Viewer for DiagramView {
         true
     }
 
+    /// Typing: the part with the keys'.
     fn text_input(&mut self, typed: &str) -> bool {
-        if let Some((_, input)) = self.props.typing.as_mut() {
-            input.insert(typed.lines().next().unwrap_or_default());
-            return true;
-        }
-        if self.palette.searching {
-            self.palette.search.insert(typed.lines().next().unwrap_or_default());
-            return true;
-        }
-        self.text_typed(typed)
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
+    /// The field with the keys: its selection, or nothing (never the cells under it); with
+    /// none open, the cells chosen.
     fn selected_text(&self) -> Option<String> {
-        if self.editing.is_some() {
-            return self.text_selected();
+        if !self.wants_text() {
+            return self.copy_chosen();
         }
-        if self.props.typing.is_some() || self.palette.searching {
-            // A field's selection, or nothing (never the cells under it).
-            let s = self
-                .props
-                .typing
-                .as_ref()
-                .map_or(self.palette.search.selected_text(), |(_, i)| i.selected_text());
-            return (!s.is_empty()).then(|| s.to_owned());
-        }
-        self.copy_chosen()
+        self.controls.selected_text_with(|part| self.field_part(part))
     }
 
+    /// A paste: into the part with the keys, else cells.
     fn paste(&mut self, text: &str) -> bool {
-        if self.editing.is_some() {
-            return self.text_typed(text);
-        }
-        if self.palette.searching || self.props.typing.is_some() {
-            return self.text_input(text);
+        let (taken, focused) = self.with_controls(|c, parts| (c.text(parts, text), c.focused()));
+        if focused.is_some() {
+            return taken.is_some();
         }
         self.paste_cells(text)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.tabs.iter().any(|(r, _)| r.contains(p))
-            || self.quick_at(p).is_some()
-            || self.arrow_at(p).is_some()
-            || self.outline_at(p).is_some()
-        {
+        // The page tabs, the quick bar's buttons: the hand.
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
+        }
+        if self.arrow_at(p).is_some() || self.outline_at(p).is_some() {
             return Some(ViewerCursor::Pointer);
         }
         use crate::edit::Handle;
@@ -739,51 +797,23 @@ impl Viewer for DiagramView {
         key: ui_components::ViewerKey,
         reach: ui_components::KeyReach,
     ) -> bool {
-        if self.editing.is_some() {
-            return self.text_key(key, reach);
+        // A part with the keys takes them all (used or not); else they edit the cells.
+        let (used, focused) =
+            self.with_controls(|c, parts| (c.key(parts, key, reach), c.focused()));
+        match (used, focused) {
+            (Some(_), _) => true,
+            (None, Some(_)) => false,
+            (None, None) => self.key_edit(key, reach),
         }
-        if self.props.typing.is_some() {
-            return self.typing_key(key, reach);
-        }
-        if self.palette.searching {
-            return self.palette_key(key, reach);
-        }
-        self.key_edit(key, reach)
     }
 
     /// ⌘Z / ⇧⌘Z, ⌘A, ⌘X (after the app copied), ⌘D — a text being edited: its own.
     fn command(&mut self, id: &str) -> bool {
-        // A number typed in the panel, the palette's search: the field's own (never the
-        // cells').
-        if let Some(input) = self.small_field() {
-            return match id {
-                "undo" => input.undo(),
-                "redo" => input.redo(),
-                "select_all" => {
-                    input.select_all();
-                    true
-                }
-                "cut" => {
-                    input.insert("");
-                    true
-                }
-                _ => false,
-            };
-        }
-        if let Some(field) = self.text_field() {
-            return match id {
-                "undo" => field.undo(),
-                "redo" => field.redo(),
-                "select_all" => {
-                    field.select_all();
-                    true
-                }
-                "cut" => {
-                    field.insert("");
-                    true
-                }
-                _ => false,
-            };
+        // A field with the keys (a number typed, the search, a text edited): its own,
+        // never the cells'.
+        let (used, focused) = self.with_controls(|c, parts| (c.command(parts, id), c.focused()));
+        if focused.is_some() {
+            return used.is_some();
         }
         if let Some(done) = self.export_command(id) {
             return done;
@@ -866,16 +896,13 @@ impl Viewer for DiagramView {
 
     /// Over a shape: its connection points.
     fn hover(&mut self, p: Point) -> bool {
-        self.palette.over = self.show_palette && self.palette_area().contains(p);
-        self.hover_shape(p)
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        self.hover_shape(p) || parts
     }
 
-    /// A palette's shape: its name.
+    /// A palette's shape: its name; a button of the bar or of the quick bar: what it does.
     fn tooltip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
-        self.palette_tip(p)
-            .or_else(|| self.toolbar_tip(p))
-            .or_else(|| self.quick_tip(p))
-            .map(|(r, title)| ui_components::tooltip::Tip::new(r, title))
+        self.controls.tooltip_at(p)
     }
 
     fn file_changed(&mut self) {

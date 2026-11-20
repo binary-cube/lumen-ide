@@ -121,7 +121,8 @@ fn network_and_disk_count_since_the_last_sample() {
     assert_eq!(moved, [io("http-client", 60, 0), io("remote", 7, 0)]);
 }
 
-/// The recorder never counts itself: its own threads are left out of what it records.
+/// The recorder never counts itself: its own threads are left out of what it records; the
+/// threads without a name are the system's workers.
 #[test]
 fn the_recorder_s_own_threads_are_left_out() {
     let ms = Duration::from_millis;
@@ -141,6 +142,7 @@ fn the_recorder_s_own_threads_are_left_out() {
                 (1, "main".to_owned(), ms(5)),
                 (2, THREAD.to_owned(), ms(9)),
                 (3, READ_THREAD.to_owned(), ms(9)),
+                (4, String::new(), ms(2)),
             ]
         }),
         memory: Arc::new(|| Some(1)),
@@ -152,7 +154,7 @@ fn the_recorder_s_own_threads_are_left_out() {
     };
     let names: Vec<String> =
         thread_times(&plan, &Owners::default()).into_iter().map(|t| t.1).collect();
-    assert_eq!(names, ["main"]);
+    assert_eq!(names, ["main", SYSTEM_WORKERS]);
 }
 
 /// A thread's name kept anonymous: one the app knows as it is; one after a known prefix

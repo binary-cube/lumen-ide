@@ -211,7 +211,7 @@ impl CommitView {
         let field = Rect::new(x0, fy, field_w, field_h);
         let spec = MultilineSpec {
             placeholder: &t("git.message_placeholder"),
-            focused: self.keys == Keys::Message,
+            focused: self.keys() == Keys::Message,
             subject_limit: Some(72),
         };
         self.message.paint(scene, text, ds, field, spec);
@@ -460,7 +460,7 @@ impl CommitView {
     /// The places' filter in `field`: the magnifier, what's typed (or its hint), its × once
     /// something is.
     fn paint_places_filter(&mut self, pen: &mut LayerPainter<'_>, field: Rect) {
-        let focused = self.keys == Keys::Places;
+        let focused = self.keys() == Keys::Places;
         ds::search_input(pen, field, &self.places_filter, focused, &t("git.places_filter"));
         self.hits.push((field, Hit::PlacesFilter));
         if !self.places_filter.text().is_empty() {

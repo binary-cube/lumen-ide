@@ -34,3 +34,16 @@ fn only_a_moved_edge_s_dots_are_made_again() {
     update_dots(&mut kept, &[shape(400.0)]);
     assert_eq!(kept.len(), 1);
 }
+
+/// The search open: the keys are its own (Esc closes it); closed, the canvas takes none.
+#[test]
+fn the_open_search_has_the_keys() {
+    let mut canvas = Canvas { search: Some(search::Search::default()), ..Canvas::default() };
+    assert!(canvas.wants_text());
+    assert!(canvas.text_input("x"));
+    assert_eq!(canvas.search.as_ref().map(|s| s.query.as_str()), Some("x"));
+    assert!(canvas.edit_key(ViewerKey::Escape));
+    assert!(canvas.search.is_none());
+    assert!(!canvas.edit_key(ViewerKey::Escape) && !canvas.text_input("y"));
+    assert!(!canvas.command("select_all"));
+}

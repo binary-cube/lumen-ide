@@ -118,6 +118,7 @@ fn main() -> anyhow::Result<()> {
     // The release's version: only this package carries it (the others' builds stay as they
     // are across releases); every crate reads it from here.
     kernel::brand::set_version(env!("CARGO_PKG_VERSION"));
+    kernel::brand::set_released(env!("APP_RELEASED"));
     // This thread runs the windows: its timed work is the interface's (a profile's).
     kernel::probe::mark_interface_thread();
     #[cfg(all(windows, not(feature = "system-allocator")))]

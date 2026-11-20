@@ -18,6 +18,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "HTML",
     description: "HTML: colors, embedded JS / CSS / JSON, folding on elements",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-code", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

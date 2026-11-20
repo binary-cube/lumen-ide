@@ -313,3 +313,18 @@ fn the_order_s_list_is_moved_in_by_the_keys() {
     assert_eq!(view.filter.order, version_control::LogOrder::Topological);
     assert!(view.edit_key(ViewerKey::Escape) || view.bar.popup.is_none());
 }
+
+/// The Date picker opened takes the focus of its parts: its keys and what's typed reach it
+/// (Esc closes it); closed, the focus goes back where it was (here: nowhere), and a key
+/// then reaches the commits again.
+#[test]
+fn the_date_picker_has_the_focus_while_open() {
+    let mut view = view(vec![by("a1", "Ana")]);
+    view.toggle_popup(filters::FilterKind::Date);
+    assert!(view.edit_key(ViewerKey::Down), "the picker's");
+    assert_eq!(view.controls.focused(), Some(0));
+    assert!(view.edit_key(ViewerKey::Escape));
+    assert!(view.bar.picker.is_none(), "Esc: it closes");
+    assert!(!view.text_input("x"), "nothing takes it");
+    assert_eq!(view.controls.focused(), None, "the focus back where it was");
+}

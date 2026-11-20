@@ -37,6 +37,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Profiler",
     description: "Profiling the app with your consent: what it spends, anonymous, in a small file",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "flame", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Records (the consent window first), or stops the recording under way.

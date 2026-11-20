@@ -31,6 +31,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Relax mode",
     description: "A calm animated scene over the whole window (stars, a sea of light, a ribbon); Esc to leave",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "moon", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Starts Relax mode.

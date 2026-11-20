@@ -42,3 +42,17 @@ fn esc_gives_up_and_the_eyedropper_asks_the_screen() {
     assert!(view.command("screen-color:#ff0000"));
     assert!(!view.command("screen-color:nope"));
 }
+
+/// The picker as the view's control: ⌘A and ⌫ in its field, what it has selected copied; a
+/// press outside it closes it.
+#[test]
+fn its_field_takes_the_keys_and_a_press_outside_closes_it() {
+    let mut view = opened();
+    assert!(view.command("select_all"));
+    assert!(view.selected_text().is_some(), "the whole color chosen");
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.selected_text(), None, "erased");
+    assert!(!view.edit_key(ViewerKey::Down), "not one of its keys");
+    view.click(Point::new(5000.0, 5000.0));
+    assert!(view.closed(), "a press outside: done");
+}

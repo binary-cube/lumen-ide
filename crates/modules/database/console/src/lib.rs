@@ -47,6 +47,7 @@ pub mod commands;
 pub mod confirm;
 pub mod consoles;
 pub mod edit;
+mod field;
 pub mod file_bar;
 pub mod history;
 pub mod history_view;
@@ -86,6 +87,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Query consoles",
     description: "A data source's SQL in a console file with its own bar and connection: the statement under the cursor, the selection or the script run, stopped, explained",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "console", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Runs the statement under the cursor, or the selection (⌘↵ in a console).

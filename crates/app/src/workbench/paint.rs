@@ -1058,7 +1058,7 @@ fn level_message(issue: &code_intelligence::LevelIssue) -> (String, Option<Strin
 
 /// Tab `tab`'s icon: the one its view asks for (an agent's session: the agent's), else its
 /// file's (`file`), or the one its bar names (a console's driver's: a server's) in the muted
-/// text's color — the database one is the `.sql` file's own (as the file icon set draws it).
+/// text's color.
 fn tab_icon(file: (IconId, Rgba), tab: &Tab, icons: &Icons, palette: &Palette) -> (IconId, Rgba) {
     if let Some(id) =
         tab.viewer.as_ref().and_then(|v| v.viewer.tab_icon()).and_then(|i| icons.id(i))
@@ -1068,7 +1068,6 @@ fn tab_icon(file: (IconId, Rgba), tab: &Tab, icons: &Icons, palette: &Palette) -
     tab.toolbar
         .as_ref()
         .and_then(|t| t.bar.icon())
-        .filter(|name| *name != "database")
         .and_then(|name| icons.id(name))
         .map_or(file, |id| (id, palette.text_muted))
 }

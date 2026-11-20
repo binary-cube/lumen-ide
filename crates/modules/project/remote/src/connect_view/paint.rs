@@ -121,7 +121,7 @@ impl ConnectView {
             Field::Local => Some("folder"),
             Field::Path => None,
         };
-        let focused = self.focused == f && !self.on_list && !fixed;
+        let focused = self.focused() == f && !self.on_list && !fixed;
         let mut style = self.style(ds);
         if icon.is_some() {
             style.lead = px(24.0);

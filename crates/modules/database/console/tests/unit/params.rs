@@ -126,3 +126,90 @@ fn the_modal_is_as_tall_as_its_rows_and_draws() {
     frame(&mut view);
     assert!(view.scroll(0.0, -1e9));
 }
+
+/// Many rows scroll: the scrollbar's thumb, pressed and dragged down, moves them (no field
+/// takes the press).
+#[test]
+fn the_rows_thumb_is_dragged() {
+    let mut many = request();
+    for i in 0..20 {
+        many.entries.push(ParamEntry::new(
+            &asked(&format!(":p{i}"), ParamName::Named(format!("p{i}"))),
+            None,
+        ));
+    }
+    let mut view = ParamsView::default();
+    view.set_data(&many);
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1700.0, content_height(&many) * 2.0),
+        scale: 2.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    assert_eq!(view.scroll, 0.0);
+    let focus = view.focus();
+    // The thumb: the bar's topmost point (the first rows are shown).
+    let area = view.rows_area;
+    let on = (area.min_y() as u32..area.max_y() as u32)
+        .flat_map(|y| (area.min_x() as u32..area.max_x() as u32 + 1).map(move |x| (x, y)))
+        .map(|(x, y)| Point::new(x as f32, y as f32))
+        .find(|p| view.bar.contains(*p))
+        .expect("a scrollbar along the rows");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    assert_eq!(view.click(at), None);
+    assert!(view.bar.is_dragging(), "the thumb is held");
+    assert!(view.drag(Point::new(at.x, at.y + 60.0)));
+    assert!(view.scroll > 0.0, "the rows moved");
+    assert!(view.release());
+    assert_eq!(view.focus(), focus, "no field took it");
+}
+
+/// The values' fields are the modal's controls: a press on one gives it the keys (typed
+/// through the view's controls), a `NULL` row's takes the focus and no text, a press beside
+/// them keeps the focus where it was.
+#[test]
+fn the_values_take_the_focus_and_the_keys_through_their_controls() {
+    let mut view = ParamsView::default();
+    view.set_data(&request());
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1700.0, content_height(&request()) * 2.0),
+        scale: 2.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let second = view.fields[1];
+    let on = Point::new(second.max_x() - 4.0, second.min_y() + second.size.height / 2.0);
+    view.hover(on);
+    assert_eq!(view.cursor_at(on), Some(ViewerCursor::Text));
+    assert_eq!(view.click(on), None);
+    assert_eq!(view.focus(), Some(1));
+    assert!(view.text_input("()"));
+    assert_eq!(view.entries()[1].text, "now()()");
+    // Beside the fields (the source's row): the focus stays.
+    view.click(Point::new(4.0, 4.0));
+    assert_eq!(view.focus(), Some(1));
+    // A `NULL` row: focused, no text.
+    view.set_kind(0, ValueKind::Null);
+    let first = view.fields[0];
+    view.click(Point::new(first.min_x() + 4.0, first.min_y() + 4.0));
+    assert_eq!(view.focus(), Some(0));
+    assert!(!view.text_input("x"));
+    assert!(view.edit_key(ViewerKey::Tab));
+    assert_eq!(view.focus(), Some(1));
+}

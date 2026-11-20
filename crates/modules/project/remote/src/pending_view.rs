@@ -19,7 +19,10 @@ use i18n::{t, tr};
 use kernel::{Point, Rect};
 use render_api::Quad;
 use text_layout::Font;
-use ui_components::changed_files::{ChangeState, ChangedFile, FilesTree, RowKind, TreeEvent};
+use ui_components::changed_files::{
+    ChangeState, ChangedFile, FilesTree, RowKind, TreeEvent, TreePart,
+};
+use ui_components::control::{Control, Controls, Press};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
     PressMods, ViewMenuEntry, Viewer, ViewerAction, ViewerKey, ViewerKind, ViewerPaint,
@@ -65,12 +68,64 @@ impl ViewerProvider for PendingProvider {
     }
 }
 
-/// The header's controls.
+/// The header's buttons.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Control {
+enum Button {
     Switch,
     Chosen,
     All,
+}
+
+/// The place of the files tree among the view's parts (see [`PendingList::with_controls`]).
+const TREE: usize = 1;
+
+/// A button's rows still going (its spinner turns; pressed, it does nothing), from what
+/// "Upload all" and "Upload N files" had going at the last paint.
+fn is_busy(busy: (bool, bool), button: Button) -> bool {
+    match button {
+        Button::Switch => false,
+        Button::All => busy.0,
+        Button::Chosen => busy.1,
+    }
+}
+
+/// The header's buttons as one control: lit under the mouse, a hand over those not busy;
+/// the one pressed (not busy) is written to `pressed`.
+struct HeaderButtons<'a> {
+    buttons: &'a [(Rect, Button)],
+    busy: (bool, bool),
+    hover: &'a mut Option<Button>,
+    pressed: &'a mut Option<Button>,
+}
+
+impl HeaderButtons<'_> {
+    fn at(&self, p: Point) -> Option<Button> {
+        self.buttons.iter().find(|(r, _)| r.contains(p)).map(|&(_, b)| b)
+    }
+}
+
+impl Control for HeaderButtons<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.at(p).is_some()
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> Press {
+        let Some(button) = self.at(p) else { return Press::Ignored };
+        if !is_busy(self.busy, button) {
+            *self.pressed = Some(button);
+        }
+        Press::Took
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        let under = p.and_then(|p| self.at(p));
+        std::mem::replace(self.hover, under) != under
+    }
+
+    fn cursor(&self, p: Point) -> Option<ui_components::ViewerCursor> {
+        let button = self.at(p)?;
+        (!is_busy(self.busy, button)).then_some(ui_components::ViewerCursor::Pointer)
+    }
 }
 
 pub struct PendingList {
@@ -82,12 +137,14 @@ pub struct PendingList {
     generation: u64,
     sending: u64,
     tree: FilesTree,
-    /// The header's controls (from the last paint), and the one under the mouse.
-    controls: Vec<(Rect, Control)>,
+    /// The header's buttons (from the last paint), and the one under the mouse.
+    buttons: Vec<(Rect, Button)>,
+    /// Its parts' state of use (see [`PendingList::with_controls`]).
+    controls: Controls,
     /// "Upload all" and "Upload N files" still going, as of the last paint (what the mouse
     /// and a press look at: nothing read per move).
     busy: (bool, bool),
-    hover: Option<Control>,
+    hover: Option<Button>,
     /// What the right-clicked menu acts on.
     menu: Option<MenuTarget>,
     /// For the app (a command run on the rows chosen).
@@ -112,7 +169,8 @@ impl Default for PendingList {
             generation: 0,
             sending: 0,
             tree,
-            controls: Vec::new(),
+            buttons: Vec::new(),
+            controls: Controls::default(),
             busy: (false, false),
             hover: None,
             menu: None,
@@ -167,14 +225,40 @@ impl PendingList {
         self.tree.chosen().into_iter().filter_map(|i| self.rows.get(i).cloned()).collect()
     }
 
-    /// A button's rows still going (its spinner turns; pressed, it does nothing), as the
-    /// last paint saw them.
-    fn busy(&self, control: Control) -> bool {
-        match control {
-            Control::Switch => false,
-            Control::All => self.busy.0,
-            Control::Chosen => self.busy.1,
+    /// Its parts, the topmost first, with their state of use: the header's buttons, the
+    /// files tree (it has the keys whenever nothing else took them, as the view's keyboard
+    /// is its). What a press or a key asked for is done after.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let (mut pressed, mut event) = (None, None);
+        let answer = {
+            let mut header = HeaderButtons {
+                buttons: &self.buttons,
+                busy: self.busy,
+                hover: &mut self.hover,
+                pressed: &mut pressed,
+            };
+            let mut tree = TreePart { tree: &mut self.tree, event: &mut event };
+            let mut parts: [&mut dyn Control; 2] = [&mut header, &mut tree];
+            if self.controls.focused().is_none() {
+                self.controls.focus(&mut parts, Some(TREE));
+            }
+            f(&mut self.controls, &mut parts)
+        };
+        match pressed {
+            Some(Button::Switch) => self.flip_auto_upload(),
+            Some(Button::Chosen) => self.upload(&self.chosen()),
+            Some(Button::All) => self.upload(&self.rows),
+            None => {}
         }
+        if let Some(TreeEvent::Open(i)) = event
+            && let Some(row) = self.rows.get(i).cloned()
+        {
+            self.compare(&row);
+        }
+        answer
     }
 
     /// What's going, looked at once (a paint): "Upload all"'s, and the chosen rows'.
@@ -284,22 +368,7 @@ impl Viewer for PendingList {
     }
 
     fn press_with(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
-        if let Some(&(_, control)) = self.controls.iter().find(|(r, _)| r.contains(p)) {
-            if self.busy(control) {
-                return None;
-            }
-            match control {
-                Control::Switch => self.flip_auto_upload(),
-                Control::Chosen => self.upload(&self.chosen()),
-                Control::All => self.upload(&self.rows),
-            }
-            return None;
-        }
-        if let Some(Some(TreeEvent::Open(i))) = self.tree.press_with(p, clicks, mods)
-            && let Some(row) = self.rows.get(i)
-        {
-            self.compare(row);
-        }
+        self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods));
         None
     }
 
@@ -308,11 +377,12 @@ impl Viewer for PendingList {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        self.tree.text_input(text)
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.tree.text_input(text.lines().next().unwrap_or_default())
+        let line = text.lines().next().unwrap_or_default();
+        self.with_controls(|c, parts| c.paste(parts, line)).is_some()
     }
 
     fn selected_text(&self) -> Option<String> {
@@ -328,16 +398,12 @@ impl Viewer for PendingList {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
-        match self.tree.key_with(key, reach) {
-            Some(Some(TreeEvent::Open(i))) => {
-                if let Some(row) = self.rows.get(i).cloned() {
-                    self.compare(&row);
-                }
-                true
-            }
-            Some(None) => true,
-            None => false,
+        // Tab: the tree's own answer (kept while searching, else not used), not a move
+        // of the focus among parts (it's the only one with keys: Tab would go nowhere).
+        if key == ViewerKey::Tab {
+            return self.tree.searching;
         }
+        self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
@@ -357,7 +423,7 @@ impl Viewer for PendingList {
 
     fn command(&mut self, id: &str) -> bool {
         // The app's edit commands, for the search.
-        if self.tree.command(id) {
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
             return true;
         }
         let Some(state) = self.state() else { return false };
@@ -393,7 +459,7 @@ impl Viewer for PendingList {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.tree.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     /// A fixed tab of the Remote window (as Git's Log and Changes): never closed.
@@ -406,29 +472,25 @@ impl Viewer for PendingList {
     }
 
     fn release(&mut self) -> bool {
-        self.tree.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let hover = self.controls.iter().find(|(r, _)| r.contains(p)).map(|&(_, c)| c);
-        let changed = hover != self.hover;
-        self.hover = hover;
-        self.tree.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     /// The files' scrollbar fading: a frame when it next changes.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.tree.next_frame()
+        self.controls.next_frame()
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
-        self.tree.tooltip_at(p)
+        self.controls.tooltip_at(p)
     }
 
-    /// A hand over the header's controls (not over one still going).
+    /// A hand over the header's buttons (not over one still going).
     fn cursor_at(&self, p: Point) -> Option<ui_components::ViewerCursor> {
-        let (_, control) = self.controls.iter().find(|(r, _)| r.contains(p))?;
-        (!self.busy(*control)).then_some(ui_components::ViewerCursor::Pointer)
+        self.controls.cursor_at(p)
     }
 
     /// What was sent is going: the buttons' spinners turn.
@@ -437,13 +499,21 @@ impl Viewer for PendingList {
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
+        self.paint_list(ctx);
+        // What the parts want of the frames, as they were just drawn.
+        self.with_controls(|c, parts| c.settle(parts));
+    }
+}
+
+impl PendingList {
+    fn paint_list(&mut self, ctx: ViewerPaint<'_>) {
         let ds = Ctx::new(ctx.palette, ctx.scale);
         let p = ctx.palette;
         let px = |v: f32| ds.px(v);
         let b = ctx.bounds;
         let layer = ctx.scene.push_layer(Some(b));
         layer.quad(Quad::filled(b, p.editor_background).rounded(px(radius::CARD)));
-        self.controls.clear();
+        self.buttons.clear();
         let Some(state) = self.state() else {
             ds::empty_state(layer, ctx.text, &ds, b, &t("remote.not_remote"), None);
             return;
@@ -466,38 +536,38 @@ impl Viewer for PendingList {
             let hovered = self.hover == Some(control);
             let spec = ds::ToolbarButton { label: &label, icon, accent, hovered };
             let busy = match control {
-                Control::All => all_busy,
-                Control::Chosen => chosen_busy,
-                Control::Switch => false,
+                Button::All => all_busy,
+                Button::Chosen => chosen_busy,
+                Button::Switch => false,
             };
             if busy {
                 ds::busy_toolbar_button(layer, ctx.text, ctx.icons, &ds, at, spec);
             } else {
                 ds::toolbar_button(layer, ctx.text, ctx.icons, &ds, at, spec);
             }
-            self.controls.push((at, control));
+            self.buttons.push((at, control));
             right = at.min_x() - px(8.0);
         };
         if !self.rows.is_empty() {
             // In the accent: the main action.
-            button(layer, Control::All, t("remote.upload_all"), "upload", true);
+            button(layer, Button::All, t("remote.upload_all"), "upload", true);
             if chosen > 0 && chosen < self.rows.len() {
                 let label = tr!("remote.upload_selected", count = chosen);
-                button(layer, Control::Chosen, label, "upload", false);
+                button(layer, Button::Chosen, label, "upload", false);
             }
             right -= px(8.0);
         }
         // "Upload on save": the switch, its label before it.
         let small = ds.ui_font(-1.0);
         let label = ctx.text.shape_line(&t("remote.auto_upload_switch"), &small);
-        let lit = self.hover == Some(Control::Switch);
+        let lit = self.hover == Some(Button::Switch);
         let mid = b.min_y() + header_h / 2.0;
         let toggle = ds::switch(layer, &ds, right - px(36.0), mid, state.auto_upload(), lit);
         let label_x = toggle.min_x() - px(8.0) - label.width;
         let label_base = ds::optical_baseline(b.min_y(), header_h, &small);
         draw_text(layer, &label, label_x, label_base, if lit { p.text } else { p.text_muted });
         let switch = Rect::new(label_x, b.min_y(), toggle.max_x() - label_x, header_h);
-        self.controls.push((switch, Control::Switch));
+        self.buttons.push((switch, Button::Switch));
         layer.quad(Quad::filled(
             Rect::new(b.min_x(), b.min_y() + header_h, b.size.width, ds.line()),
             p.card_border,

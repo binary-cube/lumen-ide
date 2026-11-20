@@ -7,12 +7,15 @@
 use i18n::t;
 use kernel::{Point, Rect};
 use render_api::Quad;
+use ui_components::control::Control;
 use ui_components::ds::{self, Ctx};
+use ui_components::tooltip::Tip;
 use ui_components::{KeyReach, LayerPainter, ViewerKey};
 use ui_kit::{TextInput, draw_text};
 
 use super::DiagramView;
 use super::gesture::Gesture;
+use super::parts::Asked;
 use crate::palette::{SECTIONS, THUMB, Thumbnails};
 
 /// The palette's width, a section header's height, a shape's cell (logical pixels).
@@ -40,8 +43,6 @@ pub(super) struct Palette {
     content_h: f32,
     hits: Vec<(Rect, Hit)>,
     pub(super) thumbs: Thumbnails,
-    /// The mouse over it (the wheel scrolls it then).
-    pub(super) over: bool,
 }
 
 impl Default for Palette {
@@ -56,7 +57,6 @@ impl Default for Palette {
             content_h: 0.0,
             hits: Vec::new(),
             thumbs: Thumbnails::default(),
-            over: false,
         }
     }
 }
@@ -186,53 +186,17 @@ impl DiagramView {
         Some(cell)
     }
 
-    /// A key while the search has the keys: its field's (Esc lets go; ↩ adds the first
-    /// shape found). `true`: used.
-    pub(super) fn palette_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let s = &mut self.palette.search;
-        match key {
-            ViewerKey::Escape => {
-                if s.text().is_empty() {
-                    self.palette.searching = false;
-                } else {
-                    s.set_text("");
-                }
-            }
-            ViewerKey::Enter => {
-                let found = crate::palette::search(s.text(), |_, e| title(e.id));
-                if let Some(&(sec, e)) = found.first() {
-                    let at =
-                        self.camera.to_diagram(self.sheet().center(), self.sheet(), self.scale);
-                    self.add_entry(sec, e, at);
-                }
-            }
-            ViewerKey::Backspace => s.backspace(reach.word),
-            ViewerKey::Delete => s.delete(),
-            ViewerKey::Left => s.move_left(reach.word, reach.extend),
-            ViewerKey::Right => s.move_right(reach.word, reach.extend),
-            ViewerKey::Home => s.home(reach.extend),
-            ViewerKey::End => s.end(reach.extend),
-            _ => return false,
-        }
-        self.palette.scroll = 0.0;
-        true
+    /// The sections' room under the search (physical pixels): what's past it scrolls.
+    pub(super) fn palette_room(&self) -> f32 {
+        (self.palette_area().size.height - (SEARCH_H + 16.0) * self.scale).max(0.0)
     }
 
-    /// The wheel over the palette: its sections scrolled. `true`: moved.
-    pub(super) fn scroll_palette(&mut self, dy: f32) -> bool {
-        let room = (self.palette_area().size.height - (SEARCH_H + 16.0) * self.scale).max(0.0);
-        let max = (self.palette.content_h - room).max(0.0);
-        let before = self.palette.scroll;
-        self.palette.scroll = (self.palette.scroll + dy).clamp(0.0, max);
-        self.palette.scroll != before
-    }
-
-    /// A shape's title under `p` (its tooltip).
-    pub(super) fn palette_tip(&self, p: Point) -> Option<(Rect, String)> {
-        self.palette.hits.iter().find_map(|(r, h)| match h {
-            Hit::Entry(s, e) if r.contains(p) => Some((*r, title(SECTIONS[*s].entries[*e].id))),
-            _ => None,
-        })
+    /// ↵ in the search: the first shape found added in the view's middle.
+    pub(super) fn add_found(&mut self) -> bool {
+        let found = crate::palette::search(self.palette.search.text(), |_, e| title(e.id));
+        let Some(&(section, entry)) = found.first() else { return false };
+        let at = self.camera.to_diagram(self.sheet().center(), self.sheet(), self.scale);
+        self.add_entry(section, entry, at)
     }
 
     /// The palette drawn.
@@ -399,5 +363,82 @@ impl DiagramView {
             .find(|(_, h)| *h == Hit::Section(s))
             .map(|(r, _)| r.center())
             .unwrap_or_default()
+    }
+}
+
+/// The palette as a control, where it's shown (`area`): the wheel over it scrolls its
+/// sections (never the sheet under it); a shape's title is its tooltip; a press never
+/// reaches it (its buttons are the view's). While its search has the keys (Tab included) it takes them, the typing (one
+/// line) and the edit commands: Esc empties it, then lets it go; ↵ asks the view to add
+/// the first shape found.
+pub(super) struct PalettePart<'a> {
+    pub(super) palette: &'a mut Palette,
+    pub(super) area: Option<Rect>,
+    /// The sections' room under the search ([`DiagramView::palette_room`]).
+    pub(super) room: f32,
+    pub(super) asked: &'a mut Option<Asked>,
+}
+
+impl Control for PalettePart<'_> {
+    fn area(&self) -> Option<Rect> {
+        self.area
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        let max = (self.palette.content_h - self.room).max(0.0);
+        self.palette.scroll = (self.palette.scroll + dy).clamp(0.0, max);
+        true
+    }
+
+    fn focusable(&self) -> bool {
+        self.palette.searching
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let palette = &mut *self.palette;
+        if !palette.searching {
+            return false;
+        }
+        match key {
+            ViewerKey::Escape if palette.search.text().is_empty() => palette.searching = false,
+            ViewerKey::Escape => palette.search.set_text(""),
+            ViewerKey::Enter => *self.asked = Some(Asked::AddFound),
+            _ => {
+                if !Control::key(&mut palette.search, key, reach) {
+                    return false;
+                }
+            }
+        }
+        palette.scroll = 0.0;
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        if !self.palette.searching {
+            return false;
+        }
+        self.palette.search.insert(typed.lines().next().unwrap_or_default());
+        true
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&self.palette.search).filter(|_| self.palette.searching)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        self.palette.searching && Control::command(&mut self.palette.search, id)
+    }
+
+    fn tooltip(&self, p: Point) -> Option<Tip> {
+        self.palette.hits.iter().find_map(|(r, h)| match h {
+            Hit::Entry(s, e) if r.contains(p) => {
+                Some(Tip::new(*r, title(SECTIONS[*s].entries[*e].id)))
+            }
+            _ => None,
+        })
     }
 }

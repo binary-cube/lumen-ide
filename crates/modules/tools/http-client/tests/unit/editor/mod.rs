@@ -170,3 +170,61 @@ fn the_page_leaves_the_splitter_s_handle_whole() {
     assert_eq!((stacked.min_y(), stacked.max_y()), (106.0, 700.0));
     assert_eq!(past_handle(page, Rect::new(10.0, 10.0, 12.0, 40.0), Orientation::Vertical), page);
 }
+
+/// A list opened from its field has the keys (↓ ↵ choose, what's typed searches it, the URL
+/// keeps its text); once it's closed they're the field's again. Its suggestions leave them to
+/// the field typed in.
+#[test]
+fn a_list_opened_from_its_field_has_the_keys_until_it_closes() {
+    let dir = scratch("list-keys");
+    let (mut editor, _) = editor(&dir, "### One\nGET https://e.com/1\n", Some(0));
+    let method = Rect::new(0.0, 0.0, 80.0, 30.0);
+    editor.hits = vec![(method, Hit::Method)];
+    editor.focus = Some(Focus::Url);
+    editor.pointer_down(Point::new(10.0, 10.0), 1, ui_components::PressMods::default());
+    editor.release();
+    assert!(editor.picker.is_open());
+    assert_eq!(editor.controls.focused(), Some(LIST), "the list has the keys");
+    assert!(editor.text_input("P"), "typed into its search");
+    assert_eq!(editor.form.as_ref().unwrap().url.text(), "https://e.com/1");
+    assert!(editor.edit_key_with(ViewerKey::Escape, KeyReach::default()));
+    assert!(!editor.picker.is_open());
+    assert_ne!(editor.controls.focused(), Some(LIST), "the form's again");
+    editor.pointer_down(Point::new(10.0, 10.0), 1, ui_components::PressMods::default());
+    editor.release();
+    assert!(editor.edit_key_with(ViewerKey::Down, KeyReach::default()));
+    assert!(editor.edit_key_with(ViewerKey::Enter, KeyReach::default()));
+    assert!(!editor.picker.is_open());
+    assert_eq!(editor.form.as_ref().unwrap().method, "POST", "the next one chosen");
+    // The field still has its caret: the keys reach it.
+    assert!(editor.text_input("x"));
+    assert!(editor.form.as_ref().unwrap().url.text().contains('x'));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The separator between the request and its response is held and dragged (the request's
+/// share follows it, within its bounds), with its cursor; an open list over it takes the
+/// mouse and the wheel instead.
+#[test]
+fn the_separator_is_dragged_and_an_open_list_is_over_it() {
+    use ui_components::{Orientation, Splitter, SplitterStyle};
+    let mut editor = RequestEditor::default();
+    let mut splitter = Splitter::new(SplitterStyle::default(), Orientation::Vertical);
+    splitter.set_bounds(Rect::new(497.0, 0.0, 6.0, 400.0), 1.0);
+    editor.splitter = Some(splitter);
+    editor.split_area = Rect::new(0.0, 0.0, 1000.0, 400.0);
+    let on_line = Point::new(500.0, 50.0);
+    editor.hover(on_line);
+    assert_eq!(editor.cursor_at(on_line), Some(ViewerCursor::ResizeHorizontal));
+    editor.pointer_down(on_line, 1, ui_components::PressMods::default());
+    assert!(editor.drag(Point::new(700.0, 50.0)));
+    editor.release();
+    assert!((editor.share - 0.7).abs() < 0.01, "{}", editor.share);
+    editor.picker.open(vec![PickerItem { label: "GET".into(), ..PickerItem::default() }], None);
+    editor.hover(on_line);
+    assert_ne!(editor.cursor_at(on_line), Some(ViewerCursor::ResizeHorizontal), "the list's");
+    editor.pointer_down(on_line, 1, ui_components::PressMods::default());
+    editor.release();
+    assert!(!editor.picker.is_open(), "a press outside the list closed it");
+    assert!((editor.share - 0.7).abs() < 0.01, "the separator untouched");
+}

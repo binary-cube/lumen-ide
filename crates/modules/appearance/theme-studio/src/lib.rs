@@ -26,6 +26,8 @@ use text_layout::{Font, TextSystem};
 use theming::caret::{Blink, CaretLook, CaretShape, CaretSpec, Motion};
 use theming::decorations::{DecorationLayer, LayerSpec};
 use theming::studio::{PREVIEW_ID, StudioInput, ThemeDraft, compose};
+use ui_components::color_picker::ColorPart;
+use ui_components::control::{Control, Controls, Shown, Thumb};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
     AppRequest, ColorPicker, LayerPainter, PickerAction, Viewer, ViewerAction, ViewerKey,
@@ -37,6 +39,7 @@ mod effects;
 mod layout;
 mod model;
 mod panel;
+mod parts;
 mod preview;
 mod rows;
 mod view;
@@ -49,6 +52,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Theme studio",
     description: "Your own themes: interface and syntax colors, the caret, effects, seen live",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "palette", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -205,6 +209,13 @@ enum Hit {
     Discard,
 }
 
+/// The places of the studio's parts among its controls (see [`Studio::with_controls`]).
+const PICKER: usize = 0;
+const SLIDERS: usize = 2;
+const NAME: usize = 4;
+const QUERY: usize = 5;
+const HANDLE: usize = 6;
+
 #[derive(Debug, Default)]
 struct Studio {
     input: Option<StudioInput>,
@@ -216,27 +227,36 @@ struct Studio {
     thumbs: Vec<Option<ThemeDraft>>,
     draft: Option<ThemeDraft>,
     name: TextInput,
-    editing_name: bool,
     /// The search across every setting.
     query: TextInput,
-    editing_query: bool,
+    /// What a key in the name's or the search's field asked (see [`parts::FieldPart`]).
+    name_asked: Option<parts::FieldAsk>,
+    query_asked: Option<parts::FieldAsk>,
     category: Category,
     /// Each category's scroll (in the order of [`Category::ALL`]).
     scrolls: [f32; 6],
     /// The settings' scrollbar, hidden at rest (over the panel's right padding).
     bar: ui_components::EdgeScrollbar,
+    /// Its controls' state of use (see [`Studio::with_controls`]).
+    controls: Controls,
     base_filter: BaseFilter,
     /// Saved globally (otherwise only for the current project).
     global: bool,
     picker: ColorPicker,
     /// The color being edited and its previous value (for "Cancel").
     picking: Option<(String, Rgba)>,
+    /// What the picker asked (applied, given up, the eyedropper), and its color changed by a
+    /// key or a text: the draft follows.
+    picker_asked: Option<PickerAction>,
+    picker_recolored: bool,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     /// The sliders, where they were drawn, and the one held; the one the keys step.
     sliders: Vec<(ui_components::SliderArea, Row)>,
     slider_held: Option<Row>,
     slider_focused: Option<Row>,
+    /// What a slider asked (a stop chosen, a step).
+    slider_asked: Option<parts::SliderAsk>,
     /// Where each setting's row was drawn last (a jump from the search goes there).
     rows_at: Vec<(SettingId, Rect)>,
     /// The setting jumped to from the search: scrolled to once drawn, then highlighted.
@@ -362,7 +382,7 @@ impl Studio {
     /// Every change undone: the draft as the starting theme has it (the name kept).
     fn discard(&mut self) {
         self.draft = self.base_draft.clone();
-        self.picker.close();
+        self.close_picker();
         self.picking = None;
         self.preview();
     }
@@ -425,8 +445,47 @@ impl Studio {
                 PickerAction::Eyedropper => {}
             }
         }
-        self.picker.close();
+        self.close_picker();
         self.preview();
+    }
+
+    /// The picker opened at `swatch` on `color`: it takes the keys while it's open (they're
+    /// the focused part's again once it closes: the focus stays under it).
+    fn open_picker(&mut self, swatch: Rect, color: Rgba) {
+        self.picker.open(swatch, color, ColorFormat::Hex, &Hex);
+    }
+
+    /// The picker closed: the keys are the focused part's again.
+    fn close_picker(&mut self) {
+        self.picker.close();
+    }
+
+    /// The part with the keys (under the picker while it's open).
+    fn focused_part(&self) -> Option<usize> {
+        self.controls.focused()
+    }
+
+    /// The keys given to part `to` (`None`: to none); while the picker is open, once it
+    /// closes.
+    fn focus_part(&mut self, to: Option<usize>) {
+        self.with_controls(|c, parts| c.focus(parts, to));
+    }
+
+    /// Part `part` lets go of the keys (if it has them).
+    fn leave(&mut self, part: usize) {
+        if self.focused_part() == Some(part) {
+            self.focus_part(None);
+        }
+    }
+
+    /// The name's field has the keys.
+    fn editing_name(&self) -> bool {
+        self.focused_part() == Some(NAME)
+    }
+
+    /// The search's field has the keys.
+    fn editing_query(&self) -> bool {
+        self.focused_part() == Some(QUERY)
     }
 
     /// A slider at `x`: its nearest stop chosen (shown at once). `true` if it changed.
@@ -452,6 +511,61 @@ impl Studio {
         &mut self.scrolls[at]
     }
 
+    /// Its controls, the topmost first: the color picker (over everything while it's open),
+    /// the settings' scrollbar with the shown category's scroll (not under the gallery), the
+    /// sliders, what an open menu or the gallery lets through, the name's and the search's
+    /// fields, the effects' handles. Under the open picker, the others aren't shown but the
+    /// fields (one may keep the focus under it: the picker over them takes every press).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let at = Category::ALL.iter().position(|c| *c == self.category).unwrap_or(0);
+        let picking = self.picker.is_open();
+        let mut color = ColorPart {
+            picker: &mut self.picker,
+            colors: &Hex,
+            action: &mut self.picker_asked,
+            recolored: &mut self.picker_recolored,
+        };
+        let mut settings = Thumb { bar: &mut self.bar, offset: &mut self.scrolls[at] };
+        let mut sliders = parts::SliderPart {
+            sliders: &self.sliders,
+            list: self.list,
+            held: &mut self.slider_held,
+            focused: &mut self.slider_focused,
+            asked: &mut self.slider_asked,
+        };
+        let mut catch = parts::Catch {
+            hits: &self.hits,
+            menu_for: &mut self.menu_for,
+            gallery_open: self.gallery_open,
+        };
+        let mut name = parts::FieldPart {
+            input: &mut self.name,
+            own: Hit::Name,
+            hits: &self.hits,
+            asked: &mut self.name_asked,
+        };
+        let mut query = parts::FieldPart {
+            input: &mut self.query,
+            own: Hit::Search,
+            hits: &self.hits,
+            asked: &mut self.query_asked,
+        };
+        let mut handle = parts::HandlePart { hits: &self.hits, drag: &mut self.drag };
+        let mut parts: [&mut dyn Control; 7] = [
+            &mut Shown { part: &mut color, shown: picking },
+            &mut Shown { part: &mut settings, shown: !self.gallery_open },
+            &mut Shown { part: &mut sliders, shown: !picking },
+            &mut Shown { part: &mut catch, shown: !picking },
+            &mut name,
+            &mut query,
+            &mut Shown { part: &mut handle, shown: !picking },
+        ];
+        f(&mut self.controls, &mut parts)
+    }
+
     fn scrolled(&self) -> f32 {
         let at = Category::ALL.iter().position(|c| *c == self.category).unwrap_or(0);
         self.scrolls[at]
@@ -469,7 +583,7 @@ impl Studio {
             return false;
         }
         self.category = c;
-        self.slider_focused = None;
+        self.leave(SLIDERS);
         true
     }
 
@@ -504,7 +618,7 @@ impl Studio {
             return;
         };
         self.query.set_text("");
-        self.editing_query = false;
+        self.leave(QUERY);
         self.show(entry.category);
         self.jump = Some(entry.id.clone());
         self.highlight = Some(entry.id);

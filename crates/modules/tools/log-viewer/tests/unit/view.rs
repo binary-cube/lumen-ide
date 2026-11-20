@@ -133,8 +133,31 @@ fn a_row_chosen_shows_its_details() {
     assert!(view.command(COPY_MESSAGE));
     assert_eq!(copied(&mut view), format!("{long} 1"));
     assert!(!view.command(ui_components::read_text::COPY), "nothing selected: nothing copied");
-    // ×: closed, until another row is chosen.
+    // The details are a part over the grid: × lit under the mouse with a hand; the wheel
+    // over them is theirs; a press in their text (⇧ held) leaves the keys with the grid.
     let close = view.details_close;
+    view.hover(close.center());
+    assert!(view.close_hover);
+    assert_eq!(view.cursor_at(close.center()), Some(ViewerCursor::Pointer));
+    let inside = Point::new(view.details_area.min_x() + 20.0, view.details_area.max_y() - 10.0);
+    view.hover(inside);
+    assert!(!view.close_hover, "left ×");
+    assert!(view.scroll(0.0, 30.0), "the wheel over them is theirs");
+    view.pointer_down(inside, 1, PressMods { shift: true, ..PressMods::default() });
+    view.release();
+    assert_eq!(view.controls.focused(), Some(GRID), "the grid keeps the keys");
+    assert!(view.details.is_some(), "a press in their text doesn't close them");
+    // The bar's buttons: lit under the mouse, a hand; pressed, Pause pauses.
+    let (pause, button) = *view.buttons.last().expect("Pause");
+    assert_eq!(button, Button::Pause);
+    view.hover(pause.center());
+    assert_eq!(
+        (view.hover, view.cursor_at(pause.center())),
+        (Some(button), Some(ViewerCursor::Pointer))
+    );
+    view.pointer_down(pause.center(), 1, PressMods::default());
+    assert!(view.grid.as_ref().is_some_and(|g| g.source().paused()), "paused");
+    // ×: closed, until another row is chosen.
     view.pointer_down(close.center(), 1, PressMods::default());
     assert!(view.details.is_none());
     view.poll();
@@ -144,5 +167,83 @@ fn a_row_chosen_shows_its_details() {
     assert_eq!(view.details.as_ref().map(|(r, _)| *r), Some(1));
     view.edit_key(ViewerKey::Escape);
     assert!(view.details.is_none(), "Esc closes them");
+    // The grid has the keys: its cell's text is what's copied; a character typed is its own
+    // (an editing begun takes the typing).
+    assert_eq!(view.controls.focused(), Some(GRID));
+    view.command("select:1,4");
+    let cells = view.grid.as_ref().and_then(|g| g.selected_text());
+    assert!(cells.is_some(), "a cell chosen");
+    assert_eq!(view.selected_text(), cells);
+    let typed = view.key('x');
+    assert_eq!(view.wants_text(), typed, "typing only into what it began");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// More lines than the grid shows: its scrollbar's thumb pressed and dragged down moves it,
+/// through the view's own press, drag and release.
+#[test]
+fn the_grid_s_thumb_is_dragged() {
+    let dir = std::env::temp_dir().join(format!("log-thumb-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("app-2026-11-20.jsonl");
+    let lines: String = (0..400)
+        .map(|n| {
+            format!(
+                r#"{{"ts":"2026-11-20T08:00:00.000Z","level":"INFO","target":"t","thread":"main","run":"r","msg":"line {n}"}}"#
+            ) + "\n"
+        })
+        .collect();
+    std::fs::write(&path, lines).unwrap();
+    let icons = icons::Icons::builtin();
+    let palette = ui_components::Palette::dark();
+    let mut text = text_layout::TextSystem::new();
+    let bounds = Rect::new(0.0, 0.0, 1200.0, 500.0);
+    let paint = |view: &mut LogFileView, text: &mut text_layout::TextSystem| {
+        let mut scene = render_api::Scene::default();
+        view.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    let opened = |text: &mut text_layout::TextSystem| {
+        let mut view = LogFileView::new(&path);
+        let since = Instant::now();
+        paint(&mut view, text);
+        while view.grid.as_ref().is_none_or(|g| g.source().counts() != (400, 400))
+            && since.elapsed() < Duration::from_secs(5)
+        {
+            view.poll();
+            paint(&mut view, text);
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        paint(&mut view, text);
+        view
+    };
+    let mut view = opened(&mut text);
+    let area = view.grid_area;
+    // Along the grid's right edge, under its header (the thumb at rest at the top).
+    let at = |x: f32, y: f32| Point::new(x, y);
+    let dragged = (0..24).any(|dx| {
+        let x = area.max_x() - 1.0 - dx as f32;
+        (0..40).any(|dy| {
+            let y = area.min_y() + 6.0 * dy as f32;
+            view.hover(at(x, y));
+            // Not a column's edge (its drag resizes the column).
+            let edge = view.cursor_at(at(x, y)) == Some(ViewerCursor::ResizeHorizontal);
+            view.pointer_down(at(x, y), 1, PressMods::default());
+            let moved = view.drag(at(x, y + 150.0));
+            view.release();
+            // On the bar, no row was chosen (a row's press would select cells instead).
+            moved && !edge && view.chosen().is_none()
+        })
+    });
+    assert!(dragged, "the thumb dragged moves the grid");
+    drop(view);
     let _ = std::fs::remove_dir_all(dir);
 }

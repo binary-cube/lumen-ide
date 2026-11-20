@@ -452,6 +452,7 @@ pub(crate) fn settings_model(themes: &crate::themes::Themes) -> SettingsModel {
         icon_look: icons::IconLook::default(),
         icon_looks: Vec::new(),
         file_icon_set: None,
+        icon_samples: Vec::new(),
         file_icon_sets: Vec::new(),
         keymaps: crate::keymaps::PRESETS
             .iter()

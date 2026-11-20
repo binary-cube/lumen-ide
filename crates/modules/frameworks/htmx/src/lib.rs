@@ -25,6 +25,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "htmx",
     description: "The hx-* attributes in tags, their values and their syntax on hover",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "package", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

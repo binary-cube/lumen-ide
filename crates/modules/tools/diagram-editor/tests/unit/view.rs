@@ -394,6 +394,7 @@ fn shapes_come_from_the_palette() {
     assert!(!view.wants_text(), "Esc twice: emptied, then let go");
     paint(&mut view, &mut text);
     let ellipse = entry(&view, 0, 3);
+    view.hover(ellipse);
     assert!(view.tooltip_at(ellipse).is_some(), "its name");
     // The general section folded: its shapes gone; the flowchart's opened: its shown.
     view.pointer_down(view.palette_section_for_tests(0), 1, PressMods::default());
@@ -956,4 +957,96 @@ fn a_side_handle_resizes_rather_than_connects() {
     drag(&mut view, (460.0, 70.0), (500.0, 70.0), PressMods::default());
     assert_eq!(cell_count(&view), before, "no edge");
     assert_eq!(geometry(&view, "start").2, 160.0, "wider");
+}
+
+/// The wheel over the palette scrolls its sections and never pans the sheet under it, even
+/// at their end; over the sheet it pans. Hidden, the palette takes no wheel.
+#[test]
+fn the_wheel_over_the_palette_is_its_own() {
+    let mut text = TextSystem::new();
+    let (mut view, _f) = editing(&mut text);
+    paint(&mut view, &mut text);
+    let over = view.palette_area().center();
+    let camera = view.camera;
+    view.hover(over);
+    assert!(view.scroll(0.0, 1e6));
+    assert!(view.scroll(0.0, 1e6), "at the end: still its own");
+    assert_eq!(view.camera, camera, "the sheet stayed");
+    view.hover(view.sheet().center());
+    assert!(view.scroll(0.0, 20.0));
+    assert_ne!(view.camera, camera, "panned");
+    view.show_palette = false;
+    let camera = view.camera;
+    view.hover(over);
+    assert!(view.scroll(0.0, 20.0));
+    assert_ne!(view.camera, camera, "hidden: the sheet under it pans");
+}
+
+/// A number typed and the palette's search open together: the number has the keys (Tab
+/// moves nothing); ↵ sets it, then the search has them.
+#[test]
+fn a_number_typed_has_the_keys_before_the_search() {
+    use super::properties::{Number, Prop};
+    let mut text = TextSystem::new();
+    let (mut view, _f) = editing(&mut text);
+    view.selection = vec!["save".into()];
+    paint(&mut view, &mut text);
+    view.pointer_down(view.palette_hits_for_search(), 1, PressMods::default());
+    view.release();
+    let at = view.prop_for_tests(Prop::Type(Number::W)).unwrap();
+    view.pointer_down(at, 1, PressMods::default());
+    view.release();
+    assert!(view.palette.searching && view.props.typing.is_some());
+    assert!(!view.edit_key_with(ViewerKey::Tab, KeyReach::default()), "Tab moves nothing");
+    assert!(view.command("select_all"));
+    assert!(view.text_input("150"));
+    assert!(view.palette.search.text().is_empty(), "the number took it");
+    assert!(view.edit_key_with(ViewerKey::Enter, KeyReach::default()));
+    assert!(view.props.typing.is_none());
+    assert!(view.text_input("cyl"));
+    assert_eq!(view.palette.search.text(), "cyl", "then the search");
+}
+
+/// The bar, the quick bar and the page tabs are parts: their tooltips and their hand where
+/// the mouse is; a press on the bar ends the text edited in place, leaves the number typed
+/// and the search open, and the number's selection is what's copied; past the bar, the
+/// number typed is let go.
+#[test]
+fn the_view_s_zones_are_parts() {
+    use super::properties::{Number, Prop};
+    use super::toolbar::Tool;
+    let mut text = TextSystem::new();
+    let (mut view, _f) = editing(&mut text);
+    let zoom = view.tool_for_tests(Tool::ZoomIn).unwrap();
+    view.hover(zoom);
+    assert!(view.tooltip_at(zoom).is_some(), "the bar's button says what it does");
+    assert_eq!(view.cursor_at(zoom), None, "the bar keeps the arrow");
+    let (tab, _) = view.tabs[1];
+    view.hover(tab.center());
+    assert_eq!(view.cursor_at(tab.center()), Some(ViewerCursor::Pointer), "a tab: the hand");
+    view.selection = vec!["save".into()];
+    paint(&mut view, &mut text);
+    let (_, buttons) = view.quick_bar.clone().expect("the quick bar shown");
+    let (colors, _) = buttons[0];
+    view.hover(colors.center());
+    assert!(view.tooltip_at(colors.center()).is_some(), "a quick button's tooltip");
+    assert_eq!(view.cursor_at(colors.center()), Some(ViewerCursor::Pointer));
+    // A text edited in place, then a press on the bar: it ends.
+    assert!(view.command("edit"));
+    assert!(view.editing.is_some());
+    view.pointer_down(view.tool_for_tests(Tool::ZoomOut).unwrap(), 1, PressMods::default());
+    view.release();
+    assert!(view.editing.is_none(), "a press on the bar ends it");
+    // A number typed: copied from, kept by a press on the bar, let go on the sheet.
+    paint(&mut view, &mut text);
+    let at = view.prop_for_tests(Prop::Type(Number::W)).unwrap();
+    view.pointer_down(at, 1, PressMods::default());
+    assert!(view.selected_text().is_some(), "its selection, right after the press");
+    view.release();
+    view.pointer_down(view.tool_for_tests(Tool::ZoomIn).unwrap(), 1, PressMods::default());
+    view.release();
+    assert!(view.props.typing.is_some(), "the bar leaves it");
+    view.pointer_down(view.sheet().center(), 1, PressMods::default());
+    view.release();
+    assert!(view.props.typing.is_none(), "the sheet lets it go");
 }

@@ -72,16 +72,6 @@ enum Under {
     SubBack,
     Result(usize),
 }
-
-/// One of its two lists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum List {
-    /// The categories, or the filter's results in their place.
-    Menus,
-    Items,
-    Sub,
-}
-
 #[derive(Debug)]
 pub struct MenuDrawer {
     nav: DrawerNav,
@@ -141,7 +131,8 @@ pub struct MenuDrawer {
     menus_bar: EdgeScrollbar,
     items_bar: EdgeScrollbar,
     sub_bar: EdgeScrollbar,
-    held: Option<List>,
+    /// Its parts' state of use (a list's thumb held…).
+    parts: ui_components::control::Controls,
 }
 
 impl MenuDrawer {
@@ -190,7 +181,7 @@ impl MenuDrawer {
             menus_bar: EdgeScrollbar::default(),
             items_bar: EdgeScrollbar::default(),
             sub_bar: EdgeScrollbar::default(),
-            held: None,
+            parts: ui_components::control::Controls::default(),
         };
         drawer.reopen(menus);
         drawer
@@ -224,7 +215,7 @@ impl MenuDrawer {
         self.open = false;
         self.intent.reset();
         self.sub_intent.reset();
-        self.held = None;
+        self.parts = ui_components::control::Controls::default();
         self.shown.retarget(0.0);
     }
 

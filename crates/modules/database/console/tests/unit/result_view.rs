@@ -154,3 +154,85 @@ fn the_extractors_commands_reach_the_app() {
         Some(ViewerAction::RunCommand(ref id)) if id == extractors::SAVE_COMMAND
     ));
 }
+
+/// The grid is the tab's control: a press reaches it through the controls with its
+/// modifiers (⇧ extends the choice), the drag and the release follow it.
+#[test]
+fn a_press_with_shift_reaches_the_grid_through_the_controls() {
+    let manual = Manual::new();
+    let (mut view, _) = view(&manual, 10, "SELECT * FROM users;", 10);
+    view.poll();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    // Drawn, its rows read, drawn again with them.
+    for _ in 0..2 {
+        let mut scene = render_api::Scene::default();
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 1200.0, 800.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+        manual.run_all();
+        view.poll();
+    }
+    // Under the bar, the grid's tools and its header: its rows.
+    let first = Point::new(200.0, 200.0);
+    let below = Point::new(200.0, 300.0);
+    view.pointer_down(first, 1, PressMods::default());
+    view.release();
+    let one = view.grid().selection().count();
+    let shift = PressMods { shift: true, ..PressMods::default() };
+    view.pointer_down(below, 1, shift);
+    view.release();
+    let extended = view.grid().selection().count();
+    assert_eq!(one, 1, "a cell chosen");
+    assert!(extended > one, "⇧ extends the choice: {extended}");
+    view.pointer_down(below, 1, PressMods::default());
+    view.release();
+    assert_eq!(view.grid().selection().count(), 1, "without ⇧: one cell again");
+}
+
+/// The grid has the keys, the text and the wheel without a press (the tab is the grid),
+/// through the controls: a press on the bar leaves them to it; what it has selected is
+/// the copy's.
+#[test]
+fn the_grid_has_the_keys_and_the_wheel_through_the_controls() {
+    let manual = Manual::new();
+    let (mut view, _) = view(&manual, 200, "SELECT * FROM users;", 200);
+    view.poll();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    for _ in 0..2 {
+        let mut scene = render_api::Scene::default();
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 1200.0, 400.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+        manual.run_all();
+        view.poll();
+    }
+    assert!(view.scroll(0.0, 60.0), "the wheel reaches the grid without a press");
+    assert!(view.selected_text().is_none(), "nothing chosen yet");
+    view.pointer_down(Point::new(200.0, 200.0), 1, PressMods::default());
+    view.release();
+    let first = view.selected_text();
+    assert!(first.is_some(), "the chosen cell is the copy's");
+    // A press on the bar beside its buttons: the grid keeps the keys.
+    view.pointer_down(Point::new(5.0, 5.0), 1, PressMods::default());
+    assert!(view.edit_key(ViewerKey::Down), "↓ moves in the grid");
+    assert!(view.selected_text().is_some());
+    assert_ne!(view.selected_text(), first, "another cell chosen");
+}

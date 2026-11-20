@@ -32,7 +32,10 @@ fn a_variable_typed_is_written_to_its_file() {
     assert!(private.contains("\"token\": \"t0k\""), "{private}");
     let public = std::fs::read_to_string(dir.join(http_requests::env::PUBLIC)).unwrap();
     assert!(public.contains("e.com") && !public.contains("t0k"), "{public}");
-    // A private value isn't copied out.
+    // The cell typed in: its selection copied; a private value isn't.
+    view.focus = Some((1, false));
+    view.select_all();
+    assert_eq!(view.selected_text().as_deref(), Some("token"));
     view.focus = Some((1, true));
     view.select_all();
     assert_eq!(view.selected_text(), None);
@@ -58,6 +61,7 @@ fn an_environment_is_renamed_on_its_tab_and_deleted_once_confirmed() {
     view.edit_key_with(ViewerKey::Enter, KeyReach::default());
     assert!(view.renaming.is_some() && view.error.is_some(), "taken: it stays typed");
     view.select_all();
+    assert_eq!(view.selected_text(), None, "the name being typed isn't copied out");
     view.text_input("staging");
     view.edit_key_with(ViewerKey::Enter, KeyReach::default());
     assert_eq!(view.names, ["$shared", "staging", "prod"]);
@@ -103,4 +107,39 @@ fn the_row_tab_moves_to_is_scrolled_into_view() {
     view.focus = Some((0, false));
     view.keep_visible(0);
     assert_eq!(view.scroll, 0.0, "back up to the first");
+}
+
+/// Its parts take the input: a cell pressed has the keys (a text cursor over it); while a
+/// name is typed on a tab, the name keeps them, a cell pressed meanwhile or not.
+#[test]
+fn the_keys_go_to_the_name_being_typed_else_to_the_cell_pressed() {
+    let mut view = EnvView {
+        names: vec!["$shared".into(), "dev".into()],
+        lines: vec![vec![Line::empty()], vec![Line::empty()]],
+        tab: 1,
+        ..EnvView::default()
+    };
+    view.hits = vec![
+        (Rect::new(0.0, 0.0, 80.0, 30.0), Hit::Tab(1)),
+        (Rect::new(0.0, 100.0, 100.0, 30.0), Hit::Cell(0, false)),
+    ];
+    let on_cell = Point::new(10.0, 110.0);
+    view.hover(on_cell);
+    assert_eq!(view.cursor_at(on_cell), Some(ViewerCursor::Text));
+    view.hover(Point::new(10.0, 10.0));
+    assert_eq!(view.cursor_at(Point::new(10.0, 10.0)), Some(ViewerCursor::Pointer), "a tab");
+    view.pointer_down(on_cell, 1, ui_components::PressMods::default());
+    assert_eq!(view.focus, Some((0, false)));
+    assert!(view.text_input("host"));
+    assert_eq!(view.lines[1][0].name.text(), "host");
+    assert_eq!(view.lines[1].len(), 2, "the last row typed in: an empty one after it");
+    view.start_rename(1);
+    view.pointer_down(on_cell, 1, ui_components::PressMods::default());
+    assert!(view.text_input("qa"));
+    assert_eq!(view.renaming.as_ref().map(|(_, i)| i.text()), Some("qa"));
+    assert_eq!(view.lines[1][0].name.text(), "host", "the cell pressed didn't take them");
+    assert!(view.edit_key_with(ViewerKey::Tab, KeyReach::default()), "⇥ takes the name");
+    assert_eq!(view.names[1], "qa");
+    assert!(view.text_input("!"), "the cell has them again");
+    assert!(view.lines[1][0].name.text().contains('!'));
 }

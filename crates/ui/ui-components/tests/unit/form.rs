@@ -15,6 +15,7 @@ fn row<'a>(width: f32, detail: Option<&'a str>, modified: bool) -> RowSpec<'a> {
         detail,
         control_w: 200.0,
         control_h: 22.0,
+        icon: None,
         modified,
         reset_hovered: false,
         highlight: 0.0,

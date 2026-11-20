@@ -41,6 +41,7 @@ mod filter_bar;
 mod filters;
 mod menus;
 mod paint;
+mod parts;
 mod view;
 
 pub(crate) use commands::{missing_fixed_tabs, open_fixed_tabs, show_log_of};
@@ -199,8 +200,13 @@ pub struct LogView {
     /// The files the details show (with the commit each change is from), and their tree.
     files: Vec<(Arc<CommitDetails>, version_control::FileChange)>,
     tree: crate::files_tree::FilesTree,
-    /// The tree has the keys (it was clicked last).
-    files_focus: bool,
+    /// What the tree, the Date picker, the files' separator, the bar's field answered as
+    /// controls ([`view`]); where the focus was before the picker opened (it goes back there).
+    opened: Option<crate::files_tree::TreeEvent>,
+    date_answer: Option<ui_components::date_range::RangeAnswer>,
+    field_answer: Option<parts::FieldAnswer>,
+    split_reset: bool,
+    before_picker: Option<usize>,
     queries: Option<Arc<dyn workbench_model::ProjectQueries>>,
     cancel: Arc<AtomicBool>,
     scroll: f32,
@@ -272,6 +278,8 @@ pub struct LogView {
     /// The commits' and the branches' scrollbars (hidden at rest).
     list_bar: ui_components::EdgeScrollbar,
     branches_bar: ui_components::EdgeScrollbar,
+    /// Its parts' state of use (see [`LogView::with_controls`]).
+    controls: ui_components::control::Controls,
 }
 
 impl std::fmt::Debug for LogView {

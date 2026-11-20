@@ -42,3 +42,36 @@ fn a_click_outside_keeps_the_chosen_color() {
         other => panic!("kept, not given up: {other:?}"),
     }
 }
+
+/// As a control, the open picker takes the keys over the part under it (which keeps the
+/// focus): typed text recolors it, ↵ is taken even with nothing to apply yet, ⌘A selects
+/// its field, esc gives up.
+#[test]
+fn as_a_control_it_takes_the_keys_over_its_part() {
+    use crate::control::{Control, Controls};
+    let mut picker = ColorPicker::default();
+    picker.open(Rect::new(0.0, 0.0, 10.0, 10.0), Rgba::rgb(0xe5484d), ColorFormat::Hex, &Hex);
+    let (mut action, mut recolored) = (None, false);
+    let mut field = ui_kit::TextInput::new("");
+    let mut c = Controls::default();
+    {
+        let mut part = ColorPart {
+            picker: &mut picker,
+            colors: &Hex,
+            action: &mut action,
+            recolored: &mut recolored,
+        };
+        let mut parts: [&mut dyn Control; 2] = [&mut part, &mut field];
+        c.focus(&mut parts, Some(1));
+        assert_eq!(c.text(&mut parts, "0"), Some(0), "its field, not the one under it");
+        assert_eq!(c.command(&mut parts, "select_all"), Some(0));
+        assert_eq!(
+            c.key(&mut parts, crate::ViewerKey::Escape, crate::KeyReach::default()),
+            Some(0)
+        );
+        assert_eq!(c.focused(), Some(1), "the focus stays under it");
+    }
+    assert!(recolored, "typing recolored it");
+    assert_eq!(action, Some(PickerAction::Cancel));
+    assert_eq!(field.text(), "", "nothing reached the part under it");
+}

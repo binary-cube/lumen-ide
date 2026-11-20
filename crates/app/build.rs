@@ -17,6 +17,20 @@ fn main() {
     println!("cargo:rerun-if-changed={}", icon.display());
     println!("cargo:rerun-if-changed={}", brand.display());
     println!("cargo:rerun-if-changed=build.rs");
+    // The release's date, beside its version (`[workspace.metadata.release] date`).
+    let manifest = root.join("Cargo.toml");
+    println!("cargo:rerun-if-changed={}", manifest.display());
+    let released = std::fs::read_to_string(&manifest)
+        .ok()
+        .and_then(|text| {
+            let section = text.split("[workspace.metadata.release]").nth(1)?;
+            section.lines().map(str::trim).find_map(|l| {
+                let (k, v) = l.split_once('=')?;
+                (k.trim() == "date").then(|| v.trim().trim_matches('"').to_owned())
+            })
+        })
+        .unwrap_or_default();
+    println!("cargo:rustc-env=APP_RELEASED={released}");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }

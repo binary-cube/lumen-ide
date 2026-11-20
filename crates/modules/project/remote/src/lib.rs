@@ -53,6 +53,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Remote projects",
     description: "Projects on a server (SFTP, FTP, FTPS): a local copy kept in step, saves uploaded after checking the server, the transfers' log",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "server", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 pub const OPEN: CommandId = workbench_model::OPEN_REMOTE_PROJECT;

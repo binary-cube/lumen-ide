@@ -29,6 +29,7 @@ use std::sync::Arc;
 use extensions::{Module, ModuleContext, ModuleError, ModuleId, ModuleManifest};
 use kernel::{Point, Rect};
 use render_api::Quad;
+use ui_components::control::{BarThumb, Control, Controls, Thumb};
 use ui_components::{AppRequest, Viewer, ViewerAction, ViewerKind, ViewerPaint, ViewerProvider};
 use ui_kit::{draw_icon, draw_text};
 
@@ -43,6 +44,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Markdown",
     description: "A rendered preview for Markdown files, next to the source",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "markdown", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -150,6 +152,8 @@ struct MarkdownViewer {
     edge_tick: Option<std::time::Instant>,
     /// The document's scrollbar (hidden at rest, as the app's lists').
     vbar: ui_components::EdgeScrollbar,
+    /// Its controls' state of use (see [`MarkdownViewer::with_controls`]).
+    controls: Controls,
     /// A source line its text asked to be brought to the top, before it was laid out.
     sync_to: Option<f32>,
 }
@@ -173,6 +177,10 @@ enum Grain {
 
 /// How close to the top or bottom a drag scrolls (logical pixels).
 const EDGE: f32 = 28.0;
+
+/// The place of the document's scrollbar among its controls (see
+/// [`MarkdownViewer::with_controls`]).
+const DOCUMENT_BAR: usize = 0;
 
 impl MarkdownViewer {
     fn new(path: &Path) -> Self {
@@ -207,6 +215,7 @@ impl MarkdownViewer {
             selecting: None,
             edge_tick: None,
             vbar: ui_components::EdgeScrollbar::auto_hiding(),
+            controls: Controls::default(),
             sync_to: None,
         }
     }
@@ -365,7 +374,10 @@ impl Viewer for MarkdownViewer {
         self.edge_scroll();
         let copy = self.copy_button();
         let selected = self.selected();
-        let Some(layout) = &self.layout else { return };
+        let Some(layout) = &self.layout else {
+            self.with_controls(|c, parts| c.settle(parts));
+            return;
+        };
         let b = ctx.bounds;
         let layer = ctx.scene.push_layer(Some(b));
         layer.quad(Quad::filled(b, palette.editor_background));
@@ -556,6 +568,8 @@ impl Viewer for MarkdownViewer {
         // The scrollbar (only when the document is taller than the view).
         let (height, scroll) = (layout.height, self.scroll);
         self.vbar.paint(ctx.scene, palette, ctx.scale, b, height, scroll);
+        // What the bars want of the frames, for the questions that come before the next one.
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
@@ -573,9 +587,13 @@ impl Viewer for MarkdownViewer {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(to) = self.vbar.drag(p) {
-            let before = self.scroll;
-            self.scroll = to.clamp(0.0, self.max_scroll());
+        // A bar's thumb held: the document, or a code block across.
+        let before = self.scroll;
+        if let Some((part, moved)) = self.with_controls(|c, parts| c.drag(parts, p)) {
+            if part != DOCUMENT_BAR {
+                return moved;
+            }
+            self.scroll = self.scroll.clamp(0.0, self.max_scroll());
             return self.scroll != before;
         }
         if let Some(sel) = &mut self.selecting {
@@ -590,19 +608,12 @@ impl Viewer for MarkdownViewer {
             }
             return self.extend_to(p);
         }
-        let (Some(block), Some(bar)) = (self.hbar_block, &self.hbar) else { return false };
-        let Some((_, _, m)) = self.scroll_block(block) else { return false };
-        match bar.drag_to(p, m) {
-            Some(to) => {
-                self.code_scroll.insert(block, to.clamp(0.0, (m.content - m.viewport).max(0.0)));
-                true
-            }
-            None => false,
-        }
+        false
     }
 
     fn release(&mut self) -> bool {
-        if self.vbar.release() {
+        let released = self.with_controls(|c, parts| c.release(parts));
+        if released == Some((DOCUMENT_BAR, true)) {
             return true;
         }
         self.edge_tick = None;
@@ -620,7 +631,7 @@ impl Viewer for MarkdownViewer {
             }
             return true;
         }
-        self.hbar.as_mut().is_some_and(ui_components::Scrollbar::end_drag)
+        released.is_some_and(|(_, changed)| changed)
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
@@ -636,18 +647,22 @@ impl Viewer for MarkdownViewer {
         self.press_at(p, clicks, mods)
     }
 
+    /// A drag selecting near an edge scrolls on its own; a bar moving.
     fn is_animating(&self) -> bool {
-        self.edge_speed().is_some()
+        self.edge_speed().is_some() || self.controls.is_animating()
     }
 
-    /// The scrollbar fading in or out: a frame when it next changes.
+    /// A bar fading in or out: a frame when it next changes.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.vbar.next_frame()
+        self.controls.next_frame()
     }
 
     fn cursor_at(&self, p: Point) -> Option<ui_components::ViewerCursor> {
         if !self.bounds.contains(p) {
             return None;
+        }
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
         let local = self.local(p);
         if self.hit_at(local).is_some() {
@@ -734,10 +749,8 @@ impl Viewer for MarkdownViewer {
         }
         let local = self.local(p);
         self.hover = Some(local);
-        if let Some(bar) = &mut self.hbar {
-            bar.hover(p);
-        }
-        self.vbar.hover(p);
+        // The bars widen under it (what's lit below says the redraw).
+        self.with_controls(|c, parts| c.hover(parts, Some(p)));
         self.hit_at(local).is_some() || self.copy_button().is_some_and(|(_, b)| b.contains(local))
     }
 
@@ -847,20 +860,18 @@ impl MarkdownViewer {
         if !self.bounds.contains(p) {
             return None;
         }
-        // The scrollbar's lane takes the press first: its thumb dragged (or jumped to).
-        if let Some(to) = self.vbar.press(p) {
-            self.scroll = to.clamp(0.0, self.max_scroll());
-            return None;
-        }
-        let local = self.local(p);
+        // The bars take the press first: the document's lane, then a code block's across
+        // (the one under the press); a thumb dragged (or jumped to).
+        let (before, local) = (self.hover, self.local(p));
         self.hover = Some(local);
-        // On a code block's bar across: its thumb dragged (or jumped to).
-        if let Some((block, _, m)) = self.hscroll_block()
-            && let Some(bar) = &mut self.hbar
-            && let Some(to) = bar.begin_drag(p, m)
-        {
-            self.code_scroll.insert(block, to);
-            return None;
+        match self.with_controls(|c, parts| c.press(parts, p, clicks)) {
+            Some((DOCUMENT_BAR, _)) => {
+                self.hover = before;
+                self.scroll = self.scroll.clamp(0.0, self.max_scroll());
+                return None;
+            }
+            Some(_) => return None,
+            None => {}
         }
         if let Some((i, button)) = self.copy_button()
             && button.contains(local)
@@ -1139,6 +1150,27 @@ fn corner(r: Rect, s: f32) -> Rect {
 impl MarkdownViewer {
     /// Code block `block` that scrolls across: its view (document coordinates) and its
     /// scroll's measures.
+    /// Its controls (the document's scrollbar, the bar across of the code block under the
+    /// mouse or dragged), the topmost first.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let block = self.hscroll_block().map(|(block, _, m)| (block, m));
+        let mut document = Thumb { bar: &mut self.vbar, offset: &mut self.scroll };
+        // Made once a block scrolling across was under the mouse; its scroll kept by block.
+        let mut code = match (self.hbar.as_mut(), block) {
+            (Some(bar), Some((block, metrics))) => Some(BarThumb {
+                bar,
+                metrics,
+                offset: self.code_scroll.entry(block).or_insert(0.0),
+            }),
+            _ => None,
+        };
+        let mut parts: [&mut dyn Control; 2] = [&mut document, &mut code];
+        f(&mut self.controls, &mut parts)
+    }
+
     fn scroll_block(&self, block: usize) -> Option<(usize, Rect, ui_components::ScrollMetrics)> {
         let layout = self.layout.as_ref()?;
         layout.items.iter().find_map(|item| match item {

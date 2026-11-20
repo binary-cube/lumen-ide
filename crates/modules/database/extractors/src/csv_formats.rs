@@ -14,6 +14,7 @@ use command_model::CommandId;
 use extractors::{Cell, Column, CsvFormat, Delimited, Input, Kind, LineEnd, Options, extract};
 use i18n::t;
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls, Press};
 use ui_components::ds::{self, ChoiceSpec, Ctx};
 use ui_components::{
     KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -234,7 +235,6 @@ enum Hit {
     Format(usize),
     Add,
     Remove,
-    Field(Field),
     Separator(usize),
     Quote(u8),
     Header,
@@ -251,12 +251,19 @@ pub struct FormatsView {
     name: TextInput,
     separator: TextInput,
     null: TextInput,
-    field: Option<Field>,
+    /// Where each field was drawn last, in [`FIELDS`]' order.
+    fields: [Rect; 3],
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     action: Option<ViewerAction>,
     done: bool,
+    /// Its parts' state of use (see [`Self::with_controls`]): the field with the focus has
+    /// the keys.
+    controls: Controls,
 }
+
+/// The fields in their places among the modal's parts.
+const FIELDS: [Field; 3] = [Field::Name, Field::Separator, Field::Null];
 
 /// The modal's content (logical pixels).
 const HEIGHT: f32 = 470.0;
@@ -294,17 +301,9 @@ impl FormatsView {
         }
     }
 
-    fn input(&mut self, field: Field) -> &mut TextInput {
-        match field {
-            Field::Name => &mut self.name,
-            Field::Separator => &mut self.separator,
-            Field::Null => &mut self.null,
-        }
-    }
-
     /// The formats given (when they can be): the window closes, they're saved.
     pub fn give(&mut self) -> bool {
-        if let Some(field) = self.field {
+        if let Some(field) = self.field() {
             self.store_field(field);
         }
         let Some(editor) = &self.editor else { return false };
@@ -322,13 +321,59 @@ impl FormatsView {
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
 
-    /// A press on `hit`.
-    fn press(&mut self, hit: Hit, p: Point) {
-        if let Some(field) = self.field
-            && hit != Hit::Field(field)
-        {
+    /// The field having the keys.
+    fn field(&self) -> Option<Field> {
+        FIELDS.get(self.controls.focused()?).copied()
+    }
+
+    /// Field `to` given the keys (`None`: none has them).
+    fn focus_field(&mut self, to: Option<Field>) {
+        let at = to.and_then(|f| FIELDS.iter().position(|x| *x == f));
+        self.with_controls(|c, parts| c.focus(parts, at));
+    }
+
+    /// Its parts (the name's, the separator's and `NULL`'s fields), with their state of use;
+    /// what a field changed is written into the format shown.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut edited = [false; 3];
+        let [name_edited, separator_edited, null_edited] = &mut edited;
+        let [name_area, separator_area, null_area] = self.fields;
+        let mut name = FormatField {
+            input: &mut self.name,
+            area: name_area,
+            tabs: false,
+            edited: name_edited,
+        };
+        let mut separator = FormatField {
+            input: &mut self.separator,
+            area: separator_area,
+            tabs: true,
+            edited: separator_edited,
+        };
+        let mut null = FormatField {
+            input: &mut self.null,
+            area: null_area,
+            tabs: false,
+            edited: null_edited,
+        };
+        let mut parts: [&mut dyn Control; 3] = [&mut name, &mut separator, &mut null];
+        let answer = f(&mut self.controls, &mut parts);
+        for (field, edited) in FIELDS.into_iter().zip(edited) {
+            if edited {
+                self.store_field(field);
+            }
+        }
+        answer
+    }
+
+    /// A press on `hit` (a field that had the keys lets go of them).
+    fn press(&mut self, hit: Hit) {
+        if let Some(field) = self.field() {
             self.store_field(field);
-            self.field = None;
+            self.focus_field(None);
         }
         let Some(editor) = &mut self.editor else { return };
         match hit {
@@ -339,16 +384,12 @@ impl FormatsView {
             Hit::Add => {
                 editor.add();
                 self.load_fields();
-                self.field = Some(Field::Name);
+                self.focus_field(Some(Field::Name));
                 self.name.select_all();
             }
             Hit::Remove => {
                 editor.remove();
                 self.load_fields();
-            }
-            Hit::Field(field) => {
-                self.field = Some(field);
-                self.input(field).click(p.x);
             }
             Hit::Separator(at) => {
                 editor.set_separator(SEPARATORS[at]);
@@ -405,19 +446,11 @@ impl Viewer for FormatsView {
     }
 
     fn wants_text(&self) -> bool {
-        self.field.is_some()
+        self.field().is_some()
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        let Some(field) = self.field else { return false };
-        // A tab can be a separator; nothing else that's a control.
-        let typed: String = typed
-            .chars()
-            .filter(|c| !c.is_control() || (*c == '\t' && field == Field::Separator))
-            .collect();
-        self.input(field).insert(&typed);
-        self.store_field(field);
-        true
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -425,6 +458,9 @@ impl Viewer for FormatsView {
         let ds = Ctx::new(p, scale);
         let px = |v: f32| ds.px(v);
         self.hits.clear();
+        // Only the fields drawn now can be pressed.
+        self.fields = [Rect::default(); 3];
+        let focus = self.field();
         let Some(editor) = self.editor.clone() else { return };
         let format = editor.current().clone();
         let layer = scene.push_layer(Some(b));
@@ -530,7 +566,7 @@ impl Viewer for FormatsView {
         // Name.
         label(layer, text, "extract.format_name", y);
         let field = Rect::new(fx, y + px(4.0), fw, px(36.0));
-        let focused = self.field == Some(Field::Name);
+        let focused = focus == Some(Field::Name);
         self.name.paint(
             layer,
             text,
@@ -539,7 +575,7 @@ impl Viewer for FormatsView {
             &t("extract.format_name"),
             &style(format.name.trim().is_empty()),
         );
-        self.hits.push((field, Hit::Field(Field::Name)));
+        self.fields[0] = field;
         y += line_h;
         // Separator: the usual ones, or any other typed.
         label(layer, text, "extract.format_separator", y);
@@ -569,11 +605,11 @@ impl Viewer for FormatsView {
             layer,
             text,
             other,
-            self.field == Some(Field::Separator),
+            focus == Some(Field::Separator),
             &t("extract.separator_other"),
             &style(custom && format.separator.is_empty()),
         );
-        self.hits.push((other, Hit::Field(Field::Separator)));
+        self.fields[1] = other;
         y += line_h;
         // Quote.
         label(layer, text, "extract.format_quote", y);
@@ -630,11 +666,11 @@ impl Viewer for FormatsView {
             layer,
             text,
             field,
-            self.field == Some(Field::Null),
+            focus == Some(Field::Null),
             &t("extract.null_empty"),
             &style(false),
         );
-        self.hits.push((field, Hit::Field(Field::Null)));
+        self.fields[2] = field;
         y += line_h;
         // The line ending.
         label(layer, text, "extract.format_line_end", y);
@@ -717,36 +753,40 @@ impl Viewer for FormatsView {
         self.hits.push((r, Hit::Reset));
     }
 
+    /// A field (its caret put, a drag selecting: it has the keys), else the modal's own;
+    /// the field that had the keys before writes what it held.
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        match self.hit(p) {
-            Some(hit) => self.press(hit, p),
-            None => {
-                if let Some(field) = self.field.take() {
-                    self.store_field(field);
-                }
-            }
+        let before = self.field();
+        let pressed = self.with_controls(|c, parts| c.press(parts, p, 1)).is_some();
+        if let Some(field) = before.filter(|f| Some(*f) != self.field()) {
+            self.store_field(field);
+        }
+        if !pressed && let Some(hit) = self.hit(p) {
+            self.press(hit);
         }
         self.action.take()
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(field) = self.field else { return false };
-        self.input(field).extend_to(p.x);
-        true
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        match self.hit(p)? {
-            Hit::Field(_) => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
+        self.hit(p).map(|_| ViewerCursor::Pointer)
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -754,14 +794,14 @@ impl Viewer for FormatsView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        match (key, self.field) {
+        match (key, self.field()) {
             (ViewerKey::Enter, _) => {
                 self.give();
             }
             (ViewerKey::Escape, Some(field)) => {
                 // The field lets go of the keys first; a second Esc closes.
                 self.store_field(field);
-                self.field = None;
+                self.focus_field(None);
             }
             (ViewerKey::Escape, None) => self.action = Some(ViewerAction::Close),
             (ViewerKey::Up, None) => {
@@ -777,48 +817,36 @@ impl Viewer for FormatsView {
                 }
             }
             (_, None) => return false,
-            (key, Some(field)) => {
-                let input = self.input(field);
-                match key {
-                    ViewerKey::Left => input.move_left(reach.word, reach.extend),
-                    ViewerKey::Right => input.move_right(reach.word, reach.extend),
-                    ViewerKey::Home => input.home(reach.extend),
-                    ViewerKey::End => input.end(reach.extend),
-                    ViewerKey::Backspace => input.backspace(reach.word),
-                    ViewerKey::Delete => input.delete(),
-                    _ => return false,
-                }
-                self.store_field(field);
+            // The field's editing keys.
+            (key, Some(_)) => {
+                return self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
             }
         }
         true
     }
 
     fn selected_text(&self) -> Option<String> {
-        let field = self.field?;
-        let input = match field {
-            Field::Name => &self.name,
-            Field::Separator => &self.separator,
-            Field::Null => &self.null,
-        };
-        let selected = input.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| {
+            let input = match FIELDS.get(i)? {
+                Field::Name => &self.name,
+                Field::Separator => &self.separator,
+                Field::Null => &self.null,
+            };
+            Some(input as &dyn Control)
+        })
     }
 
     fn command(&mut self, id: &str) -> bool {
         match id {
             "go" => self.give(),
-            "select_all" => self.field.is_some_and(|f| {
-                self.input(f).select_all();
-                true
-            }),
+            "select_all" => self.with_controls(|c, parts| c.command(parts, id)).is_some(),
             "add" => {
-                self.press(Hit::Add, Point::default());
+                self.press(Hit::Add);
                 true
             }
             id if id.starts_with("select:") => {
                 let at = id["select:".len()..].parse().unwrap_or(0);
-                self.press(Hit::Format(at), Point::default());
+                self.press(Hit::Format(at));
                 true
             }
             _ => false,
@@ -827,6 +855,78 @@ impl Viewer for FormatsView {
 
     fn take_action(&mut self) -> Option<ViewerAction> {
         self.action.take()
+    }
+}
+
+/// A format's text field as a form's control: a press puts the caret, a drag selects; with
+/// the focus it takes the text (no control characters, but a tab where `tabs`), its editing
+/// keys and Select All. Tab is its own (unused: the fields aren't stepped through).
+struct FormatField<'a> {
+    input: &'a mut TextInput,
+    area: Rect,
+    /// A tab can be typed in it (a separator).
+    tabs: bool,
+    /// Set when its text changed.
+    edited: &'a mut bool,
+}
+
+impl Control for FormatField<'_> {
+    fn area(&self) -> Option<Rect> {
+        Some(self.area)
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> Press {
+        self.input.click(p.x);
+        Press::Held
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.input.extend_to(p.x);
+        true
+    }
+
+    fn cursor(&self, _p: Point) -> Option<ViewerCursor> {
+        Some(ViewerCursor::Text)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let KeyReach { word, extend } = reach;
+        match key {
+            ViewerKey::Left => self.input.move_left(word, extend),
+            ViewerKey::Right => self.input.move_right(word, extend),
+            ViewerKey::Home => self.input.home(extend),
+            ViewerKey::End => self.input.end(extend),
+            ViewerKey::Backspace => self.input.backspace(word),
+            ViewerKey::Delete => self.input.delete(),
+            _ => return false,
+        }
+        *self.edited = true;
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let tabs = self.tabs;
+        let typed: String =
+            typed.chars().filter(|c| !c.is_control() || (*c == '\t' && tabs)).collect();
+        self.input.insert(&typed);
+        *self.edited = true;
+        true
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        if id != "select_all" {
+            return false;
+        }
+        self.input.select_all();
+        true
     }
 }
 

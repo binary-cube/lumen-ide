@@ -54,14 +54,18 @@ fn a_modules_level_is_set_and_taken_away() {
     assert_eq!(module_choices().len(), MODULE_LEVELS.len() + 1);
 }
 
-/// The modules listed: only the active ones, one row per target, by name.
+/// The modules listed: only the active ones, one row per target, by name, each with its
+/// icon.
 #[test]
 fn only_the_active_modules_are_listed_once_each() {
-    note_module("tests.b", "Beta", "test_b");
-    note_module("tests.a", "Alpha", "test_a");
-    note_module("tests.a2", "Alpha Two", "test_a");
-    note_module("tests.off", "Off", "test_off");
+    note_module("tests.b", "Beta", "terminal", "test_b");
+    note_module("tests.a", "Alpha", "database", "test_a");
+    note_module("tests.a2", "Alpha Two", "modules", "test_a");
+    note_module("tests.off", "Off", "modules", "test_off");
     set_active(["tests.a", "tests.a2", "tests.b"]);
-    let rows: Vec<_> = listed().into_iter().filter(|(t, _)| t.starts_with("test_")).collect();
-    assert_eq!(rows, [("test_a", "Alpha".to_owned()), ("test_b", "Beta".to_owned())]);
+    let rows: Vec<_> = listed().into_iter().filter(|(t, ..)| t.starts_with("test_")).collect();
+    assert_eq!(
+        rows,
+        [("test_a", "Alpha".to_owned(), "database"), ("test_b", "Beta".to_owned(), "terminal")]
+    );
 }

@@ -93,7 +93,7 @@ fn the_boxes_and_the_octal_follow_each_other() {
     assert_eq!(view.octal.text(), "0644");
     view.toggle(Bit::Access(Class::Owner, Access::Execute));
     assert_eq!(view.octal.text(), "0744");
-    view.typing = true;
+    view.with_controls(|c, parts| c.focus(parts, Some(OCTAL)));
     view.octal = TextInput::new("");
     assert!(view.text_input("7x5a5"), "only octal digits are taken");
     assert_eq!(view.octal.text(), "755");
@@ -214,4 +214,76 @@ fn the_outcome_closes_or_lists_the_refusals() {
     view.applied(Ok(Applied { changed: 0, seen: 1, failed: refused.clone(), stopped: false }));
     assert!(matches!(&view.phase, Phase::Failed(f) if *f == refused));
     assert_eq!(view.take_action(), None);
+}
+
+/// An open list with more rows than fit: its thumb pressed and dragged down through the
+/// view scrolls it, and the press chooses nothing.
+#[test]
+fn an_open_list_scrolls_by_its_thumb() {
+    let palette = ui_components::Palette::dark();
+    let ds = Ctx::new(&palette, 1.0);
+    let mut text = text_layout::TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut view = PropertiesView::default();
+    let items = (0..40).map(|i| PickerItem::person(format!("user {i}"), "")).collect();
+    view.picker.open(items, None);
+    let bounds = Rect::new(0.0, 0.0, 800.0, 900.0);
+    let anchor = Rect::new(10.0, 10.0, 300.0, 30.0);
+    let mut scene = render_api::Scene::default();
+    view.picker.paint(&mut scene, &mut text, &icons, &ds, (anchor, bounds), "");
+    let list = view.picker.list_area();
+    let edge = list.max_x() - 4.0;
+    let thumb = Point::new(edge, list.min_y() + 6.0);
+    view.hover(thumb);
+    assert!(view.press(thumb, 1).is_none());
+    assert!(view.picker.is_open(), "nothing chosen");
+    assert!(view.drag(Point::new(edge, list.min_y() + 120.0)), "the rows followed");
+    assert!(view.release());
+}
+
+/// The octal field is a part: Tab gives it the keys and takes them back, it takes only
+/// digits then (the boxes follow), a press on it gives it the keys (a drag selects), a press
+/// elsewhere takes the keys; Esc is the dialog's even while it has them.
+#[test]
+fn the_octal_field_takes_the_keys_through_its_controls() {
+    let mut view = view_of(&["a.php"]);
+    assert!(!view.typing());
+    assert!(view.edit_key(ViewerKey::Tab));
+    assert!(view.typing(), "Tab: the field");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("0644"));
+    assert!(view.text_input("7a55"));
+    assert_eq!(view.octal.text(), "755");
+    assert_eq!(view.edit().and_then(ModeEdit::octal).as_deref(), Some("0755"));
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.octal.text(), "75");
+    assert!(view.edit_key(ViewerKey::Tab));
+    assert!(!view.typing(), "Tab again: the dialog's");
+    assert!(!view.text_input("1"), "nothing takes it");
+    // Pressed on it: the keys; dragged: a selection; pressed elsewhere: gone.
+    let field = Rect::new(100.0, 100.0, 90.0, 28.0);
+    view.octal_area = Some(field);
+    view.press(Point::new(101.0, 110.0), 1);
+    assert!(view.typing());
+    assert!(view.drag(Point::new(189.0, 110.0)), "held: the drag selects");
+    view.release();
+    view.press(Point::new(5.0, 5.0), 1);
+    assert!(!view.typing());
+    view.edit_key(ViewerKey::Tab);
+    view.edit_key(ViewerKey::Escape);
+    assert!(matches!(view.take_action(), Some(ViewerAction::Close)));
+}
+
+/// An open list has the keys from when it opens (its search, its rows), the wheel over it,
+/// and lets them go when it closes.
+#[test]
+fn an_open_list_has_the_keys_until_it_closes() {
+    let mut view = view_of(&["a.php"]);
+    view.open_algos();
+    assert_eq!(view.controls.focused(), Some(LIST));
+    view.hover(Point::new(10.0, 10.0));
+    assert!(view.edit_key(ViewerKey::Escape), "the list's: it closes");
+    assert!(!view.picker.is_open());
+    assert_eq!(view.controls.focused(), None);
+    assert!(view.take_action().is_none(), "Esc closed only the list");
 }

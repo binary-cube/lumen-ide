@@ -660,3 +660,89 @@ fn the_panel_s_width_is_kept_in_the_project_s_sizes() {
     assert_eq!(view.panel_w, crate::profile::layout::PANEL_W);
     assert_eq!(sizes.get(PANEL_SIZE), None);
 }
+
+/// The topmost point of a panel's scrollbar in `area` (its thumb, at rest at the top).
+fn thumb_in(area: Rect, mut on: impl FnMut(Point) -> bool) -> Option<Point> {
+    (area.min_y() as u32..area.max_y() as u32)
+        .flat_map(|y| (area.min_x() as u32..area.max_x() as u32 + 1).map(move |x| (x, y)))
+        .map(|(x, y)| Point::new(x as f32, y as f32))
+        .find(|p| on(*p))
+}
+
+/// The panel's two lists scroll by their thumbs: pressed and dragged down, each list moves
+/// (nothing in it chosen, the other one still).
+#[test]
+fn the_panel_s_thumbs_are_dragged() {
+    let s = setup("profile-thumbs");
+    let mut view = ProfileView::new(s.runner.clone(), s.tab);
+    paint(&mut view, 1400.0);
+    let chosen = view.selected_finding();
+    let area = view.findings_area;
+    let on = thumb_in(area, |p| view.findings.thumb().bar.contains(p)).expect("the findings' bar");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    assert_eq!(view.pointer_down(at, 1, PressMods::default()), None);
+    assert!(view.drag(Point::new(at.x, at.y + 40.0)));
+    assert!(view.findings.scroll > 0.0, "the findings moved");
+    assert_eq!(view.details.scroll, 0.0);
+    assert!(view.release());
+    assert_eq!(view.selected_finding(), chosen, "none chosen");
+    // The details: a step chosen, its sections longer than their room.
+    assert!(view.command("next_problem"));
+    paint(&mut view, 1400.0);
+    let area = view.details_area;
+    let on = thumb_in(area, |p| view.details.thumb().bar.contains(p)).expect("the details' bar");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    let scrolled = view.findings.scroll;
+    assert_eq!(view.pointer_down(at, 1, PressMods::default()), None);
+    assert!(view.drag(Point::new(at.x, at.y + 40.0)));
+    assert!(view.details.scroll > 0.0, "the details moved");
+    assert_eq!(view.findings.scroll, scrolled);
+    assert!(view.release());
+}
+
+/// The side panels are parts of the view: the wheel over the findings moves their list
+/// (the one under the mouse, through its controls), never the body's; a press on a card
+/// chooses its finding, with a hand over it.
+#[test]
+fn the_panels_take_the_wheel_and_the_presses_through_the_controls() {
+    let s = setup("profile-panel-wheel");
+    let mut view = ProfileView::new(s.runner.clone(), s.tab);
+    paint(&mut view, 1400.0);
+    let area = view.findings_area;
+    let inside = Point::new(area.min_x() + 20.0, area.min_y() + 20.0);
+    view.hover(inside);
+    assert!(view.scroll(0.0, 40.0));
+    assert!(view.findings.scroll > 0.0, "the findings moved");
+    // Back at its top, then over the tree: the findings stay.
+    view.scroll(0.0, -1e6);
+    let tree = view.body;
+    view.hover(Point::new(tree.min_x() + 40.0, tree.min_y() + 60.0));
+    view.scroll(0.0, 40.0);
+    assert_eq!(view.findings.scroll, 0.0);
+    // A card pressed: its finding chosen.
+    paint(&mut view, 1400.0);
+    let card = thumb_in(area, |p| {
+        matches!(view.findings.hit(p), Some(crate::profile::findings::FindingHit::Card(_)))
+    })
+    .expect("a finding's card");
+    view.hover(card);
+    assert_eq!(view.cursor_at(card), Some(ViewerCursor::Pointer));
+    view.pointer_down(card, 1, PressMods::default());
+    view.release();
+    assert!(view.selected_finding().is_some());
+}
+
+/// The filter has the keys with nothing pressed (through the controls): a character starts
+/// it, a space or a control character doesn't, and a press elsewhere leaves it the keys.
+#[test]
+fn a_character_starts_the_filter_through_the_controls() {
+    let s = setup("profile-filter-keys");
+    let mut view = ProfileView::new(s.runner.clone(), s.tab);
+    paint(&mut view, 1400.0);
+    assert!(!view.key(' '));
+    assert!(!view.key('\u{7}'));
+    assert!(!view.wants_text());
+    view.click(Point::new(f32::MAX, f32::MAX));
+    assert!(view.key('h'), "a press on nothing keeps the keys with the filter");
+    assert!(view.wants_text());
+}

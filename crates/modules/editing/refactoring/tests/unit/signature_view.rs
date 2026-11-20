@@ -92,9 +92,10 @@ fn reordering_and_adding_rewrites_the_calls() {
     // The new parameter (focused): its name, then the value the calls pass.
     view.edit_key(ViewerKey::Backspace);
     view.type_text("urgent");
-    view.next_field();
-    view.next_field();
-    view.next_field();
+    // Tab: the type, the default, then the value.
+    for _ in 0..3 {
+        assert!(view.edit_key(ViewerKey::Tab), "Tab moves to the next field");
+    }
     view.type_text("true");
     assert!(view.can_apply());
     let plan = view.plan().unwrap();
@@ -114,4 +115,15 @@ fn removing_drops_the_argument_and_bad_names_block_applying() {
     view.edit_key(ViewerKey::End);
     view.type_text("-x");
     assert!(!view.valid() && !view.can_apply());
+}
+
+/// A group too short for the form and a few places: the page's thumb, pressed and dragged,
+/// scrolls it.
+#[test]
+fn the_page_scrolls_by_its_thumb() {
+    let mut view = view("<?php function send($to, $body) {}\nsend('a', 'b');");
+    let (w, h) = (900.0, 260.0);
+    crate::page::tests::paint(&mut view, w, h);
+    crate::page::tests::drag_thumb(&mut view, w, 30.0);
+    assert!(view.page.offset() > 0.0, "the page scrolled");
 }

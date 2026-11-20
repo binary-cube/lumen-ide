@@ -14,6 +14,9 @@ use std::sync::mpsc::Receiver;
 
 use i18n::{t, tr};
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls};
+
+use crate::dialog_field::DialogField;
 use ui_components::ds::{self, Ctx};
 use ui_components::{
     KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -141,7 +144,12 @@ pub struct StashDialog {
     done: bool,
     notes: Vec<Notification>,
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
+
+/// The place of its one part, the message, in [`StashDialog::with_controls`].
+const MESSAGE: usize = 0;
 
 impl std::fmt::Debug for StashDialog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -229,6 +237,18 @@ impl StashDialog {
         true
     }
 
+    /// Its parts used as controls (the message's field), the topmost first, with their
+    /// state of use. The field has the focus from the start and keeps it whatever is
+    /// pressed (its controls are sticky).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut message = DialogField { input: &mut self.message };
+        let mut parts: [&mut dyn Control; 1] = [&mut message];
+        f(&mut self.controls, &mut parts)
+    }
+
     fn hit(&self, p: Point) -> Option<Hit> {
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
@@ -273,6 +293,9 @@ impl Viewer for StashDialog {
             self.staged_only = *preset_staged;
         }
         self.request = Some(request.clone());
+        // A press beside the field leaves it the focus.
+        self.controls = Controls::sticky();
+        self.with_controls(|c, parts| c.focus(parts, Some(MESSAGE)));
     }
 
     fn subtitle(&self) -> Option<String> {
@@ -324,15 +347,16 @@ impl Viewer for StashDialog {
         if !self.pushing() {
             return false;
         }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.message.insert(&typed);
-        true
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
         // One line: its breaks made spaces.
         let line = text.split(['\n', '\r']).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
-        self.text_input(&line)
+        if !self.pushing() {
+            return false;
+        }
+        self.with_controls(|c, parts| c.paste(parts, &line)).is_some()
     }
 
     fn poll(&mut self) -> bool {
@@ -445,10 +469,16 @@ impl Viewer for StashDialog {
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
+        // The field takes its press (the caret put, a word or all of it selected); a press
+        // elsewhere leaves it the focus.
+        let pressed = self.with_controls(|c, parts| c.press(parts, p, clicks));
+        if pressed.is_some() {
+            return self.action.take();
+        }
         match self.hit(p) {
-            Some(Hit::Message) => self.message.press(p.x, clicks),
+            Some(Hit::Message) | None => {}
             Some(hit) if self.running.is_none() => self.tick(hit),
-            _ => {}
+            Some(_) => {}
         }
         self.action.take()
     }
@@ -458,22 +488,23 @@ impl Viewer for StashDialog {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.message.extend_to(p.x);
-        true
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
+    /// The field's own over it; the boxes' and the rows' a hand.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        match self.hit(p)? {
-            Hit::Message => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
-        }
+        self.controls.cursor_at(p).or_else(|| self.hit(p).map(|_| ViewerCursor::Pointer))
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -481,26 +512,23 @@ impl Viewer for StashDialog {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let input = &mut self.message;
         match key {
             ViewerKey::Enter => {
                 self.go();
+                true
             }
-            ViewerKey::Escape => self.action = Some(ViewerAction::Close),
-            ViewerKey::Left => input.move_left(reach.word, reach.extend),
-            ViewerKey::Right => input.move_right(reach.word, reach.extend),
-            ViewerKey::Home => input.home(reach.extend),
-            ViewerKey::End => input.end(reach.extend),
-            ViewerKey::Backspace => input.backspace(reach.word),
-            ViewerKey::Delete => input.delete(),
-            _ => return false,
+            ViewerKey::Escape => {
+                self.action = Some(ViewerAction::Close);
+                true
+            }
+            _ => self.with_controls(|c, parts| c.key(parts, key, reach)).is_some(),
         }
-        true
     }
 
+    /// Read from `&self`: the field's own, lent by its place.
     fn selected_text(&self) -> Option<String> {
-        let selected = self.message.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls
+            .selected_text_with(|i| (i == MESSAGE).then_some(&self.message as &dyn Control))
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -510,20 +538,7 @@ impl Viewer for StashDialog {
                 self.action = Some(ViewerAction::Close);
                 true
             }
-            "select_all" => {
-                self.message.select_all();
-                true
-            }
-            "undo" => self.message.undo(),
-            "redo" => self.message.redo(),
-            "cut" => {
-                let had = !self.message.selected_text().is_empty();
-                if had {
-                    self.message.insert("");
-                }
-                had
-            }
-            _ => false,
+            _ => self.with_controls(|c, parts| c.command(parts, id)).is_some(),
         }
     }
 

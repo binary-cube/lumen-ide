@@ -78,8 +78,10 @@ mod context_actions;
 mod decorations;
 mod diagnostics;
 mod dialogs;
+mod dividers;
 mod editing;
 mod editor_full;
+mod editor_popups;
 mod editor_toolbars;
 mod emphasis;
 mod entry_events;
@@ -825,6 +827,8 @@ pub struct Workbench {
     editors: groups::EditorGroups,
     /// The tool strips, the side panels and the bottom tool windows.
     tools: tool_area::ToolArea,
+    /// The docks' separators' state of use (see `dividers`).
+    dividers: ui_workbench::control::Controls,
     /// The region being worked in, emphasized while a module asks (Focus mode).
     emphasis: emphasis::WindowEmphasis,
 }
@@ -970,6 +974,7 @@ impl Workbench {
             dialogs: dialogs::Dialogs::default(),
             home: home::HomeScreen::default(),
             tools,
+            dividers: ui_workbench::control::Controls::default(),
             editors: groups::EditorGroups::default(),
             emphasis: emphasis::WindowEmphasis::default(),
         }

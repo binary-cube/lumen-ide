@@ -45,6 +45,8 @@ pub struct RowSpec<'a> {
     /// The control's width (physical pixels) and height (logical: its own).
     pub control_w: f32,
     pub control_h: f32,
+    /// An icon before its label (a module's), a name of the app's set.
+    pub icon: Option<&'a str>,
     /// It differs from its default: "↺" shown and a mark at its left edge.
     pub modified: bool,
     pub reset_hovered: bool,
@@ -73,8 +75,16 @@ pub fn stacks(ctx: &Ctx<'_>, width: f32, control_w: f32) -> bool {
 pub const DETAIL_LINE: f32 = 17.0;
 
 /// The room beside (or above) the control for a row's label and description.
+/// The room an icon before the label takes (its size and the gap after it).
+const ICON_ROOM: f32 = 18.0 + 10.0;
+
+/// Where a row's text starts: after its padding, and its icon when it has one.
+fn text_x(ctx: &Ctx<'_>, spec: &RowSpec<'_>) -> f32 {
+    spec.x + ctx.px(ROW_PAD) + if spec.icon.is_some() { ctx.px(ICON_ROOM) } else { 0.0 }
+}
+
 fn label_room(ctx: &Ctx<'_>, spec: &RowSpec<'_>) -> f32 {
-    let inner_x = spec.x + ctx.px(ROW_PAD);
+    let inner_x = text_x(ctx, spec);
     let reset_x = spec.x + spec.width - ctx.px(ROW_PAD) - ctx.px(RESET_W);
     let room = if stacks(ctx, spec.width, spec.control_w) {
         reset_x - inner_x - ctx.px(8.0)
@@ -152,12 +162,19 @@ pub fn setting_row(
         // Beside a taller control, the text block stays centered.
         (spec.y + px(10.0) + ((h - text_h) / 2.0).max(0.0), px(20.0))
     };
+    // Its icon, centered on its label's line; the text after it.
+    let text_left = text_x(ctx, &spec);
+    if let Some(id) = spec.icon.and_then(|name| icons.id(name)) {
+        let side = px(18.0);
+        let at = Rect::new(inner_x, (label_top + (label_h - side) / 2.0).round(), side, side);
+        ui_kit::draw_icon(layer, icons, id, at, ctx.fade(p.text_muted));
+    }
     let label = ellipsize(text, spec.label, &label_font, label_room);
     let shaped = text.shape_line(&label, &label_font);
     draw_text(
         layer,
         &shaped,
-        inner_x,
+        text_left,
         optical_baseline(label_top.round(), label_h, &label_font),
         ctx.fade(p.text),
     );
@@ -167,7 +184,7 @@ pub fn setting_row(
         draw_text(
             layer,
             &shaped,
-            inner_x,
+            text_left,
             optical_baseline(top.round(), px(18.0), &detail_font),
             ctx.fade(p.text_muted),
         );

@@ -20,6 +20,7 @@ use std::sync::{Arc, PoisonError};
 use kernel::{Point, Rect};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls};
 use ui_components::data_grid::export::{
     CLIPBOARD_ROWS, ExportFormat, ExportOutcome, ExportSink, ExportWriter, Target,
 };
@@ -42,6 +43,9 @@ use crate::runtime::Runtime;
 /// The bar's height over the grid (logical pixels).
 pub const BAR_H: f32 = 30.0;
 
+/// The grid's place in the view's parts.
+const GRID: usize = 0;
+
 /// A part of the bar.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
@@ -63,8 +67,6 @@ pub struct ResultView {
     folder: Option<PathBuf>,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
-    grid_area: Rect,
-    last_hover: Point,
     action: Option<ViewerAction>,
     told: Vec<Notification>,
     export: Option<Arc<ExportState>>,
@@ -73,6 +75,8 @@ pub struct ResultView {
     seen: u64,
     /// What its source allows was read once (again with each change of the runner).
     rights_read: bool,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for ResultView {
@@ -95,15 +99,37 @@ impl ResultView {
             folder,
             hits: Vec::new(),
             hover: None,
-            grid_area: Rect::default(),
-            last_hover: Point::default(),
             action: None,
             told: Vec::new(),
             export: None,
             export_format: None,
             seen: 0,
             rights_read: false,
+            // A press on the bar leaves the keys with the grid.
+            controls: Controls::sticky(),
         }
+        .with_grid_focused()
+    }
+
+    /// The grid has the keys, the text and the wheel without a press (the tab is the grid):
+    /// it's focused from the start, and a press elsewhere keeps it so.
+    fn with_grid_focused(mut self) -> Self {
+        self.with_controls(|c, parts| c.focus(parts, Some(GRID)));
+        self
+    }
+
+    /// Its part at `i`, read-only (the copy's selection asked from `&self`).
+    fn part(&self, i: usize) -> Option<&dyn Control> {
+        (i == GRID).then_some(&self.grid as &dyn Control)
+    }
+
+    /// Its parts (the grid, under the bar), with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut parts: [&mut dyn Control; 1] = [&mut self.grid];
+        f(&mut self.controls, &mut parts)
     }
 
     pub fn grid(&self) -> &DataGrid<ResultSource> {
@@ -388,10 +414,6 @@ impl ResultView {
         true
     }
 
-    fn in_grid(&self, p: Point) -> bool {
-        self.grid_area.contains(p)
-    }
-
     /// What the bar says of the rows (`None`: nothing to say), and its tooltip.
     fn note(&self) -> Option<(String, String)> {
         let source = self.grid.source();
@@ -616,7 +638,6 @@ impl Viewer for ResultView {
         self.paint_bar(&mut ctx, bar);
         let area =
             Rect::new(b.min_x(), bar.max_y(), b.size.width, (b.max_y() - bar.max_y()).max(0.0));
-        self.grid_area = area;
         self.grid.paint(GridPaint {
             bounds: area,
             scale: ctx.scale,
@@ -675,9 +696,8 @@ impl Viewer for ResultView {
             Some(_) => return None,
             None => {}
         }
-        if self.in_grid(p) {
-            self.grid.press(p, clicks, mods);
-        }
+        // The grid (⇧ / ⌘ extend its choice).
+        self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods));
         self.take_grid_action();
         self.action.take()
     }
@@ -687,19 +707,18 @@ impl Viewer for ResultView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.grid.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.grid.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.last_hover = p;
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed | self.grid.hover(p)
+        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn tooltip_at(&self, p: Point) -> Option<Tip> {
@@ -721,24 +740,18 @@ impl Viewer for ResultView {
             };
             return Some(Tip::new(*r, label));
         }
-        if self.in_grid(p) {
-            return self.grid.tooltip_at(p);
-        }
-        None
+        self.controls.tooltip_at(p)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
         if matches!(self.hit(p), Some(Hit::Commit | Hit::Rollback | Hit::Export)) {
             return Some(ViewerCursor::Pointer);
         }
-        if self.in_grid(p) {
-            return self.grid.cursor_at(p);
-        }
-        None
+        self.controls.cursor_at(p)
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
-        self.grid.scroll(dx, dy)
+        self.with_controls(|c, parts| c.scroll_focused(parts, dx, dy)).is_some()
     }
 
     fn wants_text(&self) -> bool {
@@ -746,10 +759,11 @@ impl Viewer for ResultView {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        self.grid.text_input(text)
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn key(&mut self, c: char) -> bool {
+        // The grid's control has no `char_key`: its typing starts here.
         self.grid.type_char(c)
     }
 
@@ -758,7 +772,7 @@ impl Viewer for ResultView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let used = self.grid.edit_key(key, reach);
+        let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
         self.take_grid_action();
         used
     }
@@ -768,17 +782,14 @@ impl Viewer for ResultView {
     }
 
     fn selected_text(&self) -> Option<String> {
-        self.grid.selected_text()
+        self.controls.selected_text_with(|i| self.part(i))
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
         if self.hit(p) == Some(Hit::Export) {
             return Some(ui_components::data_grid::export_menu(self.grid.project()));
         }
-        if !self.in_grid(p) {
-            return None;
-        }
-        let mut entries = self.grid.context_menu(p)?;
+        let (_, mut entries) = self.with_controls(|c, parts| c.menu(parts, p))?;
         // Its table's data, and the row a key's cell points to (as the data view's).
         if self.grid.source().editable().is_some() {
             entries.push(ViewMenuEntry::Separator);

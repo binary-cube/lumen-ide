@@ -318,7 +318,7 @@ impl Studio {
         };
         if let Some(r) = place {
             let mid = r.min_y() + r.size.height / 2.0;
-            let inner = ds::search_field(layer, icons, &ds, r, self.editing_query);
+            let inner = ds::search_field(layer, icons, &ds, r, self.editing_query());
             self.hits.push((r, Hit::Search));
             if !self.query.text().is_empty() {
                 let c = ds::clear_button(
@@ -341,7 +341,7 @@ impl Studio {
                 scene.push_layer(Some(field)),
                 text,
                 field,
-                self.editing_query,
+                self.editing_query(),
                 &t("studio.search"),
                 &field_style(&ds, 0.0),
             );

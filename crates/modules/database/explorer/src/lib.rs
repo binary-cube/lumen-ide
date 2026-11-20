@@ -64,6 +64,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Database explorer",
     description: "Data sources at work: their sessions in the background, tables read a page at a time and changed in transactions; SQLite and CSV files opened as data",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "database", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

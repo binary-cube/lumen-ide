@@ -8,11 +8,13 @@
 use i18n::t;
 use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
+use ui_components::control::Control;
 use ui_components::ds::{self, Ctx, Swatch};
 use ui_components::{KeyReach, ViewerKey};
 use ui_kit::{TextInput, draw_text};
 
 use super::DiagramView;
+use super::parts::Asked;
 
 /// The panel's width (logical pixels).
 pub(super) const WIDTH: f32 = 240.0;
@@ -330,33 +332,13 @@ impl DiagramView {
     }
 
     /// The number typed ended: set (`set`) or let go.
-    fn end_typing(&mut self, set: bool) -> bool {
+    pub(super) fn end_typing(&mut self, set: bool) -> bool {
         let Some((n, input)) = self.props.typing.take() else { return false };
         if set
             && let Ok(v) = input.text().trim().replace(',', ".").parse::<f32>()
             && v.is_finite()
         {
             self.set_number(n, v);
-        }
-        true
-    }
-
-    /// A key while a number is typed. `true`: used.
-    pub(super) fn typing_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        match key {
-            ViewerKey::Enter => return self.end_typing(true),
-            ViewerKey::Escape => return self.end_typing(false),
-            _ => {}
-        }
-        let Some((_, input)) = self.props.typing.as_mut() else { return false };
-        match key {
-            ViewerKey::Backspace => input.backspace(reach.word),
-            ViewerKey::Delete => input.delete(),
-            ViewerKey::Left => input.move_left(reach.word, reach.extend),
-            ViewerKey::Right => input.move_right(reach.word, reach.extend),
-            ViewerKey::Home => input.home(reach.extend),
-            ViewerKey::End => input.end(reach.extend),
-            _ => return false,
         }
         true
     }
@@ -661,5 +643,48 @@ impl DiagramView {
     /// Where `prop` is on the panel (its middle).
     pub(super) fn prop_for_tests(&self, prop: Prop) -> Option<Point> {
         self.props.hits.iter().find(|(_, p)| *p == prop).map(|(r, _)| r.center())
+    }
+}
+
+/// A number typed in the panel as a control: a press never reaches it (its value clicked
+/// starts it again, the panel's); while typed it has the keys (Tab included), the typing
+/// (one line) and the edit commands; ↵ asks the view to set it, Esc to let it go.
+pub(super) struct TypingPart<'a> {
+    pub(super) typing: Option<&'a mut TextInput>,
+    pub(super) asked: &'a mut Option<Asked>,
+}
+
+impl Control for TypingPart<'_> {
+    fn focusable(&self) -> bool {
+        self.typing.is_some()
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let Some(input) = self.typing.as_mut() else { return false };
+        match key {
+            ViewerKey::Enter | ViewerKey::Escape => {
+                *self.asked = Some(Asked::EndTyping(key == ViewerKey::Enter));
+                true
+            }
+            _ => Control::key(&mut **input, key, reach),
+        }
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let Some(input) = self.typing.as_mut() else { return false };
+        input.insert(typed.lines().next().unwrap_or_default());
+        true
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        self.typing.as_ref().and_then(|i| Control::selected_text(&**i))
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        self.typing.as_mut().is_some_and(|i| Control::command(&mut **i, id))
     }
 }

@@ -123,3 +123,71 @@ fn the_pinned_day_takes_its_clicks() {
     let at = view.row_at(Point::new(50.0, below)).unwrap();
     assert_eq!(at, 4, "the fifth file, under the heading's height");
 }
+
+/// The list's scrollbar: its thumb pressed and dragged down scrolls the list.
+#[test]
+fn the_list_scrolls_by_its_thumb() {
+    let mut view = ChangedFiles::default();
+    let area = Rect::new(0.0, 0.0, 400.0, 200.0);
+    let palette = ui_components::Palette::dark();
+    view.max_scroll = 800.0;
+    view.bar.paint(&mut render_api::Scene::default(), &palette, 1.0, area, 1000.0, 0.0);
+    let edge = area.max_x() - 4.0;
+    assert!(view.click(Point::new(edge, 6.0)).is_none());
+    assert!(view.drag(Point::new(edge, 80.0)), "the thumb followed");
+    assert!(view.scroll > 0.0, "the list scrolled");
+    assert!(view.release());
+}
+
+/// The calendar is a part with the keys while open: Esc closes it (the keys go nowhere
+/// after); a press outside closes it, and on another chip goes on to it.
+#[test]
+fn the_calendar_has_the_keys_while_open() {
+    let mut view = ChangedFiles {
+        chips: vec![
+            (Rect::new(0.0, 0.0, 10.0, 10.0), Chip::Quick(2)),
+            (Rect::new(20.0, 0.0, 10.0, 10.0), Chip::Pick),
+        ],
+        ..ChangedFiles::default()
+    };
+    view.click(Point::new(25.0, 5.0));
+    assert_eq!(view.controls.focused(), Some(CALENDAR));
+    assert!(view.edit_key_with(ViewerKey::Escape, KeyReach::default()));
+    assert!(view.picker.is_none(), "Esc: closed");
+    assert!(!view.edit_key_with(ViewerKey::Down, KeyReach::default()), "nothing has them");
+    // Open again, pressed on "Days…": only closed.
+    view.click(Point::new(25.0, 5.0));
+    view.click(Point::new(25.0, 5.0));
+    assert!(view.picker.is_none());
+    // Open again, pressed on another chip: closed, and the chip chosen.
+    view.click(Point::new(25.0, 5.0));
+    view.click(Point::new(5.0, 5.0));
+    assert!(view.picker.is_none());
+    assert_eq!(view.span, Span::Today);
+    assert_eq!(view.controls.focused(), None);
+}
+
+/// The search is a part: its × empties it (the keys kept), Tab isn't its, the edit commands
+/// are, a press elsewhere takes the keys.
+#[test]
+fn the_search_takes_its_keys_through_its_controls() {
+    let mut view = ChangedFiles {
+        field: Rect::new(0.0, 0.0, 200.0, 28.0),
+        clear: Some(Rect::new(180.0, 4.0, 16.0, 16.0)),
+        ..ChangedFiles::default()
+    };
+    view.click(Point::new(10.0, 10.0));
+    assert!(view.typing());
+    view.text_input("admin");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("admin"));
+    assert!(!view.edit_key_with(ViewerKey::Tab, KeyReach::default()), "Tab isn't its");
+    assert!(view.typing());
+    view.scroll = 40.0;
+    view.click(Point::new(185.0, 10.0));
+    assert_eq!(view.query.text(), "", "the × empties it");
+    assert_eq!(view.scroll, 0.0, "the list from its top");
+    assert!(view.typing(), "the keys kept");
+    view.click(Point::new(300.0, 100.0));
+    assert!(!view.typing(), "a press elsewhere takes them");
+}

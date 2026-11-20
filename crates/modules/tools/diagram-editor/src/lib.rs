@@ -31,6 +31,11 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Diagram Editor",
     description: "draw.io diagrams (.drawio) opened as tabs: their pages, shapes, edges and texts",
     depends_on: &[],
+    info: extensions::ModuleInfo {
+        icon: "graph",
+        hidden_by_default: true,
+        ..extensions::ModuleInfo::BUILT_IN
+    },
 };
 
 #[derive(Debug, Default)]

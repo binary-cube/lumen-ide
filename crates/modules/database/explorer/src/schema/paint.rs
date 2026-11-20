@@ -208,6 +208,7 @@ impl SchemaView {
         let ds = Ctx::new(p, scale);
         let px = |v: f32| ds.px(v);
         self.anchors.clear();
+        self.bounds = b;
         if self.form.is_none() {
             return;
         }
@@ -488,8 +489,8 @@ impl SchemaView {
             rows.push(row);
         }
         let content = rows.len() as f32 * line_h;
-        self.preview_scroll =
-            self.preview_scroll.clamp(0.0, (content - inner.size.height).max(0.0));
+        self.preview_max = (content - inner.size.height).max(0.0);
+        self.preview_scroll = self.preview_scroll.clamp(0.0, self.preview_max);
         let code = scene.push_layer(Some(inner));
         for (i, row) in rows.iter().enumerate() {
             let top = inner.min_y() + i as f32 * line_h - self.preview_scroll;

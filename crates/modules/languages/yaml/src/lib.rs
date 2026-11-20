@@ -14,6 +14,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "YAML",
     description: "YAML: colors, folding on keys and lists, yaml-language-server as its language server",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-text", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

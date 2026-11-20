@@ -9,6 +9,7 @@ use std::path::Path;
 use app_updates::notes::{Kind, Line};
 use i18n::t;
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx};
 use ui_components::{
     Block, BlockKind, PressMods, ReadText, Viewer, ViewerAction, ViewerCursor, ViewerKey,
@@ -75,13 +76,31 @@ enum Hit {
     Close,
 }
 
+/// The notes' place among the view's parts (see [`NotesView::with_controls`]): its only one.
+const READ: usize = 0;
+
 /// The modal's view.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct NotesView {
     notes: Option<Notes>,
     read: ReadText,
     action: Option<ViewerAction>,
     done: bool,
+    /// Its notes' state of use: they keep the focus (a press beside them leaves it), so
+    /// ⌘A, ⌘C and the wheel reach them wherever the window was pressed or the mouse is.
+    controls: Controls,
+}
+
+impl Default for NotesView {
+    fn default() -> Self {
+        Self {
+            notes: None,
+            read: ReadText::default(),
+            action: None,
+            done: false,
+            controls: Controls::sticky(),
+        }
+    }
 }
 
 /// The notes as blocks to read (none written: a line saying so).
@@ -117,6 +136,16 @@ const FOOTER: f32 = 48.0;
 const HEADER: f32 = 40.0;
 
 impl NotesView {
+    /// Its parts (the notes, which always have the focus), with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut parts: [&mut dyn Control; 1] = [&mut self.read];
+        self.controls.focus(&mut parts, Some(READ));
+        f(&mut self.controls, &mut parts)
+    }
+
     fn press(&mut self, hit: Hit) {
         match hit {
             // Downloaded here (the window stays, its progress shown); once ready, the
@@ -294,20 +323,22 @@ impl Viewer for NotesView {
     /// Over the notes the I-beam (they're selected); elsewhere, the bar too, the arrow (the
     /// buttons are the footer's: a hand).
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        Some(if self.read.over_text(p) { ViewerCursor::Text } else { ViewerCursor::Arrow })
+        Some(self.controls.cursor_at(p).unwrap_or(ViewerCursor::Arrow))
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.read.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        self.read.scroll_by(dy)
+    /// The wheel anywhere over the window scrolls the notes (its margins and the progress
+    /// under them too, not only the part under the mouse).
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.with_controls(|c, parts| c.scroll_focused(parts, dx, dy)).is_some()
     }
 
     /// A press: the notes' selection (⇧ extends it), or their bar.
     fn press_with(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
-        self.read.press(p, clicks, mods.shift);
+        self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods));
         self.action.take()
     }
 
@@ -316,19 +347,19 @@ impl Viewer for NotesView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.read.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, changed)| changed)
     }
 
     fn release(&mut self) -> bool {
-        self.read.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn select_all(&mut self) -> bool {
-        self.read.select_all()
+        self.with_controls(|c, parts| c.command(parts, "select_all")).is_some()
     }
 
     fn selected_text(&self) -> Option<String> {
-        self.read.selected_text()
+        self.controls.selected_text_with(|i| (i == READ).then_some(&self.read as &dyn Control))
     }
 
     fn clear_selection(&mut self) -> bool {
@@ -351,7 +382,7 @@ impl Viewer for NotesView {
 
     /// A right-click on the notes: the text's own menu (Copy, Copy All).
     fn context_menu(&mut self, p: kernel::Point) -> Option<Vec<ui_components::ViewMenuEntry>> {
-        self.read.contains(p).then(|| self.read.menu())
+        self.with_controls(|c, parts| c.menu(parts, p)).map(|(_, menu)| menu)
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -363,7 +394,7 @@ impl Viewer for NotesView {
             "go" => self.press(Hit::Go),
             "skip" => self.press(Hit::Skip),
             "close" => self.press(Hit::Close),
-            "select_all" => return self.read.select_all(),
+            "select_all" => return Viewer::select_all(self),
             _ => return false,
         }
         true

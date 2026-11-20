@@ -19,6 +19,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Bash",
     description: "Shell scripts: colors, folding, indentation, bash-language-server as their language server",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "terminal", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

@@ -27,6 +27,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Running work",
     description: "Asks before closing while work still runs: what runs, Stop and close, Wait, Cancel",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "play", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

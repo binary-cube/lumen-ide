@@ -177,7 +177,7 @@ impl TaskManager {
             }
             _ => return None,
         };
-        self.focus = super::Focus::Table;
+        self.focus_on(super::Focus::Table);
         self.go_to(row);
         Some(self.row_menu(row))
     }

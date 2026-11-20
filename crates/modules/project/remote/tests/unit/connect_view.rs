@@ -8,9 +8,9 @@ fn entry(path: &str, is_dir: bool) -> RemoteEntry {
 fn typed() -> ConnectView {
     let mut view = ConnectView::new();
     view.type_text("example.com");
-    view.focused = Field::User;
+    view.focus(Field::User);
     view.type_text("ana");
-    view.focused = Field::Secret;
+    view.focus(Field::Secret);
     view.type_text("s3cret");
     view
 }
@@ -92,7 +92,7 @@ fn the_server_path_is_completed_as_typed() {
         .unwrap();
     view.waiting = 1;
     view.poll();
-    view.focused = Field::Path;
+    view.focus(Field::Path);
     view.on_list = false;
     view.input_mut(Field::Path).set_text("/www/");
     view.input_mut(Field::Path).end(false);
@@ -237,7 +237,7 @@ fn the_chosen_folder_names_the_project_and_its_tree_sets_the_exclusions() {
     assert_eq!(uuid::Uuid::parse_str(&id).map(|u| u.get_version_num()), Ok(4));
     // The connection named apart: its own name, the project's kept.
     view.on_list = false;
-    view.focused = Field::Label;
+    view.focus(Field::Label);
     view.input_mut(Field::Label).end(false);
     view.type_text(" (prod)");
     let (saved, _) = view.saved().unwrap();
@@ -277,7 +277,7 @@ fn the_local_folder_is_completed_as_typed_or_picked() {
     let mut view = typed();
     view.step = Step::Contents;
     view.on_list = false;
-    view.focused = Field::Local;
+    view.focus(Field::Local);
     view.input_mut(Field::Local).set_text("");
     view.type_text(&format!("{base}al"));
     assert_eq!(view.suggestions.len(), 2);
@@ -613,7 +613,7 @@ fn a_password_typed_before_the_kept_one_is_read_stays() {
     let (root, saved) = kept("typed-first");
     let mut view = editing(&saved);
     // Typed before any poll: the kept one, arriving later, doesn't replace it.
-    view.focused = Field::Secret;
+    view.focus(Field::Secret);
     view.type_text("typed");
     assert!(until(&mut view, |v| v.reading_secret.is_none()));
     assert_eq!(view.input(Field::Secret).text(), "typed");
@@ -626,7 +626,7 @@ fn a_password_typed_before_the_kept_one_is_read_stays() {
 fn a_new_password_replaces_the_secret() {
     let (root, saved) = kept("replace");
     let mut view = editing(&saved);
-    view.focused = Field::Secret;
+    view.focus(Field::Secret);
     view.type_text("new-secret");
     view.hits = vec![(Rect::new(0.0, 0.0, 10.0, 10.0), Hit::Save)];
     view.click(Point::new(5.0, 5.0));
@@ -654,7 +654,7 @@ fn test_connection_signs_in_with_the_kept_or_the_typed_password() {
     assert_eq!(view.step(), Step::Connection, "a test stays on the form");
     // A wrong one typed over it: the server's refusal, inline.
     view.input_mut(Field::Secret).set_text("");
-    view.focused = Field::Secret;
+    view.focus(Field::Secret);
     view.type_text("wrong");
     view.test();
     assert!(until(&mut view, |v| !v.busy()));
@@ -680,7 +680,7 @@ fn the_form_is_checked_like_the_wizard_s() {
     assert_eq!(view.status, Some((t("remote.invalid_port"), Tone::Danger)));
     assert!(view.saving.is_none(), "nothing saved");
     // Typed in again: no longer marked.
-    view.focused = Field::Port;
+    view.focus(Field::Port);
     view.edit_key(ViewerKey::Backspace);
     assert_eq!(view.invalid, None);
     view.input_mut(Field::Host).set_text("ftp example.com");
@@ -690,4 +690,38 @@ fn the_form_is_checked_like_the_wizard_s() {
     assert!(view.connection("/").is_err());
     assert_eq!(config::find(&root).unwrap(), saved, "unchanged");
     let _ = std::fs::remove_dir_all(root);
+}
+
+/// The step's scrollbar: its thumb pressed and dragged down scrolls the step.
+#[test]
+fn the_step_scrolls_by_its_thumb() {
+    let mut view = ConnectView::new();
+    let area = Rect::new(0.0, 0.0, 400.0, 200.0);
+    let palette = ui_components::Palette::dark();
+    view.max_scroll = 800.0;
+    view.bar.paint(&mut render_api::Scene::default(), &palette, 1.0, area, 1000.0, 0.0);
+    let edge = area.max_x() - 4.0;
+    assert!(view.click(Point::new(edge, 6.0)).is_none());
+    assert!(view.drag(Point::new(edge, 80.0)), "the thumb followed");
+    assert!(view.scroll > 0.0, "the step scrolled");
+    assert!(view.release());
+}
+
+/// The fields are the wizard's controls: one always has the keys (a press beside them
+/// leaves it there), Tab walks the step's fields by the wizard's own order, and the editing
+/// keys go to the focused one.
+#[test]
+fn a_field_keeps_the_keys_and_the_wizard_walks_them() {
+    let mut view = ConnectView::new();
+    view.type_text("example.co");
+    assert!(view.click(Point::new(-50.0, -50.0)).is_none());
+    view.type_text("mx");
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.input(Field::Host).text(), "example.com", "still the server's field");
+    assert!(view.edit_key(ViewerKey::Tab));
+    assert_eq!(view.focused(), Field::Port);
+    assert!(view.edit_key(ViewerKey::Up));
+    assert_eq!(view.focused(), Field::Host);
+    assert!(view.command("select_all"));
+    assert_eq!(view.input(Field::Host).selected_text(), "example.com");
 }

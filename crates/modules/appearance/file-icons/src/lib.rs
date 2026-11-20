@@ -12,6 +12,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "File icons",
     description: "Icons in the tree and tabs by file name or extension",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 const ICONS: &[IconSvg] = &[

@@ -10,6 +10,8 @@ use database::transaction::AlterPreview;
 use database::{DbError, FkAction, SchemaChange, Structure, TableRef};
 use i18n::{t, tr};
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls, Scrolled, Shown};
+use ui_components::picker::Picker;
 use ui_components::{
     EdgeScrollbar, KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
 };
@@ -108,18 +110,196 @@ pub struct SchemaView {
     pub(super) form_scroll: f32,
     pub(super) form_max: f32,
     pub(super) preview_scroll: f32,
+    /// How far the preview scrolls (measured at the last paint).
+    pub(super) preview_max: f32,
     pub(super) form_bar: EdgeScrollbar,
     pub(super) preview_bar: EdgeScrollbar,
     /// Where each choice's control and each field was drawn (popups open under them).
     pub(super) anchors: HashMap<Popup, Rect>,
     pub(super) form_area: Rect,
     pub(super) preview_area: Rect,
+    /// Where the modal's content was drawn last (the form scrolls under the wheel anywhere
+    /// but over the preview).
+    pub(super) bounds: Rect,
     pub(super) hits: Vec<(Rect, Hit)>,
     /// What the abbreviated or icon-only parts under the mouse say (NN, PK, ×…).
     pub(super) tips: Vec<(Rect, String)>,
     pub(super) hover: Option<Hit>,
     last_hover: Option<Point>,
     action: Option<ViewerAction>,
+    /// Its parts' state of use (see `with_controls`).
+    controls: Controls,
+    /// What the keys' parts heard, taken after each key or text.
+    heard: Heard,
+}
+
+/// What the parts taking the keys heard (the view acts on it once they're let go).
+#[derive(Debug, Default)]
+struct Heard {
+    /// A suggestion taken (↵ or ⇥ on the lit one).
+    picked: Option<usize>,
+    /// The suggestions closed (esc).
+    closed: bool,
+    /// The focused field's text changed.
+    edited: bool,
+}
+
+/// What an open list is over the form, for the keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Listing {
+    /// A choice's list: every key, its search the text.
+    Choice,
+    /// A field's suggestions: only what moves in them, takes or closes them.
+    Suggest,
+}
+
+/// The open list as a part, over everything while it's shown (until the next paint
+/// closes it, a list no longer asked for takes nothing): its press, its hover, its cursor
+/// and its wheel are the picker's; of the keys, a choice's list takes every one and, in
+/// its search, the text; a field's suggestions ↑ ↓ ⇞ ⇟, ↵ ⇥ on the lit one (taken) and esc
+/// (closed) — the other keys and the text go on to the field, which keeps the typing.
+struct ListPart<'a> {
+    picker: &'a mut Picker,
+    shown: bool,
+    /// What it is for the keys (`None`: no list open).
+    listing: Option<Listing>,
+    picked: &'a mut Option<usize>,
+    closed: &'a mut bool,
+}
+
+impl ListPart<'_> {
+    /// The picker as the part shown only while asked for.
+    fn shown(&mut self) -> Shown<'_> {
+        Shown { part: &mut *self.picker, shown: self.shown }
+    }
+}
+
+impl Control for ListPart<'_> {
+    fn area(&self) -> Option<Rect> {
+        Control::area(&*self.picker).filter(|_| self.shown)
+    }
+
+    fn hit(&self, p: Point) -> bool {
+        self.shown && Control::hit(&*self.picker, p)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> ui_components::control::Press {
+        self.shown().press(p, clicks)
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.shown().drag(p)
+    }
+
+    fn release(&mut self) -> bool {
+        self.shown().release()
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.shown().hover(p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(&*self.picker, p).filter(|_| self.shown)
+    }
+
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.shown().scroll(dx, dy)
+    }
+
+    fn focusable(&self) -> bool {
+        self.shown && Control::focusable(&*self.picker)
+    }
+
+    fn keeps_tab(&self) -> bool {
+        self.shown && Control::keeps_tab(&*self.picker)
+    }
+
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        Control::frame_deadline(&*self.picker).filter(|_| self.shown)
+    }
+
+    fn captures_keys(&self) -> bool {
+        self.listing.is_some()
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        match self.listing {
+            Some(Listing::Choice) => Control::key(self.picker, key, reach),
+            Some(Listing::Suggest) => match key {
+                ViewerKey::Down | ViewerKey::Up | ViewerKey::PageDown | ViewerKey::PageUp => {
+                    Picker::key(self.picker, key, reach);
+                    true
+                }
+                ViewerKey::Enter | ViewerKey::Tab => {
+                    let lit = self.picker.highlighted();
+                    *self.picked = lit;
+                    lit.is_some()
+                }
+                ViewerKey::Escape => {
+                    *self.closed = true;
+                    true
+                }
+                _ => false,
+            },
+            None => false,
+        }
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.listing == Some(Listing::Choice) && self.picker.text_input(typed)
+    }
+}
+
+/// The focused field as the part having the keys (focused from code; a press on it is the
+/// view's, by its hit): the editing keys and the text typed, but none while a choice's
+/// list is open over it. `edited`: its text changed.
+struct FieldKeys<'a> {
+    /// `None`: no field focused.
+    field: Option<Text>,
+    input: Option<&'a mut ui_kit::TextInput>,
+    /// It takes the keys (no choice's list over it).
+    open: bool,
+    edited: &'a mut bool,
+}
+
+impl Control for FieldKeys<'_> {
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    /// Focused from code only: the view moves among its fields with Tab and ↑ ↓.
+    fn in_tab_order(&self) -> bool {
+        false
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let (true, Some(input)) = (self.open, self.input.as_deref_mut()) else { return false };
+        match key {
+            ViewerKey::Left => input.move_left(reach.word, reach.extend),
+            ViewerKey::Right => input.move_right(reach.word, reach.extend),
+            ViewerKey::Home => input.home(reach.extend),
+            ViewerKey::End => input.end(reach.extend),
+            ViewerKey::Backspace => input.backspace(reach.word),
+            ViewerKey::Delete => input.delete(),
+            _ => return false,
+        }
+        *self.edited |= matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
+        true
+    }
+
+    /// Typed into the field (control characters dropped).
+    fn text(&mut self, typed: &str) -> bool {
+        if !self.open || self.field.is_none() {
+            return false;
+        }
+        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
+        if let Some(input) = self.input.as_deref_mut() {
+            input.insert(&typed);
+        }
+        *self.edited = true;
+        true
+    }
 }
 
 impl std::fmt::Debug for SchemaView {
@@ -143,6 +323,9 @@ impl SchemaView {
         self.focus = form.texts().first().copied();
         self.form = Some(form);
         self.request = Some(request);
+        // The focused field has the keys from the start; a press on what isn't one keeps it.
+        self.controls = Controls::sticky();
+        self.with_controls(|_, _| ());
     }
 
     fn connect(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
@@ -489,16 +672,6 @@ impl SchemaView {
         self.replan();
     }
 
-    /// Text typed into the field having the keys.
-    pub fn type_text(&mut self, typed: &str) {
-        let Some(field) = self.focus else { return };
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        if let Some(input) = self.form.as_mut().and_then(|f| f.input_mut(field)) {
-            input.insert(&typed);
-        }
-        self.edited(field);
-    }
-
     fn edited(&mut self, field: Text) {
         if let Some(form) = &mut self.form {
             form.edited(field);
@@ -772,14 +945,10 @@ impl Viewer for SchemaView {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        if self.choosing() {
-            return self.picker.text_input(text);
-        }
-        if self.focus.is_none() {
-            return false;
-        }
-        self.type_text(text);
-        true
+        // A choice's list's search, else the focused field (under its suggestions too).
+        let used = self.with_controls(|c, parts| c.text(parts, text)).is_some();
+        self.heard_keys();
+        used
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -787,31 +956,17 @@ impl Viewer for SchemaView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        // A choice's list (the picker) has the keys.
-        if self.choosing() {
-            let event = self.picker.key(key, reach);
+        // An open list over everything first (a choice's has every key; a field's
+        // suggestions are lit by the arrows, taken by ↵ or ⇥), then the focused field.
+        let choosing = self.choosing();
+        let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
+        if choosing {
+            let event = self.picker.take_event();
             self.picked(event);
             return true;
         }
-        // Suggestions (the field keeps the typing): lit by the arrows, taken by ↵ or ⇥.
-        if self.suggesting() {
-            match key {
-                ViewerKey::Down | ViewerKey::Up | ViewerKey::PageDown | ViewerKey::PageUp => {
-                    self.picker.key(key, reach);
-                    return true;
-                }
-                ViewerKey::Enter | ViewerKey::Tab if self.picker.highlighted().is_some() => {
-                    let at = self.picker.highlighted().unwrap_or(0);
-                    self.pick(at);
-                    return true;
-                }
-                ViewerKey::Escape => {
-                    self.popup = None;
-                    self.picker.close();
-                    return true;
-                }
-                _ => {}
-            }
+        if self.heard_keys() || used {
+            return true;
         }
         match key {
             ViewerKey::Tab | ViewerKey::Down => self.focus_step(true),
@@ -821,23 +976,7 @@ impl Viewer for SchemaView {
                 self.submit();
             }
             ViewerKey::Escape => self.cancel(),
-            key => {
-                let Some(field) = self.focus else { return false };
-                let Some(input) = self.focused_input() else { return false };
-                let edits = matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
-                match key {
-                    ViewerKey::Left => input.move_left(reach.word, reach.extend),
-                    ViewerKey::Right => input.move_right(reach.word, reach.extend),
-                    ViewerKey::Home => input.home(reach.extend),
-                    ViewerKey::End => input.end(reach.extend),
-                    ViewerKey::Backspace => input.backspace(reach.word),
-                    ViewerKey::Delete => input.delete(),
-                    _ => return false,
-                }
-                if edits {
-                    self.edited(field);
-                }
-            }
+            _ => return false,
         }
         true
     }
@@ -887,40 +1026,35 @@ impl Viewer for SchemaView {
     }
 
     fn selected_text(&self) -> Option<String> {
-        let field = self.focus?;
-        let input = self.form.as_ref()?.input(field)?;
-        let selected = input.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| self.part(i))
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {
         self.action.take()
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        if self.choosing() || self.suggesting() {
-            return self.picker.scroll(dy);
-        }
-        let at = self.hover_point();
-        if self.preview_area.contains(at) {
-            self.preview_scroll = (self.preview_scroll + dy).max(0.0);
-        } else {
-            self.form_scroll = (self.form_scroll + dy).clamp(0.0, self.form_max);
-        }
-        true
+    /// The part under the mouse (an open list over everything, the preview, the form), as
+    /// it is now (a list may have opened under it since it last moved).
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        let at = self.last_hover;
+        self.with_controls(|c, parts| {
+            c.hover(parts, at);
+            c.scroll_hovered(parts, dx, dy)
+        })
+        .is_some()
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.form_bar.press(p) {
-            self.form_scroll = offset;
-            return None;
-        }
+        let inside = self.picker.contains(p);
+        let opener = self.popup;
+        let pressed = self.with_controls(|c, parts| c.press(parts, p, 1));
         // A choice's list takes the click: a row taken; outside it, it closes — and the click
         // goes on, but on the field that opened it (that only closes it).
-        if self.choosing() || self.suggesting() {
-            let inside = self.picker.contains(p);
-            let opener = self.popup;
-            let event = self.picker.press(p);
+        if let Some((part, _)) = pressed {
+            if part != LIST {
+                return None;
+            }
+            let event = self.picker.take_event();
             self.picked(event);
             let same = matches!((&self.hit(p), opener), (Some(Hit::Choice(c)), Some(Popup::Choice(o))) if *c == o);
             if inside || same {
@@ -976,8 +1110,7 @@ impl Viewer for SchemaView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(offset) = self.form_bar.drag(p) {
-            self.form_scroll = offset;
+        if self.with_controls(|c, parts| c.drag(parts, p)).is_some() {
             return true;
         }
         match self.focused_input() {
@@ -990,24 +1123,26 @@ impl Viewer for SchemaView {
     }
 
     fn release(&mut self) -> bool {
-        self.form_bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         self.last_hover = Some(p);
+        // An open list takes the mouse over everything.
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         if self.choosing() || self.suggesting() {
-            return self.picker.hover(p);
+            return parts;
         }
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed | self.form_bar.hover(p) | self.preview_bar.hover(p)
+        changed | parts
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        // A choice's list: its own cursor, never what's under it.
-        if (self.choosing() || self.suggesting()) && self.picker.contains(p) {
-            return Some(self.picker.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
+        // A part's (an open list's, never what's under it).
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
         match self.hit(p)? {
             Hit::Field(_) => Some(ViewerCursor::Text),
@@ -1016,7 +1151,94 @@ impl Viewer for SchemaView {
     }
 }
 
+/// The open list's and the focused field's places among the modal's parts.
+const LIST: usize = 0;
+const FIELD: usize = 3;
+
 impl SchemaView {
+    /// Its parts (a choice's list or a field's suggestions while asked for, over
+    /// everything, and its keys; the preview and its scrollbar; the form and its
+    /// scrollbar: the rest of the modal; the focused field, having the keys), the topmost
+    /// first, with their state of use. An open list's keys come first, those it doesn't
+    /// use and the text go on to the field (its suggestions take ↑ ↓ ↵ ⇥ esc, the field
+    /// keeps the typing). The view moves among its fields (Tab, ↑ ↓, a press on one): the
+    /// field's part is always the focused one.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let listing = if self.choosing() {
+            Some(Listing::Choice)
+        } else if self.suggesting() {
+            Some(Listing::Suggest)
+        } else {
+            None
+        };
+        let field = self.focus;
+        let shown = self.popup.is_some();
+        let mut list = ListPart {
+            picker: &mut self.picker,
+            shown,
+            listing,
+            picked: &mut self.heard.picked,
+            closed: &mut self.heard.closed,
+        };
+        let input = field.and_then(|f| self.form.as_mut()?.input_mut(f));
+        let mut field_keys = FieldKeys {
+            field,
+            input,
+            open: listing != Some(Listing::Choice),
+            edited: &mut self.heard.edited,
+        };
+        let mut preview = Scrolled {
+            bar: &mut self.preview_bar,
+            offset: &mut self.preview_scroll,
+            area: self.preview_area,
+            max: self.preview_max,
+        };
+        let mut form = Scrolled {
+            bar: &mut self.form_bar,
+            offset: &mut self.form_scroll,
+            area: self.bounds,
+            max: self.form_max,
+        };
+        let mut parts: [&mut dyn Control; 4] =
+            [&mut list, &mut preview, &mut form, &mut field_keys];
+        self.controls.focus(&mut parts, Some(FIELD));
+        let answer = f(&mut self.controls, &mut parts);
+        // A press on the open list doesn't take the keys from the field.
+        self.controls.focus(&mut parts, Some(FIELD));
+        answer
+    }
+
+    /// Its part at `i`, read-only (the copy's selection asked from `&self`): the focused
+    /// field's.
+    fn part(&self, i: usize) -> Option<&dyn Control> {
+        let field = self.focus.filter(|_| i == FIELD)?;
+        Some(self.form.as_ref()?.input(field)? as &dyn Control)
+    }
+
+    /// What the keys' parts heard, acted on: a suggestion taken or closed, the field's
+    /// text changed. `true` if a suggestion was taken or closed.
+    fn heard_keys(&mut self) -> bool {
+        let heard = std::mem::take(&mut self.heard);
+        if heard.edited
+            && let Some(field) = self.focus
+        {
+            self.edited(field);
+        }
+        if let Some(at) = heard.picked {
+            self.pick(at);
+            return true;
+        }
+        if heard.closed {
+            self.popup = None;
+            self.picker.close();
+            return true;
+        }
+        false
+    }
+
     /// The primary button's label.
     pub fn submit_label(&self) -> String {
         let kind = self.form.as_ref().map(|f| f.kind.clone());
@@ -1028,10 +1250,6 @@ impl SchemaView {
             Some(k) if k.drops() => "schema.drop",
             _ => "schema.save",
         })
-    }
-
-    fn hover_point(&self) -> Point {
-        self.last_hover.unwrap_or(Point::new(f32::MIN, f32::MIN))
     }
 }
 

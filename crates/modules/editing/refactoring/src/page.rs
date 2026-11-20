@@ -6,6 +6,7 @@
 
 use kernel::{Point, Rect};
 use render_api::Scene;
+use ui_components::control::{Control, NOWHERE, Press};
 use ui_components::{EdgeScrollbar, Palette};
 
 use crate::plan_list::PlanList;
@@ -45,6 +46,12 @@ impl PageScroll {
     pub fn paint_bar(&mut self, scene: &mut Scene, palette: &Palette, scale: f32) {
         let content = self.area.size.height + self.max;
         self.bar.paint(scene, palette, scale, self.area, content, self.offset);
+    }
+
+    /// How far the page is scrolled (the tests check a drag moved it).
+    #[cfg(test)]
+    pub fn offset(&self) -> f32 {
+        self.offset
     }
 
     /// Point `p` is on the page (not on the keys under it).
@@ -92,6 +99,30 @@ impl PageScroll {
     }
 }
 
+/// The page's scrollbar as a control: pressed on its lane, its thumb is held (or the page
+/// jumps there) and follows the pointer.
+impl Control for PageScroll {
+    fn hit(&self, p: Point) -> bool {
+        self.bar.contains(p)
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> Press {
+        if PageScroll::press(self, p) { Press::Held } else { Press::Ignored }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        PageScroll::drag(self, p)
+    }
+
+    fn release(&mut self) -> bool {
+        PageScroll::release(self)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        PageScroll::hover(self, p.unwrap_or(NOWHERE))
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/page.rs"]
-mod tests;
+pub(crate) mod tests;

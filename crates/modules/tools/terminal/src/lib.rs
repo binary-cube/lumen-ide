@@ -33,6 +33,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Terminal",
     description: "The terminal at the bottom: shells as tabs, links to files, the theme's colors",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "terminal", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Its window at the bottom.

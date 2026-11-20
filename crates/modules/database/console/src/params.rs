@@ -28,6 +28,7 @@ use i18n::t;
 use kernel::{Point, Rect};
 use render_api::Quad;
 use ui_components::code_tokens::{self, CodeLine};
+use ui_components::control::{Control, Controls, Press, Thumb};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
     EdgeScrollbar, KeyReach, Tip, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind,
@@ -37,6 +38,7 @@ use ui_kit::{TextInput, TextInputStyle, draw_icon, draw_text};
 use workbench_model::WorkbenchHost;
 
 use crate::answer_slot::Once;
+use crate::field::KeyField;
 
 /// The modal's virtual extension (its view's kind).
 pub const EXTENSION: &str = "view-console-params";
@@ -251,7 +253,6 @@ impl ViewerProvider for ParamsProvider {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
-    Field(usize),
     Kind(usize, ValueKind),
     Remember(usize),
     Go,
@@ -263,7 +264,8 @@ enum Hit {
 pub struct ParamsView {
     request: Option<ParamsRequest>,
     inputs: Vec<TextInput>,
-    focus: Option<usize>,
+    /// Where each value's field was drawn last (empty: not drawn, scrolled out of view).
+    fields: Vec<Rect>,
     /// Given: the window closes (and the values are used).
     done: bool,
     /// The main button was pressed with a problem left: it's shown.
@@ -275,6 +277,12 @@ pub struct ParamsView {
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     action: Option<ViewerAction>,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
+    /// The row whose value has the keys (while the values have the focus).
+    row: usize,
+    /// Set when a field's text changed (the fields say it; nothing here follows it).
+    edited: bool,
 }
 
 impl std::fmt::Debug for ParamsView {
@@ -307,8 +315,31 @@ impl ParamsView {
             .collect()
     }
 
+    /// The value's row having the keys.
     pub fn focus(&self) -> Option<usize> {
-        self.focus
+        (self.controls.focused() == Some(VALUES)).then_some(self.row)
+    }
+
+    /// Row `i`'s value given the keys.
+    fn focus_row(&mut self, i: usize) {
+        self.row = i;
+        self.with_controls(|c, parts| c.focus(parts, Some(VALUES)));
+    }
+
+    /// Tab (⇧Tab `back`): the next row's value given the keys, around the ends; the first
+    /// (the last going back) when none has them.
+    fn step_focus(&mut self, back: bool) {
+        let n = self.inputs.len();
+        if n == 0 {
+            return;
+        }
+        let next = match (self.focus(), back) {
+            (None, false) => 0,
+            (None, true) => n - 1,
+            (Some(at), false) => (at + 1) % n,
+            (Some(at), true) => (at + n - 1) % n,
+        };
+        self.focus_row(next);
     }
 
     /// Entry `i`'s value typed (as if by the keyboard: the field's text replaced).
@@ -325,7 +356,7 @@ impl ParamsView {
             e.kind_chosen = true;
         }
         if kind != ValueKind::Null {
-            self.focus = Some(i);
+            self.focus_row(i);
         }
     }
 
@@ -344,7 +375,7 @@ impl ParamsView {
     pub fn give(&mut self) -> bool {
         if let Some((i, _)) = self.problem() {
             self.tried = true;
-            self.focus = Some(i);
+            self.focus_row(i);
             return false;
         }
         let Some(then) = self.request.as_ref().map(|r| r.then.clone()) else { return false };
@@ -367,40 +398,42 @@ impl ParamsView {
         self.action = Some(ViewerAction::Close);
     }
 
+    /// Its parts (the rows' scrollbar, then the values: one part, each row's field in it),
+    /// with their state of use; a fixed list, nothing made for it at each event. The focus
+    /// moves among the rows with Tab and ↑ ↓ (a `NULL` row's too: it takes no text) and
+    /// stays where it was on a press beside them.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let entries = self.request.as_ref().map_or(&[][..], |r| &r.entries[..]);
+        let mut values = Values {
+            inputs: &mut self.inputs,
+            fields: &self.fields,
+            entries,
+            row: &mut self.row,
+            edited: &mut self.edited,
+        };
+        let mut rows = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut parts: [&mut dyn Control; 2] = [&mut rows, &mut values];
+        f(&mut self.controls, &mut parts)
+    }
+
     fn hit(&self, p: Point) -> Option<Hit> {
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
 
-    fn focused_input(&mut self) -> Option<&mut TextInput> {
-        let i = self.focus?;
-        // `NULL` takes no text.
-        let null = self.request.as_ref()?.entries.get(i)?.kind == ValueKind::Null;
-        if null {
-            return None;
-        }
-        self.inputs.get_mut(i)
+    /// The focused row takes a value (it isn't `NULL`).
+    fn focused_value(&self) -> bool {
+        let Some(i) = self.focus() else { return false };
+        self.request
+            .as_ref()
+            .and_then(|r| r.entries.get(i))
+            .is_some_and(|e| e.kind != ValueKind::Null)
     }
 
-    fn step(&mut self, forward: bool) {
-        let n = self.inputs.len();
-        if n == 0 {
-            return;
-        }
-        self.focus = Some(match (self.focus, forward) {
-            (None, _) => 0,
-            (Some(i), true) => (i + 1) % n,
-            (Some(i), false) => (i + n - 1) % n,
-        });
-    }
-
-    fn press(&mut self, hit: Hit, x: f32) {
+    fn press(&mut self, hit: Hit) {
         match hit {
-            Hit::Field(i) => {
-                self.focus = Some(i);
-                if let Some(input) = self.focused_input() {
-                    input.press(x, 1);
-                }
-            }
             Hit::Kind(i, kind) => self.set_kind(i, kind),
             Hit::Remember(i) => self.toggle_remember(i),
             Hit::Go => {
@@ -464,18 +497,20 @@ impl Viewer for ParamsView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
         if let Some(request) = data.downcast_ref::<ParamsRequest>() {
             self.inputs = request.entries.iter().map(|e| TextInput::new(&e.text)).collect();
+            self.fields = vec![Rect::default(); request.entries.len()];
             // The first value to type: the first left empty, else the first.
-            self.focus = request
+            let first = request
                 .entries
                 .iter()
                 .position(|e| e.text.is_empty() && e.kind != ValueKind::Null)
                 .or((!request.entries.is_empty()).then_some(0));
-            if let (Some(i), true) = (self.focus, !request.entries.is_empty())
-                && let Some(input) = self.inputs.get_mut(i)
-            {
+            if let Some(input) = first.and_then(|i| self.inputs.get_mut(i)) {
                 input.select_all();
             }
             self.request = Some(request.clone());
+            if let Some(i) = first {
+                self.focus_row(i);
+            }
         }
     }
 
@@ -506,14 +541,11 @@ impl Viewer for ParamsView {
     }
 
     fn wants_text(&self) -> bool {
-        self.focus.is_some()
+        self.focus().is_some()
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        let Some(input) = self.focused_input() else { return false };
-        input.insert(&typed);
-        true
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -584,7 +616,8 @@ impl Viewer for ParamsView {
             card.size.height - px(20.0),
         );
         let lines = code_lines(&request);
-        let focused_name = self.focus.and_then(|i| request.entries.get(i)).map(|e| e.name.clone());
+        let focus = self.focus();
+        let focused_name = focus.and_then(|i| request.entries.get(i)).map(|e| e.name.clone());
         let metrics = text.metrics(&code_font);
         {
             let code = scene.push_layer(Some(inner));
@@ -679,10 +712,12 @@ impl Viewer for ParamsView {
         let shown = request.entries.len().clamp(1, ROWS);
         let area = Rect::new(b.min_x(), y, b.size.width, shown as f32 * px(ROW_H));
         self.rows_area = area;
+        // Only the rows drawn now can be pressed.
+        self.fields.iter_mut().for_each(|r| *r = Rect::default());
         let content = request.entries.len() as f32 * px(ROW_H);
         self.max_scroll = (content - area.size.height).max(0.0);
         // The focused row kept in view.
-        if let Some(i) = self.focus {
+        if let Some(i) = focus {
             let top = i as f32 * px(ROW_H);
             if top < self.scroll {
                 self.scroll = top;
@@ -701,7 +736,7 @@ impl Viewer for ParamsView {
                     continue;
                 }
                 let mid = (top + px(ROW_H) / 2.0).round();
-                if self.focus == Some(i) {
+                if focus == Some(i) {
                     rows.quad(
                         Quad::filled(
                             Rect::new(
@@ -738,7 +773,7 @@ impl Viewer for ParamsView {
                 let wrong = (self.tried || !entry.text.is_empty())
                     && problem.as_ref().is_some_and(|(at, _)| *at == i);
                 let style = Self::style(&ds, !null, wrong);
-                let focused = self.focus == Some(i) && !null;
+                let focused = focus == Some(i) && !null;
                 let placeholder =
                     if null { "NULL".to_owned() } else { t("console.params_placeholder") };
                 if let Some(input) = self.inputs.get(i) {
@@ -748,7 +783,9 @@ impl Viewer for ParamsView {
                         input.paint(rows, text, field, focused, &placeholder, &style);
                     }
                 }
-                self.hits.push((field, Hit::Field(i)));
+                if let Some(at) = self.fields.get_mut(i) {
+                    *at = field;
+                }
                 // Its kind.
                 let selected =
                     ValueKind::ALL.iter().position(|k| *k == entry.effective_kind()).unwrap_or(0);
@@ -851,47 +888,46 @@ impl Viewer for ParamsView {
         self.hits.push((c, Hit::Cancel));
     }
 
+    /// The scrollbar's thumb or a value's field (its caret put, a drag selecting), else a
+    /// button; beside them the focus stays where it was.
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
+        let pressed = self.with_controls(|c, parts| {
+            let kept = c.focused();
+            let pressed = c.press(parts, p, 1);
+            if pressed.is_none() {
+                c.focus(parts, kept);
+            }
+            pressed
+        });
+        if pressed.is_some() {
             return None;
         }
         if let Some(hit) = self.hit(p) {
-            self.press(hit, p.x);
+            self.press(hit);
         }
         self.action.take()
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(offset) = self.bar.drag(p) {
-            self.scroll = offset;
-            return true;
-        }
-        match self.focused_input() {
-            Some(input) => {
-                input.extend_to(p.x);
-                true
-            }
-            None => false,
-        }
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some()
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed | self.bar.hover(p)
+        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        match self.hit(p)? {
-            Hit::Field(_) => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
+        self.hit(p).map(|_| ViewerCursor::Pointer)
     }
 
     fn tooltip_at(&self, p: Point) -> Option<Tip> {
@@ -923,29 +959,24 @@ impl Viewer for ParamsView {
                 self.give();
             }
             ViewerKey::Escape => self.cancel(),
-            ViewerKey::Tab => self.step(!reach.extend),
-            ViewerKey::Down => self.step(true),
-            ViewerKey::Up => self.step(false),
+            // ↓ ↑ move the focus as Tab and ⇧Tab do.
+            ViewerKey::Tab | ViewerKey::Down | ViewerKey::Up => {
+                let back = key == ViewerKey::Up || key == ViewerKey::Tab && reach.extend;
+                self.step_focus(back);
+            }
+            // The focused value's editing keys (⌦ at its end too: nothing to delete).
             key => {
-                let Some(input) = self.focused_input() else { return false };
-                match key {
-                    ViewerKey::Left => input.move_left(reach.word, reach.extend),
-                    ViewerKey::Right => input.move_right(reach.word, reach.extend),
-                    ViewerKey::Home => input.home(reach.extend),
-                    ViewerKey::End => input.end(reach.extend),
-                    ViewerKey::Backspace => input.backspace(reach.word),
-                    ViewerKey::Delete => input.delete(),
-                    _ => return false,
-                }
+                let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
+                return used || key == ViewerKey::Delete && self.focused_value();
             }
         }
         true
     }
 
     fn selected_text(&self) -> Option<String> {
-        let input = self.inputs.get(self.focus?)?;
-        let selected = input.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| {
+            (i == VALUES).then(|| self.inputs.get(self.row).map(|f| f as &dyn Control)).flatten()
+        })
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -967,7 +998,7 @@ impl Viewer for ParamsView {
             let Some((row, value)) = rest.split_once(':') else { return false };
             let Ok(row) = row.parse::<usize>() else { return false };
             self.set_text(row, value);
-            self.focus = Some(row);
+            self.focus_row(row);
             return true;
         }
         if let Some(row) = id.strip_prefix("remember:").and_then(|r| r.parse::<usize>().ok()) {
@@ -979,25 +1010,93 @@ impl Viewer for ParamsView {
                 self.give();
                 true
             }
-            "select_all" => self.focused_input().is_some_and(|i| {
-                i.select_all();
-                true
-            }),
-            "undo" => self.focused_input().is_some_and(TextInput::undo),
-            "redo" => self.focused_input().is_some_and(TextInput::redo),
-            "cut" => self.focused_input().is_some_and(|i| {
-                let had = !i.selected_text().is_empty();
-                if had {
-                    i.insert("");
-                }
-                had
-            }),
-            _ => false,
+            // The focused value's edit commands (⌘A, ⌘Z, ⇧⌘Z, ⌘X).
+            id => self.with_controls(|c, parts| c.command(parts, id)).is_some(),
         }
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {
         self.action.take()
+    }
+}
+
+/// The values' place among the modal's parts (after the rows' scrollbar).
+const VALUES: usize = 1;
+
+/// The parameters' values as one form's control: each row's field (a press there gives
+/// its row the keys), the keys, the text and the edit commands to the row having them; a
+/// `NULL` row takes the focus and no text.
+struct Values<'a> {
+    inputs: &'a mut [TextInput],
+    /// Where each row's field was drawn last (empty: scrolled out of view).
+    fields: &'a [Rect],
+    entries: &'a [ParamEntry],
+    /// The row having the keys.
+    row: &'a mut usize,
+    edited: &'a mut bool,
+}
+
+impl Values<'_> {
+    /// The row whose field is at `p`.
+    fn at(&self, p: Point) -> Option<usize> {
+        self.fields.iter().position(|r| r.contains(p))
+    }
+
+    fn null(&self, i: usize) -> bool {
+        self.entries.get(i).is_some_and(|e| e.kind == ValueKind::Null)
+    }
+
+    /// Row `i`'s field (`None`: a `NULL` row, or no such row).
+    fn field(&mut self, i: usize) -> Option<KeyField<'_>> {
+        if self.null(i) {
+            return None;
+        }
+        Some(KeyField {
+            input: self.inputs.get_mut(i)?,
+            area: self.fields.get(i).copied().unwrap_or_default(),
+            selects: true,
+            edited: self.edited,
+        })
+    }
+}
+
+impl Control for Values<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.at(p).is_some()
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let Some(i) = self.at(p) else { return Press::Ignored };
+        *self.row = i;
+        self.field(i).map_or(Press::Took, |mut f| f.press(p, clicks))
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        let row = *self.row;
+        self.field(row).is_some_and(|mut f| f.drag(p))
+    }
+
+    fn cursor(&self, _p: Point) -> Option<ViewerCursor> {
+        Some(ViewerCursor::Text)
+    }
+
+    fn focusable(&self) -> bool {
+        !self.inputs.is_empty()
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let row = *self.row;
+        self.field(row).is_some_and(|mut f| f.key(key, reach))
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let row = *self.row;
+        self.field(row).is_some_and(|mut f| f.text(typed))
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        let row = *self.row;
+        self.field(row).is_some_and(|mut f| f.command(id))
     }
 }
 

@@ -20,6 +20,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Diagrams",
     description: "The project's diagrams (.drawio): listed, made, renamed and moved",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "graph", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

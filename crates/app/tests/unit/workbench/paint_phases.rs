@@ -6,7 +6,7 @@ fn the_parts_are_told_slowest_first_and_short_ones_left_out() {
     let start = Instant::now();
     let at = |ms: u64| start + Duration::from_millis(ms);
     let marks = vec![("start", at(0)), ("a", at(10)), ("short", at(11)), ("b", at(61))];
-    let phases = PaintPhases { marks, frames: 1 };
+    let phases = PaintPhases { marks, frames: 1, phase: None };
     assert_eq!(phases.text(), "b=50ms a=10ms");
 }
 

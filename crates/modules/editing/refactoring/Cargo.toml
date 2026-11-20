@@ -23,3 +23,6 @@ refactor.workspace = true
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+icons.workspace = true

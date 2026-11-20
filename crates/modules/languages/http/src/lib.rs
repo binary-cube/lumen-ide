@@ -30,6 +30,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "HTTP requests (language)",
     description: ".http files: colors (the body in its own language, the scripts in JavaScript), folding per request, structure, completion",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "globe", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

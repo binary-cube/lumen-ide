@@ -23,6 +23,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Focus mode",
     description: "The area being worked in stays in color, the rest of the window turns gray",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "eye", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Turns it on or off.

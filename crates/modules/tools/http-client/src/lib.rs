@@ -22,6 +22,7 @@ pub mod gitignore;
 mod importing;
 pub mod job;
 mod page;
+mod parts;
 mod pending;
 pub mod preview_view;
 pub mod request_tree;
@@ -56,6 +57,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "HTTP client",
     description: "Runs the requests of .http files: environments, cookies, the responses in Services",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "globe", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

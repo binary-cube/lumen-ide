@@ -20,6 +20,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "CSV",
     description: "CSV and TSV files as data sources: their rows read a page at a time, sorted, filtered and changed in one commit",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "table", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// The files the driver opens: by extension, then by a text start.

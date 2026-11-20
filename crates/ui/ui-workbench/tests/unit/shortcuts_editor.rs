@@ -6,6 +6,8 @@ fn row(command: &str, place: &str, shortcuts: &[&str]) -> BindingRow {
         label: command.into(),
         group: String::new(),
         place: place.into(),
+        // As the app says it: text is typed everywhere and in an editor.
+        typing: place.is_empty() || place.starts_with("editor"),
         shortcuts: shortcuts.iter().map(|s| (*s).to_owned()).collect(),
         shown: shortcuts.iter().map(|s| (*s).to_owned()).collect(),
         changed: false,
@@ -77,6 +79,9 @@ fn a_plain_letter_is_refused_where_text_is_typed() {
     assert!(e.recording(), "still recording");
     let mut e = editor(vec![row("canvas.fit", "canvas", &[])], "canvas.fit");
     assert!(e.record("K", "K").is_some());
+    // A language's editor is an editor: text is typed there too.
+    let mut e = editor(vec![row("sql.run", "editor-sql", &[])], "sql.run");
+    assert_eq!(e.record("K", "K"), None);
 }
 
 /// × removes one shortcut; "back to the preset" forgets the user's.

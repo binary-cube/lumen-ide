@@ -58,8 +58,8 @@ impl Workbench {
         if let Some(input) = self.active_input_mut() {
             return Some(if redo { input.redo() } else { input.undo() });
         }
-        // A module's window over everything: its field.
-        if let Some(used) = self.modal_view_field_command(if redo { "redo" } else { "undo" }) {
+        // A window over everything editing its own field (a module's view).
+        if let Some(used) = self.overlay_edit(if redo { "redo" } else { "undo" }) {
             return Some(used);
         }
         if let Some(v) = self.panel_field() {
@@ -689,45 +689,43 @@ impl Workbench {
         true
     }
 
-    /// Which text field has the keyboard now (the same order as `type_text`), or `None`
-    /// for the editor / a viewer / the terminal.
-    /// A modal or an overlay's text field has the keyboard: what's behind it shows no caret
-    /// (and gets no keys).
+    /// A modal or a window over the editor with a text field has the keyboard: what's
+    /// behind it shows no caret (and gets no keys).
     pub(super) fn keyboard_in_overlay(&self) -> bool {
         self.modal_open()
-            // A module's view over the window with a field (the color picker's).
-            || self.modal_view_has_input()
-            || matches!(
-                self.input_owner(),
-                Some(InputOwner::ProjectsMenu | InputOwner::Dialog | InputOwner::Settings)
-            )
+            || self.active_overlay().is_some_and(|o| {
+                let slot = o.slot();
+                slot.has_input(self) || slot.input(self).is_some()
+            })
     }
 
+    /// Who has the keyboard's text field that the app edits: the window over the editor on
+    /// top when it has one (none when it hasn't, or its view edits its own: nothing behind
+    /// it is edited), else the app's screens (the empty screen's search, the find bar).
     fn input_owner(&self) -> Option<InputOwner> {
-        let dialog = self.dialogs.dialog.is_open();
-        // The modal window's view has its own fields (nothing behind it takes text).
-        if self.modal_view.is_some() && !dialog {
+        // Down the open windows over the editor: the first with a field has it; a popover
+        // without one (a context menu) lets it through to what's under it, a modal never.
+        if self.active_overlay().is_some() {
+            for o in Overlay::ALL {
+                let slot = o.slot();
+                if slot.floats(self) || !slot.is_open(self) {
+                    continue;
+                }
+                if slot.input(self).is_some() {
+                    return Some(InputOwner::Overlay(o));
+                }
+                if slot.kind(self) == OverlayKind::Modal {
+                    return None;
+                }
+            }
             return None;
         }
-        Some(if self.menu_drawer_open() {
-            InputOwner::MenuDrawer
-        } else if self.home.projects_menu.is_open() && !dialog {
-            InputOwner::ProjectsMenu
-        } else if self.home_visible() && self.focus == Focus::Editor {
-            InputOwner::Home
-        } else if dialog {
-            // A dialog without a text field takes the keys anyway (nothing to edit).
-            self.dialogs.dialog.input.as_ref()?;
-            InputOwner::Dialog
-        } else if self.settings.is_open() {
-            InputOwner::Settings
-        } else if self.focus == Focus::Find
-            && self.tabs.get(self.active).is_some_and(|t| t.find_open)
-        {
-            InputOwner::Find
-        } else {
-            return None;
-        })
+        if self.home_visible() && self.focus == Focus::Editor {
+            return Some(InputOwner::Home);
+        }
+        let find =
+            self.focus == Focus::Find && self.tabs.get(self.active).is_some_and(|t| t.find_open);
+        find.then_some(InputOwner::Find)
     }
 
     /// The side panel having the keyboard, while it takes text (its field: the project
@@ -743,11 +741,8 @@ impl Workbench {
     /// The text field that has the keyboard (see `input_owner`).
     pub(super) fn active_input(&self) -> Option<&ui_kit::TextInput> {
         Some(match self.input_owner()? {
-            InputOwner::MenuDrawer => &self.menu_drawer.as_ref()?.query,
-            InputOwner::ProjectsMenu => &self.home.projects_menu.query,
+            InputOwner::Overlay(o) => o.slot().input(self)?,
             InputOwner::Home => &self.home.picker.query,
-            InputOwner::Dialog => self.dialogs.dialog.input.as_ref()?,
-            InputOwner::Settings => self.settings.query_input(),
             InputOwner::Find => self.tabs.get(self.active)?.find_bar.focused_input_ref(),
         })
     }
@@ -760,11 +755,8 @@ impl Workbench {
 
     pub(super) fn active_input_mut(&mut self) -> Option<&mut ui_kit::TextInput> {
         Some(match self.input_owner()? {
-            InputOwner::MenuDrawer => &mut self.menu_drawer.as_mut()?.query,
-            InputOwner::ProjectsMenu => &mut self.home.projects_menu.query,
+            InputOwner::Overlay(o) => o.slot().input_mut(self)?,
             InputOwner::Home => &mut self.home.picker.query,
-            InputOwner::Dialog => self.dialogs.dialog.input.as_mut()?,
-            InputOwner::Settings => self.settings.query_input_mut(),
             InputOwner::Find => self.tabs.get_mut(self.active)?.find_bar.focused_input(),
         })
     }
@@ -795,12 +787,12 @@ impl Workbench {
     /// `Some`: what a field or a view having the keyboard holds selected (maybe nothing).
     /// `None`: it's the document's.
     fn selected_outside_document(&self) -> Option<Option<String>> {
-        // A module's window over everything: what its field (or its view) has selected,
-        // never the document behind it.
+        // A window over everything answering the clipboard itself (a module's view): what
+        // its field (or its view) has selected, never the document behind it.
         if self.input_owner().is_none()
-            && let Some(modal) = &self.modal_view
+            && let Some(selected) = self.active_overlay().and_then(|o| o.slot().selected_text(self))
         {
-            return Some(modal.viewer.selected_text().filter(|s| !s.is_empty()));
+            return Some(selected);
         }
         if let Some(selected) = self.view_selection() {
             return Some(Some(selected).filter(|s| !s.is_empty()));
@@ -841,11 +833,18 @@ impl Workbench {
         None
     }
 
+    /// An edit command for the window on top's own field or view: `None` when it takes none.
+    fn overlay_edit(&mut self, id: &str) -> Option<bool> {
+        self.active_overlay()?.slot().edit_command(self, id)
+    }
+
     pub fn cut(&mut self, text: &mut TextSystem) -> Option<String> {
-        // A module's window over everything: its field's selection, never the document's.
-        if self.input_owner().is_none() && self.modal_view.is_some() {
-            let selected = self.selected_text();
-            self.modal_view_field_command("cut");
+        // A window over everything answering the clipboard itself: its field's selection,
+        // never the document's.
+        if self.input_owner().is_none()
+            && let Some(selected) = self.active_overlay().and_then(|o| o.slot().selected_text(self))
+        {
+            self.overlay_edit("cut");
             return selected;
         }
         if self.input_owner().is_some() || self.side_typing().is_some() {
@@ -894,7 +893,10 @@ impl Workbench {
         if self.input_owner().is_some() || self.side_typing().is_some() {
             return self.type_text(text, clip.lines().next().unwrap_or_default());
         }
-        if let Some(used) = self.modal_view_text(text, clip.lines().next().unwrap_or_default()) {
+        // A window over everything whose view takes what's pasted.
+        if let Some(o) = self.active_overlay()
+            && let Some(used) = o.slot().paste(self, text, clip.lines().next().unwrap_or_default())
+        {
             return used;
         }
         // A viewer with its own field (the commit message, the canvas search).
@@ -913,7 +915,7 @@ impl Workbench {
             input.select_all();
             return true;
         }
-        if let Some(used) = self.modal_view_command("select_all") {
+        if let Some(used) = self.overlay_edit("select_all") {
             return used;
         }
         // The bottom view's text field (the Git log's filters).
@@ -1059,14 +1061,12 @@ impl Workbench {
     // ─── Mouse ───
 }
 
-/// The text fields that can have the keyboard (see `Workbench::input_owner`).
+/// Who has the keyboard's text field (see `Workbench::input_owner`): a window over the
+/// editor (its slot says which field), or one of the app's screens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InputOwner {
-    MenuDrawer,
-    ProjectsMenu,
+    Overlay(Overlay),
     Home,
-    Dialog,
-    Settings,
     Find,
 }
 

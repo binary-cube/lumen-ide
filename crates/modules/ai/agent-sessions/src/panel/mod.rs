@@ -32,8 +32,10 @@ use crate::favorites::{Label, Mark};
 use crate::folders::Folder;
 
 mod paint;
+mod parts;
 use i18n::t;
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx};
 use ui_components::picker::{PickerEvent, PickerItem};
 use ui_components::{
@@ -127,6 +129,13 @@ enum DropOn {
 
 /// How far the mouse moves, pressed on a session, before it's a drag (logical pixels).
 const DRAG_FROM: f32 = 4.0;
+
+/// The places of its parts among its controls (see [`SessionsPanel::with_controls`]; the
+/// list's scrollbar between the first two).
+const AGENTS_LIST: usize = 0;
+const RENAME_FIELD: usize = 2;
+const SEARCH_FIELD: usize = 3;
+const PRESSED_ROW: usize = 4;
 /// The header's "new folder", and the menus' rows for the folders.
 const NEW_FOLDER: &str = "new-folder";
 const MOVE: &str = "move:";
@@ -163,6 +172,8 @@ pub struct SessionsPanel {
     scroll: f32,
     max_scroll: f32,
     bar: EdgeScrollbar,
+    /// Its controls' state of use (see [`SessionsPanel::with_controls`]).
+    controls: Controls,
     row_h: f32,
     hovered: Option<usize>,
     /// Only the favorites listed (the header's star).
@@ -177,6 +188,8 @@ pub struct SessionsPanel {
     /// of its rows (`None`: every one).
     filter_list: ui_components::picker::Picker,
     filter_rows: Vec<Option<&'static str>>,
+    /// What the agents' list did at a press or a key (the panel follows it right after).
+    list_event: Option<PickerEvent>,
     /// Each row's star as drawn (a click on it adds the session to the favorites or takes
     /// it off), and the one under the mouse.
     stars: Vec<(Rect, Star)>,
@@ -191,9 +204,10 @@ pub struct SessionsPanel {
     /// The session a right click was on (its agent and its id: the list may be read again
     /// while the menu is open).
     menu_on: Option<(&'static str, String)>,
-    /// What's searched for in the titles, and whether it has the keys (clicked into).
+    /// What's searched for in the titles (it has the keys while it's the focused part), and
+    /// what its last key or text asked.
     query: TextInput,
-    typing: bool,
+    search_asked: Option<parts::FieldAsk>,
     field: Rect,
     /// The search's × (while there's text).
     clear: Option<Rect>,
@@ -218,8 +232,10 @@ pub struct SessionsPanel {
     /// The "⋮" of the row under the mouse (where, whose), and whether the mouse is on it.
     more_button: Option<(Rect, usize)>,
     hover_more: bool,
-    /// A session being renamed in its row.
+    /// A session being renamed in its row (its field has the keys meanwhile), and what its
+    /// last key asked.
     renaming: Option<Renaming>,
+    rename_asked: Option<parts::FieldAsk>,
     /// Titles given here not yet read back from the agents' files (agent, id, title).
     retitled: Vec<(&'static str, String, String)>,
     /// The rows as listed (made with the sessions shown), the project's folders and how
@@ -253,6 +269,7 @@ impl Default for SessionsPanel {
             max_scroll: 0.0,
             // Hidden at rest, as the project's tree's: shown while it scrolls or is hovered.
             bar: EdgeScrollbar::auto_hiding(),
+            controls: Controls::default(),
             row_h: ROW,
             hovered: None,
             only_favorites: false,
@@ -261,6 +278,7 @@ impl Default for SessionsPanel {
             hover_filter: false,
             filter_list: ui_components::picker::Picker::default(),
             filter_rows: Vec::new(),
+            list_event: None,
             stars: Vec::new(),
             hover_star: None,
             more_rect: None,
@@ -269,7 +287,7 @@ impl Default for SessionsPanel {
             chats: None,
             menu_on: None,
             query: TextInput::default(),
-            typing: false,
+            search_asked: None,
             field: Rect::default(),
             clear: None,
             hover_clear: false,
@@ -285,6 +303,7 @@ impl Default for SessionsPanel {
             more_button: None,
             hover_more: false,
             renaming: None,
+            rename_asked: None,
             retitled: Vec::new(),
             rows: Vec::new(),
             folders: Vec::new(),
@@ -575,7 +594,8 @@ impl SessionsPanel {
     fn paint_search(&mut self, ctx: &mut ViewerPaint<'_>, ds: &Ctx<'_>) {
         let layer = ctx.scene.push_layer(Some(ctx.bounds));
         let mut pen = ui_components::LayerPainter::new(layer, ctx.text, ctx.icons, *ds);
-        ds::search_input(&mut pen, self.field, &self.query, self.typing, &t("agents.search"));
+        let typing = self.typing();
+        ds::search_input(&mut pen, self.field, &self.query, typing, &t("agents.search"));
         self.clear = None;
         if !self.query.text().is_empty() {
             let mid = self.field.min_y() + self.field.size.height / 2.0;
@@ -1055,7 +1075,7 @@ impl SessionsPanel {
         let mut input = TextInput::new(now);
         input.select_all();
         self.renaming = Some(Renaming { target, input, field: Rect::default() });
-        self.typing = false;
+        self.with_controls(|c, parts| c.focus(parts, Some(RENAME_FIELD)));
     }
 
     /// A folder made (named "New Folder"), `then` done with its id, and named in its row.
@@ -1073,6 +1093,7 @@ impl SessionsPanel {
     /// once its agent ends (and its tab named so now) — and shown here meanwhile.
     fn finish_rename(&mut self) {
         let Some(renaming) = self.renaming.take() else { return };
+        self.rename_ended();
         let title = crate::one_line(renaming.input.text());
         let (agent, id) = match renaming.target {
             Renamed::Folder(id) => {
@@ -1185,6 +1206,8 @@ impl ToolPanel for SessionsPanel {
 
     fn paint(&mut self, mut ctx: ViewerPaint<'_>) {
         self.paint_panel(&mut ctx);
+        // What the scrollbar wants of the frames (its fade), for the questions before the next.
+        self.with_controls(|c, parts| c.settle(parts));
         // The agents' list, over everything, under its field.
         if let Some(anchor) = self.filter_field
             && self.filter_list.is_open()
@@ -1198,8 +1221,9 @@ impl ToolPanel for SessionsPanel {
     }
 
     fn scroll(&mut self, dy: f32) -> bool {
+        // The agents' list open takes the wheel (whether or not the mouse reached it yet).
         if self.filter_list.is_open() {
-            return self.filter_list.scroll(dy);
+            return self.with_controls(|c, parts| c.wheel(parts, 0.0, dy)).is_some_and(|(_, m)| m);
         }
         let before = self.scroll;
         self.scroll = (self.scroll + dy).clamp(0.0, self.max_scroll);
@@ -1207,27 +1231,27 @@ impl ToolPanel for SessionsPanel {
     }
 
     fn click(&mut self, p: Point) -> Option<ToolPanelAction> {
-        // The agents' list open: it takes the click (a row, or closed by one outside).
-        if self.filter_list.is_open() {
-            let event = self.filter_list.press(p);
-            self.filter_list_event(event);
-            return None;
-        }
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            return None;
-        }
-        // Renaming: a click in its field moves the caret; elsewhere, the name's given.
-        if let Some(renaming) = &mut self.renaming {
-            if renaming.field.contains(p) {
-                renaming.input.press(p.x, 1);
+        // The parts first: the agents' list open (a row, or closed by a click outside), the
+        // scrollbar, the renamed row's field (the caret moved), the search (the keys to it).
+        // A press beside them takes the keys from the search.
+        match self.with_controls(|c, parts| c.press(parts, p, 1)) {
+            Some((AGENTS_LIST, _)) => {
+                let event = self.list_event.take();
+                self.filter_list_event(event);
                 return None;
             }
-            self.finish_rename();
+            // Pressed elsewhere than in the renamed row: the name's given.
+            Some((SEARCH_FIELD, _)) => {
+                self.finish_rename();
+                return None;
+            }
+            Some(_) => return None,
+            None => {}
         }
+        // Renaming: a click elsewhere gives the name.
+        self.finish_rename();
         // The agents' filter: its list, under it.
         if let Some(anchor) = self.filter_field.filter(|r| r.contains(p)) {
-            self.typing = false;
             if anchor.size.width > 0.0 {
                 self.open_agent_filter();
             }
@@ -1236,13 +1260,8 @@ impl ToolPanel for SessionsPanel {
         // The search: its ×, or the keys to it (a click elsewhere takes them back).
         if self.clear.is_some_and(|r| r.contains(p)) {
             self.query = TextInput::default();
-            self.typing = true;
+            self.with_controls(|c, parts| c.focus(parts, Some(SEARCH_FIELD)));
             self.searching();
-            return None;
-        }
-        self.typing = self.field.contains(p);
-        if self.typing {
-            self.query.press(p.x, 1);
             return None;
         }
         if self.more_rect.is_some_and(|r| r.contains(p)) {
@@ -1271,21 +1290,18 @@ impl ToolPanel for SessionsPanel {
         // A session: opened on letting go (unless it's dragged into a folder meanwhile).
         let i = self.row_at(p)?;
         self.press = Some((i, p));
+        self.controls.hold(PRESSED_ROW);
         None
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(offset) = self.bar.drag(p) {
-            let changed = offset != self.scroll;
-            self.scroll = offset;
-            return changed;
+        match self.with_controls(|c, parts| c.drag(parts, p)) {
+            // A session pressed: dragged once it's moved far enough.
+            Some((PRESSED_ROW, false)) => return false,
+            Some((PRESSED_ROW, true)) => {}
+            Some((_, moved)) => return moved,
+            None => return false,
         }
-        let Some((i, from)) = self.press else { return false };
-        let far = (p.x - from.x).hypot(p.y - from.y) >= DRAG_FROM * self.scale();
-        if self.dragging.is_none() && !far {
-            return false;
-        }
-        self.dragging = Some(i);
         // Onto a folder or one of its sessions: into it; elsewhere in the list: out of any.
         let into = |f: &Folder| DropOn::Folder(f.id.clone());
         let drop = match self.row_index(p).and_then(|n| self.rows.get(n)) {
@@ -1296,16 +1312,17 @@ impl ToolPanel for SessionsPanel {
             }
             _ => self.list.contains(p).then_some(DropOn::Loose),
         };
-        let changed = drop != self.drop_on;
         self.drop_on = drop;
-        changed || self.dragging.is_some()
+        true
     }
 
     /// Let go: a session dragged goes where it was dropped; one pressed and not moved is
     /// opened (its terminal asked for, as a click's would be).
     fn release(&mut self) -> bool {
-        if self.bar.release() {
-            return true;
+        match self.with_controls(|c, parts| c.release(parts)) {
+            Some((PRESSED_ROW, _)) => {}
+            Some((_, changed)) => return changed,
+            None => return false,
         }
         let Some((i, _)) = self.press.take() else { return false };
         let dropped = self.drop_on.take();
@@ -1326,10 +1343,11 @@ impl ToolPanel for SessionsPanel {
     }
 
     fn hover(&mut self, p: Point) -> bool {
+        let mut changed = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        // The agents' list open: the rows under it aren't hovered.
         if self.filter_list.is_open() {
-            return self.filter_list.hover(p);
+            return changed;
         }
-        let mut changed = self.bar.hover(p);
         let folder = self.folder_at(p);
         changed |= folder != self.hovered_folder;
         self.hovered_folder = folder;
@@ -1351,82 +1369,45 @@ impl ToolPanel for SessionsPanel {
 
     /// Clicked into (or a session renamed), it takes the keys (its rows stay the mouse's).
     fn takes_keys(&self) -> bool {
-        self.typing || self.renaming.is_some() || self.filter_list.is_open()
+        self.typing() || self.renaming.is_some() || self.filter_list.is_open()
     }
 
     fn wants_text(&self) -> bool {
-        self.typing || self.renaming.is_some() || self.filter_list.searches()
+        self.typing() || self.renaming.is_some() || self.filter_list.searches()
     }
 
+    /// To the field with the keys (the renamed row's, the search), the agents' list open or
+    /// not (what's typed isn't the list's).
     fn text_input(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        if let Some(renaming) = &mut self.renaming {
-            renaming.input.insert(&typed);
-            return true;
-        }
-        if !self.typing {
+        let Some(part) = self.with_controls(|c, parts| c.text(parts, typed)) else {
             return false;
-        }
-        self.query.insert(&typed);
-        self.searching();
+        };
+        self.follow(part);
         true
     }
 
+    /// What the field with the keys has selected (lent read-only as the bare field, whose
+    /// selection reads as its part's).
     fn selected_text(&self) -> Option<String> {
-        if let Some(renaming) = &self.renaming {
-            let selected = renaming.input.selected_text();
-            return (!selected.is_empty()).then(|| selected.to_owned());
-        }
-        let selected = self.query.selected_text();
-        (self.typing && !selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| match i {
+            RENAME_FIELD => self.renaming.as_ref().map(|r| &r.input as &dyn Control),
+            SEARCH_FIELD => Some(&self.query as &dyn Control),
+            _ => None,
+        })
     }
 
+    /// To the part with the keys: the agents' list open, else the renamed row's field or
+    /// the search.
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        // The agents' list open: its keys (↑ ↓ ↵, Esc closes it).
-        if self.filter_list.is_open() {
-            let event = self.filter_list.key(key, reach);
-            return self.filter_list_event(event) || true;
-        }
-        // Renaming: ↵ gives the name, Esc leaves it as it was.
-        if let Some(renaming) = &mut self.renaming {
-            match key {
-                ViewerKey::Enter => self.finish_rename(),
-                ViewerKey::Escape => self.renaming = None,
-                _ => return reach.edit(&mut renaming.input, key),
-            }
-            return true;
-        }
-        if !self.typing {
+        let Some(part) = self.with_controls(|c, parts| c.key(parts, key, reach)) else {
             return false;
-        }
-        let before = self.query.text().to_owned();
-        let used = match key {
-            // Esc: what's typed goes, then the keys.
-            ViewerKey::Escape if before.is_empty() => {
-                self.typing = false;
-                true
-            }
-            ViewerKey::Escape => {
-                self.query = TextInput::default();
-                true
-            }
-            // ↵: the first session found, taken up again.
-            ViewerKey::Enter => {
-                if let Some(&i) = self.shown.first() {
-                    self.resume(i, true);
-                }
-                true
-            }
-            _ => reach.edit(&mut self.query, key),
         };
-        if self.query.text() != before {
-            self.searching();
-        }
-        used
+        self.follow(part);
+        true
     }
 
     fn focus_lost(&mut self) {
-        self.typing = false;
+        self.with_controls(|c, parts| c.focus(parts, None));
         self.finish_rename();
     }
 
@@ -1557,41 +1538,18 @@ impl ToolPanel for SessionsPanel {
         self.session_menu(i)
     }
 
-    /// An edit command for its search while it's typed in (⌘A, ⌘X, ⌘Z, ⇧⌘Z).
+    /// An edit command for the field with the keys (⌘A, ⌘X, ⌘Z, ⇧⌘Z): the renamed row's,
+    /// the search while it's typed in; the agents' list open takes none (they go on to it).
     fn command(&mut self, id: &str) -> bool {
-        if let Some(renaming) = &mut self.renaming {
-            match id {
-                "select_all" => renaming.input.select_all(),
-                "cut" => renaming.input.insert(""),
-                "undo" => {
-                    renaming.input.undo();
-                }
-                "redo" => {
-                    renaming.input.redo();
-                }
-                _ => return false,
-            }
-            return true;
-        }
-        if !self.typing {
-            return false;
-        }
-        let edited = match id {
-            "select_all" => {
-                self.query.select_all();
-                return true;
-            }
-            "cut" => {
-                self.query.insert("");
-                true
-            }
-            "undo" => self.query.undo(),
-            "redo" => self.query.redo(),
-            _ => return false,
-        };
-        if edited {
-            self.searching();
-        }
+        let listed = self.filter_list.is_open();
+        let taken = self.with_controls(|c, parts| {
+            c.command(parts, id).or_else(|| {
+                let under = c.focused().filter(|_| listed)?;
+                parts.get_mut(under)?.command(id).then_some(under)
+            })
+        });
+        let Some(part) = taken else { return false };
+        self.follow(part);
         true
     }
 
@@ -1656,11 +1614,95 @@ impl ToolPanel for SessionsPanel {
 
     /// Its scrollbar fading: a frame when it next changes.
     fn frame_deadline(&self) -> Option<Instant> {
-        self.bar.next_frame()
+        self.controls.next_frame()
     }
 
     fn purge(&mut self) {
         self.read_at = None;
+    }
+}
+
+impl SessionsPanel {
+    /// Its controls, the topmost first: the agents' list (over everything while open), the
+    /// list's scrollbar with the scroll it moves, the renamed row's field, the search, a
+    /// session pressed (held from the panel's own press, to be dragged).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let from = DRAG_FROM * self.scale();
+        let mut agents =
+            parts::AgentsList { list: &mut self.filter_list, event: &mut self.list_event };
+        let mut list = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut rename = self.renaming.as_mut().map(|r| parts::FieldPart {
+            input: &mut r.input,
+            area: r.field,
+            aside: None,
+            search: false,
+            asked: &mut self.rename_asked,
+        });
+        let mut search = parts::FieldPart {
+            input: &mut self.query,
+            area: self.field,
+            aside: self.clear,
+            search: true,
+            asked: &mut self.search_asked,
+        };
+        let mut rows = parts::RowDrag { pressed: self.press, dragging: &mut self.dragging, from };
+        let mut parts: [&mut dyn Control; 5] =
+            [&mut agents, &mut list, &mut rename, &mut search, &mut rows];
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// The search has the keys (clicked into).
+    fn typing(&self) -> bool {
+        self.controls.focused() == Some(SEARCH_FIELD)
+    }
+
+    /// The keys to the search (`true`), or taken from it.
+    fn keys_to_search(&mut self, on: bool) {
+        let to = if on { Some(SEARCH_FIELD) } else { None };
+        if on || self.typing() {
+            self.with_controls(|c, parts| c.focus(parts, to));
+        }
+    }
+
+    /// The renamed row's field gone: the keys it had go nowhere.
+    fn rename_ended(&mut self) {
+        if self.controls.focused() == Some(RENAME_FIELD) {
+            self.with_controls(|c, parts| c.focus(parts, None));
+        }
+    }
+
+    /// What part `part` asked at a key, a text or a command: the agents' list's row chosen
+    /// (or it closed), the name given or left, the first session found taken up again, the
+    /// search let go or changed.
+    fn follow(&mut self, part: usize) {
+        match part {
+            AGENTS_LIST => {
+                let event = self.list_event.take();
+                self.filter_list_event(event);
+            }
+            RENAME_FIELD => match self.rename_asked.take() {
+                Some(parts::FieldAsk::Enter) => self.finish_rename(),
+                Some(parts::FieldAsk::Escape) => {
+                    self.renaming = None;
+                    self.rename_ended();
+                }
+                Some(parts::FieldAsk::Searched) | None => {}
+            },
+            SEARCH_FIELD => match self.search_asked.take() {
+                Some(parts::FieldAsk::Enter) => {
+                    if let Some(&i) = self.shown.first() {
+                        self.resume(i, true);
+                    }
+                }
+                Some(parts::FieldAsk::Escape) => self.keys_to_search(false),
+                Some(parts::FieldAsk::Searched) => self.searching(),
+                None => {}
+            },
+            _ => {}
+        }
     }
 }
 

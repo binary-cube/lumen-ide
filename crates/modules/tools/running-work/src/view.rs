@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use i18n::{t, tr};
 use kernel::Rect;
 use text_layout::Font;
+use ui_components::control::{Control, Controls, Shown, Thumb};
 use ui_components::ds::{self, Ctx};
 use ui_components::{AppRequest, Viewer, ViewerAction, ViewerKey, ViewerPaint};
 use ui_kit::draw_text;
@@ -74,6 +75,8 @@ pub struct RunningView {
     scale: f32,
     /// The stopping programs' list's scrollbar (the app's).
     bar: ui_components::EdgeScrollbar,
+    /// Its parts' state of use (see [`RunningView::with_controls`]).
+    controls: Controls,
 }
 
 impl RunningView {
@@ -96,6 +99,26 @@ impl RunningView {
         let moved = (to - self.scroll).abs() > f32::EPSILON;
         self.scroll = to;
         moved
+    }
+
+    /// Its parts (while stopping, the list's scrollbar with its offset), with their state of
+    /// use. The bar moves physical pixels: the list follows it, within its end.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let scale = self.scale.max(1.0);
+        let before = self.scroll * scale;
+        let mut offset = before;
+        let shown = self.prompt.as_ref().is_some_and(|p| p.stopping.is_some());
+        let mut list = Thumb { bar: &mut self.bar, offset: &mut offset };
+        let mut list = Shown { part: &mut list, shown };
+        let mut parts: [&mut dyn Control; 1] = [&mut list];
+        let answer = f(&mut self.controls, &mut parts);
+        if offset != before {
+            self.scroll_to(offset);
+        }
+        answer
     }
 
     /// The app is ending, what it started being stopped (nothing to answer).
@@ -434,29 +457,25 @@ impl Viewer for RunningView {
     }
 
     /// A press on the list's scrollbar: its thumb taken, or the list moved there.
-    fn press(&mut self, p: kernel::Point, _clicks: u32) -> Option<ViewerAction> {
-        if self.stopping().is_some()
-            && let Some(offset) = self.bar.press(p)
-        {
-            self.scroll_to(offset);
-        }
+    fn press(&mut self, p: kernel::Point, clicks: u32) -> Option<ViewerAction> {
+        self.with_controls(|c, parts| c.press(parts, p, clicks));
         None
     }
 
+    /// The held part follows the pointer: `true` if the list moved.
     fn drag(&mut self, p: kernel::Point) -> bool {
-        match self.bar.drag(p) {
-            Some(offset) => self.scroll_to(offset),
-            None => false,
-        }
+        let before = self.scroll;
+        self.with_controls(|c, parts| c.drag(parts, p));
+        (self.scroll - before).abs() > f32::EPSILON
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     /// The scrollbar widens under the mouse.
     fn hover(&mut self, p: kernel::Point) -> bool {
-        self.stopping().is_some() && self.bar.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn command(&mut self, id: &str) -> bool {

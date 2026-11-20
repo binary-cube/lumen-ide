@@ -43,9 +43,8 @@ impl ConflictCheck for None_ {
     }
 }
 
-#[test]
-fn lists_every_place_read_only_and_opens_them() {
-    let text = "<?php function send() {}\n$m->send();\nsend();";
+/// A view showing the usages of `send` in `text`.
+fn view_of(text: &str) -> UsagesView {
     let sources = Files(HashMap::from([(PathBuf::from("/p/a.php"), text.to_owned())]));
     let target = RenameTarget {
         name: "send".into(),
@@ -64,6 +63,12 @@ fn lists_every_place_read_only_and_opens_them() {
     let found =
         plan_rename(&target, context.sources.as_ref(), context.resolver.as_ref(), &|| false);
     view.set_usages(found);
+    view
+}
+
+#[test]
+fn lists_every_place_read_only_and_opens_them() {
+    let mut view = view_of("<?php function send() {}\n$m->send();\nsend();");
     let usages = view.usages().unwrap();
     let places: Vec<(Certainty, u32)> =
         usages.files[0].occurrences.iter().map(|o| (o.certainty, o.line)).collect();
@@ -74,4 +79,15 @@ fn lists_every_place_read_only_and_opens_them() {
     assert!(view.summary().contains('3') || view.summary().contains("3"));
     assert!(view.edit_key(ViewerKey::Escape));
     assert_eq!(view.take_action(), Some(ViewerAction::Close));
+}
+
+/// A group too short for the header and a few places: the page's thumb, pressed and
+/// dragged, scrolls it.
+#[test]
+fn the_page_scrolls_by_its_thumb() {
+    let mut view = view_of("<?php function send() {}\nsend();\nsend();\nsend();");
+    let (w, h) = (600.0, 260.0);
+    crate::page::tests::paint(&mut view, w, h);
+    crate::page::tests::drag_thumb(&mut view, w, 30.0);
+    assert!(view.page.offset() > 0.0, "the page scrolled");
 }

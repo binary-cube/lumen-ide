@@ -28,6 +28,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Project",
     description: "The project panel: the tree of the project's files, their search and operations",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "folder", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Its window, on the left.

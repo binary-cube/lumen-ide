@@ -122,3 +122,45 @@ fn long_notes_scroll_by_the_wheel_and_the_thumb() {
     });
     assert!(dragged, "the thumb dragged scrolls the notes");
 }
+
+/// The notes are the view's part: a press selects (⇧ extends it), ⌘A selects them all and
+/// they're copied after a press beside them; the wheel scrolls them from anywhere in the
+/// window; the I-beam over them, the arrow beside.
+#[test]
+fn the_notes_are_its_part() {
+    let mut text = TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut view = NotesView::default();
+    let lines = (0..80).map(|i| Block::new(BlockKind::Point { depth: 0 }, format!("Change {i}")));
+    view.read.set_blocks(lines.collect());
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 640.0, 520.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let (from, to) = (Point::new(60.0, 30.0), Point::new(60.0, 80.0));
+    view.hover(from);
+    assert_eq!(view.cursor_at(from), Some(ViewerCursor::Text));
+    view.press_with(from, 1, PressMods::default());
+    view.release();
+    let shift = PressMods { shift: true, ..PressMods::default() };
+    view.press_with(to, 1, shift);
+    view.release();
+    assert!(view.selected_text().is_some_and(|s| s.contains('\n')), "⇧ extended it");
+    let beside = Point::new(4.0, 510.0);
+    view.hover(beside);
+    assert_eq!(view.cursor_at(beside), Some(ViewerCursor::Arrow));
+    view.press_with(beside, 1, PressMods::default());
+    assert!(view.select_all());
+    assert!(view.selected_text().is_some_and(|s| s.contains("Change 79")), "all, copied");
+    assert!(view.scroll(0.0, 40.0) && view.read.scroll() > 0.0, "the wheel beside them");
+    assert!(view.context_menu(from).is_some(), "their menu over them");
+    assert!(view.context_menu(beside).is_none());
+}

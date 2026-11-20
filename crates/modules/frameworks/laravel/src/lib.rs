@@ -26,6 +26,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Laravel",
     description: "Views, routes and config keys: completion, go to definition, hover",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "package", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// `env('X')`, `env('X', default)`, `Env::get('X')`.

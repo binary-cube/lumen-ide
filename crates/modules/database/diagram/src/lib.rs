@@ -30,6 +30,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Relations Diagram",
     description: "A data source's tables and the relations between them, as a diagram",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "schema", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// The view's kind (its viewer's id: where its keys work).

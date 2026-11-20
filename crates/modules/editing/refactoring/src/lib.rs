@@ -10,7 +10,9 @@
 //! whole refactoring can be undone at once.
 
 mod move_view;
+mod name_field;
 mod page;
+mod param_fields;
 mod plan_list;
 mod rename_view;
 mod signature_view;
@@ -39,6 +41,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Refactoring",
     description: "Rename symbols everywhere they're used (PHP, JS, CSS, HTML), change signatures, move classes and files, with a preview and undo",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "wand", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 pub const RENAME: CommandId = workbench_model::RENAME_SYMBOL;

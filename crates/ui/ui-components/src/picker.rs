@@ -300,6 +300,8 @@ pub struct Picker {
     search_always: bool,
     /// The search was pressed: a drag selects in it.
     selecting: bool,
+    /// What it did last as a control (a press, a key), taken by its view.
+    event: Option<PickerEvent>,
 }
 
 impl Picker {
@@ -523,18 +525,27 @@ impl Picker {
         true
     }
 
-    /// The mouse dragged after a press in the search: what it covers selected.
+    /// The mouse dragged after a press: its scrollbar's thumb followed (the rows scroll),
+    /// or in the search what it covers selected.
     pub fn drag(&mut self, p: Point) -> bool {
-        if !self.open || !self.selecting {
+        if !self.open {
+            return false;
+        }
+        if let Some(offset) = self.bar.drag(p) {
+            let changed = offset != self.scroll;
+            self.scroll = offset;
+            return changed;
+        }
+        if !self.selecting {
             return false;
         }
         self.query.extend_to(p.x);
         true
     }
 
-    /// The mouse let go.
+    /// The mouse let go (the thumb, a selection in the search).
     pub fn release(&mut self) -> bool {
-        std::mem::take(&mut self.selecting)
+        self.bar.release() | std::mem::take(&mut self.selecting)
     }
 
     /// Text pasted into the search: on one line (its breaks made spaces).
@@ -564,6 +575,11 @@ impl Picker {
         if !self.area.contains(p) {
             self.open = false;
             return Some(PickerEvent::Closed);
+        }
+        // On its scrollbar: the thumb taken (or the rows jumped there); a drag follows.
+        if let Some(offset) = self.bar.press(p) {
+            self.scroll = offset;
+            return None;
         }
         if self.clear.is_some_and(|c| c.contains(p)) {
             self.query.set_text("");
@@ -632,6 +648,11 @@ impl Picker {
         let clear_changed = clear != self.clear_hover;
         self.clear_hover = clear;
         changed | clear_changed | self.bar.hover(p)
+    }
+
+    /// Its scrollbar's thumb is held (the mouse's moves go to [`Self::drag`]).
+    pub fn dragging(&self) -> bool {
+        self.open && self.bar.is_dragging()
     }
 
     /// The wheel over it.
@@ -815,6 +836,97 @@ impl Picker {
             }
         }
         self.bar.paint(scene, p, ctx.scale, list, content, scroll);
+    }
+}
+
+impl Picker {
+    /// Where its rows were drawn last (under its search).
+    pub fn list_area(&self) -> kernel::Rect {
+        self.list
+    }
+
+    /// What it did last as a control ([`crate::control::Control`]): chosen, ticked, closed.
+    pub fn take_event(&mut self) -> Option<PickerEvent> {
+        self.event.take()
+    }
+}
+
+/// An open list is a control over everything: a press outside it closes it (it's hit
+/// anywhere while open), the keys and the text go to it.
+impl crate::control::Control for Picker {
+    fn area(&self) -> Option<kernel::Rect> {
+        self.open.then_some(self.area)
+    }
+
+    fn hit(&self, _p: Point) -> bool {
+        self.open
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> crate::control::Press {
+        use crate::control::Press;
+        let was_held = self.dragging();
+        self.event = self.press_with(p, clicks);
+        if self.dragging() && !was_held || self.selecting { Press::Held } else { Press::Took }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Picker::drag(self, p)
+    }
+
+    fn release(&mut self) -> bool {
+        Picker::release(self)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        p.is_some_and(|p| Picker::hover(self, p))
+    }
+
+    /// Over its rows a hand, its search the text's; elsewhere while it's open the arrow
+    /// (never what's under it).
+    fn cursor(&self, p: Point) -> Option<crate::ViewerCursor> {
+        self.cursor_at(p).or(self.open.then_some(crate::ViewerCursor::Arrow))
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        Picker::scroll(self, dy)
+    }
+
+    fn focusable(&self) -> bool {
+        self.open
+    }
+
+    /// An open list keeps Tab (it moves in it), the focus doesn't move on.
+    fn keeps_tab(&self) -> bool {
+        self.open
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        if !self.open {
+            return false;
+        }
+        self.event = Picker::key(self, key, reach);
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.text_input(typed)
+    }
+
+    /// Pasted into its search on one line (its breaks made spaces).
+    fn paste(&mut self, text: &str) -> bool {
+        Picker::paste(self, text)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Picker::selected_text(self)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        Picker::command(self, id)
+    }
+
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        self.next_frame()
     }
 }
 

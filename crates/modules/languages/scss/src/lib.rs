@@ -11,6 +11,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "SCSS",
     description: "SCSS: colors, folding on rules and comments",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-style", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

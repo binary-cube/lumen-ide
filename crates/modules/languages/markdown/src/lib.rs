@@ -27,6 +27,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Markdown",
     description: "Markdown: colors, folding by section, code blocks in their own language, headings as its structure",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "markdown", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -50,6 +51,7 @@ impl Module for MarkdownModule {
 
 pub fn descriptor() -> LanguageDescriptor {
     LanguageDescriptor::new("markdown", "Markdown")
+        .icon_sample(4, "README.md")
         .word_chars("-")
         .extensions(&["md", "markdown", "mdown", "mkd", "mdx"])
         .file_names(&["README", "CHANGELOG", "CONTRIBUTING"])

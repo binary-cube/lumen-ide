@@ -21,6 +21,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Vue",
     description: "Template directives and the Composition API: completion, hover, parameters, their expressions colored",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "package", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

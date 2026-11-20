@@ -16,6 +16,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Zig",
     description: "Zig: colors, folding, indentation, ZLS as its language server",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "zap", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

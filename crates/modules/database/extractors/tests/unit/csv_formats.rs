@@ -75,3 +75,44 @@ fn esc_closes_without_giving_anything() {
     assert!(matches!(view.take_action(), Some(ViewerAction::Close)));
     assert!(!view.closed());
 }
+
+/// The fields are the modal's controls: a press on one gives it the keys (typed through the
+/// controls), a press on another writes what the first held
+/// and moves the keys there, a press beside them takes the keys away; Tab stays in a field.
+#[test]
+fn a_press_moves_the_keys_between_the_fields() {
+    let mut view = FormatsView::default();
+    view.set_data(&FormatsRequest { id: 3, formats: CsvFormat::defaults() });
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1400.0, HEIGHT * 2.0),
+        scale: 2.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let [name, separator, _] = view.fields;
+    let on = |r: Rect| Point::new(r.max_x() - 6.0, r.min_y() + r.size.height / 2.0);
+    view.hover(on(separator));
+    assert_eq!(view.cursor_at(on(separator)), Some(ViewerCursor::Text));
+    view.click(on(separator));
+    view.release();
+    assert_eq!(view.field(), Some(Field::Separator));
+    assert!(view.text_input("~"));
+    assert_eq!(view.editor().unwrap().current().separator, "~");
+    assert!(!view.edit_key(ViewerKey::Tab), "Tab moves nothing");
+    assert_eq!(view.field(), Some(Field::Separator));
+    view.click(on(name));
+    view.release();
+    assert_eq!(view.field(), Some(Field::Name));
+    assert!(view.text_input("x"));
+    assert!(view.editor().unwrap().current().name.ends_with('x'));
+    view.click(Point::new(2.0, 2.0));
+    assert!(!view.wants_text());
+}

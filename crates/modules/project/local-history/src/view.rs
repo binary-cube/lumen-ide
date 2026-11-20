@@ -13,6 +13,7 @@ use i18n::{t, tr};
 use kernel::{Point, Rect};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, Tone, radius};
 use ui_components::{Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint};
 use ui_kit::draw_text;
@@ -73,6 +74,8 @@ pub struct HistoryView {
     opening: ui_components::deferred::Deferred,
     /// The versions' scrollbar, hidden at rest (beside them, in the margin).
     bar: ui_components::EdgeScrollbar,
+    /// Its controls' state of use (see [`HistoryView::with_controls`]).
+    controls: Controls,
     /// The fixed tab: what it follows, and the change of the active file it last took.
     follow: Option<FollowData>,
     followed: Option<u64>,
@@ -94,6 +97,17 @@ impl std::fmt::Debug for Wake {
 }
 
 impl HistoryView {
+    /// Its controls (the versions' scrollbar with its offset), the topmost first, with
+    /// their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut bar = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut parts: [&mut dyn Control; 1] = [&mut bar];
+        f(&mut self.controls, &mut parts)
+    }
+
     /// The versions listed (tests).
     pub fn revisions(&self) -> &[Revision] {
         &self.revisions
@@ -297,8 +311,8 @@ impl Viewer for HistoryView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
+        // Its controls first: the scrollbar's thumb is held or jumped to.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return None;
         }
         match self.hit(p)? {
@@ -318,29 +332,28 @@ impl Viewer for HistoryView {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        self.hit(p).map(|_| ViewerCursor::Pointer)
+        let rows = || self.hit(p).map(|_| ViewerCursor::Pointer);
+        self.controls.cursor_at(p).or_else(rows)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        self.bar.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        self.scroll = offset;
-        true
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
-    /// Its scrollbar fading: a frame when it next changes.
+    /// Its scrollbar fading: a frame when it next changes (as its parts said at the paint).
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.bar.next_frame()
+        self.controls.next_frame()
     }
 
     fn status(&self) -> Option<String> {
@@ -358,6 +371,15 @@ impl Viewer for HistoryView {
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
+        self.paint_page(ctx);
+        // What its parts want of the frames, as drawn.
+        self.with_controls(|c, parts| c.settle(parts));
+    }
+}
+
+impl HistoryView {
+    /// The page: the title, the explanation, the versions and their scrollbar.
+    fn paint_page(&mut self, ctx: ViewerPaint<'_>) {
         self.opening.set_waker(&ctx.waker);
         if let Some(wake) = &ctx.waker {
             self.waker = Some(Wake(Arc::clone(wake)));

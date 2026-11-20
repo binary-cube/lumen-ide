@@ -18,6 +18,8 @@ use std::sync::mpsc::Receiver;
 use i18n::{t, tr};
 use kernel::{Point, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Thumb};
+use ui_components::date_range::{RangeAnswer, RangePart};
 use ui_components::ds::{self, Ctx, Tone, radius};
 use ui_components::{
     AppRequest, Date, DateRangePicker, EdgeScrollbar, KeyReach, PickerEvent, ViewMenuEntry, Viewer,
@@ -28,6 +30,7 @@ use ui_kit::{TextInput, draw_text};
 use crate::local_time;
 use crate::session::RecentFile;
 
+mod search;
 mod timeline;
 
 use timeline::{Item, Stamp};
@@ -102,6 +105,10 @@ impl Span {
     }
 }
 
+/// The places of its parts (see [`ChangedFiles::with_controls`]).
+const CALENDAR: usize = 0;
+const SEARCH: usize = 1;
+
 /// What can be pressed above the list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Chip {
@@ -136,9 +143,8 @@ pub struct ChangedFiles {
     picker: Option<DateRangePicker>,
     /// Where "Days…" is (the calendar opens under it).
     pick_rect: Rect,
-    /// What's searched for in the paths, and whether it has the keys (clicked into).
+    /// What's searched for in the paths (it has the keys once clicked into).
     query: TextInput,
-    typing: bool,
     field: Rect,
     /// The search's × (while there's text).
     clear: Option<Rect>,
@@ -146,6 +152,10 @@ pub struct ChangedFiles {
     scroll: f32,
     max_scroll: f32,
     bar: EdgeScrollbar,
+    /// Its controls' state of use (see [`ChangedFiles::with_controls`]).
+    controls: Controls,
+    /// The last press closed the calendar by landing outside it.
+    closed_outside: bool,
     list: Rect,
     /// The rows shown (the span's, the search's), newest first: what the menu copies.
     shown: Vec<usize>,
@@ -185,13 +195,14 @@ impl Default for ChangedFiles {
             picker: None,
             pick_rect: Rect::default(),
             query: TextInput::default(),
-            typing: false,
             field: Rect::default(),
             clear: None,
             hover_clear: false,
             scroll: 0.0,
             max_scroll: 0.0,
             bar: EdgeScrollbar::default(),
+            controls: Controls::default(),
+            closed_outside: false,
             list: Rect::default(),
             shown: Vec::new(),
             in_span: 0,
@@ -331,6 +342,62 @@ impl ChangedFiles {
         self.hovered_row = None;
     }
 
+    /// Its controls, the topmost first, with their state of use: the calendar while it's
+    /// open (over everything), the search, the list's scrollbar. What they said is done
+    /// after: a range chosen, the calendar closed by a press outside it, the search changed
+    /// or left (the keys go nowhere then).
+    fn with_controls<R: Default>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut f = Some(f);
+        let mut said = None;
+        // Called once, always: what `f` said.
+        self.use_parts(&mut |c, parts| said = f.take().map(|f| f(c, parts)));
+        said.unwrap_or_default()
+    }
+
+    /// [`Self::with_controls`] without a result (not generic: it calls itself to let the
+    /// keys go).
+    fn use_parts(&mut self, f: &mut dyn FnMut(&mut Controls, &mut [&mut dyn Control])) {
+        let (mut answer, mut edited, mut left) = (None, false, false);
+        let open = self.picker.is_some();
+        {
+            // While it's closed, its place takes nothing.
+            let mut calendar =
+                self.picker.as_mut().map(|picker| RangePart { picker, answer: &mut answer });
+            let mut search = search::SearchField {
+                query: &mut self.query,
+                field: self.field,
+                clear: self.clear,
+                edited: &mut edited,
+                left: &mut left,
+            };
+            let mut list = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+            let mut parts: [&mut dyn Control; 3] = [&mut calendar, &mut search, &mut list];
+            f(&mut self.controls, &mut parts);
+        }
+        match answer {
+            Some(RangeAnswer::Chose(event)) => self.picker_event(event),
+            Some(RangeAnswer::Outside) => {
+                self.picker = None;
+                self.closed_outside = true;
+            }
+            None => {}
+        }
+        if edited {
+            self.searched();
+        }
+        if left || (open && self.picker.is_none()) {
+            self.use_parts(&mut |c, parts| c.focus(parts, None));
+        }
+    }
+
+    /// The search has the keys.
+    fn typing(&self) -> bool {
+        self.controls.focused() == Some(SEARCH)
+    }
+
     fn open_picker(&mut self) {
         let today = local_time::today();
         let presets = ui_components::date_range::standard_presets(today, false);
@@ -341,6 +408,8 @@ impl ChangedFiles {
         let mut picker = DateRangePicker::new(today, presets, range);
         picker.max = Some(today);
         self.picker = Some(picker);
+        // Open, it has the keys (its fields, its days).
+        self.with_controls(|c, parts| c.focus(parts, Some(CALENDAR)));
     }
 
     fn picker_event(&mut self, event: PickerEvent) {
@@ -448,7 +517,8 @@ impl ChangedFiles {
         ds: &Ctx<'_>,
     ) {
         let field = self.field;
-        let area = ds::search_field(layer, icons, ds, field, self.typing);
+        let typing = self.typing();
+        let area = ds::search_field(layer, icons, ds, field, typing);
         let mut area = area;
         self.clear = None;
         if !self.query.text().is_empty() {
@@ -475,7 +545,7 @@ impl ChangedFiles {
             ..ds::search_input_style(ds, area.size.height)
         };
         let placeholder = t("remote.changed_search");
-        self.query.paint(layer, text, area, self.typing, &placeholder, &style);
+        self.query.paint(layer, text, area, typing, &placeholder, &style);
     }
 
     /// The list: the fine line down its left side, each day's ring and name (its date
@@ -703,37 +773,21 @@ impl Viewer for ChangedFiles {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // The calendar: its parts; a press outside closes it.
-        if let Some(picker) = &mut self.picker {
-            match picker.press(p) {
-                Some(Some(event)) => self.picker_event(event),
-                Some(None) => {}
-                None => {
-                    self.picker = None;
-                    // On "Days…" itself: only closed.
-                    if self.chip_at(p) == Some(Chip::Pick) {
-                        return None;
-                    }
-                }
+        // Its controls first: the calendar (a press outside closes it), the search (its ×,
+        // or the keys to it; a click elsewhere takes them back), the scrollbar's thumb.
+        let open = self.picker.is_some();
+        let pressed = self.with_controls(|c, parts| c.press(parts, p, 1));
+        if open {
+            // On "Days…" itself: only closed; on another chip: it goes on to it.
+            if std::mem::take(&mut self.closed_outside) && self.chip_at(p) == Some(Chip::Pick) {
+                return None;
             }
             if self.picker.is_some() || self.chip_at(p).is_none() {
                 return None;
             }
+            return self.click(p);
         }
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            return None;
-        }
-        // The search: its ×, or the keys to it (a click elsewhere takes them back).
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            self.query = TextInput::default();
-            self.typing = true;
-            self.searched();
-            return None;
-        }
-        self.typing = self.field.contains(p);
-        if self.typing {
-            self.query.press(p.x, 1);
+        if pressed.is_some() {
             return None;
         }
         match self.chip_at(p) {
@@ -757,23 +811,18 @@ impl Viewer for ChangedFiles {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != self.scroll;
-        self.scroll = offset;
-        changed
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let mut changed = self.bar.hover(p);
-        if let Some(picker) = &mut self.picker {
-            changed |= picker.hover(p);
-            if picker.rect().contains(p) {
-                return changed;
-            }
+        let mut changed = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        // Over the open calendar: nothing under it lights up.
+        if self.picker.as_ref().is_some_and(|picker| picker.rect().contains(p)) {
+            return changed;
         }
         let (chip, row) = (self.chip_at(p), self.row_at(p));
         let clear = self.clear.is_some_and(|r| r.contains(p));
@@ -783,6 +832,8 @@ impl Viewer for ChangedFiles {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        // The calendar's: the text's over its fields, a hand elsewhere on it (its shared
+        // control says a hand only over what it takes, the arrow elsewhere).
         if let Some(picker) = &self.picker
             && picker.rect().contains(p)
         {
@@ -792,67 +843,41 @@ impl Viewer for ChangedFiles {
                 ViewerCursor::Pointer
             });
         }
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            return Some(ViewerCursor::Pointer);
-        }
-        if self.field.contains(p) {
-            return Some(ViewerCursor::Text);
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
         (self.chip_at(p).is_some() || self.row_at(p).is_some()).then_some(ViewerCursor::Pointer)
     }
 
     fn wants_text(&self) -> bool {
-        self.picker.is_some() || self.typing
+        self.picker.is_some() || self.typing()
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        if let Some(picker) = &mut self.picker {
-            return picker.text_input(typed) || (typed == " " && picker.space());
+        if self.with_controls(|c, parts| c.text(parts, typed)).is_some() {
+            return true;
         }
-        if !self.typing {
-            return false;
-        }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.query.insert(&typed);
-        self.searched();
-        true
+        // Space on the calendar's days picks the one with the keys (its control doesn't
+        // take it yet).
+        self.picker.as_mut().is_some_and(|picker| typed == " " && picker.space())
     }
 
+    /// Read from `&self`: the calendar's own (its part is made over it mutably), else the
+    /// search lends its field by its place.
     fn selected_text(&self) -> Option<String> {
         if let Some(picker) = &self.picker {
             return picker.selected_text();
         }
-        let selected = self.query.selected_text();
-        (self.typing && !selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| (i == SEARCH).then_some(&self.query as &dyn Control))
     }
 
+    /// The part with the keys takes them (the calendar all of them, Esc closing it; the
+    /// search its own, Esc emptying it, then giving the keys back); with none, none is used.
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if let Some(picker) = &mut self.picker {
-            if let Some(event) = picker.key(key, reach) {
-                self.picker_event(event);
-            }
-            return true;
-        }
-        if !self.typing {
+        if self.controls.focused().is_none() {
             return false;
         }
-        let before = self.query.text().to_owned();
-        match key {
-            // Esc: what's typed goes, then the keys.
-            ViewerKey::Escape if before.is_empty() => self.typing = false,
-            ViewerKey::Escape => self.query = TextInput::default(),
-            ViewerKey::Left => self.query.move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.query.move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.query.home(reach.extend),
-            ViewerKey::End => self.query.end(reach.extend),
-            ViewerKey::Backspace => self.query.backspace(reach.word),
-            ViewerKey::Delete => self.query.delete(),
-            _ => return false,
-        }
-        if self.query.text() != before {
-            self.searched();
-        }
-        true
+        self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
@@ -867,30 +892,13 @@ impl Viewer for ChangedFiles {
     }
 
     fn command(&mut self, id: &str) -> bool {
-        if let Some(picker) = &mut self.picker {
-            return picker.command(id);
+        // The part with the keys: the calendar's fields, the search.
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
+            return true;
         }
-        if self.typing {
-            let before = self.query.text().to_owned();
-            let done = match id {
-                "select_all" => {
-                    self.query.select_all();
-                    true
-                }
-                "undo" => self.query.undo(),
-                "redo" => self.query.redo(),
-                "cut" if !self.query.selected_text().is_empty() => {
-                    self.query.insert("");
-                    true
-                }
-                _ => false,
-            };
-            if self.query.text() != before {
-                self.searched();
-            }
-            if done {
-                return true;
-            }
+        // While the calendar is open, the commands are its only.
+        if self.picker.is_some() {
+            return false;
         }
         match id {
             COPY_PATH => {
@@ -1039,7 +1047,8 @@ impl ChangedFiles {
         }
         self.scroll = sample.scroll;
         self.query = TextInput::new(&sample.query);
-        self.typing = !sample.query.is_empty();
+        let typing = (!sample.query.is_empty()).then_some(SEARCH);
+        self.with_controls(|c, parts| c.focus(parts, typing));
         self.sample = true;
     }
 }

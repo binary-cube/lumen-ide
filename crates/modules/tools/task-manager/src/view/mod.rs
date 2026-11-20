@@ -18,6 +18,7 @@ use render_api::Scene;
 use text_layout::TextSystem;
 use ui_components::chart::PlotCache;
 use ui_components::columns::Choice;
+use ui_components::control::Controls;
 use ui_components::ds::{self, Ctx};
 use ui_components::{EdgeScrollbar, Orientation, Splitter, SplitterStyle};
 use ui_kit::TextInput;
@@ -30,6 +31,7 @@ use crate::model::{Column, GroupKey, Grouping, Item, ViewModel, ViewState};
 mod actions;
 mod commands;
 mod detail;
+mod filter;
 mod keys;
 mod menu;
 mod summary;
@@ -266,6 +268,11 @@ pub struct TaskManager {
     /// The list's scroll when its detail opened on a page ("‹ Back" returns to it).
     back_to: Option<f32>,
     splitter: Splitter,
+    /// Where the held separator's line was dragged to (physical pixels on its axis).
+    split_at: Option<f32>,
+    /// Its parts' state of use (see [`TaskManager::with_controls`]): a press on none of
+    /// them leaves their focus as it was, since the view's own ring ([`Focus`]) gives it.
+    controls: Controls,
     layouts: LayoutCache,
     plots: Plots,
     hits: Vec<(Rect, Hit)>,
@@ -377,6 +384,8 @@ impl Default for TaskManager {
             detail_bar: EdgeScrollbar::default(),
             back_to: None,
             splitter: Splitter::new(SplitterStyle::default(), Orientation::Vertical),
+            split_at: None,
+            controls: Controls::sticky(),
             layouts: LayoutCache::default(),
             plots: Plots::default(),
             hits: Vec::new(),

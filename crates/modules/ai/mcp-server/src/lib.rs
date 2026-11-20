@@ -25,6 +25,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "MCP Server",
     description: "The editor's MCP server: agents on the machine use the editor through the tools the modules offer",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "server", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

@@ -2,6 +2,7 @@
 //! and saving the composed file.
 
 use super::*;
+use crate::parts::{BUTTONS, DIVIDERS, FIELD};
 
 impl Viewer for Compare {
     fn set_data(&mut self, data: &dyn std::any::Any) {
@@ -15,6 +16,7 @@ impl Viewer for Compare {
         }
         let Some(input) = data.downcast_ref::<CompareInput>() else { return };
         self.resolving = None;
+        self.follow_field();
         let (left, lcrlf, ltrail) = split_lines(&input.left.1);
         let (right, rcrlf, rtrail) = split_lines(&input.right.1);
         self.left_path = input.left.0.clone();
@@ -212,13 +214,16 @@ impl Viewer for Compare {
             bar.set_expansion(0.0);
             bar.paint(ctx.scene, metrics);
         }
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
+    /// The wheel: to the part under the mouse that scrolls (the field written by hand),
+    /// else the rows, and across only the column under the mouse.
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
-        let pointer = self.pointer;
-        if let Some(field) = self.by_hand().filter(|f| f.contains(pointer)) {
-            return field.scroll_by(dy);
+        if self.with_controls(|c, parts| c.scroll_hovered(parts, dx, dy)).is_some() {
+            return true;
         }
+        let pointer = self.pointer;
         let before = self.scroll;
         self.scroll += dy;
         self.clamp_scroll();
@@ -230,11 +235,11 @@ impl Viewer for Compare {
         self.scroll != before || across
     }
 
+    /// The part holding the pointer follows it (a separator moved resizes its columns),
+    /// else the selection being made, else the overview's thumb.
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(field) = self.by_hand()
-            && field.drag(p)
-        {
-            return true;
+        if let Some((part, changed)) = self.with_controls(|c, parts| c.drag(parts, p)) {
+            return changed || DIVIDERS.contains(&part);
         }
         if self.selecting {
             return self.drag_select(p);
@@ -243,49 +248,26 @@ impl Viewer for Compare {
             self.drag_overview(p.y, grab);
             return true;
         }
-        if let Some(across) =
-            self.across.iter_mut().find(|a| a.bar.as_ref().is_some_and(|b| b.is_dragging()))
-        {
-            let metrics = across.metrics();
-            if let Some(offset) = across.bar.as_ref().and_then(|b| b.drag_to(p, metrics)) {
-                across.go(offset);
-            }
-            return true;
-        }
-        let Some(i) = self.splitters.iter().position(Splitter::is_dragging) else { return false };
-        if let Some(x) = self.splitters[i].drag_to(p) {
-            self.drag_separator(i, x);
-        }
-        true
+        false
     }
 
     fn release(&mut self) -> bool {
-        if let Some(field) = self.by_hand()
-            && field.release()
-        {
-            return true;
+        self.resizing = false;
+        if let Some((part, changed)) = self.with_controls(|c, parts| c.release(parts)) {
+            // A separator let go: the columns' places are kept.
+            if DIVIDERS.contains(&part) && changed {
+                self.keep_splits();
+            }
+            return changed;
         }
         if std::mem::take(&mut self.selecting) {
             return true;
         }
-        if self.overview_grab.take().is_some() {
-            return true;
-        }
-        let ended = self.across.iter_mut().fold(false, |any, a| {
-            a.bar.as_mut().is_some_and(ui_components::Scrollbar::end_drag) | any
-        });
-        if ended {
-            return true;
-        }
-        let released = self.splitters.iter_mut().fold(false, |any, s| s.end_drag() | any);
-        if released {
-            self.keep_splits();
-        }
-        released
+        self.overview_grab.take().is_some()
     }
 
     fn is_animating(&self) -> bool {
-        self.splitters.iter().any(Splitter::is_animating)
+        self.controls.is_animating()
     }
 
     /// A press: `clicks` in a row select a word (two) or a line (three) in the code.
@@ -302,29 +284,18 @@ impl Viewer for Compare {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(field) = self.by_hand().filter(|f| f.contains(p)) {
-            field.press(p, 1, false);
-            return None;
-        }
-        // A column's bar across: its code scrolled there (and dragged from there).
-        if let Some(across) =
-            self.across.iter_mut().find(|a| a.bar.as_ref().is_some_and(|b| b.contains(p)))
-        {
-            let metrics = across.metrics();
-            if let Some(offset) = across.bar.as_mut().and_then(|b| b.begin_drag(p, metrics)) {
-                across.go(offset);
+        // Its parts first: the field written by hand, a column's bar across (its code
+        // scrolled there), a button (the buttons on a separator win), a separator (grabbed
+        // over a difference's rows too: it's above them).
+        let clicks = self.press_clicks.max(1);
+        let hit = match self.with_controls(|c, parts| c.press(parts, p, clicks)) {
+            Some((BUTTONS, _)) => self.pressed.take(),
+            Some((part, _)) => {
+                self.resizing = DIVIDERS.contains(&part);
+                return None;
             }
-            return None;
-        }
-        // The buttons on a separator win; elsewhere on it, it's grabbed (a difference's rows
-        // reach under it too: the separator is above them).
-        let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
-        if matches!(hit, None | Some(Hit::Select(_)))
-            && let Some(s) = self.splitters.iter_mut().find(|s| s.contains(p))
-        {
-            s.begin_drag(p);
-            return None;
-        }
+            None => self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h),
+        };
         let Some(hit) = hit else {
             // On the code: the selection starts (elsewhere, what was selected goes).
             match self.code_at(p) {
@@ -393,63 +364,66 @@ impl Viewer for Compare {
         None
     }
 
+    /// A separator held or under the mouse: its resize cursor; on the code, the text's;
+    /// else its parts' (a button's hand).
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        let on_button = self.hits.iter().any(|(r, _)| r.contains(p));
-        let dragging = self.splitters.iter().any(Splitter::is_dragging);
+        let part = self.controls.cursor_at(p);
         let selectable = matches!(
             self.hits.iter().rev().find(|(r, _)| r.contains(p)),
             None | Some((_, Hit::Select(_)))
         );
-        if dragging || (!on_button && self.splitters.iter().any(|s| s.contains(p))) {
+        if self.resizing || part == Some(ViewerCursor::ResizeHorizontal) {
             Some(ViewerCursor::ResizeHorizontal)
         } else if selectable && self.code_at(p).is_some() {
             Some(ViewerCursor::Text)
         } else {
-            on_button.then_some(ViewerCursor::Pointer)
+            part
         }
     }
 
+    /// Its parts told where the mouse is (a separator lights up only where no button is,
+    /// a bar across widens), and the place under it kept.
     fn hover(&mut self, p: Point) -> bool {
         self.pointer = p;
-        let bar = self
-            .across
-            .iter_mut()
-            .fold(false, |any, a| a.bar.as_mut().is_some_and(|b| b.hover(p)) | any);
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         let before = self.hover;
         self.hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
-        // A separator lights up only where no button is.
-        let on_button = self.hover.is_some();
-        let mut changed = bar || before != self.hover;
-        for s in &mut self.splitters {
-            let at = if on_button { Point::new(f32::MIN, f32::MIN) } else { p };
-            changed |= s.hover(at);
-        }
-        changed
+        parts || before != self.hover
     }
 
+    /// The field written by hand, while it's open, has the keys and the typing.
     fn wants_text(&self) -> bool {
-        self.resolving.as_ref().is_some_and(|r| r.by_hand.is_some())
+        self.controls.focused() == Some(FIELD)
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        self.by_hand().map(|f| f.insert(text)).is_some()
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
         self.text_input(text)
     }
 
-    /// What's selected: in the field written by hand, else in a column.
+    /// What's selected: in the part with the keys (the field written by hand), else in a
+    /// column.
     fn selected_text(&self) -> Option<String> {
-        if let Some(field) = self.resolving.as_ref().and_then(|r| r.by_hand.as_ref()) {
-            return Some(field.selected_text().to_owned()).filter(|s| !s.is_empty());
+        if self.controls.focused().is_none() {
+            return self.selection_text();
         }
-        self.selection_text()
+        self.controls.selected_text_with(|part| match part {
+            FIELD => self
+                .resolving
+                .as_ref()
+                .and_then(|r| r.by_hand.as_ref())
+                .map(|f| f as &dyn ui_components::control::Control),
+            _ => None,
+        })
     }
 
     /// ⌘A: the column selected last (else the one under the mouse, else the right one).
     fn select_all(&mut self) -> bool {
-        if !self.loaded || self.by_hand().is_some() {
+        // A part with the keys (the field written by hand) keeps ⌘A for itself.
+        if !self.loaded || self.with_controls(|c, _| c.focused()).is_some() {
             return false;
         }
         let which =
@@ -458,39 +432,23 @@ impl Viewer for Compare {
         true
     }
 
+    /// A part with the keys (the field written by hand) takes them all; else the view's.
     fn edit_key_with(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
-        let (word, extend) = (reach.word, reach.extend);
-        let Some(field) = self.by_hand() else { return self.edit_key(key) };
-        match key {
-            ViewerKey::Backspace => field.backspace(word),
-            ViewerKey::Delete => field.delete(),
-            ViewerKey::Left => field.left(word, extend),
-            ViewerKey::Right => field.right(word, extend),
-            ViewerKey::Up => field.vertical(false, extend),
-            ViewerKey::Down => field.vertical(true, extend),
-            ViewerKey::Home => field.home(word, extend),
-            ViewerKey::End => field.end(word, extend),
-            ViewerKey::Enter => field.newline(),
-            _ => return false,
+        let (used, focused) =
+            self.with_controls(|c, parts| (c.key(parts, key, reach), c.focused()));
+        match (used, focused) {
+            (Some(_), _) => true,
+            (None, Some(_)) => false,
+            (None, None) => self.edit_key(key),
         }
-        true
     }
 
-    /// Its actions ([`ACTIONS`]).
+    /// Its actions ([`ACTIONS`]); a part with the keys takes the edit commands (and leaves
+    /// the comparison's alone).
     fn command(&mut self, id: &str) -> bool {
-        if let Some(field) = self.by_hand() {
-            match id {
-                "select_all" => field.select_all(),
-                "cut" => field.insert(""),
-                "undo" => {
-                    field.undo();
-                }
-                "redo" => {
-                    field.redo();
-                }
-                _ => return false,
-            }
-            return true;
+        let (used, focused) = self.with_controls(|c, parts| (c.command(parts, id), c.focused()));
+        if focused.is_some() {
+            return used.is_some();
         }
         match id {
             "select_all" => return self.select_all(),

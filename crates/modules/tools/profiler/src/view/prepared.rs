@@ -286,9 +286,17 @@ pub fn prepare(recording: &Recording, s: &Summary) -> Prepared {
             .threads
             .iter()
             .map(|(name, owner, c)| {
+                // The threads without a name are the system's (the GPU driver, the frames).
+                let system = [profiling_collect::SYSTEM_WORKERS, profiling_collect::UNNAMED]
+                    .contains(&name.as_str());
+                let whose = match owner {
+                    Some(owner) => owner.clone(),
+                    None if system => t("profiler.system_workers"),
+                    None => "—".to_owned(),
+                };
                 vec![
                     Cell::Text(name.clone()),
-                    Cell::Muted(owner.clone().unwrap_or_else(|| "—".to_owned())),
+                    Cell::Muted(whose),
                     Cell::Bar((*c / top) as f32, format!("{c:.1}%"), Tone::Accent),
                 ]
             })

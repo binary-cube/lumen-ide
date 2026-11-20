@@ -812,3 +812,50 @@ fn a_figure_once_reported_stays_at_zero() {
     assert_eq!(metrics(&view), [Metric::Cpu], "kept");
     assert!(view.texts.detail.stats[0].now.starts_with('0'), "{}", view.texts.detail.stats[0].now);
 }
+
+/// A list longer than its rows' area: its scrollbar's thumb pressed and dragged down
+/// scrolls it, through the view's own press, drag and release.
+#[test]
+fn the_list_s_thumb_dragged_scrolls_it() {
+    let mut view = demo("split");
+    let mut pen = Pen::new();
+    pen.paint(&mut view, 900.0, 320.0, 1.0);
+    assert!(view.max_scroll > 0.0, "more rows than the area holds");
+    let rows = view.page().unwrap().rows;
+    let at = |x: f32| Point::new(x, rows.min_y() + 6.0);
+    let edge = (0..24).map(|dx| rows.max_x() - 1.0 - dx as f32).find(|&x| {
+        let mut view = demo("split");
+        pen.paint(&mut view, 900.0, 320.0, 1.0);
+        view.hover(at(x));
+        view.click(at(x));
+        let moved = view.drag(Point::new(x, rows.min_y() + 120.0)) && view.scroll > 0.0;
+        moved && view.release()
+    });
+    assert!(edge.is_some(), "the thumb dragged scrolls the list");
+    let x = edge.unwrap_or_default();
+    view.hover(at(x));
+    view.click(at(x));
+    view.release();
+    assert!(!view.drag(Point::new(x, rows.max_y())), "let go: the moves don't reach it");
+}
+
+/// The wheel goes to the part under the mouse: over the detail it scrolls the detail,
+/// elsewhere the list (also with no mouse yet).
+#[test]
+fn the_wheel_scrolls_the_part_under_the_mouse() {
+    let mut view = demo("wide");
+    let mut pen = Pen::new();
+    pen.paint(&mut view, 1300.0, 700.0, 1.0);
+    let page = view.page().unwrap();
+    let (detail, rows) = (page.detail.expect("open"), page.rows);
+    assert!(view.max_scroll > 0.0 && view.detail_max > 0.0, "both scroll");
+    assert!(view.scroll(0.0, 30.0), "no mouse yet: the list");
+    assert_eq!((view.scroll, view.detail_scroll), (30.0, 0.0));
+    view.hover(center(detail));
+    assert!(view.scroll(0.0, 20.0));
+    assert_eq!((view.scroll, view.detail_scroll), (30.0, 20.0), "over the detail: its own");
+    view.hover(center(rows));
+    assert!(view.scroll(0.0, -30.0));
+    assert_eq!((view.scroll, view.detail_scroll), (0.0, 20.0), "over the rows: the list");
+    assert!(!view.scroll(0.0, -30.0), "at its top");
+}

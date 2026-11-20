@@ -45,6 +45,63 @@ where a component exists is replaced by it (as the scrollbars were).
 Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
 ([modals](modals.md)), the status bar the app's (below).
 
+## Generic and agnostic: interaction goes through contracts
+
+- **Code that routes doesn't name what it routes to.** Whoever passes input on (the app to
+  its windows over the editor, a view to its parts, a panel to its rows) walks a list of
+  parts that answer one contract — never a chain of `if self.completion… if self.dialog…
+  if self.settings…`. A new part is added to the list and answers the contract; nothing
+  else changes.
+- **Every interaction is in the contract, not only the mouse**: a press and what follows
+  it (drag, release: whoever took the press holds the pointer until it's let go), hover
+  and the cursor, the wheel, the keys and the text typed (whoever has the focus), a
+  selection and its copy, a tooltip, a right-click's menu. A part implements what it uses;
+  the rest has defaults.
+- **The windows over the editor answer `OverlaySlot`**:
+  - what it answers: `click`, `drag`, `release`, `held`, `scroll`, `hover`, `key`, `text`,
+    `input`, `selected_text`, `edit_command`, `paste`, `loading`, `frame_deadline`,
+    `rest_deadline`, `press_elsewhere`…;
+  - the stack is walked in `Overlay::ALL`'s order, and the editor's cards (hover,
+    completion, the parameters' hint) are floating slots too;
+  - a deadline is named by its overlay (`Overlay::name`), so a profile says whose it is.
+- **A view's parts are a form's controls** (`ui_components::control`):
+  - **The contract:** each part answers `Control`. The view keeps one `Controls` (who holds
+    the pointer, who has the focus, what's under the mouse) and hands its parts as a list
+    each time, from a `with_controls` that builds a fixed array, never a `Vec` per event.
+  - **The meaning stays the view's:** a part that answered is known by its place in the
+    list, or by what it wrote (`take_event`, an `action` / `answer` field). The view's own
+    hit table (a rect → its action) is its meaning, not routing.
+  - **Ready-made parts:**
+    - fields and lists: `TextInput`, `MultilineField`, `Picker`, `DataGrid`, `ReadText`,
+      `Icicle`, `changed_files::TreePart`, `date_range::RangePart`,
+      `color_picker::ColorPart`;
+    - bars and dividers: `Thumb` (an `EdgeScrollbar` with its offset), `ScrollThumb` (with
+      a `ScrollState`), `BarThumb` (a `Scrollbar` with its own metrics), `Scrolled` (a bar
+      plus the wheel over an area), `Divider` (a splitter);
+    - views and wrappers: `Embedded` / `TabView` (a view inside a view), `Shown` (a part
+      shown only sometimes), `Option<C>` / `Absent` (a part that may be missing),
+      `OneClick`.
+  - **What the contract says:**
+    - `press_with` carries ⇧ / ⌘;
+    - `captures_keys` is a part over everything (an open list, a picker): what it doesn't
+      use (keys, text, paste, commands) goes on to the focused part;
+    - `keeps_tab` / `in_tab_order` give a part its own Tab, or keep it out of the Tab
+      order (the view moves the focus);
+    - `Controls::sticky()` keeps the focus on a press beside the parts; `hold` holds a part
+      from code.
+  - **Asked from `&self`:** cursor and tooltip come from the last hover
+    (`Controls::cursor_at` / `tooltip_at`: the app hovers before it asks); animation and
+    the next frame come from `settle`, called while painting; the selection comes from
+    `selected_text_with`, the view lending its parts read-only.
+  - **A field with behavior of its own** (its key set, its Tab order, a password never
+    copied) is a control of its module that does exactly that. It is never a `typing`
+    bool routed by hand, and never the generic field if that would change the behavior.
+- **Nothing generic names a module, a language or a view**: no `"php"`, `"terminal"`,
+  `"database"` in the app or in components; what differs is said by whoever it belongs to
+  (a field on its contribution, a default method it overrides).
+- Found a chain that names its parts: it's a bug of the same kind as a hardcoded tool
+  window — moved behind the contract.
+
 ## Scrolling (it went wrong each time: check it every time)
 
 - **A scrollbar is wired whole, never only drawn**: `paint` with the content's height and

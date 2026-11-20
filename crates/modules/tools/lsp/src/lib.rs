@@ -61,6 +61,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Language Servers",
     description: "Language servers (LSP) for the languages that describe one, downloaded once when first needed (or bundled with a full build): started per project when a file of their language opens, stopped when unused, shown in the Task Manager",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "server", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// A command: its id, label, shortcuts, icon and handler.

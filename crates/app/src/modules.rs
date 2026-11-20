@@ -136,7 +136,7 @@ pub struct LanguageSupport {
 /// `tracing` writes it) noted for the log's settings (each module's own level).
 fn add(registry: &mut ModuleRegistry, module: Box<dyn extensions::Module>, target: &'static str) {
     let manifest = module.manifest();
-    crate::logs::note_module(manifest.id.as_str(), manifest.name, target);
+    crate::logs::note_module(manifest.id.as_str(), manifest.name, manifest.info.icon, target);
     registry.register(module);
 }
 
@@ -684,15 +684,33 @@ pub(crate) fn order_viewers(
     viewers.into_iter().map(|(_, v)| v).collect()
 }
 
-/// The module selection from the user settings, `[modules]` (default: all, the ones
-/// [`crate::settings::HIDDEN_BY_DEFAULT`] hidden).
+/// The modules whose manifest says they start hidden until the user shows them (work put
+/// aside for now, its code kept), read once from the registered modules.
+fn hidden_by_default_ids() -> &'static [String] {
+    static IDS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    IDS.get_or_init(|| {
+        builtin()
+            .manifests()
+            .filter(|m| m.info.hidden_by_default)
+            .map(|m| m.id.as_str().to_owned())
+            .collect()
+    })
+}
+
+/// Module `id` starts hidden until the user shows it (its manifest says so).
+pub fn hidden_by_default(id: &str) -> bool {
+    hidden_by_default_ids().iter().any(|h| h == id)
+}
+
+/// The module selection from the user settings, `[modules]` (default: all, those whose
+/// manifest says so hidden).
 pub fn selection_from_settings() -> ModuleSelection {
-    use crate::settings::{HIDDEN_BY_DEFAULT, MODULES_DISABLED, MODULES_ENABLED, MODULES_MODE};
+    use crate::settings::{MODULES_DISABLED, MODULES_ENABLED, MODULES_MODE};
     let settings = crate::config::settings();
     let mut hidden = settings.get(&crate::settings::MODULES_HIDDEN);
-    for id in HIDDEN_BY_DEFAULT {
+    for id in hidden_by_default_ids() {
         if crate::settings::module_hidden(settings, id) && !hidden.iter().any(|h| h == id) {
-            hidden.push((*id).to_owned());
+            hidden.push(id.clone());
         }
     }
     ModuleSelection {

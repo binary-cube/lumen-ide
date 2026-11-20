@@ -570,8 +570,11 @@ impl EditorApp {
             self.frames.decoration_frames += 1;
         }
 
+        self.workbench.paint_phases.end();
         let mut glyphs = WithIcons { text: &mut **text, icons: self.workbench.icons() };
         let painted = frame_start.elapsed();
+        // A profile recording's step: the scene handed to the GPU and shown.
+        let rendering = kernel::probe::time("app", "render");
         let result = renderer.render(&self.frames.scene, &mut glyphs);
         // What floats, on its layer over the pages (shown once it has a frame).
         if !only_decorations && let Some(floating) = &mut self.frames.floating {
@@ -581,6 +584,7 @@ impl EditorApp {
                 Err(e) => tracing::warn!(error = %e, "the floating layer's frame"),
             }
         }
+        drop(rendering);
         // A long frame says which half took the time (the scene, the GPU).
         if frame_start.elapsed() >= Duration::from_millis(500) {
             let phases = self.workbench.paint_phases.text();
@@ -680,18 +684,9 @@ impl EditorApp {
         if let Some(at) = self.workbench.served_deadline() {
             due("served", at);
         }
-        // A notification's ring or spinner: a frame when it next changes (no faster than
-        // about 30 a second), none while nothing counts down.
-        if let Some(at) = self.workbench.toast_deadline() {
-            due("toast", at);
-        }
         // The status bar's meter gliding to new heights.
         if let Some(at) = self.workbench.status_deadline() {
             due("status", at);
-        }
-        // A view over the window animating at its own pace (a full-window scene).
-        if let Some(at) = self.workbench.modal_view_deadline() {
-            due("modal-view", at);
         }
         if let Some(at) = self.workbench.idle_deadline() {
             due("idle", at);
@@ -705,13 +700,10 @@ impl EditorApp {
         if let Some(at) = self.web_views.deadline() {
             due("web-views", at);
         }
-        // The windows over the editor at theirs (a popover's scrollbar fading).
-        if let Some(at) = self.workbench.overlays_deadline() {
-            due("overlays", at);
-        }
-        // A settings card playing its picture (Relax mode's scenes), at its pace.
-        if let Some(at) = self.workbench.settings_card_deadline() {
-            due("settings-card", at);
+        // The windows over the editor at theirs, each by its name (a notification's ring, a
+        // popover's scrollbar fading, a modal view's scene, a settings card's picture).
+        for (owner, at) in self.workbench.overlays_due() {
+            due(owner, at);
         }
         // The overlay shows what the frames drawn anyway measured (never a frame to measure
         // itself: idle stays idle); only its ×'s tooltip asks for one.

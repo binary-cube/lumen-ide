@@ -383,6 +383,11 @@ fn a_result_written_by_hand_is_saved_as_written() {
     assert!(c.wants_text() && c.can_save());
     assert_eq!(c.by_hand().unwrap().text(), "1\nours 2\n3\ntheirs 4\n5");
     c.by_hand().unwrap().select_all();
+    assert_eq!(
+        ui_components::Viewer::selected_text(&c).as_deref(),
+        Some("1\nours 2\n3\ntheirs 4\n5"),
+        "the field's selection is what's copied"
+    );
     c.text_input("mine");
     c.save().unwrap();
     assert_eq!(
@@ -393,6 +398,7 @@ fn a_result_written_by_hand_is_saved_as_written() {
     c.toggle_by_hand();
     c.toggle_by_hand();
     assert!(!c.wants_text() && !c.can_save());
+    assert_eq!(ui_components::Viewer::selected_text(&c), None, "closed: the columns'");
 }
 
 /// A line with tabs: its changed part lit where it's drawn (each tab shown as four spaces),
@@ -544,4 +550,104 @@ fn a_separator_over_a_difference_is_dragged() {
     c.release();
     paint(&mut c);
     assert!(c.splitters[0].bounds().center().x < before - 60.0, "moved");
+}
+
+/// A column with a line longer than its room: its bar across, along its bottom, has a thumb
+/// that pressed and dragged right scrolls the code across, through the view's own press,
+/// drag and release.
+#[test]
+fn a_column_s_thumb_across_is_dragged() {
+    let long = "x".repeat(600);
+    let mut c = compare(&format!("{long}\nb\n"), "a\nb\n");
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    c.paint(ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, 1200.0, 500.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let bar = c.across[0].bar.as_ref().expect("the left column's bar across");
+    let thumb = bar.thumb_rect(c.across[0].metrics()).expect("its thumb");
+    let at = thumb.center();
+    c.hover(at);
+    assert!(c.click(at).is_none());
+    assert!(c.drag(kernel::Point::new(at.x + 80.0, at.y)));
+    assert!(c.across[0].offset > 0.0, "the code scrolled across");
+    assert!(c.release());
+    assert!(!c.drag(kernel::Point::new(at.x + 160.0, at.y)), "let go: the moves don't reach it");
+}
+
+/// While the result is written by hand its field keeps the keys, even after a press on a
+/// column: the text and the edit commands are its, Tab moves nothing, the comparison's own
+/// keys and actions wait; closed, they're the comparison's again.
+#[test]
+fn the_field_written_by_hand_keeps_the_keys_while_open() {
+    let mut c = resolving();
+    c.toggle_by_hand();
+    paint(&mut c);
+    let left = Point::new(c.list.min_x() + 80.0, c.list.min_y() + c.row_h * 0.5);
+    let _ = c.pointer_down(left, 1, ui_components::PressMods::default());
+    c.release();
+    c.by_hand().unwrap().select_all();
+    assert!(c.text_input("mine"));
+    assert_eq!(c.by_hand().unwrap().text(), "mine");
+    assert!(!c.edit_key_with(ViewerKey::Tab, ui_components::KeyReach::default()));
+    assert!(c.edit_key_with(ViewerKey::Enter, ui_components::KeyReach::default()));
+    assert_eq!(c.by_hand().unwrap().text(), "mine\n");
+    assert!(c.command("undo"), "the field's");
+    assert!(!c.command("next"), "the comparison's actions wait");
+    assert!(!c.select_all(), "⌘A is the field's");
+    c.toggle_by_hand();
+    assert!(!c.text_input("x"), "closed: nothing takes the text");
+    assert!(c.command("next"));
+}
+
+/// A button on a separator wins over it: pressed, the button acts and nothing is held; the
+/// mouse over it shows the hand and leaves the separator unlit. Beside it, the separator is
+/// grabbed, its resize cursor shown wherever the pointer goes until let go.
+#[test]
+fn a_button_on_a_separator_wins_and_the_separator_is_held_beside_it() {
+    let mut c = compare("a\nb\nc\nd\n", "a\nB\nc\nD\n");
+    paint(&mut c);
+    let bar = c.splitters[0].bounds();
+    let button = Rect::new(bar.min_x(), bar.min_y(), bar.size.width, 20.0);
+    c.hits = vec![(button, Hit::Next)];
+    let on = button.center();
+    c.hover(on);
+    assert_eq!(c.cursor_at(on), Some(ViewerCursor::Pointer));
+    assert!(!c.splitters[0].is_hovered(), "unlit under a button");
+    let _ = c.pointer_down(on, 1, ui_components::PressMods::default());
+    assert!(!c.splitters[0].is_dragging(), "the button took it");
+    let beside = Point::new(bar.center().x, bar.max_y() - 20.0);
+    c.hover(beside);
+    assert!(c.splitters[0].is_hovered());
+    assert_eq!(c.cursor_at(beside), Some(ViewerCursor::ResizeHorizontal));
+    let _ = c.pointer_down(beside, 1, ui_components::PressMods::default());
+    assert!(c.splitters[0].is_dragging());
+    let far = Point::new(beside.x - 100.0, beside.y);
+    assert!(c.drag(far));
+    assert_eq!(c.cursor_at(far), Some(ViewerCursor::ResizeHorizontal), "held: wherever it goes");
+    assert!(c.release());
+    assert!(!c.splitters[0].is_dragging());
+}
+
+/// The wheel over the field written by hand scrolls only it, never the rows behind.
+#[test]
+fn the_wheel_over_the_field_written_by_hand_is_its_own() {
+    let mut c = resolving();
+    c.toggle_by_hand();
+    paint(&mut c);
+    let between = (c.splitters[0].bounds().center().x + c.splitters[1].bounds().center().x) / 2.0;
+    let field = Point::new(between, c.list.center().y);
+    assert!(c.by_hand().unwrap().contains(field));
+    c.hover(field);
+    assert!(c.scroll(0.0, 400.0));
+    assert_eq!(c.scroll, 0.0, "the rows stayed");
 }

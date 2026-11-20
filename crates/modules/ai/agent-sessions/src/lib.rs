@@ -33,6 +33,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Agent Sessions",
     description: "The AI agents' sessions of the project, on the left: taken up again or started in a terminal tab",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "comment", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

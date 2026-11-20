@@ -19,6 +19,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Emmet",
     description: "HTML abbreviations expanded on Tab: div.card#main, ul>li*3, a[href], !, lorem",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "zap", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

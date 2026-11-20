@@ -34,6 +34,18 @@ impl ProjectQueries for Fake {
         if query.text != "needle" || !inside {
             return Vec::new();
         }
+        // A project with many results (a list that scrolls).
+        if self.0 == MANY {
+            return (0..MANY_HITS)
+                .map(|i| Hit {
+                    path: format!("src/f{i}.php"),
+                    start_line: 2,
+                    end_line: 3,
+                    preview: "<?php\n$needle = 1;".into(),
+                    score: 1.0,
+                })
+                .collect();
+        }
         vec![Hit {
             path: "src/a.php".into(),
             start_line: 2,
@@ -453,4 +465,121 @@ fn recent_searches_are_forgotten_one_or_all() {
     assert_eq!(opened(project, "/result", None).panel.recent_searches(), ["alpha"]);
     view.act(ProjectSearchAction::ClearRecent);
     assert!(opened(project, "/result", None).panel.recent_searches().is_empty());
+}
+
+/// The root of the project whose search finds many files.
+const MANY: &str = "/many";
+/// The files it finds.
+const MANY_HITS: usize = 40;
+
+/// The results' scrollbar: its thumb pressed and dragged down scrolls the rows; let go, the
+/// moves no longer reach it.
+#[test]
+fn the_results_scroll_by_their_thumb() {
+    let mut view = opened(kernel::ProjectId::new(), MANY, None);
+    view.text_input("needle");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while view.searching.is_some() && std::time::Instant::now() < deadline {
+        view.poll();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let bounds = kernel::Rect::new(0.0, 0.0, 1200.0, 800.0);
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds,
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let on_bar = (0..800)
+        .flat_map(|y| (0..1200).rev().map(move |x| Point::new(x as f32, y as f32)))
+        .find(|&p| view.panel.on_bar(p))
+        .expect("a scrollbar");
+    view.hover(on_bar);
+    assert!(view.click(on_bar).is_none(), "the thumb takes the press");
+    let before = view.panel.first_row();
+    assert!(view.drag(Point::new(on_bar.x, on_bar.y + 120.0)), "the rows follow");
+    assert!(view.panel.first_row() > before);
+    view.release();
+    assert!(!view.drag(Point::new(on_bar.x, on_bar.y + 200.0)), "let go: not held");
+}
+
+/// The view's results searched and drawn (the many files' project).
+fn painted_with_many() -> SearchView {
+    let mut view = opened(kernel::ProjectId::new(), MANY, None);
+    view.text_input("needle");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while view.searching.is_some() && std::time::Instant::now() < deadline {
+        view.poll();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, 1200.0, 800.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    view
+}
+
+/// The panel is the view's one control, with the keyboard from the start: what's typed
+/// and the keys reach its fields through the controls, and Tab stays in it (it opens the
+/// folder's row, then goes on between its fields).
+#[test]
+fn the_keyboard_is_the_panel_s_from_the_start() {
+    let mut view = opened(kernel::ProjectId::new(), "/keys", None);
+    assert_eq!(view.controls.focused(), Some(PANEL));
+    view.text_input("ab");
+    assert!(view.edit_key_with(ViewerKey::Left, KeyReach::default()));
+    view.text_input("x");
+    assert_eq!(view.panel.input.text(), "axb", "the caret moved by the key");
+    assert!(view.edit_key(ViewerKey::Tab));
+    assert!(view.panel.in_scope(), "Tab opened the folder's row");
+    assert!(view.edit_key_with(ViewerKey::Tab, KeyReach { word: false, extend: true }));
+    assert!(view.panel.in_mask(), "⇧Tab goes on too, as before");
+    assert_eq!(view.controls.focused(), Some(PANEL), "the focus stays in the panel");
+    assert!(view.command("select_all"));
+}
+
+/// The wheel moves the results by rows: under the mouse, or with the mouse not moved yet.
+#[test]
+fn the_results_scroll_by_the_wheel() {
+    let mut view = painted_with_many();
+    let before = view.panel.first_row();
+    assert!(view.scroll(0.0, 60.0), "with no hover yet, the wheel is the panel's");
+    assert!(view.panel.first_row() > before);
+    let moved = view.panel.first_row();
+    view.hover(Point::new(600.0, 400.0));
+    assert!(view.scroll(0.0, -60.0));
+    assert!(view.panel.first_row() < moved);
+    assert!(!view.scroll(0.0, 1.0), "less than a row: nothing");
+}
+
+/// The cursor and the tooltip are answered where the mouse is, as the panel said there.
+#[test]
+fn the_cursor_and_the_tooltip_follow_the_mouse() {
+    let mut view = painted_with_many();
+    let button = view.panel.scope_button();
+    let on = button.center();
+    assert_eq!(view.cursor_at(on), None, "not hovered yet");
+    view.hover(on);
+    assert_eq!(view.cursor_at(on), Some(ViewerCursor::Pointer));
+    assert!(view.tooltip_at(on).is_some(), "the folder's button says what it does");
+    let away = Point::new(-10.0, -10.0);
+    view.hover(away);
+    assert_eq!(view.cursor_at(away), None);
+    assert!(view.tooltip_at(away).is_none());
 }

@@ -264,3 +264,58 @@ fn it_draws_many_statements_only_where_they_re_seen() {
     view.set_query("nothing");
     paint(&mut view, &mut text);
 }
+
+/// Many statements scroll: the list's thumb, pressed and dragged down, moves them and
+/// chooses none.
+#[test]
+fn the_list_s_thumb_is_dragged() {
+    let mut s = setup("history-thumb");
+    for i in 0..200 {
+        record(&s, &format!("SELECT {i}"), i);
+    }
+    let (_, mut view) = window(&mut s, "");
+    let mut text = text_layout::TextSystem::new();
+    paint(&mut view, &mut text);
+    assert_eq!(view.scroll, 0.0);
+    let selected = view.selected;
+    // The thumb: the bar's topmost point (the newest statements are shown).
+    let list = view.list;
+    let on = (list.min_y() as u32..list.max_y() as u32)
+        .flat_map(|y| (list.min_x() as u32..list.max_x() as u32 + 1).map(move |x| (x, y)))
+        .map(|(x, y)| Point::new(x as f32, y as f32))
+        .find(|p| view.bar.contains(*p))
+        .expect("a scrollbar along the list");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    assert_eq!(view.click(at), None);
+    assert!(view.bar.is_dragging(), "the thumb is held");
+    assert!(view.drag(Point::new(at.x, at.y + 60.0)));
+    assert!(view.scroll > 0.0, "the list moved");
+    assert!(view.release());
+    assert_eq!(view.selected, selected, "none chosen");
+}
+
+/// The search is the window's control with the keys: a press on it is its own (nothing
+/// chosen), its text cursor shown; typed text and ⌫ go through the view's controls and
+/// search again.
+#[test]
+fn the_search_has_the_keys_through_its_controls() {
+    let mut s = setup("history-search");
+    record(&s, "SELECT 1", 1);
+    record(&s, "SELECT 2", 2);
+    let (_, mut view) = window(&mut s, "");
+    let mut text = text_layout::TextSystem::new();
+    paint(&mut view, &mut text);
+    let f = view.field;
+    let on = Point::new(f.min_x() + 80.0, f.min_y() + f.size.height / 2.0);
+    view.hover(on);
+    assert_eq!(view.cursor_at(on), Some(ViewerCursor::Text));
+    assert_eq!(view.click(on), None);
+    assert_eq!(view.controls.focused(), Some(SEARCH));
+    assert!(view.text_input("2x"));
+    assert!(view.shown().is_empty());
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.shown().iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["SELECT 2"]);
+    // While Clear History asks: no text cursor over it.
+    view.command("clear");
+    assert_ne!(view.cursor_at(on), Some(ViewerCursor::Text));
+}

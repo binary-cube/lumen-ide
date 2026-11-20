@@ -14,14 +14,17 @@ use refactor::application::{Conflict, RenameContext, plan_rename};
 use refactor::{Plan, valid_name};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx, Tone, radius, space};
+use ui_components::tool_panel::KeyReach;
 use ui_components::{Viewer, ViewerAction, ViewerKey, ViewerPaint};
 use ui_kit::{TextInput, TextInputStyle, draw_text};
 
+use crate::name_field::NameField;
 use crate::page::{MIN_LIST, PageScroll};
-use crate::plan_list::PlanList;
 #[cfg(test)]
 pub use crate::plan_list::Row;
+use crate::plan_list::{Places, PlanList};
 
 /// The extension of the view's virtual tab.
 pub const EXTENSION: &str = "view-rename";
@@ -38,10 +41,12 @@ pub struct RenameData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
     Apply,
-    Field,
     /// The `esc` key cap: drops the refactoring.
     Close,
 }
+
+/// The name field's place among the controls (see [`RenameView::with_controls`]).
+const FIELD: usize = 2;
 
 /// The worker a new name's clashes are found on.
 const CONFLICTS_THREAD: &str = "refactor-conflicts";
@@ -52,6 +57,10 @@ pub struct RenameView {
     /// What is typed before the name and not shown in the field (a PHP variable's `$`).
     prefix: String,
     name: TextInput,
+    /// Where the name's field was drawn last.
+    name_area: Option<Rect>,
+    /// A key or a text reached the name: the preview follows it.
+    edited: bool,
     plan: Option<Plan>,
     planning: Option<Receiver<Plan>>,
     /// What the typed name would clash with.
@@ -67,6 +76,10 @@ pub struct RenameView {
     hover: Option<Hit>,
     list: PlanList,
     page: PageScroll,
+    /// Its controls' state of use (see [`RenameView::with_controls`]).
+    controls: Controls,
+    /// What a press on the places decided, taken by the click.
+    clicked: Option<ViewerAction>,
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
@@ -150,10 +163,15 @@ impl RenameView {
 
     /// Types `text` into the name field.
     pub fn type_name(&mut self, text: &str) {
-        // One line, no spaces: a name.
-        let text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-        self.name.insert(&text);
-        self.name_changed();
+        self.with_controls(|c, parts| c.text(parts, text));
+        self.follow_name();
+    }
+
+    /// The name was reached by a key or a text: the preview follows it.
+    fn follow_name(&mut self) {
+        if std::mem::take(&mut self.edited) {
+            self.name_changed();
+        }
     }
 
     /// The action applying the chosen places (`None` if it can't be applied).
@@ -195,10 +213,29 @@ impl RenameView {
         });
         self.planning = Some(rx);
     }
+
+    /// Its controls (the page's scrollbar, the places, the name's field), the topmost first.
+    /// The field is the page's only one with keys: it has the focus from `set_data` on.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut places =
+            Places { list: &mut self.list, plan: self.plan.as_mut(), clicked: &mut self.clicked };
+        let mut field =
+            NameField { input: &mut self.name, area: self.name_area, edited: &mut self.edited };
+        let mut parts: [&mut dyn Control; 3] = [&mut self.page, &mut places, &mut field];
+        f(&mut self.controls, &mut parts)
+    }
 }
 
 impl Viewer for RenameView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
+        // The keys' part from the first data on: a press beside it leaves it the focus.
+        if self.controls.focused().is_none() {
+            self.controls = Controls::sticky();
+            self.with_controls(|c, parts| c.focus(parts, Some(FIELD)));
+        }
         let Some(data) = data.downcast_ref::<RenameData>() else { return };
         let name = data.context.target.name.clone();
         // The language's sigil (`$total`) stays: only the name after it is typed.
@@ -253,34 +290,26 @@ impl Viewer for RenameView {
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
+        if self.with_controls(|c, parts| c.key(parts, key, KeyReach::default())).is_some() {
+            self.follow_name();
+            return true;
+        }
         match key {
-            ViewerKey::Backspace => self.name.backspace(false),
-            ViewerKey::Delete => self.name.delete(),
-            ViewerKey::Left => self.name.move_left(false, false),
-            ViewerKey::Right => self.name.move_right(false, false),
-            ViewerKey::Home => self.name.home(false),
-            ViewerKey::End => self.name.end(false),
             ViewerKey::Enter => {
                 self.action = self.apply();
-                return self.action.is_some();
+                self.action.is_some()
             }
             // Esc: the refactoring is dropped, back to the editor.
             ViewerKey::Escape => {
                 self.action = Some(ViewerAction::Close);
-                return true;
+                true
             }
-            _ => return false,
+            _ => false,
         }
-        self.name_changed();
-        true
     }
 
     fn command(&mut self, id: &str) -> bool {
-        if id == "select_all" {
-            self.name.select_all();
-            return true;
-        }
-        false
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {
@@ -288,27 +317,26 @@ impl Viewer for RenameView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // The page's scrollbar; nothing under the keys.
-        if self.page.press(p) || !self.page.contains(p) {
+        // Nothing under the keys.
+        if !self.page.contains(p) {
             return None;
         }
-        if self.list.contains(p) {
-            return self.list.click(self.plan.as_mut()?, p);
+        // The page's scrollbar, a place, the name's field.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            return self.clicked.take();
         }
         let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
         match hit {
-            Hit::Apply => return self.apply(),
-            Hit::Field => self.name.click(p.x),
-            Hit::Close => return Some(ViewerAction::Close),
+            Hit::Apply => self.apply(),
+            Hit::Close => Some(ViewerAction::Close),
         }
-        None
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
         let changed = hover != self.hover;
         self.hover = hover;
-        self.list.hover(p) | self.page.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -316,11 +344,11 @@ impl Viewer for RenameView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.page.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.page.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -391,7 +419,7 @@ impl Viewer for RenameView {
             lead: 0.0,
         };
         self.name.paint(layer, ctx.text, field, true, &t("refactor.new_name"), &style);
-        self.hits.push((field, Hit::Field));
+        self.name_area = Some(field);
         let button = Rect::new(field.max_x() + px(space::MD), y, button_w, px(ds::BUTTON_H));
         let hovered = self.hover == Some(Hit::Apply);
         ds::primary_button(

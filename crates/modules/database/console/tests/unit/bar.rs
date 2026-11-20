@@ -58,7 +58,7 @@ fn center(bar: &ConsoleBar, tool: Tool) -> Point {
 fn its_tab_is_the_console_of_its_source() {
     let b = bar("title", "");
     assert_eq!(b.bar.title().as_deref(), Some("console [shop]"));
-    assert_eq!(b.bar.icon(), Some("database"));
+    assert_eq!(b.bar.icon(), None, "a server without an icon of its own: the file's");
     assert!(b.bar.accent(&Palette::dark()).is_some(), "the source's color");
     assert_eq!(
         b.bar.crumbs(),

@@ -29,6 +29,12 @@ fn view() -> CommitView {
     view
 }
 
+/// A press through the view's parts: `true` if the code's text took it (a selection held).
+fn press_code(view: &mut CommitView, p: Point) -> bool {
+    Viewer::press(view, p, 1);
+    view.code.dragging
+}
+
 fn at(row: f32, column: f32) -> Point {
     Point::new(100.0 + column * 10.0, row * 20.0 + 5.0)
 }
@@ -36,16 +42,16 @@ fn at(row: f32, column: f32) -> Point {
 #[test]
 fn a_drag_selects_across_lines_and_a_tab_counts_as_shown() {
     let mut view = view();
-    assert!(view.press_code(at(1.0, 4.0), false));
-    assert!(view.drag_code(at(2.0, 2.0)));
-    assert!(view.code.release());
+    assert!(press_code(&mut view, at(1.0, 4.0)));
+    assert!(view.drag(at(2.0, 2.0)));
+    assert!(view.release());
     assert_eq!(view.selected_code().as_deref(), Some("one\ntw"));
 }
 
 #[test]
 fn a_click_without_a_drag_selects_nothing() {
     let mut view = view();
-    assert!(view.press_code(at(1.0, 4.0), false));
+    assert!(press_code(&mut view, at(1.0, 4.0)));
     view.code.release();
     assert_eq!(view.selected_code(), None);
 }
@@ -53,25 +59,25 @@ fn a_click_without_a_drag_selects_nothing() {
 #[test]
 fn a_hunk_header_or_the_numbers_are_not_code() {
     let mut view = view();
-    assert!(!view.press_code(at(0.0, 2.0), false), "a hunk's header");
-    assert!(!view.press_code(Point::new(50.0, 25.0), false), "the numbers");
+    assert!(!press_code(&mut view, at(0.0, 2.0)), "a hunk's header");
+    assert!(!press_code(&mut view, Point::new(50.0, 25.0)), "the numbers");
 }
 
 #[test]
 fn a_press_elsewhere_ends_the_selection() {
     let mut view = view();
-    view.press_code(at(1.0, 4.0), false);
-    view.drag_code(at(2.0, 2.0));
+    press_code(&mut view, at(1.0, 4.0));
+    view.drag(at(2.0, 2.0));
     view.code.release();
-    assert!(!view.press_code(at(1.0, 4.0), true), "on the message");
+    assert!(!press_code(&mut view, Point::new(-10.0, -10.0)), "pressed elsewhere");
     assert_eq!(view.selected_code(), None);
 }
 
 #[test]
 fn the_highlight_covers_what_is_selected_and_stays_between_the_edges() {
     let mut view = view();
-    view.press_code(at(1.0, 4.0), false);
-    view.drag_code(at(2.0, 2.0));
+    press_code(&mut view, at(1.0, 4.0));
+    view.drag(at(2.0, 2.0));
     let row = view.code.band(1, 7, (100.0, 400.0)).unwrap();
     assert_eq!((row.min_x(), row.size.width), (140.0, 40.0));
     let last = view.code.band(2, 3, (100.0, 400.0)).unwrap();

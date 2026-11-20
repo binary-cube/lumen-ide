@@ -23,6 +23,7 @@ use std::time::SystemTime;
 use database::diagram::FileTable;
 use database::{DataFiles, DbError, RepositoryEvent, TableInfo, TableKind};
 use kernel::{EventBus, Point, ProjectId, Subscription};
+use ui_components::control::{Absent, Control, Controls, Divider, Scrolled, Shown, Thumb};
 use ui_components::data_grid::{DataGrid, ExportFormat, GridAction, GridSource, MENU_PREFIX, Tool};
 use ui_components::{
     AppRequest, KeyReach, PressMods, Restored, Splitter, ViewMemory, ViewMenuEntry, Viewer,
@@ -160,6 +161,8 @@ pub struct DataView {
     /// The list's width (logical pixels), its scroll, the structure's scroll.
     pub(crate) list_width: f32,
     pub(crate) list_scroll: f32,
+    /// How far the tables' list scrolls (measured at the last paint).
+    pub(crate) list_max: f32,
     pub(crate) structure_scroll: f32,
     /// The tables' and the structure's scrollbars, hidden at rest.
     pub(crate) list_bar: ui_components::EdgeScrollbar,
@@ -169,6 +172,10 @@ pub struct DataView {
     /// It's still to be brought into view.
     pub(crate) structure_reveal: bool,
     pub(crate) splitter: Splitter,
+    /// Where the held splitter's line goes (turned into the list's width).
+    split_at: Option<f32>,
+    /// Its parts' state of use (see `with_controls`).
+    controls: Controls,
     /// The project's dragged sizes: the list's width is kept there ([`LIST_SIZE`]).
     sizes: Option<workbench_model::LayoutSizes>,
     hits: Vec<(kernel::Rect, Hit)>,
@@ -203,13 +210,10 @@ pub struct DataView {
     export_seen: u64,
     /// The format of an export waiting for its file to be chosen.
     export_format: Option<ExportFormat>,
-    /// Where the grid is (the right side, under its header).
-    pub(crate) grid_area: kernel::Rect,
     pub(crate) list_area: kernel::Rect,
     pub(crate) structure_area: kernel::Rect,
-    /// The last paint's scale, and where the mouse last was.
+    /// The last paint's scale.
     pub(crate) last_scale: f32,
-    last_hover: Point,
     /// Its source's color (its tab's), as last worked out.
     color: crate::catalog::ColorCache,
     /// Whether its source has query consoles, for the catalog's generation (its header's
@@ -243,12 +247,16 @@ impl DataView {
             unsaved: false,
             list_width: 240.0,
             list_scroll: 0.0,
+            list_max: 0.0,
             structure_scroll: 0.0,
             list_bar: ui_components::EdgeScrollbar::auto_hiding(),
             structure_bar: ui_components::EdgeScrollbar::auto_hiding(),
             structure_focus: None,
             structure_reveal: false,
             splitter: Splitter::new(Default::default(), ui_components::Orientation::Vertical),
+            split_at: None,
+            // A press beside the grid leaves it the keys.
+            controls: Controls::sticky(),
             sizes: None,
             hits: Vec::new(),
             tips: Vec::new(),
@@ -266,11 +274,9 @@ impl DataView {
             export: None,
             export_seen: 0,
             export_format: None,
-            grid_area: kernel::Rect::default(),
             list_area: kernel::Rect::default(),
             structure_area: kernel::Rect::default(),
             last_scale: 1.0,
-            last_hover: Point::new(0.0, 0.0),
             color: crate::catalog::ColorCache::default(),
             console_cache: None,
         }
@@ -745,10 +751,6 @@ impl DataView {
     fn notify(&mut self, notification: Notification) {
         self.told.push(notification);
     }
-
-    fn in_grid(&self, p: Point) -> bool {
-        self.tab == Tab::Data && self.grid_area.contains(p)
-    }
 }
 
 /// Where the snapshot's mouse rests (`snapshot-point:<tool>`).
@@ -829,11 +831,6 @@ impl DataView {
     /// The scale of the last paint.
     fn scale(&self) -> f32 {
         self.last_scale
-    }
-
-    /// The mouse's last place (scrolling goes to what's under it).
-    fn hover_point(&self) -> Point {
-        self.last_hover
     }
 }
 

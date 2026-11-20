@@ -43,142 +43,10 @@ impl Viewer for ProfileView {
         }
     }
 
-    fn paint(&mut self, mut ctx: ViewerPaint<'_>) {
-        self.refresh();
-        let b = ctx.bounds;
-        self.bounds = b;
-        self.scale = ctx.scale;
-        self.hits.clear();
-        self.splitter.set_style(SplitterStyle::from_palette(ctx.palette));
-        let compact_rows = if self.report().is_some() { self.listed().len() } else { 0 };
-        let spec = LayoutSpec {
-            bounds: b,
-            scale: ctx.scale,
-            panel_w: self.panel_w,
-            drawer_open: self.drawer_open,
-            compact_rows,
-        };
-        let key = (
-            b.min_x().to_bits(),
-            b.min_y().to_bits(),
-            b.size.width.to_bits(),
-            b.size.height.to_bits(),
-            ctx.scale.to_bits(),
-            self.panel_w.to_bits(),
-            self.drawer_open,
-            compact_rows,
-        );
-        self.laid = *self.layout.get_or_update(key, || layout::layout(&spec));
-        let laid = self.laid;
-        self.paint_bar(&mut ctx, laid.bar);
-        let Some(report) = self.report().cloned() else {
-            let ds = Ctx::new(ctx.palette, ctx.scale);
-            let body = Rect::new(
-                b.min_x(),
-                laid.bar.max_y(),
-                b.size.width,
-                (b.max_y() - laid.bar.max_y()).max(0.0),
-            );
-            let layer = ctx.scene.push_layer(Some(body));
-            layer.quad(Quad::filled(body, ctx.palette.editor_background));
-            ds::empty_state(layer, ctx.text, &ds, body, &i18n::t("console.result_gone"), None);
-            return;
-        };
-        self.paint_summary(&mut ctx, laid.summary, &report);
-        if laid.compact.size.height > 0.0 {
-            self.paint_compact(&mut ctx, laid.compact);
-        }
-        // The columns that fit the tree's room, its words first.
-        let tree_logical = laid.tree.size.width / ctx.scale.max(0.01);
-        let words = self.table.tree_width(ctx.text, ctx.palette, ctx.scale);
-        let gutter = if self.table.rows().iter().any(|r| r.sign.is_some()) {
-            ui_components::tree_table::GUTTER
-        } else {
-            0.0
-        };
-        let fit = tree::fitting(&self.columns_all, tree_logical - gutter - 12.0, words);
-        self.rebuild(&report, Some(fit));
-        let selected = self.selected_node();
-        // The comparison and the tables take the panel's room too when it's beside (their
-        // tables are wide); in a drawer the panel still opens over them.
-        let whole = if laid.mode_wide {
-            Rect::new(
-                laid.tree.min_x(),
-                laid.tree.min_y(),
-                laid.panel.max_x() - laid.tree.min_x(),
-                laid.tree.size.height,
-            )
-        } else {
-            laid.tree
-        };
-        self.body = laid.tree;
-        let own_room = self.compare.is_some() || self.mode == ProfileMode::Tables;
-        if own_room {
-            self.body = whole;
-            if let Some(compare) = self.compare.as_mut() {
-                compare.paint(whole, ctx.scale, ctx.text, ctx.scene, ctx.palette, ctx.icons);
-            } else {
-                self.paint_tables(&mut ctx, whole, &report);
-            }
-            if laid.drawer && laid.panel.size.width > 0.0 && self.compare.is_none() {
-                self.paint_panel(&mut ctx, laid.panel, &report);
-            } else {
-                self.findings_area = Rect::default();
-                self.details_area = Rect::default();
-            }
-            // No splitter: nothing beside.
-            self.splitter.set_bounds(Rect::default(), ctx.scale);
-            self.paint_dropdown(&mut ctx);
-            return;
-        }
-        match self.mode {
-            ProfileMode::Tables => {}
-            ProfileMode::Graph => {
-                let findings = shown_of(&report, &self.shown);
-                self.graph.paint(crate::profile::graph::GraphPaint {
-                    area: laid.tree,
-                    scale: ctx.scale,
-                    text: ctx.text,
-                    scene: ctx.scene,
-                    palette: ctx.palette,
-                    icons: ctx.icons,
-                    report: &report,
-                    findings: &findings,
-                    table: &mut self.table,
-                    row_of: &self.built.row_of,
-                    selected,
-                });
-            }
-            ProfileMode::Flame => {
-                let findings = shown_of(&report, &self.shown);
-                self.flame.sync(&report, &findings, self.shown_generation);
-                let painter = ui_components::Painter {
-                    text: ctx.text,
-                    scene: ctx.scene,
-                    palette: ctx.palette,
-                    icons: ctx.icons,
-                };
-                self.flame.paint(laid.tree, ctx.scale, painter, selected);
-            }
-            ProfileMode::Tree => self.table.paint(TablePaint {
-                bounds: laid.tree,
-                scale: ctx.scale,
-                text: ctx.text,
-                scene: ctx.scene,
-                palette: ctx.palette,
-                icons: ctx.icons,
-            }),
-        }
-        if laid.panel.size.width > 0.0 {
-            self.paint_panel(&mut ctx, laid.panel, &report);
-        } else {
-            self.findings_area = Rect::default();
-            self.details_area = Rect::default();
-        }
-        // The splitter after both panes.
-        self.splitter.set_bounds(laid.split, ctx.scale);
-        self.splitter.paint(ctx.scene);
-        self.paint_dropdown(&mut ctx);
+    fn paint(&mut self, ctx: ViewerPaint<'_>) {
+        self.paint_view(ctx);
+        // What its parts want of the frames (a splitter's fade).
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn poll(&mut self) -> bool {
@@ -204,7 +72,7 @@ impl Viewer for ProfileView {
     }
 
     fn is_animating(&self) -> bool {
-        self.splitter.is_animating()
+        self.controls.is_animating()
     }
 
     fn pointer_down(&mut self, p: Point, clicks: u32, _mods: PressMods) -> Option<ViewerAction> {
@@ -226,15 +94,31 @@ impl Viewer for ProfileView {
             }
             self.dropdown = None;
         }
-        if self.splitter.begin_drag(p) {
-            if clicks == 2 {
-                self.splitter.end_drag();
-                self.panel_w = layout::PANEL_W;
-                if let Some(sizes) = &self.sizes {
-                    sizes.remove(PANEL_SIZE);
+        match self.with_controls(|c, parts| c.press(parts, p, clicks)) {
+            // The splitter: twice, the panel's width back to its own.
+            Some((SPLITTER, _)) => {
+                if clicks == 2 {
+                    self.with_controls(|c, parts| c.release(parts));
+                    self.panel_w = layout::PANEL_W;
+                    if let Some(sizes) = &self.sizes {
+                        sizes.remove(PANEL_SIZE);
+                    }
                 }
+                return None;
             }
-            return None;
+            // A side panel: its scrollbar's thumb held, or what its list says of the press
+            // (the filter lets the keys go).
+            Some(_) => {
+                self.typing = false;
+                if let Some(hit) = self.finding_pressed.take() {
+                    self.press_finding(hit);
+                }
+                if let Some(hit) = self.detail_pressed.take() {
+                    self.press_detail(hit);
+                }
+                return self.action.take();
+            }
+            None => {}
         }
         if let Some(hit) = self.hit_at(p) {
             if hit != Hit::Filter {
@@ -258,62 +142,6 @@ impl Viewer for ProfileView {
                 }
                 Some(CompareEvent::Step(node)) => self.select_node(Some(node)),
                 None => {}
-            }
-            return self.action.take();
-        }
-        if self.findings_area.contains(p) {
-            if self.findings.press_bar(p) {
-                return None;
-            }
-            let listed = self.listed();
-            match self.findings.hit(p) {
-                Some(FindingHit::Card(i) | FindingHit::Step(i)) => {
-                    if let Some(&f) = listed.get(i) {
-                        self.choose_finding(f);
-                    }
-                }
-                Some(FindingHit::Copy(i)) => {
-                    let sql = listed.get(i).and_then(|&f| {
-                        self.shown_findings().get(f)?.suggestion.as_ref()?.sql().map(str::to_owned)
-                    });
-                    if let Some(sql) = sql {
-                        self.copy(sql, "profile.view.copied_sql");
-                    }
-                }
-                Some(FindingHit::Insert(i)) => {
-                    if let Some(&f) = listed.get(i) {
-                        self.insert(f);
-                    }
-                }
-                Some(FindingHit::Ignore(i)) => {
-                    let rule =
-                        listed.get(i).and_then(|&f| self.shown_findings().get(f).map(|f| f.rule));
-                    if let (Some(rule), Some(runner)) = (rule, &self.runner) {
-                        runner.ignore_rule(rule, true);
-                        self.selected_finding = None;
-                        self.notifications
-                            .push(Notification::info(i18n::t("profile.view.ignored")));
-                    }
-                }
-                Some(FindingHit::ShowIgnored) => {
-                    if let Some(runner) = &self.runner {
-                        runner.unignore_all();
-                    }
-                }
-                None => {}
-            }
-            return self.action.take();
-        }
-        if self.details_area.contains(p) {
-            if self.details.press_bar(p) {
-                return None;
-            }
-            match self.details.hit(p) {
-                Some(DetailHit::Value(v)) if !v.is_empty() => {
-                    self.copy(v, "profile.view.copied_value")
-                }
-                Some(DetailHit::Problem(i)) => self.choose_finding(i),
-                _ => {}
             }
             return self.action.take();
         }
@@ -345,7 +173,8 @@ impl Viewer for ProfileView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(center) = self.splitter.drag_to(p) {
+        let held = self.with_controls(|c, parts| c.drag(parts, p));
+        if let (Some((SPLITTER, _)), Some(center)) = (held, self.split_at) {
             let w = ((self.bounds.max_x() - center) / self.scale.max(0.01)).max(layout::PANEL_MIN);
             if w != self.panel_w {
                 self.panel_w = w;
@@ -365,7 +194,7 @@ impl Viewer for ProfileView {
             ProfileMode::Tables => self.tables.drag(p),
             _ => self.table.drag(p),
         };
-        self.findings.drag(p) || self.details.drag(p) || body
+        held.is_some_and(|(_, moved)| moved) || body
     }
 
     fn release(&mut self) -> bool {
@@ -381,22 +210,15 @@ impl Viewer for ProfileView {
         };
         let others =
             self.compare.as_mut().is_some_and(|c| c.table.release()) | self.tables.release();
-        self.splitter.end_drag()
-            | self.findings.release()
-            | self.details.release()
-            | self.table.release()
-            | graph
-            | others
+        let parts = self.with_controls(|c, parts| c.release(parts));
+        parts.is_some_and(|(_, changed)| changed) | self.table.release() | graph | others
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.pointer = Some(p);
         let hit = self.hit_at(p);
         let mut changed = hit != self.hover;
         self.hover = hit;
-        changed |= self.splitter.hover(p);
-        changed |= self.findings.hover(p);
-        changed |= self.details.hover(p);
+        changed |= self.with_controls(|c, parts| c.hover(parts, Some(p)));
         let inside = self.body.contains(p) && self.dropdown.is_none();
         if let Some(compare) = self.compare.as_mut() {
             let over = (inside || self.laid.panel.contains(p)) && self.dropdown.is_none();
@@ -420,21 +242,22 @@ impl Viewer for ProfileView {
         if let Some(compare) = self.compare.as_mut() {
             return compare.scroll(dx, dy);
         }
-        match self.pointer {
-            Some(p) if self.findings_area.contains(p) => self.findings.scroll_by(dy),
-            Some(p) if self.details_area.contains(p) => self.details.scroll_by(dy),
-            _ => match self.mode {
-                ProfileMode::Graph => self.graph.scroll(dx, dy),
-                ProfileMode::Flame => self.flame.scroll(dy),
-                ProfileMode::Tables => self.tables.scroll(dx, dy),
-                _ => self.table.scroll(dx, dy),
-            },
+        // Over a side panel: its list's (never through it to the body under a drawer).
+        if self.with_controls(|c, parts| c.scroll_hovered(parts, dx, dy)).is_some() {
+            return self.panel_scrolled;
+        }
+        match self.mode {
+            ProfileMode::Graph => self.graph.scroll(dx, dy),
+            ProfileMode::Flame => self.flame.scroll(dy),
+            ProfileMode::Tables => self.tables.scroll(dx, dy),
+            _ => self.table.scroll(dx, dy),
         }
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.splitter.contains(p) {
-            return Some(ViewerCursor::ResizeHorizontal);
+        // Its parts' (the splitter's, a finding's card).
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
         match self.hit_at(p) {
             Some(Hit::Filter) => return Some(ViewerCursor::Text),
@@ -449,9 +272,6 @@ impl Viewer for ProfileView {
                 return Some(ViewerCursor::Pointer);
             }
             return compare.table.cursor_at(p);
-        }
-        if self.findings.hit(p).is_some() {
-            return Some(ViewerCursor::Pointer);
         }
         match self.mode {
             ProfileMode::Graph => (self.graph.is_control(p) || self.graph.is_over_card(p))
@@ -475,13 +295,11 @@ impl Viewer for ProfileView {
         if let Some(compare) = &self.compare {
             return compare.tooltip_at(p);
         }
-        if self.findings_area.contains(p) {
-            return self.findings.tooltip_at(p);
+        // A side panel's (a drawer's over the body: none of the body's through it).
+        if let Some(tip) = self.controls.tooltip_at(p) {
+            return Some(tip);
         }
-        if self.details_area.contains(p) {
-            return self.details.tooltip_at(p);
-        }
-        if self.body.contains(p) {
+        if self.body.contains(p) && !self.laid.panel.contains(p) {
             return match self.mode {
                 ProfileMode::Graph => self.graph.tooltip_at(p),
                 ProfileMode::Flame => self.flame.tooltip_at(p),
@@ -788,10 +606,10 @@ impl Viewer for ProfileView {
                 _ => {}
             }
         }
-        if key.is_control() || key == ' ' {
-            return false;
-        }
-        // Typing starts the filter.
+        // Typing starts the filter (the part having the keys).
+        let mut typed = None;
+        self.with_filter(&mut typed, |c, parts| c.char_key(parts, key));
+        let Some(key) = typed else { return false };
         self.typing = true;
         let mut filter = self.filter.clone();
         filter.push(key);
@@ -960,5 +778,379 @@ impl Viewer for ProfileView {
             count = report.profile.nodes.len(),
             time = millis(set.elapsed)
         ))
+    }
+}
+
+/// The splitter's and the filter's places among the view's parts.
+const SPLITTER: usize = 0;
+const FILTER: usize = 3;
+
+impl ProfileView {
+    /// Everything it shows, its parts placed.
+    fn paint_view(&mut self, mut ctx: ViewerPaint<'_>) {
+        self.refresh();
+        let b = ctx.bounds;
+        self.bounds = b;
+        self.scale = ctx.scale;
+        self.hits.clear();
+        self.splitter.set_style(SplitterStyle::from_palette(ctx.palette));
+        let compact_rows = if self.report().is_some() { self.listed().len() } else { 0 };
+        let spec = LayoutSpec {
+            bounds: b,
+            scale: ctx.scale,
+            panel_w: self.panel_w,
+            drawer_open: self.drawer_open,
+            compact_rows,
+        };
+        let key = (
+            b.min_x().to_bits(),
+            b.min_y().to_bits(),
+            b.size.width.to_bits(),
+            b.size.height.to_bits(),
+            ctx.scale.to_bits(),
+            self.panel_w.to_bits(),
+            self.drawer_open,
+            compact_rows,
+        );
+        self.laid = *self.layout.get_or_update(key, || layout::layout(&spec));
+        let laid = self.laid;
+        self.paint_bar(&mut ctx, laid.bar);
+        let Some(report) = self.report().cloned() else {
+            let ds = Ctx::new(ctx.palette, ctx.scale);
+            let body = Rect::new(
+                b.min_x(),
+                laid.bar.max_y(),
+                b.size.width,
+                (b.max_y() - laid.bar.max_y()).max(0.0),
+            );
+            let layer = ctx.scene.push_layer(Some(body));
+            layer.quad(Quad::filled(body, ctx.palette.editor_background));
+            ds::empty_state(layer, ctx.text, &ds, body, &i18n::t("console.result_gone"), None);
+            return;
+        };
+        self.paint_summary(&mut ctx, laid.summary, &report);
+        if laid.compact.size.height > 0.0 {
+            self.paint_compact(&mut ctx, laid.compact);
+        }
+        // The columns that fit the tree's room, its words first.
+        let tree_logical = laid.tree.size.width / ctx.scale.max(0.01);
+        let words = self.table.tree_width(ctx.text, ctx.palette, ctx.scale);
+        let gutter = if self.table.rows().iter().any(|r| r.sign.is_some()) {
+            ui_components::tree_table::GUTTER
+        } else {
+            0.0
+        };
+        let fit = tree::fitting(&self.columns_all, tree_logical - gutter - 12.0, words);
+        self.rebuild(&report, Some(fit));
+        let selected = self.selected_node();
+        // The comparison and the tables take the panel's room too when it's beside (their
+        // tables are wide); in a drawer the panel still opens over them.
+        let whole = if laid.mode_wide {
+            Rect::new(
+                laid.tree.min_x(),
+                laid.tree.min_y(),
+                laid.panel.max_x() - laid.tree.min_x(),
+                laid.tree.size.height,
+            )
+        } else {
+            laid.tree
+        };
+        self.body = laid.tree;
+        let own_room = self.compare.is_some() || self.mode == ProfileMode::Tables;
+        if own_room {
+            self.body = whole;
+            if let Some(compare) = self.compare.as_mut() {
+                compare.paint(whole, ctx.scale, ctx.text, ctx.scene, ctx.palette, ctx.icons);
+            } else {
+                self.paint_tables(&mut ctx, whole, &report);
+            }
+            if laid.drawer && laid.panel.size.width > 0.0 && self.compare.is_none() {
+                self.paint_panel(&mut ctx, laid.panel, &report);
+            } else {
+                self.findings_area = Rect::default();
+                self.details_area = Rect::default();
+            }
+            // No splitter: nothing beside.
+            self.splitter.set_bounds(Rect::default(), ctx.scale);
+            self.paint_dropdown(&mut ctx);
+            return;
+        }
+        match self.mode {
+            ProfileMode::Tables => {}
+            ProfileMode::Graph => {
+                let findings = shown_of(&report, &self.shown);
+                self.graph.paint(crate::profile::graph::GraphPaint {
+                    area: laid.tree,
+                    scale: ctx.scale,
+                    text: ctx.text,
+                    scene: ctx.scene,
+                    palette: ctx.palette,
+                    icons: ctx.icons,
+                    report: &report,
+                    findings: &findings,
+                    table: &mut self.table,
+                    row_of: &self.built.row_of,
+                    selected,
+                });
+            }
+            ProfileMode::Flame => {
+                let findings = shown_of(&report, &self.shown);
+                self.flame.sync(&report, &findings, self.shown_generation);
+                let painter = ui_components::Painter {
+                    text: ctx.text,
+                    scene: ctx.scene,
+                    palette: ctx.palette,
+                    icons: ctx.icons,
+                };
+                self.flame.paint(laid.tree, ctx.scale, painter, selected);
+            }
+            ProfileMode::Tree => self.table.paint(TablePaint {
+                bounds: laid.tree,
+                scale: ctx.scale,
+                text: ctx.text,
+                scene: ctx.scene,
+                palette: ctx.palette,
+                icons: ctx.icons,
+            }),
+        }
+        if laid.panel.size.width > 0.0 {
+            self.paint_panel(&mut ctx, laid.panel, &report);
+        } else {
+            self.findings_area = Rect::default();
+            self.details_area = Rect::default();
+        }
+        // The splitter after both panes.
+        self.splitter.set_bounds(laid.split, ctx.scale);
+        self.splitter.paint(ctx.scene);
+        self.paint_dropdown(&mut ctx);
+    }
+
+    /// What a press on the findings' list hit.
+    fn press_finding(&mut self, hit: FindingHit) {
+        let listed = self.listed();
+        match hit {
+            FindingHit::Card(i) | FindingHit::Step(i) => {
+                if let Some(&f) = listed.get(i) {
+                    self.choose_finding(f);
+                }
+            }
+            FindingHit::Copy(i) => {
+                let sql = listed.get(i).and_then(|&f| {
+                    self.shown_findings().get(f)?.suggestion.as_ref()?.sql().map(str::to_owned)
+                });
+                if let Some(sql) = sql {
+                    self.copy(sql, "profile.view.copied_sql");
+                }
+            }
+            FindingHit::Insert(i) => {
+                if let Some(&f) = listed.get(i) {
+                    self.insert(f);
+                }
+            }
+            FindingHit::Ignore(i) => {
+                let rule =
+                    listed.get(i).and_then(|&f| self.shown_findings().get(f).map(|f| f.rule));
+                if let (Some(rule), Some(runner)) = (rule, &self.runner) {
+                    runner.ignore_rule(rule, true);
+                    self.selected_finding = None;
+                    self.notifications.push(Notification::info(i18n::t("profile.view.ignored")));
+                }
+            }
+            FindingHit::ShowIgnored => {
+                if let Some(runner) = &self.runner {
+                    runner.unignore_all();
+                }
+            }
+        }
+    }
+
+    /// What a press on a step's details hit.
+    fn press_detail(&mut self, hit: DetailHit) {
+        match hit {
+            DetailHit::Value(v) if !v.is_empty() => self.copy(v, "profile.view.copied_value"),
+            DetailHit::Problem(i) => self.choose_finding(i),
+            _ => {}
+        }
+    }
+
+    /// Its parts (the splitter, the findings' and the details' panels while they're drawn),
+    /// the topmost first, with their state of use. The body's views (the tree, the graph,
+    /// the flame graph, the tables, the comparison: one at a time, by its mode) and the
+    /// filter stay its own.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut typed = None;
+        self.with_filter(&mut typed, f)
+    }
+
+    /// [`Self::with_controls`], the character a key started the filter with left in
+    /// `typed`. The filter has the keys without a press (nothing else takes them): it's
+    /// given the focus each time.
+    fn with_filter<R>(
+        &mut self,
+        typed: &mut Option<char>,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let (mut findings_scrolled, mut details_scrolled) = (false, false);
+        let mut splitter = Divider { splitter: &mut self.splitter, at: &mut self.split_at };
+        let mut findings = Panel {
+            rows: &mut self.findings,
+            area: self.findings_area,
+            pressed: &mut self.finding_pressed,
+            scrolled: &mut findings_scrolled,
+        };
+        let mut details = Panel {
+            rows: &mut self.details,
+            area: self.details_area,
+            pressed: &mut self.detail_pressed,
+            scrolled: &mut details_scrolled,
+        };
+        let mut filter = Filter { typed };
+        let mut parts: [&mut dyn Control; 4] =
+            [&mut splitter, &mut findings, &mut details, &mut filter];
+        self.controls.focus(&mut parts, Some(FILTER));
+        let answer = f(&mut self.controls, &mut parts);
+        self.panel_scrolled = findings_scrolled || details_scrolled;
+        answer
+    }
+}
+
+/// The steps' filter as the part having the keys: never hit (it's drawn by the view), a
+/// character typed with nothing else to take it starts it (`typed`; the view filters).
+struct Filter<'a> {
+    typed: &'a mut Option<char>,
+}
+
+impl Control for Filter<'_> {
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    /// Focused from code only: Tab doesn't stop at it.
+    fn in_tab_order(&self) -> bool {
+        false
+    }
+
+    /// Any but a control character or a space.
+    fn char_key(&mut self, key: char) -> bool {
+        if key.is_control() || key == ' ' {
+            return false;
+        }
+        *self.typed = Some(key);
+        true
+    }
+}
+
+/// What a side panel's list (the findings' cards, a step's details) answers as a part of the
+/// view.
+trait PanelRows {
+    /// What a press on it hits.
+    type Hit;
+    fn thumb(&mut self) -> Thumb<'_>;
+    fn hit_at(&self, p: Point) -> Option<Self::Hit>;
+    /// The mouse at `p` (anywhere: off it, nothing lit): `true` if what it shows changed.
+    fn hover_at(&mut self, p: Point) -> bool;
+    fn scroll_by(&mut self, dy: f32) -> bool;
+    fn tip_at(&self, p: Point) -> Option<Tip>;
+    fn cursor_at(&self, p: Point) -> Option<ViewerCursor>;
+}
+
+impl PanelRows for FindingsList {
+    type Hit = FindingHit;
+    fn thumb(&mut self) -> Thumb<'_> {
+        FindingsList::thumb(self)
+    }
+    fn hit_at(&self, p: Point) -> Option<FindingHit> {
+        self.hit(p)
+    }
+    fn hover_at(&mut self, p: Point) -> bool {
+        self.hover(p)
+    }
+    fn scroll_by(&mut self, dy: f32) -> bool {
+        FindingsList::scroll_by(self, dy)
+    }
+    fn tip_at(&self, p: Point) -> Option<Tip> {
+        self.tooltip_at(p)
+    }
+    /// A card and its buttons are pressed.
+    fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        self.hit(p).map(|_| ViewerCursor::Pointer)
+    }
+}
+
+impl PanelRows for DetailsList {
+    type Hit = DetailHit;
+    fn thumb(&mut self) -> Thumb<'_> {
+        DetailsList::thumb(self)
+    }
+    fn hit_at(&self, p: Point) -> Option<DetailHit> {
+        self.hit(p)
+    }
+    fn hover_at(&mut self, p: Point) -> bool {
+        self.hover(p)
+    }
+    fn scroll_by(&mut self, dy: f32) -> bool {
+        DetailsList::scroll_by(self, dy)
+    }
+    fn tip_at(&self, p: Point) -> Option<Tip> {
+        self.tooltip_at(p)
+    }
+    /// Its rows are copied by a press, without a hand over them.
+    fn cursor_at(&self, _p: Point) -> Option<ViewerCursor> {
+        None
+    }
+}
+
+/// A side panel as a part of the view, there while it's drawn: a press on its scrollbar
+/// holds the thumb, elsewhere on it what its list hit is kept for the view; the wheel over
+/// it is its list's (`scrolled`: it moved), never the body's under it.
+struct Panel<'a, L: PanelRows> {
+    rows: &'a mut L,
+    /// Where it was drawn this frame (empty: not drawn).
+    area: Rect,
+    pressed: &'a mut Option<L::Hit>,
+    scrolled: &'a mut bool,
+}
+
+impl<L: PanelRows> Control for Panel<'_, L> {
+    fn area(&self) -> Option<Rect> {
+        Some(self.area).filter(|a| a.size.width > 0.0 && a.size.height > 0.0)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let mut thumb = self.rows.thumb();
+        if thumb.hit(p) && thumb.press(p, clicks) == Press::Held {
+            return Press::Held;
+        }
+        *self.pressed = self.rows.hit_at(p);
+        Press::Took
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.rows.thumb().drag(p)
+    }
+
+    fn release(&mut self) -> bool {
+        self.rows.thumb().release()
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        let bar = self.rows.thumb().hover(p);
+        bar | self.rows.hover_at(p.unwrap_or(NOWHERE))
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.rows.cursor_at(p)
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        *self.scrolled |= self.rows.scroll_by(dy);
+        true
+    }
+
+    fn tooltip(&self, p: Point) -> Option<Tip> {
+        self.rows.tip_at(p)
     }
 }

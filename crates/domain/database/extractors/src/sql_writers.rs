@@ -35,6 +35,11 @@ impl Extractor for SqlInserts {
         "sql"
     }
 
+    /// A `.sql` is the plain inserts (one row a statement).
+    fn names_files(&self) -> &[&str] {
+        if self.multirow { &[] } else { &["sql"] }
+    }
+
     fn skips_columns(&self) -> bool {
         true
     }

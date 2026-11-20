@@ -941,6 +941,80 @@ impl DateRangePicker {
     }
 }
 
+/// What a press or a key on an open date picker said.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RangeAnswer {
+    /// Pressed outside it (its owner closes it).
+    Outside,
+    /// A preset, a range applied, or cancelled.
+    Chose(PickerEvent),
+}
+
+/// An open date picker as a form's control: hit anywhere (a press outside it is told, its
+/// owner closes it), its fields take the keys and the text; what it said is written to
+/// `answer`.
+pub struct RangePart<'a> {
+    pub picker: &'a mut DateRangePicker,
+    pub answer: &'a mut Option<RangeAnswer>,
+}
+
+impl std::fmt::Debug for RangePart<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RangePart").finish_non_exhaustive()
+    }
+}
+
+impl crate::control::Control for RangePart<'_> {
+    fn hit(&self, _p: Point) -> bool {
+        true
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> crate::control::Press {
+        *self.answer = match self.picker.press(p) {
+            None => Some(RangeAnswer::Outside),
+            Some(event) => event.map(RangeAnswer::Chose),
+        };
+        crate::control::Press::Took
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.picker.hover(p.unwrap_or(crate::control::NOWHERE))
+    }
+
+    /// A hand over what takes a press in it, the arrow elsewhere (never what's under it).
+    fn cursor(&self, p: Point) -> Option<crate::ViewerCursor> {
+        let over = self.picker.hits.iter().any(|(r, _)| r.contains(p));
+        Some(if over { crate::ViewerCursor::Pointer } else { crate::ViewerCursor::Arrow })
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        if let Some(event) = self.picker.key(key, reach) {
+            *self.answer = Some(RangeAnswer::Chose(event));
+        }
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.picker.text_input(typed)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        self.picker.selected_text()
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        self.picker.command(id)
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/date_range.rs"]
 mod tests;

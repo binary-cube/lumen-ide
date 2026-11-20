@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use i18n::t;
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx};
 use ui_components::picker::{Picker, PickerEvent, PickerItem};
 use ui_components::{
@@ -42,6 +43,8 @@ pub struct ConsentView {
     field: Rect,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
+    /// Its parts' state of use (see [`ConsentView::with_controls`]).
+    controls: Controls,
     resources: Option<Arc<dyn ResourceSource>>,
     action: Option<ViewerAction>,
     notifications: Vec<Notification>,
@@ -84,10 +87,21 @@ impl ConsentView {
             field: Rect::default(),
             hits: Vec::new(),
             hover: None,
+            controls: Controls::default(),
             resources: None,
             action: None,
             notifications: Vec::new(),
         }
+    }
+
+    /// Its parts (the length's list, over everything while open), with their state of use.
+    /// The list opens from its field and is given the focus then: its keys, Tab among them.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut parts: [&mut dyn Control; 1] = [&mut self.picker];
+        f(&mut self.controls, &mut parts)
     }
 
     fn hit(&self, p: Point) -> Option<Hit> {
@@ -245,20 +259,30 @@ impl Viewer for ConsentView {
 
     /// A click (as a tab or a modal window sends it: both come here).
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if self.picker.is_open() {
-            let event = self.picker.press(p);
+        // A part takes it (an open list: a length chosen, or closed by a press outside).
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            let event = self.picker.take_event();
             self.picked(event);
             return None;
         }
         if let Some(hit) = self.hit(p) {
             self.act(hit);
         }
+        // A list opened: it has the keys, and the mouse (there) is over it.
+        if self.picker.is_open() {
+            self.with_controls(|c, parts| {
+                c.focus(parts, Some(0));
+                c.hover(parts, Some(p));
+            });
+        }
         self.action.take()
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        if self.picker.is_open() {
-            return self.picker.hover(p);
+        // A part under the mouse (an open list) takes it over what's under it.
+        let over = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        if self.controls.hovered().is_some() {
+            return over;
         }
         let hover = self.hit(p);
         let changed = hover != self.hover;
@@ -267,20 +291,32 @@ impl Viewer for ConsentView {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        // The length's list open: its own cursor, never the text's under it.
-        if self.picker.is_open() {
-            return Some(self.picker.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
+        // A part under the mouse (the length's list open): its own cursor, never the text's
+        // under it.
+        if self.controls.hovered().is_some() {
+            return Some(self.controls.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
         }
         Some(self.hit(p).map_or(ViewerCursor::Arrow, |_| ViewerCursor::Pointer))
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        self.picker.is_open() && self.picker.scroll(dy)
+    /// The wheel to the part under the mouse (the open list).
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.with_controls(|c, parts| c.scroll_hovered(parts, dx, dy)).is_some()
+    }
+
+    /// A part holding the pointer (the open list's thumb) follows it.
+    fn drag(&mut self, p: Point) -> bool {
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, changed)| changed)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if self.picker.is_open() {
-            let event = self.picker.key(key, reach);
+        // The part with the focus (the open list: every key its own).
+        if self.with_controls(|c, parts| c.key(parts, key, reach)).is_some() {
+            let event = self.picker.take_event();
             self.picked(event);
             return true;
         }

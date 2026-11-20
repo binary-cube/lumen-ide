@@ -269,6 +269,12 @@ impl ProjectSearch {
         self.results.get(index)
     }
 
+    /// The first of the scrolled rows shown (a test's view of the scrolling).
+    #[cfg(test)]
+    pub(crate) fn first_row(&self) -> usize {
+        self.first
+    }
+
     pub fn recent(&self, index: usize) -> Option<&str> {
         self.recent.get(index).map(String::as_str)
     }
@@ -455,11 +461,9 @@ impl ProjectSearch {
         let option = self.option_at(p).map(|(_, o)| o);
         let replace = self.replace_button.contains(p);
         let replace_all = self.replace_open && self.replace_all.contains(p);
-        let bar = self.bar.hover(p);
         let forget = self.forget_buttons.iter().find(|(r, _)| r.contains(p)).map(|(_, i)| *i);
         let clear = self.clear_all.contains(p);
-        let changed = bar
-            || forget != self.forget_hover
+        let changed = forget != self.forget_hover
             || clear != self.clear_hover
             || hover != self.hover
             || esc != self.esc_hover
@@ -504,6 +508,17 @@ impl ProjectSearch {
     /// The mouse released: the thumb let go. `true` if it was held.
     pub fn release_bar(&mut self) -> bool {
         self.bar.release()
+    }
+
+    /// `p` is on the scrolled rows' scrollbar (the tests find its thumb).
+    #[cfg(test)]
+    pub fn on_bar(&self, p: Point) -> bool {
+        self.bar.contains(p)
+    }
+
+    /// The mouse at `p` over the scrolled rows' scrollbar (it widens): `true` if it changed.
+    pub fn hover_bar(&mut self, p: Point) -> bool {
+        self.bar.hover(p)
     }
 
     /// The scrolled rows from `offset` (physical pixels, as the scrollbar gives it).

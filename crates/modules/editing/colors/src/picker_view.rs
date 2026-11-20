@@ -5,6 +5,8 @@
 use std::path::Path;
 
 use kernel::Point;
+use ui_components::color_picker::ColorPart;
+use ui_components::control::{Control, Controls};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{
     ColorPick, ColorPicker, PICKER_EXTENSION, PickerAction, Viewer, ViewerAction, ViewerCursor,
@@ -36,6 +38,10 @@ pub(crate) struct PickerView {
     /// The color's place in the active file's text.
     range: std::ops::Range<usize>,
     action: Option<ViewerAction>,
+    /// The picker's state of use as a control (see [`PickerView::with_controls`]), and what
+    /// it asked for at a press or a key (acted on right after).
+    controls: Controls,
+    asked: Option<PickerAction>,
     /// Done (applied or cancelled): the app closes it.
     done: bool,
 }
@@ -63,6 +69,32 @@ impl PickerView {
     }
 }
 
+impl PickerView {
+    /// Its one control: the picker, over everything while open (its keys too).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        // Whether the keys recolored it isn't needed here: the color is read when applied.
+        let mut recolored = false;
+        let mut picker = ColorPart {
+            picker: &mut self.picker,
+            colors: &Colors,
+            action: &mut self.asked,
+            recolored: &mut recolored,
+        };
+        let mut parts: [&mut dyn Control; 1] = [&mut picker];
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// What the picker asked for at a press or a key, done.
+    fn follow(&mut self) {
+        if let Some(action) = self.asked.take() {
+            self.act(action);
+        }
+    }
+}
+
 impl Viewer for PickerView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
         let Some(pick) = data.downcast_ref::<ColorPick>() else { return };
@@ -78,25 +110,25 @@ impl Viewer for PickerView {
 
     /// Anywhere: inside it works the picker; outside it closes, keeping a changed color.
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(action) = self.picker.mouse_down(p, &Colors) {
-            self.act(action);
-        }
+        self.with_controls(|c, parts| c.press(parts, p, 1));
+        self.follow();
         self.action.take()
     }
 
     /// In the square or on a strip: the color follows the mouse.
     fn drag(&mut self, p: Point) -> bool {
-        self.picker.mouse_drag(p, &Colors)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.picker.mouse_up()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.picker.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
+    /// Asked from `&self` at any point (not only where the mouse last was): the picker's own.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
         self.picker.over_control(p).then_some(ViewerCursor::Pointer)
     }
@@ -106,31 +138,22 @@ impl Viewer for PickerView {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        self.picker.type_text(text, &Colors);
-        true
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.text_input(text)
+        self.with_controls(|c, parts| c.paste(parts, text)).is_some()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
         self.edit_key_with(key, KeyReach::default())
     }
 
+    /// Esc gives up, ↵ applies, ⌫ erases in its field, ← → move its caret (⇧ selects).
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        match key {
-            ViewerKey::Escape => self.act(PickerAction::Cancel),
-            ViewerKey::Enter => match self.picker.confirm() {
-                Some(action) => self.act(action),
-                None => return false,
-            },
-            ViewerKey::Backspace => self.picker.backspace(&Colors),
-            ViewerKey::Left => self.picker.move_cursor(false, reach.extend),
-            ViewerKey::Right => self.picker.move_cursor(true, reach.extend),
-            _ => return false,
-        }
-        true
+        let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
+        self.follow();
+        used
     }
 
     /// The color sampled from the screen (`screen-color:#rrggbb`), ⌘A in its field.
@@ -144,13 +167,10 @@ impl Viewer for PickerView {
                 None => false,
             };
         }
-        if id == "select_all" {
-            self.picker.select_all();
-            return true;
-        }
-        false
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
+    /// Asked from `&self`: the picker's field's selection, read as its part reads it.
     fn selected_text(&self) -> Option<String> {
         Some(self.picker.input().selected_text().to_owned()).filter(|t| !t.is_empty())
     }

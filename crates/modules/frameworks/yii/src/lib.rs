@@ -19,6 +19,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Yii",
     description: "The controllers' views: completion and go to file",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "package", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

@@ -137,38 +137,23 @@ impl Viewer for PropertiesView {
     }
 
     fn wants_text(&self) -> bool {
-        self.typing || (self.picker.is_open() && self.picker.searches())
+        self.typing() || (self.picker.is_open() && self.picker.searches())
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        self.picker.is_open() && self.picker.scroll(dy)
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.with_controls(|c, parts| c.scroll_hovered(parts, dx, dy)).is_some()
     }
 
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.picker.next_frame()
+        self.controls.next_frame()
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        if self.picker.is_open() {
-            return self.picker.text_input(typed);
-        }
-        if !self.typing {
-            return false;
-        }
-        // Only octal digits, four at most.
-        let digits: String = typed.chars().filter(|c| ('0'..='7').contains(c)).collect();
-        if digits.is_empty() {
-            return true;
-        }
-        let room =
-            4usize.saturating_sub(self.octal.text().len() - self.octal.selected_text().len());
-        self.octal.insert(&digits[..digits.len().min(room)]);
-        self.octal_typed();
-        true
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.text_input(text.trim())
+        self.with_controls(|c, parts| c.paste(parts, text.trim())).is_some()
     }
 
     fn poll(&mut self) -> bool {
@@ -230,6 +215,7 @@ impl Viewer for PropertiesView {
         let ds = Ctx::new(palette, scale);
         self.hits.clear();
         self.anchors.clear();
+        self.octal_area = None;
         // (The footer — its keys, its buttons — is the window's: `modal_buttons`.)
         let layer = scene.push_layer(Some(bounds));
         self.paint_body(layer, text, icons, &ds, bounds, focused);
@@ -241,14 +227,22 @@ impl Viewer for PropertiesView {
             // (The algorithms are few: no search.)
             self.picker.paint(scene, text, icons, &ds, (anchor, bounds), &search);
         }
+        // What the parts want of the frames, as they were just drawn.
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        // An open list takes the click (outside it, it closes).
-        if self.picker.is_open() {
-            let event = self.picker.press(p);
-            self.picked(event);
-            return None;
+        // Its controls first. An open list takes the press (outside it, it closes) as one
+        // click (its search selects no word); the octal field takes the caret (while it can
+        // be edited); a press elsewhere takes the keys from it.
+        let clicks = if self.picker.is_open() { 1 } else { clicks };
+        match self.with_controls(|c, parts| c.press(parts, p, clicks)) {
+            Some((LIST, _)) => {
+                self.list_answered();
+                return None;
+            }
+            Some(_) => return None,
+            None => {}
         }
         let mut hit = self.hit(p);
         // Asked or running: only the footer's buttons (nothing changes meanwhile).
@@ -256,7 +250,6 @@ impl Viewer for PropertiesView {
         if !matches!(self.phase, Phase::Editing | Phase::Failed(_)) && !footer {
             hit = None;
         }
-        self.typing = matches!(hit, Some(Hit::Octal));
         match hit {
             Some(Hit::Choice(choice)) => self.open_list(choice),
             Some(Hit::Tab(tab)) => self.tab = tab,
@@ -265,7 +258,7 @@ impl Viewer for PropertiesView {
             Some(Hit::Calculate) => self.calculate(),
             Some(Hit::Copy(i)) => self.copy(i),
             Some(Hit::Bit(bit)) => self.toggle(bit),
-            Some(Hit::Octal) => self.octal.press(p.x, clicks),
+            Some(Hit::Octal) => {}
             Some(Hit::Measure) if self.measuring.is_some() => self.stop_measure(),
             Some(Hit::Measure) => self.measure(),
             Some(Hit::Recursive) => self.recursive = !self.recursive,
@@ -273,6 +266,8 @@ impl Viewer for PropertiesView {
             Some(hit @ (Hit::Ok | Hit::Back | Hit::Stop | Hit::Close)) => self.footer(hit),
             None => {}
         }
+        // What the mouse is over may have changed (a list opened under it).
+        self.with_controls(|c, parts| c.hover(parts, Some(p)));
         self.action.take()
     }
 
@@ -281,15 +276,19 @@ impl Viewer for PropertiesView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if self.typing {
-            self.octal.extend_to(p.x);
-        }
-        self.typing
+        // A control holding the pointer (the list's thumb, its search's selection).
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
+        // Its controls: an open list takes the mouse over everything.
+        let list = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         if self.picker.is_open() {
-            return self.picker.hover(p);
+            return list;
         }
         let hover = self.hit(p);
         let changed = hover != self.hover;
@@ -298,12 +297,15 @@ impl Viewer for PropertiesView {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        // An open list: its own (a hand on its rows); never what's under it.
-        if self.picker.is_open() {
-            return Some(self.picker.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
+        // A part's own (an open list's: a hand on its rows; the octal field's), and over a
+        // part saying none, the arrow: never what's under it.
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
+        }
+        if self.controls.hovered().is_some() {
+            return Some(ViewerCursor::Arrow);
         }
         Some(match self.hit(p) {
-            Some(Hit::Octal) => ViewerCursor::Text,
             Some(_) => ViewerCursor::Pointer,
             // Nothing to click or select there.
             None => ViewerCursor::Arrow,
@@ -315,10 +317,15 @@ impl Viewer for PropertiesView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if self.picker.is_open() {
-            let event = self.picker.key(key, reach);
-            self.picked(event);
-            return true;
+        // The part with the keys first (an open list takes them all; the octal field its
+        // own, Tab giving it the keys); the dialog's after.
+        match self.with_controls(|c, parts| c.key(parts, key, reach)) {
+            Some(LIST) => {
+                self.list_answered();
+                return true;
+            }
+            Some(_) => return true,
+            None => {}
         }
         match key {
             ViewerKey::Escape => self.action = Some(ViewerAction::Close),
@@ -326,31 +333,21 @@ impl Viewer for PropertiesView {
                 Phase::Confirm(total) => self.apply(total),
                 _ => self.ok(),
             },
-            ViewerKey::Tab => self.typing = self.edit.is_some() && !self.typing,
-            _ if !self.typing => return false,
-            ViewerKey::Left => self.octal.move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.octal.move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.octal.home(reach.extend),
-            ViewerKey::End => self.octal.end(reach.extend),
-            ViewerKey::Backspace => {
-                self.octal.backspace(reach.word);
-                self.octal_typed();
-            }
-            ViewerKey::Delete => {
-                self.octal.delete();
-                self.octal_typed();
-            }
+            // The field had the keys (or nothing takes them): they're the dialog's again.
+            ViewerKey::Tab => self.with_controls(|c, parts| c.focus(parts, None)),
             _ => return false,
         }
         true
     }
 
+    /// Read from `&self`: the focused part's own, lent by its place (an open list has the
+    /// focus while it's open).
     fn selected_text(&self) -> Option<String> {
-        if self.picker.is_open() {
-            return self.picker.selected_text();
-        }
-        let selected = self.octal.selected_text();
-        (self.typing && !selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| match i {
+            LIST => Some(&self.picker as &dyn Control),
+            OCTAL => Some(&self.octal as &dyn Control),
+            _ => None,
+        })
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -359,20 +356,8 @@ impl Viewer for PropertiesView {
             self.footer(hit);
             return true;
         }
-        // An open list's search gets the edit commands (⌘A…).
-        if self.picker.is_open() {
-            return self.picker.command(id);
-        }
-        if !self.typing {
-            return false;
-        }
-        match id {
-            "select_all" => {
-                self.octal.select_all();
-                true
-            }
-            _ => false,
-        }
+        // The part with the keys: an open list's search (⌘A…), the octal field.
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {

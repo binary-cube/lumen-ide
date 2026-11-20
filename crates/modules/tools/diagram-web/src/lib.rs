@@ -45,6 +45,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     description: "A .drawio file edited in draw.io itself, downloaded once on demand and run \
                   offline by the system's web engine",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "globe", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

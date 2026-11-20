@@ -744,3 +744,81 @@ fn the_floating_glass_is_set_in_the_studio() {
     studio.reset_row(opacity);
     assert_eq!(studio.draft.as_ref().unwrap().floating.opacity, None);
 }
+
+/// A window too short for the settings: once they scroll (the bar shows), its thumb, pressed
+/// and dragged, scrolls them.
+#[test]
+fn the_settings_scroll_by_their_thumb() {
+    let (mut studio, mut text, mut scene) = opened();
+    let (w, h) = (1400.0, 600.0);
+    paint_at(&mut studio, &mut text, &mut scene, w, h);
+    // Hidden at rest: a scroll shows it.
+    assert!(studio.scroll(0.0, 1.0));
+    paint_at(&mut studio, &mut text, &mut scene, w, h);
+    let list = studio.list;
+    let thumb = Point::new(list.max_x() - 4.0, list.min_y() + 6.0);
+    assert_eq!(studio.click(thumb), None);
+    let pressed = studio.scrolled();
+    assert!(studio.drag(Point::new(thumb.x, thumb.y + 40.0)));
+    assert!(studio.scrolled() > pressed, "scrolled down");
+    assert!(studio.release());
+}
+
+/// The name's field: pressed, it has the keys (only ⌫ ← → edit it); ↵ lets go of them, as a
+/// press elsewhere does.
+#[test]
+fn the_name_takes_the_keys_until_enter() {
+    let (mut studio, _text, _scene) = opened();
+    let _ = click_on(&mut studio, Hit::Name);
+    assert!(studio.editing_name() && studio.wants_text());
+    assert!(studio.text_input("!"));
+    assert!(studio.name.text().starts_with('!'), "the caret where it was pressed");
+    assert!(!studio.edit_key(ViewerKey::Tab), "Tab isn't the studio's");
+    assert!(studio.edit_key(ViewerKey::Enter));
+    assert!(!studio.editing_name() && !studio.wants_text());
+    let _ = click_on(&mut studio, Hit::Name);
+    assert!(studio.command("select_all"));
+    let _ = click_on(&mut studio, Hit::Category(Category::Caret));
+    assert!(!studio.editing_name(), "a press elsewhere lets go");
+    assert!(!studio.command("select_all"));
+}
+
+/// An open effect's menu: a press elsewhere only closes it (the search keeps the keys).
+#[test]
+fn a_press_beside_an_open_menu_only_closes_it() {
+    let (mut studio, _text, _scene) = opened();
+    assert!(studio.command("find"));
+    studio.menu_for = Some(0);
+    let before = studio.category;
+    let _ = click_on(&mut studio, Hit::Category(Category::Caret));
+    assert_eq!(studio.menu_for, None);
+    assert_eq!(studio.category, before, "the press did nothing more");
+    assert!(studio.editing_query(), "the search kept the keys");
+    // Esc: the search emptied and let go.
+    assert!(studio.text_input("x"));
+    assert!(studio.edit_key(ViewerKey::Escape));
+    assert!(studio.query.text().is_empty() && !studio.editing_query());
+}
+
+/// The color picker has the keys while it's open; closed, they go back where they were.
+#[test]
+fn the_picker_has_the_keys_while_open() {
+    let (mut studio, mut text, mut scene) = opened();
+    show(&mut studio, &mut text, &mut scene, Category::Interface);
+    let token = studio.hits.iter().find_map(|(_, h)| match h {
+        Hit::Token(key) => Some(Hit::Token(key.clone())),
+        _ => None,
+    });
+    let _ = click_on(&mut studio, token.expect("a color to pick"));
+    assert!(studio.picker.is_open() && studio.wants_text());
+    // The search asked for meanwhile: its turn comes once the picker closes.
+    assert!(studio.command("find"));
+    assert!(studio.text_input("1"), "the picker's field takes it");
+    assert!(studio.query.text().is_empty());
+    assert!(studio.editing_query(), "the focus stays under the picker");
+    assert!(studio.command("select_all"), "⌘A: the field's under it, not the picker's");
+    assert!(!studio.edit_key(ViewerKey::Down), "a key the picker doesn't use isn't the field's");
+    assert!(studio.edit_key(ViewerKey::Escape), "the picker gives up");
+    assert!(!studio.picker.is_open());
+    assert!(studio.editing_query());
+}

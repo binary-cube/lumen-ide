@@ -8,6 +8,7 @@ use kernel::{Point, Rect};
 use remote::application::Action;
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, Tone, radius};
 use ui_components::{EdgeScrollbar, Viewer, ViewerAction, ViewerKind, ViewerPaint, ViewerProvider};
 use ui_kit::draw_text;
@@ -51,6 +52,8 @@ pub struct TransferLog {
     /// How far the list scrolls (measured when painted).
     max_scroll: f32,
     bar: EdgeScrollbar,
+    /// Its controls' state of use (see [`TransferLog::with_controls`]).
+    controls: Controls,
     list: Rect,
     row_h: f32,
     /// The file of the right-clicked row (its menu acts on it), and what's asked of the app.
@@ -62,6 +65,16 @@ pub struct TransferLog {
 const PROPERTIES: &str = "remote.log.properties";
 
 impl TransferLog {
+    /// Its controls (the list's scrollbar), with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut list = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut parts: [&mut dyn Control; 1] = [&mut list];
+        f(&mut self.controls, &mut parts)
+    }
+
     /// The file of the row at `p` (the newest first, as shown).
     fn path_at(&self, p: Point) -> Option<String> {
         if !self.list.contains(p) || self.row_h <= 0.0 {
@@ -112,25 +125,20 @@ impl Viewer for TransferLog {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-        }
+        self.with_controls(|c, parts| c.press(parts, p, 1));
         None
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != self.scroll;
-        self.scroll = offset;
-        changed
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.bar.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ui_components::ViewMenuEntry>> {

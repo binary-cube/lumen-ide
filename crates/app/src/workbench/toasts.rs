@@ -329,6 +329,12 @@ fn ago(elapsed: Duration) -> String {
 pub(super) struct ToastsSlot;
 
 impl OverlaySlot for ToastsSlot {
+    /// A notification's ring or spinner: a frame when it next changes (no faster than about
+    /// 30 a second), none while nothing counts down.
+    fn frame_deadline(&self, wb: &Workbench) -> Option<std::time::Instant> {
+        wb.toast_deadline()
+    }
+
     fn kind(&self, _wb: &Workbench) -> OverlayKind {
         OverlayKind::Popover
     }

@@ -56,18 +56,8 @@ impl Workbench {
 
     /// The mouse at `p`, not on a notification.
     pub(super) fn hover_under_toasts(&mut self, p: Point) -> (bool, CursorIcon) {
-        let card = self.code_hover.scrollbar_hover(p);
-        if self.code_hover.contains(p) {
-            return (self.tooltips.set(None) | card, CursorIcon::Default);
-        }
-        // The completion list: over it, nothing under it gets the mouse (its scrollbar
-        // shows when the pointer reaches its lane, and narrows when it leaves).
-        let popup = self.completion.hover(p);
-        if self.completion.contains(p) {
-            return (self.tooltips.set(None) | popup, CursorIcon::Default);
-        }
         let blocked = self.modal_open();
-        let mut redraw = self.reveal_top_bar(p) | popup;
+        let mut redraw = self.reveal_top_bar(p);
         // Editors the mouse isn't over (other groups, hidden tabs) forget their hover, or
         // their scroll strip would stay widened.
         let current = self.active;
@@ -92,17 +82,19 @@ impl Workbench {
         // Over another editor group: its hover (tabs, editor), without making it current.
         if !self.overlay_open()
             && let Some((redraw, icon)) = self.with_group_at(p, |this| {
+                // The hover first: what's under the mouse is told where it is, then asked
+                // its tooltip there.
+                let (redraw, icon) = this.hover_inner(p);
                 let tip = this.tooltip_at(p);
                 let tip_changed = this.tooltips.set(tip);
-                let (redraw, icon) = this.hover_inner(p);
                 (redraw || tip_changed, icon)
             })
         {
             return (redraw, icon);
         }
+        let (redraw, icon) = self.hover_inner(p);
         let tip = self.tooltip_at(p);
         let tip_changed = self.tooltips.set(tip);
-        let (redraw, icon) = self.hover_inner(p);
         (redraw || tip_changed, icon)
     }
 
@@ -129,10 +121,7 @@ impl Workbench {
             return o.slot().hover(self, p);
         }
         // The splitters follow the mouse wherever it goes (left for a panel, they go dark).
-        let splitters = self.tools.terminal_splitter.hover(p)
-            | self.tools.splitter.hover(p)
-            | (self.tools.side_on(ui_workbench::Dock::Right).is_some()
-                && self.tools.side_splitter.hover(p));
+        let splitters = self.hover_dividers(p);
         // The separator between a preview's halves: over both of them.
         let (lit, over) = self.hover_preview_split(p);
         if let Some(icon) = over {
@@ -212,12 +201,8 @@ impl Workbench {
             };
             return (redraw, icon);
         }
-        let right = self.tools.side_on(ui_workbench::Dock::Right).is_some();
-        if self.tools.splitter.contains(p) || (right && self.tools.side_splitter.contains(p)) {
-            return (redraw, CursorIcon::ResizeHorizontal);
-        }
-        if self.tools.terminal_splitter.contains(p) {
-            return (redraw, CursorIcon::ResizeVertical);
+        if let Some(cursor) = self.divider_cursor(p) {
+            return (redraw, cursor);
         }
         // The find bar lies over the editor and the viewer.
         if let Some(tab) = self.tabs.get_mut(self.active).filter(|t| t.find_open) {

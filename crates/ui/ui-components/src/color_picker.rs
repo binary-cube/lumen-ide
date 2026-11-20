@@ -808,6 +808,100 @@ pub fn from_hsva([h, s, v, a]: [f32; 4]) -> Rgba {
     Rgba::new(r + m, g + m, b + m, a)
 }
 
+/// An open color picker as a form's control: hit anywhere (outside it, it closes keeping a
+/// changed color), its square and strips held while dragged; while open it takes the keys
+/// whatever has the focus (which stays with the part under it, theirs again once it
+/// closes): its field the text (⇧ ← → selecting, ⌫, ⌘A), ↵ applies, esc gives up. What it
+/// asked for is written to `action`; `recolored` is set when the keys or the text changed
+/// its color. `colors` reads and writes the color's formats.
+pub struct ColorPart<'a> {
+    pub picker: &'a mut ColorPicker,
+    pub colors: &'a dyn ColorProvider,
+    pub action: &'a mut Option<PickerAction>,
+    pub recolored: &'a mut bool,
+}
+
+impl std::fmt::Debug for ColorPart<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ColorPart").finish_non_exhaustive()
+    }
+}
+
+impl crate::control::Control for ColorPart<'_> {
+    fn hit(&self, _p: Point) -> bool {
+        self.picker.is_open()
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> crate::control::Press {
+        *self.action = self.picker.mouse_down(p, self.colors);
+        crate::control::Press::Held
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.picker.mouse_drag(p, self.colors)
+    }
+
+    fn release(&mut self) -> bool {
+        self.picker.mouse_up()
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.picker.hover(p.unwrap_or(crate::control::NOWHERE))
+    }
+
+    fn cursor(&self, p: Point) -> Option<crate::ViewerCursor> {
+        self.picker.over_control(p).then_some(crate::ViewerCursor::Pointer)
+    }
+
+    /// While open it takes the keys over its part (its field, ↵, esc).
+    fn captures_keys(&self) -> bool {
+        self.picker.is_open()
+    }
+
+    fn key(&mut self, key: crate::ViewerKey, reach: crate::KeyReach) -> bool {
+        use crate::ViewerKey;
+        match key {
+            ViewerKey::Escape => *self.action = Some(PickerAction::Cancel),
+            // Taken even with nothing to apply yet (a color half typed): never what's behind.
+            ViewerKey::Enter => {
+                if let Some(action) = self.picker.confirm() {
+                    *self.action = Some(action);
+                }
+            }
+            ViewerKey::Backspace => {
+                self.picker.backspace(self.colors);
+                *self.recolored = true;
+            }
+            ViewerKey::Left => self.picker.move_cursor(false, reach.extend),
+            ViewerKey::Right => self.picker.move_cursor(true, reach.extend),
+            _ => return false,
+        }
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.picker.type_text(typed, self.colors);
+        *self.recolored = true;
+        true
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Some(self.picker.input().selected_text().to_owned()).filter(|s| !s.is_empty())
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        if id != "select_all" {
+            return false;
+        }
+        self.picker.select_all();
+        true
+    }
+
+    fn animating(&self) -> bool {
+        self.picker.is_animating()
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/color_picker.rs"]
 mod tests;

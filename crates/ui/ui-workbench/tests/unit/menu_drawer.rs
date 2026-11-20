@@ -350,3 +350,20 @@ fn its_panel_is_frosted_as_the_palette_says() {
     let (alpha, blurs) = painted(&mut sliding, &palette(BackdropSpec::default(), glass));
     assert_eq!((alpha, blurs), (1.0, 0));
 }
+
+/// The categories' scrollbar: its thumb pressed holds the mouse (nothing under it chosen),
+/// dragged down the list follows, let go nothing follows.
+#[test]
+fn the_categories_scroll_by_their_thumb() {
+    let mut drawer = drawer(20, 400.0);
+    let room = drawer.menus_room;
+    let lane = Point::new(room.max_x() - 3.0, room.min_y() + 6.0);
+    drawer.hover(lane);
+    paint(&mut drawer);
+    assert_eq!(drawer.hit(lane), DrawerAction::Drag, "the thumb takes the press");
+    assert!(drawer.scrollbar_held());
+    assert!(drawer.drag_scrollbar(Point::new(lane.x, lane.y + 120.0)), "the list follows");
+    assert!(drawer.release());
+    assert!(!drawer.scrollbar_held());
+    assert!(!drawer.drag_scrollbar(Point::new(lane.x, lane.y)), "let go: nothing follows");
+}

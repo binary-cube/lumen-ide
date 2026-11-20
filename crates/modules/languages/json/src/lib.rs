@@ -16,6 +16,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "JSON",
     description: "JSON: colors, folding on objects and arrays, detection in other languages",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-json", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -29,6 +30,7 @@ impl Module for JsonModule {
     fn activate(&self, ctx: &mut ModuleContext<'_>) -> Result<(), ModuleError> {
         ctx.contribute(
             LanguageDescriptor::new("json", "JSON")
+                .icon_sample(3, "package.json")
                 .extensions(&["json", "jsonc", "webmanifest", "har"])
                 .file_names(&["composer.lock", ".babelrc", ".prettierrc", ".eslintrc", ".jshintrc"])
                 .line_comment("//")

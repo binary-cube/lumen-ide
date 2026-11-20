@@ -19,8 +19,8 @@ use kernel::LanguageId;
 use syntax_ts::SyntaxConfig;
 
 use crate::settings::{
-    HIDDEN_BY_DEFAULT, MODULE_LOADING, MODULES_DISABLED, MODULES_HIDDEN, MODULES_PRELOAD,
-    MODULES_SHOWN, ON_DEMAND, STARTUP,
+    MODULE_LOADING, MODULES_DISABLED, MODULES_HIDDEN, MODULES_PRELOAD, MODULES_SHOWN, ON_DEMAND,
+    STARTUP,
 };
 
 /// How long a module's data may stay unused before it's let go (`on-demand`).
@@ -276,7 +276,7 @@ pub(crate) fn set_hidden(settings: &settings_model::SettingsService, id: &str, h
     shown.retain(|s| s != id);
     if hidden {
         chosen.push(id.to_owned());
-    } else if HIDDEN_BY_DEFAULT.contains(&id) {
+    } else if crate::modules::hidden_by_default(id) {
         shown.push(id.to_owned());
     }
     for (setting, value) in [(&MODULES_HIDDEN, chosen), (&MODULES_SHOWN, shown)] {

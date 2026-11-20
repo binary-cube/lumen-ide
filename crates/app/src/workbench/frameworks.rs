@@ -153,6 +153,11 @@ impl Workbench {
                     id: id.to_owned(),
                     name: localized(id, "_name", m.name),
                     description: localized(id, "", m.description),
+                    icon: m.info.icon,
+                    // One that comes with the app: its makers', its version and date.
+                    author: m.info.author.unwrap_or(kernel::brand::PUBLISHER).to_owned(),
+                    version: m.info.version.unwrap_or(kernel::brand::version()).to_owned(),
+                    updated: m.info.updated.unwrap_or(kernel::brand::released()).to_owned(),
                     enabled: enabled(id),
                     active: m.state == extensions::ModuleState::Active,
                     preload: preload.iter().any(|p| p == id),
@@ -168,7 +173,20 @@ impl Workbench {
         model.code_languages =
             self.settings_languages().into_iter().map(|l| (l.id, l.name)).collect();
         model.code_language = self.shown_settings_language();
-        // The file icons: ours (by language), then the sets.
+        // The file icons: ours (by language), then the sets; the preview's files as the
+        // languages give them.
+        let mut samples: Vec<_> = self
+            .support
+            .languages
+            .languages()
+            .iter()
+            .filter_map(|l| l.icon_sample.map(|(order, name)| (order, name, l.icon, l.id.as_str())))
+            .collect();
+        samples.sort_by_key(|(order, ..)| *order);
+        model.icon_samples = samples
+            .into_iter()
+            .map(|(_, name, icon, language)| (name.to_owned(), icon, language.to_owned()))
+            .collect();
         model.file_icon_set = self.icons.file_set();
         model.file_icon_sets = std::iter::once(ui_workbench::FileIconChoice {
             set: None,

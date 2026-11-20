@@ -7,6 +7,7 @@ use std::path::Path;
 use i18n::t;
 use kernel::{Point, ProjectId, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{EdgeScrollbar, Viewer, ViewerAction, ViewerKind, ViewerPaint, ViewerProvider};
 use ui_kit::draw_text;
@@ -58,6 +59,8 @@ pub struct LogView {
     follow: bool,
     bar: EdgeScrollbar,
     list: Rect,
+    /// Its parts' state of use (see [`LogView::with_controls`]).
+    controls: Controls,
 }
 
 impl LogView {
@@ -67,6 +70,16 @@ impl LogView {
         project.servers(|s| {
             s.iter().find(|r| r.id == data.server).map(|r| std::sync::Arc::clone(r.client.status()))
         })
+    }
+
+    /// Its parts (the lines' scrollbar with their offset), with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut lines = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut parts: [&mut dyn Control; 1] = [&mut lines];
+        f(&mut self.controls, &mut parts)
     }
 }
 
@@ -92,26 +105,25 @@ impl Viewer for LogView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-        }
+        self.with_controls(|c, parts| c.press(parts, p, 1));
         None
     }
 
+    /// The held part follows the pointer; moved to the end, new lines keep it there.
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != self.scroll;
-        self.scroll = offset;
+        let Some((_, changed)) = self.with_controls(|c, parts| c.drag(parts, p)) else {
+            return false;
+        };
         self.follow = self.scroll >= self.max_scroll;
         changed
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.bar.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -175,3 +187,7 @@ impl Viewer for LogView {
         self.bar.paint(ctx.scene, p, ctx.scale, b, content, scroll);
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/log_view.rs"]
+mod tests;

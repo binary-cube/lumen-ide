@@ -52,6 +52,14 @@ impl ExportFormat {
         }
     }
 
+    /// The extensions of a file's name that ask for it.
+    pub fn names_files(&self) -> &[&str] {
+        match self {
+            Self::Text(e) => e.names_files(),
+            Self::Xlsx => &[XLSX],
+        }
+    }
+
     /// Its usual extension.
     pub fn extension(&self) -> &str {
         match self {
@@ -105,19 +113,10 @@ pub fn format_of(
     if ext == chosen.extension() {
         return Some(chosen.clone());
     }
-    let id = match ext.as_str() {
-        "csv" => "csv",
-        "tsv" | "tab" => "tsv-header",
-        "json" => "json",
-        "sql" => "sql",
-        "md" | "markdown" => "markdown",
-        "html" | "htm" => "html",
-        "xml" => "xml",
-        "xlsx" => XLSX,
-        "txt" => "pretty",
-        _ => return None,
-    };
-    ExportFormat::find(project, id)
+    // The format that says it's asked for by this extension (each declares its own).
+    ExportFormat::offered(project, false)
+        .into_iter()
+        .find(|f| f.names_files().contains(&ext.as_str()))
 }
 
 /// What writes an export's bytes, a block of rows at a time: an extractor's text or a

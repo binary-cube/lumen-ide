@@ -171,19 +171,28 @@ impl Workbench {
 
     /// A projects list holds a press (a click or a drag, known on release).
     pub(super) fn picker_pressed(&self) -> bool {
-        self.home.projects_menu.pressed() || self.home.picker.pressed()
+        self.home.picker.pressed()
     }
 
-    /// The mouse moved while a list's row is pressed. `None`: no list is pressed.
+    /// The mouse moved while the empty screen's list has a row pressed. `None`: none is.
     pub(super) fn drag_picker(&mut self, p: Point) -> Option<bool> {
-        let (picker, _) = self.home.pressed_picker()?;
+        let picker = Some(&mut self.home.picker).filter(|p| p.pressed())?;
         Some(picker.drag(p))
     }
 
-    /// The press ends: the row's action (a click) or a move (a drop). `None`: no list is
-    /// pressed.
+    /// The press on the empty screen's list ends: the row's action (a click) or a move (a
+    /// drop). `None`: none was pressed.
     pub(super) fn release_picker(&mut self) -> Option<bool> {
-        let (picker, modal) = self.home.pressed_picker()?;
+        self.release_projects_list(false)
+    }
+
+    /// The press on a projects list ends (the window's, `modal`, or the empty screen's):
+    /// the row's action or a move. `None`: none was pressed.
+    pub(super) fn release_projects_list(&mut self, modal: bool) -> Option<bool> {
+        let picker = if modal { &mut self.home.projects_menu } else { &mut self.home.picker };
+        if !picker.pressed() {
+            return None;
+        }
         if let Some(action) = picker.release() {
             let result = self.picker_action(action, modal);
             self.request = Some(result);

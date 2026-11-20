@@ -18,6 +18,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Colors",
     description: "The color's swatch in the gutter and the color picker (hex, rgb, hsl, CSS names)",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "palette", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

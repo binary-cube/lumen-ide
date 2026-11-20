@@ -34,6 +34,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Indexing",
     description: "The project's index (declarations, text): kept up to date from the project's events",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "index", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// The indexes open (one per window's project), for the Task Manager.

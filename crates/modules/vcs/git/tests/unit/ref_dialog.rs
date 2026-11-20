@@ -54,3 +54,66 @@ fn a_dialog_starts_from_what_it_was_asked_with() {
     };
     assert_eq!(old, "topic");
 }
+
+/// A tag's two fields: a press in the message's gives it the keys and a drag there selects
+/// in it, the name's left as it was.
+#[test]
+fn a_press_and_a_drag_in_a_field_select_in_it() {
+    let mut d = dialog(RefKindAsked::NewTag { on: None, on_label: "HEAD".into() }, &[]);
+    d.text_input("v2");
+    assert!(d.edit_key(ViewerKey::Tab), "Tab: to the message's field");
+    d.text_input("the release");
+    assert!(d.edit_key(ViewerKey::Tab), "and back to the name's");
+    assert_eq!(d.controls.focused(), Some(NAME));
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    d.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 520.0, 300.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let (field, _) = *d.hits.iter().find(|(_, h)| *h == Hit::Message).unwrap();
+    let mid = field.min_y() + field.size.height / 2.0;
+    d.press(Point::new(field.max_x() - 4.0, mid), 1);
+    assert_eq!(d.controls.focused(), Some(MESSAGE));
+    assert!(d.drag(Point::new(field.min_x() + 4.0, mid)));
+    d.release();
+    assert_eq!(d.selected_text().as_deref(), Some("the release"));
+    assert!(d.name.selected_text().is_empty());
+}
+
+/// A branch's dialog: the name's field has the keys from the start and keeps them when the
+/// checkbox is pressed; Tab is no move (one field).
+#[test]
+fn the_name_keeps_the_keys_through_a_press_on_the_checkbox() {
+    let mut d =
+        dialog(RefKindAsked::NewBranch { from: None, from_label: "HEAD".into() }, &["main"]);
+    assert_eq!(d.controls.focused(), Some(NAME));
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    d.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 520.0, 300.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let (row, _) = *d.hits.iter().find(|(_, h)| *h == Hit::Checkout).unwrap();
+    d.press(row.center(), 1);
+    assert!(!d.checkout, "the box unticked");
+    assert_eq!(d.controls.focused(), Some(NAME), "the name kept the keys");
+    assert!(!d.edit_key(ViewerKey::Tab));
+    assert!(d.text_input("topic"));
+    assert!(d.edit_key(ViewerKey::Backspace));
+    assert_eq!(d.name.text(), "topi");
+}

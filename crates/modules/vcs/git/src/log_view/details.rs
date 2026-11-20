@@ -45,7 +45,7 @@ impl LogView {
             ds::empty_state(layer, text, ds, area, &t("git.log_loading"), None);
         } else {
             let queries = self.queries.clone();
-            let focused = self.files_focus;
+            let focused = self.files_focused();
             self.tree.paint(scene, text, icons, ds, (files, focused), queries.as_deref());
         }
         let below = Rect::new(

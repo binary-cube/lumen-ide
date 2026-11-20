@@ -9,7 +9,7 @@ use crate::cell::{Cell, Column, hex};
 use crate::extractor::{Extractor, Group, Input, Lines, Stream};
 
 macro_rules! simple {
-    ($ty:ident, $id:literal, $key:literal, $ext:literal) => {
+    ($ty:ident, $id:literal, $key:literal, $ext:literal, $names:expr) => {
         #[derive(Debug, Clone, Copy)]
         pub struct $ty;
 
@@ -17,16 +17,20 @@ macro_rules! simple {
             fn info() -> (&'static str, &'static str, &'static str) {
                 ($id, $key, $ext)
             }
+
+            /// The file names' extensions that ask for it.
+            const NAMES: &'static [&'static str] = $names;
         }
     };
 }
 
-simple!(Json, "json", "extract.json", "json");
-simple!(Markdown, "markdown", "extract.markdown", "md");
-simple!(Html, "html", "extract.html", "html");
-simple!(Xml, "xml", "extract.xml", "xml");
-simple!(OneRow, "one-row", "extract.one_row", "txt");
-simple!(Pretty, "pretty", "extract.pretty", "txt");
+simple!(Json, "json", "extract.json", "json", &["json"]);
+simple!(Markdown, "markdown", "extract.markdown", "md", &["md", "markdown"]);
+simple!(Html, "html", "extract.html", "html", &["html", "htm"]);
+simple!(Xml, "xml", "extract.xml", "xml", &["xml"]);
+simple!(OneRow, "one-row", "extract.one_row", "txt", &[]);
+// A text file: the table as a terminal prints it.
+simple!(Pretty, "pretty", "extract.pretty", "txt", &["txt"]);
 
 macro_rules! extractor {
     ($ty:ident, $open:expr) => {
@@ -45,6 +49,10 @@ macro_rules! extractor {
 
             fn extension(&self) -> &str {
                 Self::info().2
+            }
+
+            fn names_files(&self) -> &[&str] {
+                Self::NAMES
             }
 
             fn open(&self, input: &Input) -> Box<dyn Stream> {

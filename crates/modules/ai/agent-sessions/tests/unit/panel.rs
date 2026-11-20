@@ -171,14 +171,15 @@ fn favorites_come_first() {
 /// ⌘A in its search selects what's typed (then typed over); ⌘Z takes the typing back.
 #[test]
 fn its_search_takes_the_edit_commands() {
-    let mut panel = SessionsPanel { typing: true, ..SessionsPanel::default() };
+    let mut panel = SessionsPanel::default();
+    panel.keys_to_search(true);
     assert!(panel.text_input("czcz"));
     assert!(ToolPanel::command(&mut panel, "select_all"));
     assert_eq!(panel.selected_text().as_deref(), Some("czcz"));
     assert!(panel.text_input("new"));
     assert_eq!(panel.query.text(), "new");
     assert!(ToolPanel::command(&mut panel, "undo"));
-    panel.typing = false;
+    panel.keys_to_search(false);
     assert!(!ToolPanel::command(&mut panel, "select_all"), "not typed in: not its");
 }
 
@@ -387,7 +388,7 @@ fn a_pinned_session_comes_first() {
     assert!(panel.menu_command(PIN));
     panel.filter();
     assert_eq!(panel.shown, [1, 0, 2]);
-    assert!(SessionsPanel::default().bar.next_frame().is_none(), "at rest: no frames");
+    assert!(SessionsPanel::default().frame_deadline().is_none(), "at rest: no frames");
 }
 
 /// Folders group the list: a session moved into one is listed under it (set in), the
@@ -512,4 +513,93 @@ fn the_list_is_filtered_by_agent() {
     assert!(panel.filter_list_event(Some(PickerEvent::Chosen(0))));
     panel.filter();
     assert_eq!(panel.shown, [0, 1, 2], "every agent's again");
+    // Open, it takes the keys (↓ then ↵ choose the first agent), never what's typed.
+    panel.open_agent_filter();
+    assert!(panel.takes_keys());
+    assert!(!panel.text_input("x"), "nothing else has the keys");
+    assert!(panel.edit_key_with(ViewerKey::Down, KeyReach::default()));
+    assert!(panel.edit_key_with(ViewerKey::Enter, KeyReach::default()));
+    panel.filter();
+    assert_eq!(panel.shown, [0, 1], "only the first agent's");
+    // A click anywhere while it's open is its own (outside: it closes).
+    panel.open_agent_filter();
+    assert!(panel.click(Point::new(5000.0, 5000.0)).is_none());
+    assert!(!panel.filter_list.is_open());
+}
+
+/// The renamed row's field keeps what's typed and the edit commands under the agents' list
+/// (its keys are the list's: Esc closes it, the name stays being typed); ⌘Z is always used.
+#[test]
+fn a_rename_under_the_agents_list() {
+    let mut panel = listed(vec![session("a", 3)]);
+    panel.start_rename(0);
+    panel.open_agent_filter();
+    assert!(panel.text_input("Matching"));
+    assert!(ToolPanel::command(&mut panel, "select_all"));
+    assert_eq!(panel.selected_text().as_deref(), Some("Matching"));
+    assert!(panel.edit_key_with(ViewerKey::Escape, KeyReach::default()));
+    assert!(!panel.filter_list.is_open() && panel.renaming.is_some(), "the list closed");
+    assert!(ToolPanel::command(&mut panel, "redo"), "nothing to redo: still used");
+    assert!(!ToolPanel::command(&mut panel, "paste"), "not one of its commands");
+    assert!(!panel.edit_key_with(ViewerKey::Tab, KeyReach::default()), "Tab isn't the panel's");
+}
+
+/// Paints `panel` `w` × `h` at scale 1.
+fn painted(panel: &mut SessionsPanel, w: f32, h: f32) {
+    let (palette, icons) = (ui_components::Palette::dark(), icons::Icons::builtin());
+    let (mut text, mut scene) = (text_layout::TextSystem::new(), render_api::Scene::default());
+    panel.paint(ui_components::ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, w, h),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+}
+
+/// How far in from the panel's right edge its scrollbar's lane is pressed.
+const LANE_INSET: f32 = 4.0;
+
+/// A long list: its scrollbar, shown once scrolled, is pressed, dragged and let go (the
+/// list follows), and wants a frame for its fade.
+#[test]
+fn the_list_scrolls_by_its_thumb() {
+    let many = (0..200).map(|i| session(&format!("s{i}"), 200 - i)).collect();
+    let mut panel = listed(many);
+    let (w, h) = (300.0, 400.0);
+    painted(&mut panel, w, h);
+    assert!(panel.scroll(1.0), "it scrolls");
+    painted(&mut panel, w, h);
+    let lane = Point::new(w - LANE_INSET, panel.list.min_y() + 20.0);
+    panel.hover(lane);
+    assert!(panel.click(lane).is_none(), "the thumb takes the press");
+    let before = panel.scroll;
+    assert!(panel.drag(Point::new(lane.x, lane.y + 60.0)));
+    assert!(panel.scroll > before, "the list followed");
+    assert!(panel.release());
+    painted(&mut panel, w, h);
+    assert!(panel.frame_deadline().is_some(), "it fades out after a while");
+}
+
+/// The agents' list open with its own search (many agents): what's typed goes to its
+/// search, not to the panel's; the wheel is the list's.
+#[test]
+fn the_agents_list_takes_its_search_text_and_the_wheel() {
+    use ui_components::control::Control;
+    let mut list = ui_components::picker::Picker::default();
+    let items = (0..40).map(|i| ui_components::picker::PickerItem {
+        label: format!("agent {i}"),
+        ..Default::default()
+    });
+    list.open(items.collect(), None);
+    assert!(list.searches(), "enough agents for a search");
+    let mut event = None;
+    let mut part = parts::AgentsList { list: &mut list, event: &mut event };
+    assert!(part.text("agent 3"), "typed into its search");
+    assert!(part.takes_wheel(Point::new(0.0, 0.0)), "open: the wheel is its own");
+    assert!(part.captures_keys());
+    assert!(list.shown().len() < 40, "the search narrowed the agents");
 }

@@ -20,6 +20,7 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use ui_components::control::{Control, Controls, Press, Thumb};
 
 use icons::Icons;
 use kernel::{Point, Rect, Rgba};
@@ -112,6 +113,8 @@ pub struct Dialog {
     /// A row of the list's height, as last painted (↑ / ↓ scroll by it).
     list_row: f32,
     list_bar: ui_components::EdgeScrollbar,
+    /// Its parts' state of use (see [`Dialog::with_controls`]).
+    controls: Controls,
     /// Where the list's box ends, as last painted (tests).
     #[cfg(test)]
     list_bottom: f32,
@@ -137,6 +140,7 @@ impl Dialog {
         self.list_scroll = 0.0;
         self.list_max = 0.0;
         self.list_bar = ui_components::EdgeScrollbar::default();
+        self.controls = Controls::default();
         self.appear.start(Duration::from_millis(140));
     }
 
@@ -201,8 +205,8 @@ impl Dialog {
         let hover = self.rects.iter().position(|r| r.contains(p));
         let changed = hover != self.hover;
         self.hover = hover;
-        let bar = self.list_bar.hover(p);
-        changed || bar
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        changed || parts
     }
 
     /// The wheel (physical pixels, positive = down): the list scrolls. `true` if it moved.
@@ -222,29 +226,39 @@ impl Dialog {
         self.list_scroll
     }
 
-    /// A press on the list's scrollbar: `true` if it took it (a drag follows: the list
-    /// follows the thumb, or jumps where the track was pressed).
-    pub fn scrollbar_press(&mut self, p: Point) -> bool {
-        let Some(offset) = self.list_bar.press(p) else { return false };
-        self.list_scroll = offset.clamp(0.0, self.list_max);
-        true
+    /// Its parts that take the mouse (its list's thumb), with their state of use: pressed,
+    /// held, hovered alike (`ui_components::control`).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut list = Thumb { bar: &mut self.list_bar, offset: &mut self.list_scroll };
+        let mut parts: [&mut dyn Control; 1] = [&mut list];
+        let answer = f(&mut self.controls, &mut parts);
+        self.list_scroll = self.list_scroll.clamp(0.0, self.list_max);
+        answer
     }
 
-    pub fn scrollbar_held(&self) -> bool {
-        self.list_bar.is_dragging()
+    /// A press on one of its parts that holds the mouse (its list's thumb, or its track:
+    /// the list jumps there): `true` if one took it (a drag follows).
+    pub fn press(&mut self, p: Point) -> bool {
+        self.with_controls(|c, parts| c.press(parts, p, 1))
+            .is_some_and(|(_, press)| press == Press::Held)
     }
 
-    /// The held thumb dragged to `p`: `true` if the list moved.
-    pub fn scrollbar_drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.list_bar.drag(p) else { return false };
-        let before = self.list_scroll;
-        self.list_scroll = offset.clamp(0.0, self.list_max);
-        self.list_scroll != before
+    /// One of its parts holds the mouse.
+    pub fn held(&self) -> bool {
+        self.controls.held()
     }
 
-    /// The mouse released: `true` if the scrollbar was held.
-    pub fn scrollbar_release(&mut self) -> bool {
-        self.list_bar.release()
+    /// The part holding the mouse follows it to `p`: `true` if what it shows moved.
+    pub fn drag(&mut self, p: Point) -> bool {
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    /// The mouse released: `true` if a part held it.
+    pub fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some()
     }
 
     /// ↑ / ↓: the list scrolls `rows` rows (negative: up). `true` if it moved.

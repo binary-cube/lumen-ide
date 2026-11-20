@@ -12,6 +12,7 @@ use refactor::{Certainty, Plan};
 use render_api::{Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_components::ViewerAction;
+use ui_components::control::{Control, NOWHERE, Press};
 use ui_components::ds::{self, Check, Ctx, Tone, radius, space};
 use ui_kit::draw_text;
 
@@ -24,6 +25,32 @@ pub enum Row {
     File(usize),
     /// A place in a file.
     Place(usize, usize),
+}
+
+/// The list with the plan it shows, as a control: a press on a row toggles it or shows its
+/// line (that action kept in `clicked` for the view).
+pub struct Places<'a> {
+    pub list: &'a mut PlanList,
+    /// Nothing found yet: a press on the list does nothing.
+    pub plan: Option<&'a mut Plan>,
+    pub clicked: &'a mut Option<ViewerAction>,
+}
+
+impl Control for Places<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.list.contains(p)
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> Press {
+        if let Some(plan) = self.plan.as_deref_mut() {
+            *self.clicked = self.list.click(plan, p);
+        }
+        Press::Took
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.list.hover(p.unwrap_or(NOWHERE))
+    }
 }
 
 /// What a click on the list hit.

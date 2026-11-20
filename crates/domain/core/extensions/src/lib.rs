@@ -12,7 +12,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use kernel::ModuleId;
 
-/// A module's description.
+/// A module's description: who it is, what it needs, and what's shown of it ([`ModuleInfo`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModuleManifest {
     pub id: ModuleId,
@@ -20,6 +20,37 @@ pub struct ModuleManifest {
     pub description: &'static str,
     /// The modules it needs (e.g. `lang.php` → `lang.html`). Missing ones are reported.
     pub depends_on: &'static [&'static str],
+    pub info: ModuleInfo,
+}
+
+/// What the settings, the log's levels and the Task Manager show of a module besides its
+/// name (its icon, who made it, its version, when it changed), and how it starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModuleInfo {
+    /// Its icon: a name of the app's own set (shown even while it's off, when nothing of
+    /// its own is loaded).
+    pub icon: &'static str,
+    /// Who made it; `None`: the app's makers (a module that comes with the app).
+    pub author: Option<&'static str>,
+    /// Its version; `None`: the app's (it comes with the app).
+    pub version: Option<&'static str>,
+    /// When it last changed (`YYYY-MM-DD`); `None`: with the app's build.
+    pub updated: Option<&'static str>,
+    /// It starts hidden until the user shows it (it runs, shows nothing of its own).
+    pub hidden_by_default: bool,
+}
+
+impl ModuleInfo {
+    /// What a module that comes with the app has: the app's makers, version and build; a
+    /// generic icon; shown. A manifest gives its icon and takes the rest from here
+    /// (`..ModuleInfo::BUILT_IN`).
+    pub const BUILT_IN: ModuleInfo = ModuleInfo {
+        icon: "modules",
+        author: None,
+        version: None,
+        updated: None,
+        hidden_by_default: false,
+    };
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -177,6 +208,7 @@ pub struct ModuleReport {
     pub description: &'static str,
     /// The modules it needs.
     pub depends_on: &'static [&'static str],
+    pub info: ModuleInfo,
     pub state: ModuleState,
     /// It runs hidden: its own buttons, menus and commands aren't shown
     /// ([`ModuleSelection::hidden`]); `false` for a module that doesn't run.
@@ -202,6 +234,11 @@ impl fmt::Debug for ModuleRegistry {
 impl ModuleRegistry {
     pub fn register(&mut self, module: Box<dyn Module>) {
         self.modules.push(module);
+    }
+
+    /// The registered modules' manifests, in their order (nothing activated).
+    pub fn manifests(&self) -> impl Iterator<Item = &ModuleManifest> {
+        self.modules.iter().map(|m| m.manifest())
     }
 
     /// Measures how long each module takes to activate and preload with `clock`.
@@ -314,6 +351,7 @@ impl ModuleRegistry {
                 name: manifest.name,
                 description: manifest.description,
                 depends_on: manifest.depends_on,
+                info: manifest.info,
                 hidden: state == ModuleState::Active && selection.hides(&manifest.id),
                 state,
                 took: took(),

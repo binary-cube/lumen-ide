@@ -177,6 +177,11 @@ publish = false
 license = "MIT"
 repository = "https://github.com/binary-cube/lumen-ide"
 
+[workspace.metadata.release]
+# When the version above was released (`YYYY-MM-DD`): written with it at each release, shown
+# as the modules' that come with the app last change.
+date = "2026-11-20"
+
 [workspace.dependencies]
 # Internal crates
 kernel = { path = "crates/kernel" }

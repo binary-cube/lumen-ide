@@ -142,3 +142,65 @@ fn the_flame_graph_nests_the_ways_down() {
     assert!(nodes[1..].iter().all(|n| n.parent == Some(0)));
     assert_eq!(nodes[1].label, "log-viewer·paint", "the costlier child first");
 }
+
+/// The flame graph is a part of the page while it's drawn: under the mouse its bars show a
+/// hand and their time, and the keys walk it (the page doesn't move); away from it the keys
+/// scroll the page.
+#[test]
+fn the_flame_graph_takes_the_keys_under_the_mouse() {
+    let recording = Recording::new("2026-11-20T10:00:00Z".into(), 100, System::default());
+    let way = |steps: &[&str], us: u64| {
+        (steps.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>(), 1, us)
+    };
+    let summary = Summary {
+        spans: vec![way(&["app·frame"], 1000), way(&["app·frame", "editor·paint"], 600)],
+        ..profiling::summary(&recording)
+    };
+    let mut prepared = prepared::prepare(&recording, &summary);
+    let mut view = ProfileView::new(Path::new("profile-20261120-100000.json"));
+    view.flame.set_nodes(std::mem::take(&mut prepared.flame_nodes));
+    view.read = Some(Ok(Box::new(prepared)));
+    let icons = icons::Icons::builtin();
+    let palette = ui_components::Palette::dark();
+    let mut text = text_layout::TextSystem::new();
+    let bounds = Rect::new(0.0, 0.0, 1200.0, 300.0);
+    let mut paint = |view: &mut ProfileView, bounds: Rect| {
+        let mut scene = render_api::Scene::default();
+        view.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    // Where it is on the whole page; then a window over it, with room to scroll on.
+    paint(&mut view, Rect::new(0.0, 0.0, 1200.0, 6000.0));
+    let area = view.flame_area.expect("the flame graph drawn");
+    view.scroll = (area.min_y() - 40.0).max(0.0);
+    paint(&mut view, bounds);
+    let area = view.flame_area.expect("still drawn");
+    let bar = (0..60)
+        .map(|dy| Point::new(area.min_x() + 40.0, area.min_y() + dy as f32 * 2.0))
+        .find(|p| {
+            view.hover(*p);
+            view.cursor_at(*p) == Some(ViewerCursor::Pointer)
+        })
+        .expect("a bar under the mouse shows a hand");
+    assert!(view.tooltip_at(bar).is_some(), "its time");
+    let at = view.scroll;
+    assert!(view.edit_key(ViewerKey::Down), "the flame graph walks");
+    assert_eq!(view.scroll, at, "the page stays");
+    view.edit_key(ViewerKey::Tab);
+    assert_eq!(view.controls.focused(), Some(1), "Tab stays with it");
+    // Away from it: the keys are the page's.
+    let away = Point::new(bounds.min_x() + 2.0, bounds.min_y() + 2.0);
+    view.hover(away);
+    assert_eq!(view.tooltip_at(bar), None);
+    assert!(view.edit_key(ViewerKey::Down));
+    assert!(view.scroll > at, "the page scrolled");
+    assert!(!view.edit_key(ViewerKey::Tab), "no part to give the keys to");
+}

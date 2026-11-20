@@ -1076,6 +1076,86 @@ pub fn draw_lit(
     width
 }
 
+/// A files tree as a form's control: a press on a row, its search or its buttons (⌘ / ⇧ add
+/// to the choice), its scrollbar's thumb held; with the focus its keys and its search; what
+/// a press or a key opened is written to `event`.
+pub struct TreePart<'a> {
+    pub tree: &'a mut FilesTree,
+    pub event: &'a mut Option<TreeEvent>,
+}
+
+impl std::fmt::Debug for TreePart<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TreePart").finish_non_exhaustive()
+    }
+}
+
+impl crate::control::Control for TreePart<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.tree.contains(p)
+    }
+
+    fn press_with(&mut self, p: Point, clicks: u32, mods: PressMods) -> crate::control::Press {
+        match self.tree.press_with(p, clicks, mods) {
+            Some(event) => {
+                *self.event = event;
+                crate::control::Press::Held
+            }
+            None => crate::control::Press::Ignored,
+        }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.tree.drag(p)
+    }
+
+    fn release(&mut self) -> bool {
+        self.tree.release()
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        self.tree.hover(p.unwrap_or(crate::control::NOWHERE))
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        self.tree.scroll_by(dy)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: crate::KeyReach) -> bool {
+        match self.tree.key_with(key, reach) {
+            Some(event) => {
+                *self.event = event;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.tree.text_input(typed)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        self.tree.selected_text()
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        self.tree.command(id)
+    }
+
+    fn tooltip(&self, p: Point) -> Option<crate::Tip> {
+        self.tree.tooltip_at(p)
+    }
+
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        self.tree.next_frame()
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/changed_files.rs"]
 mod tests;

@@ -21,6 +21,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Path Marks",
     description: "Decide what's indexed: excluded, library, generated or normal folders",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "pin", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 const EXCLUDED: CommandId = CommandId("marks.excluded");

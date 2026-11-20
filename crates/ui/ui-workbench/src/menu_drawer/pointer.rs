@@ -2,6 +2,7 @@
 //! bar.
 
 use super::*;
+use ui_components::control::{Control, Controls, ScrollThumb};
 
 impl MenuDrawer {
     /// What a press at `p` does.
@@ -10,19 +11,8 @@ impl MenuDrawer {
         if !self.open || self.button.contains(p) {
             return DrawerAction::Close;
         }
-        if let Some(offset) = self.menus_bar.press(p) {
-            self.menus_scroll.scroll_to(offset);
-            self.held = Some(List::Menus);
-            return DrawerAction::Drag;
-        }
-        if let Some(offset) = self.items_bar.press(p) {
-            self.items_scroll.scroll_to(offset);
-            self.held = Some(List::Items);
-            return DrawerAction::Drag;
-        }
-        if let Some(offset) = self.sub_bar.press(p) {
-            self.sub_scroll.scroll_to(offset);
-            self.held = Some(List::Sub);
+        // A part that holds the mouse (a list's thumb, or its track: the list jumps there).
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return DrawerAction::Drag;
         }
         if !self.panel.contains(p) {
@@ -83,7 +73,7 @@ impl MenuDrawer {
     /// on the way to the open one). `true` if a redraw is needed.
     pub fn hover(&mut self, p: Point) -> bool {
         self.pointer = Some(p);
-        let mut changed = self.menus_bar.hover(p) | self.items_bar.hover(p) | self.sub_bar.hover(p);
+        let mut changed = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         if !self.open {
             return changed;
         }
@@ -162,29 +152,31 @@ impl MenuDrawer {
         }
     }
 
+    /// Its parts that take the mouse (each list's thumb), with their state of use: pressed,
+    /// held, hovered alike (`ui_components::control`).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut menus = ScrollThumb { bar: &mut self.menus_bar, scroll: &mut self.menus_scroll };
+        let mut items = ScrollThumb { bar: &mut self.items_bar, scroll: &mut self.items_scroll };
+        let mut sub = ScrollThumb { bar: &mut self.sub_bar, scroll: &mut self.sub_scroll };
+        let mut parts: [&mut dyn Control; 3] = [&mut menus, &mut items, &mut sub];
+        f(&mut self.parts, &mut parts)
+    }
+
+    /// One of its parts holds the mouse.
     pub fn scrollbar_held(&self) -> bool {
-        self.held.is_some()
+        self.parts.held()
     }
 
-    /// The held scrollbar's thumb dragged to `p`. `true` if it moved.
+    /// The part holding the mouse follows it to `p`. `true` if what it shows moved.
     pub fn drag_scrollbar(&mut self, p: Point) -> bool {
-        match self.held {
-            Some(List::Menus) => {
-                self.menus_bar.drag(p).is_some_and(|offset| self.menus_scroll.scroll_to(offset))
-            }
-            Some(List::Items) => {
-                self.items_bar.drag(p).is_some_and(|offset| self.items_scroll.scroll_to(offset))
-            }
-            Some(List::Sub) => {
-                self.sub_bar.drag(p).is_some_and(|offset| self.sub_scroll.scroll_to(offset))
-            }
-            None => false,
-        }
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
-    /// The mouse released: a held scrollbar let go. `true` if one was.
+    /// The mouse released: `true` if a part held it.
     pub fn release(&mut self) -> bool {
-        let held = self.held.take().is_some();
-        self.menus_bar.release() | self.items_bar.release() | self.sub_bar.release() | held
+        self.with_controls(|c, parts| c.release(parts)).is_some()
     }
 }

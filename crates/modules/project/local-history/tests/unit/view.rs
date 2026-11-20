@@ -127,3 +127,46 @@ fn compared(view: &mut HistoryView, i: usize) -> Option<ViewerAction> {
     view.compare(i);
     prepared(view)
 }
+
+/// The versions' scrollbar: its thumb pressed (it shows after a scroll) and dragged down
+/// scrolls the list; let go, the moves no longer reach it.
+#[test]
+fn the_versions_scroll_by_their_thumb() {
+    let (mut view, base) = view_with("thumb");
+    let revision = view.revisions[0].clone();
+    view.revisions = vec![revision; 80];
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut paint = |view: &mut HistoryView| {
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 900.0, 600.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut render_api::Scene::default(),
+            palette: &palette,
+            icons: &icons,
+            focused: false,
+            waker: None,
+        })
+    };
+    paint(&mut view);
+    // A scroll shows the bar (it hides at rest).
+    assert!(view.scroll(0.0, 1.0));
+    paint(&mut view);
+    let list = view.list;
+    let edge = list.max_x() + 10.0;
+    let thumb = Point::new(edge, list.min_y() + 6.0);
+    view.hover(thumb);
+    assert!(view.click(thumb).is_none(), "the thumb takes the press");
+    let before = view.scroll;
+    assert!(view.drag(Point::new(edge, list.min_y() + 120.0)), "the list follows");
+    assert!(view.scroll > before);
+    view.release();
+    assert!(!view.drag(Point::new(edge, list.min_y() + 200.0)), "let go: not held");
+    // Shown after the scroll, the bar fades at its own pace: the frame it wants is told
+    // through the controls, as the paint left them.
+    paint(&mut view);
+    assert!(view.frame_deadline().is_some(), "the bar's fade asks for a frame");
+    let _ = std::fs::remove_dir_all(base);
+}

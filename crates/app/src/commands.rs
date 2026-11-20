@@ -1420,6 +1420,8 @@ pub fn keymap_bindings() -> std::sync::Arc<Vec<ui_workbench::BindingRow>> {
             label: label(b.command).trim_end_matches('…').to_owned(),
             group: place_name.or_else(|| menu_place(b.command)).unwrap_or_default(),
             place,
+            // Text is typed everywhere and in an editor; a view's own keys are its.
+            typing: !matches!(b.when, When::View(_)),
             shown: b.shortcuts.iter().map(|s| display_shortcut(s)).collect(),
             shortcuts: b.shortcuts,
             changed: b.origin == command_model::bindings::Origin::User,

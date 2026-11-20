@@ -83,3 +83,40 @@ fn the_footer_s_buttons_are_the_window_s() {
     assert_eq!(view.take_action(), Some(ViewerAction::Close));
     assert_eq!(*answer.lock().unwrap(), Some(false));
 }
+
+/// Many statements scroll in their card: the scrollbar's thumb, pressed and dragged down,
+/// moves them (the tick isn't touched).
+#[test]
+fn the_statements_thumb_is_dragged() {
+    let (mut r, _) = request(0, true);
+    r.lines = (0..80).map(|i| format!("DELETE FROM orders WHERE id = {i}")).collect();
+    r.changes = r.lines.len();
+    let mut view = PreviewView::default();
+    view.set_data(&r);
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let bounds = Rect::new(0.0, 0.0, 1000.0, 700.0);
+    view.paint(ViewerPaint {
+        bounds,
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let on = (0..bounds.size.height as u32)
+        .flat_map(|y| (0..bounds.size.width as u32).map(move |x| (x, y)))
+        .map(|(x, y)| Point::new(x as f32, y as f32))
+        .find(|p| view.bar.contains(*p))
+        .expect("a scrollbar along the statements");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    assert_eq!(view.click(at), None);
+    assert!(view.drag(Point::new(at.x, at.y + 40.0)));
+    assert!(view.scroll > 0.0, "the statements moved");
+    assert!(view.release());
+    assert!(!view.confirmed, "the tick untouched");
+}

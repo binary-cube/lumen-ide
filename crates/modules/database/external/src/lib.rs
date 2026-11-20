@@ -30,6 +30,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "External Drivers",
     description: "Database drivers installed apart (any language, a JDBC bridge), speaking the drivers' protocol: started only while a session of theirs is open",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "server", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Where the drivers are installed: `<config folder>/drivers`.

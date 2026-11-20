@@ -602,6 +602,8 @@ impl Workbench {
 /// What each one does is its [`OverlaySlot`](super::overlay_stack::OverlaySlot).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Overlay {
+    /// The code's hover card: floating, over every other (see `editor_popups`).
+    CodeHover,
     /// Files dragged from the system's file manager: over everything, floating (see
     /// `file_drop`).
     FileDrop,
@@ -621,13 +623,18 @@ pub(super) enum Overlay {
     About,
     Settings,
     ProjectsMenu,
+    /// The completion list: floating, the editor keeping the keyboard (see `editor_popups`).
+    Completion,
+    /// The parameters' hint over a call: floating, only shown (see `editor_popups`).
+    ParamHint,
     /// The resources pinned, as pills in the editor's corner: under everything (see
     /// `status`).
     ResourcePills,
 }
 
 impl Overlay {
-    pub const ALL: [Overlay; 13] = [
+    pub const ALL: [Overlay; 16] = [
+        Overlay::CodeHover,
         Overlay::FileDrop,
         Overlay::Toasts,
         Overlay::StatusPopover,
@@ -640,6 +647,8 @@ impl Overlay {
         Overlay::About,
         Overlay::Settings,
         Overlay::ProjectsMenu,
+        Overlay::Completion,
+        Overlay::ParamHint,
         Overlay::ResourcePills,
     ];
 }

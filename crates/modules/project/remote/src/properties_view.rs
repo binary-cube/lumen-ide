@@ -25,6 +25,7 @@ use remote::properties::{
     PropertiesChange, Special, Tri, shared,
 };
 use text_layout::Font;
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Check, Ctx};
 use ui_components::picker::{Picker, PickerColumn, PickerEvent, PickerItem, TableRows};
 use ui_components::{
@@ -35,6 +36,7 @@ use ui_kit::{TextInput, draw_text};
 
 use crate::session::{self, State};
 
+mod octal;
 mod viewer;
 
 pub(crate) mod checksum;
@@ -193,6 +195,10 @@ struct Applying {
     done: Receiver<Result<Applied, String>>,
 }
 
+/// The places of its parts (see [`PropertiesView::with_controls`]).
+const LIST: usize = 0;
+const OCTAL: usize = 1;
+
 #[derive(Default)]
 pub struct PropertiesView {
     data: Option<PropertiesData>,
@@ -208,14 +214,16 @@ pub struct PropertiesView {
     /// The permissions as edited (all of those whose mode the server says).
     edit: Option<ModeEdit>,
     octal: TextInput,
-    /// The octal field has the keys.
-    typing: bool,
+    /// Where the octal field was drawn (while it can be edited), from the last paint.
+    octal_area: Option<Rect>,
     /// The owner and the group chosen (`None`: as they are).
     owner: Option<Principal>,
     group: Option<Principal>,
     /// The list open (which), and where its fields are.
     picking: Option<Pick>,
     picker: Picker,
+    /// Its controls' state of use (see [`PropertiesView::with_controls`]).
+    controls: Controls,
     anchors: Vec<(Pick, Rect)>,
     tab: Tab,
     /// Where the footer starts (the last paint): the tabs' content ends above it.
@@ -252,6 +260,49 @@ impl Drop for PropertiesView {
 }
 
 impl PropertiesView {
+    /// Its controls, the topmost first, with their state of use: an open list, the octal
+    /// field (its text typed: the boxes follow it).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut typed = false;
+        let answer = {
+            let mut octal = octal::OctalField {
+                input: &mut self.octal,
+                area: self.octal_area,
+                editable: matches!(self.phase, Phase::Editing | Phase::Failed(_)),
+                has_mode: self.edit.is_some(),
+                typed: &mut typed,
+            };
+            let mut parts: [&mut dyn Control; 2] = [&mut self.picker, &mut octal];
+            f(&mut self.controls, &mut parts)
+        };
+        if typed {
+            self.octal_typed();
+        }
+        answer
+    }
+
+    /// The octal field has the keys.
+    fn typing(&self) -> bool {
+        self.controls.focused() == Some(OCTAL)
+    }
+
+    /// A list opened: it has the keys (its search, its rows).
+    fn focus_list(&mut self) {
+        self.with_controls(|c, parts| c.focus(parts, Some(LIST)));
+    }
+
+    /// What the open list said: done, and the keys go nowhere once it closed.
+    fn list_answered(&mut self) {
+        let event = self.picker.take_event();
+        self.picked(event);
+        if !self.picker.is_open() && self.controls.focused() == Some(LIST) {
+            self.with_controls(|c, parts| c.focus(parts, None));
+        }
+    }
+
     /// What the server said (once read), with the edits made from it.
     pub(crate) fn take_loaded(&mut self, loaded: Loaded) {
         let modes: Vec<_> = loaded.props.iter().filter_map(|p| p.mode).collect();
@@ -586,6 +637,7 @@ impl PropertiesView {
         ];
         self.picker.open_with(items, chosen, Box::new(TableRows::new(columns)));
         self.picking = Some(Pick::Account(choice));
+        self.focus_list();
     }
 
     /// The algorithms' list opened.
@@ -597,6 +649,7 @@ impl PropertiesView {
         let chosen = Algo::ALL.iter().position(|a| *a == self.sums.algo());
         self.picker.open(items, chosen);
         self.picking = Some(Pick::Algo);
+        self.focus_list();
     }
 
     /// Each chosen file's digest computed (in the background).
@@ -1003,9 +1056,10 @@ impl PropertiesView {
         let style = ds::field_style(ds, ds.code_font(-0.5), self.octal_invalid());
         let placeholder =
             if edit.octal().is_none() { t("remote.props_mixed") } else { String::new() };
-        self.octal.paint(layer, text, field, self.typing && focused, &placeholder, &style);
+        self.octal.paint(layer, text, field, self.typing() && focused, &placeholder, &style);
         if enabled {
             self.hits.push((field, Hit::Octal));
+            self.octal_area = Some(field);
         }
         // Beside it: as `ls -l` writes it, or why the octal isn't taken.
         let (note, color) = if self.octal_invalid() {

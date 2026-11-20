@@ -55,7 +55,7 @@ fn a_change_after_asking_asks_again() {
     let mut d = dialog();
     d.form.as_mut().unwrap().force = true;
     d.command(GO);
-    d.apply(Hit::Tags, Point::new(0.0, 0.0), 1);
+    d.apply(Hit::Tags);
     assert!(!d.confirming);
 }
 
@@ -138,4 +138,59 @@ fn the_table_s_thumb_is_dragged_a_row_at_a_time() {
     assert_eq!(d.first, 20 - ROWS_SHOWN, "at its end, no further");
     assert!(d.release());
     assert_eq!(ticked(&d), before, "nothing ticked by it");
+}
+
+/// A row's name pressed: the keys and the text go to it (through its parts' focus), an
+/// edit asks again before a force push; a press on a box takes the keys away from it.
+#[test]
+fn a_rows_name_takes_the_keys_once_pressed() {
+    let mut d = dialog();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    d.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 720.0, 520.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let (field, _) = *d.hits.iter().find(|(_, h)| matches!(h, Hit::Name(0))).unwrap();
+    d.form.as_mut().unwrap().force = true;
+    d.command(GO);
+    assert!(d.confirming);
+    Viewer::press(&mut d, Point::new(field.max_x() - 2.0, field.min_y() + 4.0), 1);
+    d.release();
+    assert_eq!(d.typing, Some(0));
+    assert!(!d.confirming, "a press in a name asks again");
+    assert!(d.text_input("-x"));
+    assert!(d.edit_key(ViewerKey::Backspace));
+    assert_eq!(d.form.as_ref().unwrap().lines[0].remote_name.text(), "main-");
+    assert!(d.command("select_all"));
+    assert_eq!(d.selected_text().as_deref(), Some("main-"));
+    // Pasted: its first line, into the row typed in.
+    assert!(d.paste("-y\nnext"));
+    assert_eq!(d.form.as_ref().unwrap().lines[0].remote_name.text(), "-y");
+    let (tags, _) = *d.hits.iter().find(|(_, h)| *h == Hit::Tags).unwrap();
+    Viewer::press(&mut d, tags.center(), 1);
+    assert!(d.typing.is_none() && !d.text_input("y"), "a box pressed: no name typed in");
+    assert!(d.selected_text().is_none(), "no row: nothing to copy");
+    d.form.as_mut().unwrap().force = true;
+    d.command(GO);
+    assert!(!d.paste("z") && !d.confirming, "pasted with nowhere to take it: asked again");
+}
+
+/// The remotes' list open: the wheel is its own even where it can't scroll (the rows under
+/// it stay).
+#[test]
+fn the_open_remotes_list_keeps_the_wheel() {
+    let mut d = dialog();
+    d.open_remotes();
+    d.hover(Point::new(5.0, 5.0));
+    let first = d.first;
+    assert!(Viewer::scroll(&mut d, 0.0, 500.0), "the list's");
+    assert_eq!(d.first, first, "the rows didn't move");
 }

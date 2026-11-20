@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use database::{DataSourceId, FieldKind, FolderId, Scope, SecretPolicy, SourceColor};
 use i18n::t;
 use kernel::{Point, Rect, Secret};
+use ui_components::control::{Control, Controls, Scrolled};
 use ui_components::{
     AppRequest, KeyReach, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
 };
@@ -19,6 +20,7 @@ use super::{Probe, SourcesRequest, Tester};
 use crate::catalog::Listed;
 use workbench_model::Notification;
 
+pub(super) mod fields;
 mod footer;
 mod menus;
 mod viewer;
@@ -145,9 +147,25 @@ pub struct SourcesView {
     pub(super) list_max: f32,
     pub(super) form_area: Rect,
     pub(super) list_area: Rect,
+    /// Where the window's content was drawn last (the form scrolls under the wheel anywhere
+    /// but over the list).
+    pub(super) bounds: Rect,
     last_hover: Option<Point>,
     action: Option<ViewerAction>,
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Its parts' state of use (see `with_parts`).
+    controls: PartsInUse,
+}
+
+/// The parts' state of use, its focus sticky: a press beside the fields (a box ticked, the
+/// password's eye) leaves the caret where it was, the view saying where it goes otherwise.
+#[derive(Debug, Clone)]
+struct PartsInUse(Controls);
+
+impl Default for PartsInUse {
+    fn default() -> Self {
+        Self(Controls::sticky())
+    }
 }
 
 impl std::fmt::Debug for SourcesView {
@@ -209,6 +227,7 @@ impl SourcesView {
             self.focus = Some(focus.clone());
         }
         self.editor = Some(editor);
+        self.sync_focus();
         true
     }
 
@@ -267,20 +286,19 @@ impl SourcesView {
     /// Text typed into the field having the keys.
     pub fn type_text(&mut self, typed: &str) {
         let Some(field) = self.focus.clone() else { return };
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        let Some(editor) = &mut self.editor else { return };
-        if let Some(input) = editor.input_mut(&field) {
-            input.insert(&typed);
-        }
+        self.with_fields(|c, parts| c.text(parts, typed));
         self.edited(&field);
     }
 
+    /// `field` was edited: the editor follows it (the filter may select another source,
+    /// whose fields then take the parts' places).
     fn edited(&mut self, field: &Field) {
         if let Some(editor) = &mut self.editor {
             editor.edited(field);
         }
         self.error = None;
         self.confirm_close = false;
+        self.sync_focus();
     }
 
     pub fn tool(&mut self, tool: Tool) {
@@ -431,11 +449,8 @@ impl SourcesView {
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| h.clone())
     }
 
-    fn focused_input(&mut self) -> Option<&mut ui_kit::TextInput> {
-        let field = self.focus.clone()?;
-        self.editor.as_mut()?.input_mut(&field)
-    }
-
+    /// The focus moved to the next field taking typed text (`forward`), or the one before,
+    /// in the editor's order: the parts' focus follows.
     fn focus_step(&mut self, forward: bool) {
         let Some(editor) = &self.editor else { return };
         let texts = editor.texts();
@@ -450,6 +465,7 @@ impl SourcesView {
         };
         self.focus = Some(texts[next].clone());
         self.close_popup();
+        self.sync_focus();
     }
 
     /// The selection moved up or down the visible list.
@@ -469,10 +485,7 @@ impl SourcesView {
         let focus = self.focus.clone();
         self.select(row);
         self.focus = focus;
-    }
-
-    fn hover_point(&self) -> Point {
-        self.last_hover.unwrap_or(Point::new(f32::MIN, f32::MIN))
+        self.sync_focus();
     }
 }
 

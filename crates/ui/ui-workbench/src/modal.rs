@@ -270,6 +270,11 @@ impl Modal {
         self.nav_bar.release()
     }
 
+    /// Its navigation bar as a control (`ui_components::control`).
+    pub fn nav_grab(&mut self) -> NavGrab<'_> {
+        NavGrab(self)
+    }
+
     /// The header's field, left of `esc` (from the last paint; empty without one).
     pub fn header_field(&self) -> Rect {
         self.header_field
@@ -895,6 +900,33 @@ struct Frame {
     footer_h: f32,
     /// Between the header and the footer.
     body: Rect,
+}
+
+/// A modal's navigation bar as a control: pressed on its lane, its thumb is held (or the
+/// navigation jumps there) and follows the pointer (see [`Modal::nav_grab`]).
+#[derive(Debug)]
+pub struct NavGrab<'a>(&'a mut Modal);
+
+impl ui_components::control::Control for NavGrab<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.0.nav_overflows && self.0.nav_bar.contains(p)
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> ui_components::control::Press {
+        if self.0.press_nav_bar(p) {
+            ui_components::control::Press::Held
+        } else {
+            ui_components::control::Press::Ignored
+        }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.0.drag_nav_bar(p)
+    }
+
+    fn release(&mut self) -> bool {
+        self.0.release_nav_bar()
+    }
 }
 
 #[cfg(test)]

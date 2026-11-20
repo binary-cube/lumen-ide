@@ -36,6 +36,7 @@ use remote::{
 };
 use render_api::Quad;
 use text_layout::TextSystem;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Check, Ctx, Tone, radius};
 use ui_components::{
     AppRequest, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -47,6 +48,7 @@ use crate::config::{self, Saved};
 use crate::paint::{Column, Pen};
 use crate::session;
 
+mod fields;
 mod owner;
 mod paint;
 mod transfer;
@@ -136,6 +138,10 @@ const FIELDS: [Field; 9] = [
     Field::Local,
     Field::Path,
 ];
+
+/// The controls before the text fields (see [`ConnectView::with_controls`]): the open
+/// list, the step's scrollbar.
+const FIELD_PARTS: usize = 2;
 
 const PROTOCOLS: [Protocol; 4] = [
     Protocol::Sftp,
@@ -260,8 +266,8 @@ pub(crate) fn explain(e: &RemoteError) -> String {
 
 pub struct ConnectView {
     step: Step,
-    inputs: Vec<(Field, TextInput)>,
-    focused: Field,
+    /// Its text fields, in [`FIELDS`]' order (their places among its controls follow it).
+    inputs: [(Field, TextInput); FIELDS.len()],
     protocol: Protocol,
     auth: AuthKind,
     mode: Mode,
@@ -317,6 +323,8 @@ pub struct ConnectView {
     /// How far the step scrolls (measured when painted), and its scrollbar.
     max_scroll: f32,
     bar: ui_components::EdgeScrollbar,
+    /// Its controls' state of use (see [`ConnectView::with_controls`]).
+    controls: Controls,
     /// The new connection's identity (UUID v4, made once: its secret is kept under it, so
     /// two connections named alike never share or overwrite one).
     connection_id: String,
@@ -476,9 +484,57 @@ fn names(listing: &[RemoteEntry]) -> Vec<String> {
 }
 
 impl ConnectView {
+    /// Its controls, the topmost first, with their state of use: an open list over
+    /// everything, the step's scrollbar, the text fields ([`fields::FormField`], one of them
+    /// always focused: a press beside them leaves it the keys). The wizard moves the focus
+    /// itself (Tab and the arrows walk the step's fields, a step given focuses one), and asks
+    /// the open list and the path's suggestions first; what a field typed is followed after.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut shown = self.inputs.each_ref().map(|(field, _)| self.in_step(*field)).into_iter();
+        let edited = std::cell::Cell::new(None);
+        let answer = {
+            let hits = &self.hits;
+            let mut fields = self.inputs.each_mut().map(|(field, input)| fields::FormField {
+                field: *field,
+                input,
+                hits,
+                in_step: shown.next().unwrap_or(false),
+                edited: &edited,
+            });
+            let [f0, f1, f2, f3, f4, f5, f6, f7, f8] = &mut fields;
+            let mut step = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+            let mut parts: [&mut dyn Control; FIELD_PARTS + FIELDS.len()] =
+                [&mut self.picker, &mut step, f0, f1, f2, f3, f4, f5, f6, f7, f8];
+            f(&mut self.controls, &mut parts)
+        };
+        if let Some(field) = edited.get() {
+            self.edited(field);
+        }
+        answer
+    }
+
+    /// The field with the keys (the form's first before any is given them).
+    fn focused(&self) -> Field {
+        let at = self.controls.focused().and_then(|i| i.checked_sub(FIELD_PARTS));
+        at.and_then(|i| self.inputs.get(i)).map_or(Field::Host, |(field, _)| *field)
+    }
+
+    /// The keys given to `field`.
+    fn focus(&mut self, field: Field) {
+        let Some(at) = self.inputs.iter().position(|(f, _)| *f == field) else { return };
+        self.with_controls(|c, parts| c.focus(parts, Some(FIELD_PARTS + at)));
+    }
+
+    /// The part that was pressed is a field (its place among the controls).
+    fn is_field(part: usize) -> bool {
+        part >= FIELD_PARTS
+    }
+
     pub fn new() -> Self {
-        let mut inputs: Vec<(Field, TextInput)> =
-            FIELDS.iter().map(|f| (*f, TextInput::default())).collect();
+        let mut inputs = FIELDS.map(|f| (f, TextInput::default()));
         for (field, input) in &mut inputs {
             match field {
                 Field::Port => input.set_text("22"),
@@ -486,10 +542,9 @@ impl ConnectView {
                 _ => {}
             }
         }
-        Self {
+        let mut view = Self {
             step: Step::Connection,
             inputs,
-            focused: Field::Host,
             protocol: Protocol::Sftp,
             auth: AuthKind::Password,
             mode: Mode::Mirror,
@@ -529,6 +584,7 @@ impl ConnectView {
             scroll: 0.0,
             max_scroll: 0.0,
             bar: Default::default(),
+            controls: Controls::sticky(),
             connection_id: uuid::Uuid::new_v4().to_string(),
             hits: Vec::new(),
             hover: None,
@@ -543,7 +599,10 @@ impl ConnectView {
             invalid: None,
             connectors: session::connector,
             stores: config::secret_store,
-        }
+        };
+        // The keys in the first field from the start.
+        view.focus(Field::Host);
+        view
     }
 
     pub fn step(&self) -> Step {
@@ -596,8 +655,8 @@ impl ConnectView {
             .collect();
         self.connection_id.clone_from(&c.id);
         (self.local_typed, self.name_typed, self.label_typed) = (true, true, true);
-        (self.step, self.focused, self.status, self.invalid) =
-            (Step::Connection, Field::Host, None, None);
+        (self.step, self.status, self.invalid) = (Step::Connection, None, None);
+        self.focus(Field::Host);
         self.editing = Some(saved);
     }
 
@@ -654,22 +713,25 @@ impl ConnectView {
         self.input(field).text().trim().to_owned()
     }
 
-    /// The fields of the current step (a key's path only with a key, no secret with the
-    /// agent).
+    /// The fields of the current step, in their order.
     fn fields(&self) -> Vec<Field> {
+        FIELDS.into_iter().filter(|f| self.in_step(*f)).collect()
+    }
+
+    /// `field` is one of the current step's (a key's path only with a key, no secret with
+    /// the agent).
+    fn in_step(&self, field: Field) -> bool {
         match self.step {
-            Step::Connection => [Field::Host, Field::Port, Field::User, Field::Secret, Field::Key]
-                .into_iter()
-                .filter(|f| match f {
-                    Field::Key => self.auth == AuthKind::Key,
-                    Field::Secret => self.auth != AuthKind::Agent,
-                    _ => true,
-                })
-                .collect(),
-            Step::Folder => vec![Field::Path],
+            Step::Connection => match field {
+                Field::Host | Field::Port | Field::User => true,
+                Field::Key => self.auth == AuthKind::Key,
+                Field::Secret => self.auth != AuthKind::Agent,
+                _ => false,
+            },
+            Step::Folder => field == Field::Path,
             // Editing: the project's folder (its name and local copy) stays.
-            Step::Contents if self.editing.is_some() => vec![Field::Label],
-            Step::Contents => vec![Field::Name, Field::Label, Field::Local],
+            Step::Contents if self.editing.is_some() => field == Field::Label,
+            Step::Contents => matches!(field, Field::Name | Field::Label | Field::Local),
         }
     }
 
@@ -684,13 +746,8 @@ impl ConnectView {
             }
             return;
         }
-        if !self.fields().contains(&self.focused) {
-            return;
-        }
-        let field = self.focused;
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
-        self.input_mut(field).insert(&text);
-        self.edited(field);
+        // The focused field takes it, when it's the step's.
+        self.with_controls(|c, parts| c.text(parts, text));
     }
 
     fn edited(&mut self, field: Field) {
@@ -774,7 +831,7 @@ impl ConnectView {
     /// The server's folders of `dir`, kept; suggested at once if the path is still in it.
     fn server_folders_read(&mut self, dir: String, names: Vec<String>) {
         self.server_folders.insert(folder_key(&dir), Some(names));
-        if self.step == Step::Folder && self.focused == Field::Path && !self.on_list {
+        if self.step == Step::Folder && self.focused() == Field::Path && !self.on_list {
             self.suggest_server();
         }
     }
@@ -782,7 +839,7 @@ impl ConnectView {
     /// The focused path completed with suggestion `i` (its folders listed next).
     fn complete(&mut self, i: usize) {
         let Some(path) = self.suggestions.get(i).cloned() else { return };
-        if self.focused == Field::Path {
+        if self.focused() == Field::Path {
             self.input_mut(Field::Path).set_text(&format!("{path}/"));
             self.input_mut(Field::Path).end(false);
             self.suggest_server();
@@ -800,14 +857,15 @@ impl ConnectView {
         if fields.is_empty() {
             return;
         }
-        let at = fields.iter().position(|f| *f == self.focused).unwrap_or(0) as isize;
+        let focused = self.focused();
+        let at = fields.iter().position(|f| *f == focused).unwrap_or(0) as isize;
         let to = at + step;
         // Steps 2, 3: before the first field / past the last one, the listing / tree.
         if self.step != Step::Connection && (to < 0 || to >= fields.len() as isize) {
             self.on_list = true;
             return;
         }
-        self.focused = fields[to.rem_euclid(fields.len() as isize) as usize];
+        self.focus(fields[to.rem_euclid(fields.len() as isize) as usize]);
     }
 
     /// The keys of the listing (step 2) and of the tree (step 3).
@@ -820,7 +878,7 @@ impl ConnectView {
             ViewerKey::Up => self.highlight = self.highlight.map(|h| h.saturating_sub(1)),
             ViewerKey::Tab => {
                 self.on_list = false;
-                self.focused = if self.step == Step::Folder { Field::Path } else { Field::Name };
+                self.focus(if self.step == Step::Folder { Field::Path } else { Field::Name });
             }
             ViewerKey::Right | ViewerKey::Enter if self.step == Step::Folder => {
                 match self.highlight.and_then(|h| self.listing.get(h)).filter(|e| e.is_dir) {
@@ -956,7 +1014,7 @@ impl ConnectView {
         self.status = Some((invalid.why, Tone::Danger));
         self.invalid = invalid.field;
         if let Some(field) = invalid.field.filter(|f| self.fields().contains(f)) {
-            self.focused = field;
+            self.focus(field);
             self.on_list = false;
         }
     }
@@ -1098,7 +1156,7 @@ impl ConnectView {
         if self.step == Step::Connection {
             self.browser = None;
             self.server_folders.clear();
-            self.focused = Field::Host;
+            self.focus(Field::Host);
         }
     }
 
@@ -1190,7 +1248,7 @@ impl ConnectView {
             self.excluded.clear();
         }
         self.scroll = 0.0;
-        self.focused = Field::Name;
+        self.focus(Field::Name);
         self.on_list = true;
         self.highlight = None;
         if !self.name_typed {

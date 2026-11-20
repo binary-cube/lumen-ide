@@ -127,6 +127,31 @@ impl Workbench {
 pub(super) struct MenuDrawerSlot;
 
 impl OverlaySlot for MenuDrawerSlot {
+    /// A category the mouse rests on: shown then.
+    fn rest_deadline(&self, wb: &Workbench) -> Option<std::time::Instant> {
+        wb.menu_drawer.as_ref().and_then(|d| d.deadline())
+    }
+
+    fn input<'a>(&self, wb: &'a Workbench) -> Option<&'a ui_kit::TextInput> {
+        Some(&wb.menu_drawer.as_ref()?.query)
+    }
+
+    fn input_mut<'a>(&self, wb: &'a mut Workbench) -> Option<&'a mut ui_kit::TextInput> {
+        Some(&mut wb.menu_drawer.as_mut()?.query)
+    }
+
+    fn held(&self, wb: &mut Workbench) -> bool {
+        wb.menu_drawer.as_ref().is_some_and(|d| d.scrollbar_held())
+    }
+
+    fn drag(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point) -> Option<bool> {
+        wb.drag_menu_drawer(p)
+    }
+
+    fn release(&self, wb: &mut Workbench, _: &mut TextSystem) -> Option<bool> {
+        wb.release_menu_drawer().then_some(true)
+    }
+
     fn kind(&self, _wb: &Workbench) -> OverlayKind {
         OverlayKind::Modal
     }

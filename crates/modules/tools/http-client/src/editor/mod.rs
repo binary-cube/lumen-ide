@@ -6,6 +6,7 @@
 
 mod form;
 mod paint;
+mod parts;
 mod suggest;
 
 use std::path::PathBuf;
@@ -14,7 +15,8 @@ use std::time::{Duration, Instant};
 
 use http_requests::draft::Draft;
 use kernel::{Point, Rect};
-use ui_components::picker::{Picker, PickerEvent, PickerItem};
+use ui_components::control::{self, Controls, NOWHERE};
+use ui_components::picker::{Picker, PickerItem};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{
     MultilineField, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -170,6 +172,13 @@ pub struct RequestEditor {
     share: f32,
     splitter: Option<ui_components::Splitter>,
     split_area: Rect,
+    /// Where the held separator's line was dragged to (physical pixels across).
+    split_at: Option<f32>,
+    /// Its parts' state of use (see [`RequestEditor::with_controls`]).
+    controls: Controls,
+    /// Where the mouse was last: the wheel goes to the part there (a list opened under a
+    /// mouse that hasn't moved since is the wheel's).
+    mouse: Option<Point>,
     data: Option<EditorData>,
     form: Option<Form>,
     /// The file's text as last read or written.
@@ -227,7 +236,36 @@ impl std::fmt::Debug for RequestEditor {
     }
 }
 
+/// The open list, first among its parts (see [`RequestEditor::with_controls`]).
+const LIST: usize = 0;
+/// The form with the response beside it, last among them.
+const FORM: usize = 2;
+
 impl RequestEditor {
+    /// Its parts, the topmost first, with their state of use: an open list over everything,
+    /// the separator between the request and its response (once drawn), the form with the
+    /// response beside it ([`parts`]). The keys are the first's that takes them: an open
+    /// list's (not the suggestions': they leave them to the field typed in), else the form's.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn control::Control]) -> R,
+    ) -> R {
+        let mut controls = std::mem::take(&mut self.controls);
+        let shared = std::cell::RefCell::new(self);
+        let answer = {
+            let mut list = parts::ListPart(&shared);
+            let mut split = parts::SplitPart(&shared);
+            let mut form = parts::FormPart(&shared);
+            let mut parts: [&mut dyn control::Control; 3] = [&mut list, &mut split, &mut form];
+            crate::parts::keys_to_first(&mut controls, &mut parts);
+            let answer = f(&mut controls, &mut parts);
+            crate::parts::keys_to_first(&mut controls, &mut parts);
+            answer
+        };
+        shared.into_inner().controls = controls;
+        answer
+    }
+
     fn tab(&self) -> Tab {
         self.tab.unwrap_or(Tab::Params)
     }
@@ -850,6 +888,7 @@ impl Viewer for RequestEditor {
         }
         self.take_work();
         self.paint_editor(ctx);
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn poll(&mut self) -> bool {
@@ -881,95 +920,43 @@ impl Viewer for RequestEditor {
         self.running().is_some()
     }
 
-    /// The splitter moving.
+    /// The separator moving (as last drawn).
     fn is_animating(&self) -> bool {
-        self.splitter.as_ref().is_some_and(|s| s.is_animating())
+        self.controls.is_animating()
     }
 
+    /// The wheel to the part under the mouse.
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
-        if self.picker.is_open() {
-            return self.picker.scroll(dy);
-        }
-        if let Some(Focus::Area(area)) = self.focus
-            && let Some(field) = self.area(area)
-        {
-            return field.scroll_by(dy);
-        }
-        if let Some((_, _, view)) = self.response.as_mut() {
-            return view.scroll(dx, dy);
-        }
-        false
+        let at = self.mouse.unwrap_or(NOWHERE);
+        self.with_controls(|c, parts| c.scroll(parts, at, dx, dy)).is_some()
     }
 
     fn pointer_down(
         &mut self,
         p: Point,
         clicks: u32,
-        _mods: ui_components::PressMods,
+        mods: ui_components::PressMods,
     ) -> Option<ViewerAction> {
-        if self.picker.is_open() {
-            match self.picker.press(p) {
-                Some(PickerEvent::Chosen(i)) => self.picked(i),
-                Some(_) => self.picking = None,
-                None => {}
-            }
-            return None;
-        }
-        if self.splitter.as_mut().is_some_and(|s| s.begin_drag(p)) {
-            return None;
-        }
-        match self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h) {
-            Some(hit) => self.press_hit(hit, p, clicks),
-            None => self.focus = None,
-        }
+        self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods));
         self.action.take()
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(x) = self.splitter.as_ref().and_then(|s| s.drag_to(p)) {
-            let b = self.split_area;
-            if b.size.width > 0.0 {
-                self.share = ((x - b.min_x()) / b.size.width).clamp(0.2, 0.8);
-            }
-            return true;
-        }
-        let Some(focus) = self.dragging else { return false };
-        match focus {
-            Focus::Area(area) => self.area(area).is_some_and(|f| f.drag(p)),
-            _ => {
-                if let Some(input) = self.input(focus) {
-                    input.extend_to(p.x);
-                }
-                true
-            }
-        }
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, changed)| changed)
     }
 
     fn release(&mut self) -> bool {
         self.dragging = None;
-        self.splitter.as_mut().is_some_and(|s| s.end_drag())
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        if self.picker.is_open() {
-            return self.picker.hover(p);
-        }
-        let line = self.splitter.as_mut().is_some_and(|s| s.hover(p));
-        let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
-        (std::mem::replace(&mut self.hover, hover) != hover) | line
+        self.mouse = Some(p);
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.picker.is_open() {
-            return self.picker.cursor_at(p);
-        }
-        if self.splitter.as_ref().is_some_and(|s| s.contains(p)) {
-            return Some(ViewerCursor::ResizeHorizontal);
-        }
-        match self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)? {
-            Hit::Field(_) => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
-        }
+        self.controls.cursor_at(p)
     }
 
     fn takes_keyboard(&self) -> bool {
@@ -980,179 +967,37 @@ impl Viewer for RequestEditor {
         self.focus.is_some() || self.picker.is_open()
     }
 
+    /// To the part with the keys: an open list's search, else the field typed in.
     fn text_input(&mut self, typed: &str) -> bool {
-        // The suggestions keep the field's text: it goes on being typed.
-        if self.picker.is_open() && !matches!(self.picking, Some(Pick::Suggest(..))) {
-            return self.picker.text_input(typed);
-        }
-        let Some(focus) = self.focus else { return false };
-        match focus {
-            Focus::Area(area) => {
-                let Some(field) = self.area(area) else { return false };
-                field.insert(typed);
-                self.typed_in(focus);
-                self.suggest(focus);
-                true
-            }
-            _ => {
-                let one_line: String = typed.chars().filter(|c| !c.is_control()).collect();
-                let Some(input) = self.input(focus) else { return false };
-                input.insert(&one_line);
-                self.typed_in(focus);
-                self.suggest(focus);
-                true
-            }
-        }
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
         self.text_input(text)
     }
 
+    /// What the part with the keys has selected: an open list's search, else the field
+    /// typed in.
     fn selected_text(&self) -> Option<String> {
-        if self.picker.is_open() && !matches!(self.picking, Some(Pick::Suggest(..))) {
-            return self.picker.selected_text();
-        }
-        let focus = self.focus?;
-        let form = self.form.as_ref()?;
-        let text = match focus {
-            Focus::Title => form.title.selected_text(),
-            Focus::Url => form.url.selected_text(),
-            Focus::Cell(table, row, value) => {
-                let rows = match table {
-                    Table::Params => &form.params,
-                    Table::Headers => &form.headers,
-                    Table::Form => &form.form,
-                    Table::Multipart => &form.parts,
-                };
-                let row = rows.get(row)?;
-                if value { row.value.selected_text() } else { row.name.selected_text() }
-            }
-            Focus::Auth(i) => form.auth.get(i)?.selected_text(),
-            Focus::File => form.file.selected_text(),
-            Focus::Timeout => form.timeout.selected_text(),
-            Focus::ConnectTimeout => form.connect_timeout.selected_text(),
-            Focus::Area(Area::Bulk) => self.bulk.as_ref()?.selected_text(),
-            Focus::Area(Area::Body) => form.body.selected_text(),
-            Focus::Area(Area::Variables) => form.variables.selected_text(),
-            Focus::Area(Area::Pre) => form.pre.selected_text(),
-            Focus::Area(Area::Post) => form.post.selected_text(),
-            Focus::Area(Area::Docs) => form.docs.selected_text(),
-        };
-        (!text.is_empty()).then(|| text.to_owned())
+        self.controls.selected_text_with(|part| match part {
+            LIST => Some(&self.picker as &dyn control::Control),
+            FORM => self.typed_field(),
+            _ => None,
+        })
     }
 
     fn select_all(&mut self) -> bool {
-        if self.picker.is_open() && !matches!(self.picking, Some(Pick::Suggest(..))) {
-            return self.picker.command("select_all");
-        }
-        let Some(focus) = self.focus else { return false };
-        match focus {
-            Focus::Area(area) => self.area(area).map(MultilineField::select_all).is_some(),
-            _ => self.input(focus).map(TextInput::select_all).is_some(),
-        }
+        self.command("select_all")
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        // The suggestions take ↑ ↓ ↵ ⇥ Esc; the rest goes on in the field.
-        let suggesting = matches!(self.picking, Some(Pick::Suggest(..))) && self.picker.is_open();
-        let list_key = matches!(
-            key,
-            ViewerKey::Up | ViewerKey::Down | ViewerKey::Enter | ViewerKey::Tab | ViewerKey::Escape
-        );
-        if suggesting && !list_key {
-            self.picker.close();
-            self.picking = None;
-        } else if self.picker.is_open() {
-            match self.picker.key(key, reach) {
-                Some(PickerEvent::Chosen(i)) => self.picked(i),
-                Some(_) => self.picking = None,
-                None => {}
-            }
-            return true;
-        }
-        let Some(focus) = self.focus else { return false };
-        if key == ViewerKey::Escape {
-            self.focus = None;
-            return true;
-        }
-        match focus {
-            Focus::Area(area) => {
-                let Some(field) = self.area(area) else { return false };
-                let KeyReach { word, extend } = reach;
-                match key {
-                    ViewerKey::Backspace => field.backspace(word),
-                    ViewerKey::Delete => field.delete(),
-                    ViewerKey::Left => field.left(word, extend),
-                    ViewerKey::Right => field.right(word, extend),
-                    ViewerKey::Up => field.vertical(false, extend),
-                    ViewerKey::Down => field.vertical(true, extend),
-                    ViewerKey::Home => field.home(word, extend),
-                    ViewerKey::End => field.end(word, extend),
-                    ViewerKey::Enter => field.newline(),
-                    ViewerKey::Tab => field.insert("  "),
-                    _ => return false,
-                }
-                if matches!(
-                    key,
-                    ViewerKey::Backspace | ViewerKey::Delete | ViewerKey::Enter | ViewerKey::Tab
-                ) {
-                    self.typed_in(focus);
-                }
-                true
-            }
-            _ => match key {
-                ViewerKey::Enter if focus == Focus::Url => {
-                    self.send();
-                    true
-                }
-                ViewerKey::Enter | ViewerKey::Tab => {
-                    self.next_field(reach.extend);
-                    true
-                }
-                _ => {
-                    let edits = matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
-                    let Some(input) = self.input(focus) else { return false };
-                    let used = reach.edit(input, key);
-                    if used && edits {
-                        self.typed_in(focus);
-                    }
-                    if used {
-                        self.suggest(focus);
-                    }
-                    used
-                }
-            },
-        }
+        self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
 
+    /// An edit command (⌘A, cut, undo, redo) for the part with the keys.
     fn command(&mut self, id: &str) -> bool {
-        // A list's search open: ⌘A, cut, undo are its own (suggestions keep the field's).
-        if self.picker.is_open()
-            && !matches!(self.picking, Some(Pick::Suggest(..)))
-            && self.picker.command(id)
-        {
-            return true;
-        }
-        match id {
-            // ⌘A in a field: its text.
-            "select_all" | "select-all" => self.select_all(),
-            "undo" | "redo" => {
-                let Some(focus) = self.focus else { return false };
-                let redo = id == "redo";
-                let done = match focus {
-                    Focus::Area(area) => {
-                        self.area(area).is_some_and(|f| if redo { f.redo() } else { f.undo() })
-                    }
-                    _ => self.input(focus).is_some_and(|f| if redo { f.redo() } else { f.undo() }),
-                };
-                if done {
-                    self.typed_in(focus);
-                }
-                done
-            }
-            _ => false,
-        }
+        let id = if id == "select-all" { "select_all" } else { id };
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn web_page(&self) -> Option<ui_components::WebPage> {

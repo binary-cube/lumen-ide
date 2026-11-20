@@ -88,6 +88,13 @@ pub trait Extractor: Send + Sync + std::fmt::Debug {
     /// The extension of a file it writes (`csv`, `sql`, `json`).
     fn extension(&self) -> &str;
 
+    /// The extensions of a file's name that ask for it when an export is named so (`md`,
+    /// `markdown`): one format each (of several writing `.sql`, the plain inserts); none by
+    /// default.
+    fn names_files(&self) -> &[&str] {
+        &[]
+    }
+
     /// "Skip Computed / Skip Generated Columns" apply to it (the SQL that writes rows).
     fn skips_columns(&self) -> bool {
         false

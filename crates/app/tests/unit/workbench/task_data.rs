@@ -61,6 +61,7 @@ fn an_action_goes_to_whoever_reported_the_part() {
         name: "Test",
         description: "",
         depends_on: &[],
+        info: extensions::ModuleInfo::BUILT_IN,
     };
     registry.register(Box::new(Holding(manifest, AtomicBool::new(true))));
     let modules = Arc::new(crate::module_manager::ModuleManager::new(

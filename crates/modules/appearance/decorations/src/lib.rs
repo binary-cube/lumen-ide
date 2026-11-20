@@ -24,6 +24,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Theme decorations",
     description: "What a theme draws besides its colors (a garland, particles, corner ornaments, a glow), and your own over any theme",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "sparkles", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

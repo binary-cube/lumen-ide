@@ -35,6 +35,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Updates",
     description: "Tells when a new version is out, shows what's in it, and updates the app when the user chooses",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "download", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Help › Check for Updates… (the application's menu on macOS).

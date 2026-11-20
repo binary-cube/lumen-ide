@@ -476,7 +476,7 @@ impl RelationsView {
         let field_w = px(230.0);
         if x + field_w + px(200.0) < right {
             let f = Rect::new(x, mid - px(16.0), field_w, px(32.0));
-            self.paint_filter(Pen { layer, text, ds }, icons, f, focused && self.typing);
+            self.paint_filter(Pen { layer, text, ds }, icons, f, focused && self.typing());
             x = f.max_x() + px(16.0);
         }
         // A table's neighbors: how far, and every table again.
@@ -587,6 +587,7 @@ impl RelationsView {
         let px = |v: f32| ds.px(v);
         let field = ds::search_field(layer, icons, ds, f, typing);
         self.hits.push((f, Hit::Field));
+        self.filter_area = f;
         self.tip(Hit::Field, f, "relations.tip_filter", Some("database.diagram_find"));
         let mut right = field.max_x();
         if !self.filter.text().is_empty() {
@@ -613,6 +614,7 @@ impl RelationsView {
                 draw_icon(layer, icons, id, ir, p.text_muted);
             }
             self.hits.push((r, Hit::Clear));
+            self.clear_area = r;
             self.tip(Hit::Clear, r, "relations.tip_clear", None);
             right = r.min_x() - px(6.0);
         }

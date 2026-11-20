@@ -24,6 +24,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Binary Files",
     description: "Files that aren't text (videos, archives…) or are too large open as a notice, not in the editor",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "hash", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

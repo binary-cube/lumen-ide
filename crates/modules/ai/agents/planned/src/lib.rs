@@ -15,6 +15,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Planned Agents",
     description: "The agents the editor will host but doesn't yet: shown greyed out among the agents",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "plan", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// A mark filling its 24 × 24 box, drawn inside 20 × 20 (the line icons' room).

@@ -2,7 +2,6 @@
 //! back; the zoom (−, its value — a click fits the page —, +); the properties shown or not.
 //! Each button greyed out where it can't act (nothing chosen, nothing to undo, locked).
 
-use i18n::t;
 use kernel::{Point, Rect};
 use render_api::Quad;
 use ui_components::Viewer;
@@ -57,7 +56,8 @@ impl Tool {
         }
     }
 
-    fn tip(self) -> &'static str {
+    /// Its tooltip's text key.
+    pub(super) fn tip(self) -> &'static str {
         match self {
             Self::Palette => "diagram_editor.tool_palette",
             Self::Select => "diagram_editor.tool_select",
@@ -190,11 +190,6 @@ impl DiagramView {
             | Tool::DrawLine => {}
         }
         true
-    }
-
-    /// A button's tooltip.
-    pub(super) fn toolbar_tip(&self, p: Point) -> Option<(Rect, String)> {
-        self.tools.iter().find(|(r, _)| r.contains(p)).map(|(r, tool)| (*r, t(tool.tip())))
     }
 
     /// The bar drawn.

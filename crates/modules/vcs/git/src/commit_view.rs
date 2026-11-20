@@ -25,7 +25,9 @@ use version_control::staging::{DiffHunk, LineKind, hunks};
 use version_control::{Commit, FileState, PatchTarget, Repository, Revision, StagedFile, VcsError};
 use workbench_model::{ChoiceItem, ChoiceList, LayoutSizes, Question, WorkbenchHost};
 
-use crate::divider::Divider;
+use ui_components::control::{Control, Controls, Thumb};
+
+use crate::divider::{Divider, Grip};
 
 use self::diff::*;
 use self::paint::*;
@@ -33,6 +35,7 @@ use self::paint::*;
 mod diff;
 mod menu;
 mod paint;
+mod parts;
 mod places;
 mod selection;
 mod syntax;
@@ -116,7 +119,7 @@ enum Hit {
     ClearPlacesFilter,
 }
 
-/// Where the keyboard goes.
+/// Where the keyboard goes (which of its lanes has the focus: [`CommitView::keys`]).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum Keys {
     /// It types the message.
@@ -181,9 +184,10 @@ pub struct CommitView {
     /// The files' state badges, as last drawn (their tooltips: the state in words).
     badges: Vec<(Rect, version_control::FileState)>,
     hover: Option<Hit>,
-    /// The message was pressed: the mouse dragged selects in it.
-    selecting: bool,
-    keys: Keys,
+    /// What the files' lists were asked with the keys; the places' filter asked to leave
+    /// ([`parts`]).
+    lists_asked: Option<parts::ListsAsked>,
+    leave_places: bool,
     /// The shown file's row is brought into view at the next paint (it was moved to by key).
     reveal: bool,
     dividers: Dividers,
@@ -223,6 +227,8 @@ pub struct CommitView {
     places_filter: ui_kit::TextInput,
     places_area: Rect,
     places_scroll: f32,
+    /// Its parts' state of use (see [`CommitView::with_controls`]).
+    controls: Controls,
 }
 
 impl CommitView {
@@ -302,23 +308,6 @@ impl CommitView {
             self.places_scroll = 0.0;
             self.lay_places();
         }
-    }
-
-    /// A key while the places' filter has the keyboard: it edits it; Esc empties it (or,
-    /// empty, gives the keyboard back to the message, as Tab does).
-    fn places_key(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
-        match key {
-            ViewerKey::Escape if !self.places_filter.text().is_empty() => {
-                self.edit_places_filter(|input| input.set_text(""));
-            }
-            ViewerKey::Escape | ViewerKey::Tab => self.keys = Keys::Message,
-            _ => {
-                let mut edited = false;
-                self.edit_places_filter(|input| edited = reach.edit(input, key));
-                return edited;
-            }
-        }
-        true
     }
 
     /// Place `i` clicked: a section or a folder folds or opens; the history, a search, a
@@ -515,13 +504,6 @@ impl CommitView {
             }
         });
         self.amend_rx = Some(rx);
-    }
-
-    /// The draft kept for the repository (until it's committed).
-    fn keep_draft(&self) {
-        if let Some(repo) = &self.repo {
-            drafts().insert(repo.root().to_path_buf(), self.message.text().to_owned());
-        }
     }
 
     fn commit(&mut self) -> bool {

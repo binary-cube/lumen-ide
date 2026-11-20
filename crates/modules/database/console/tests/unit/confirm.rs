@@ -147,3 +147,42 @@ fn the_statements_box_fits_them() {
     Viewer::set_data(&mut view, &prod);
     assert_eq!(Viewer::modal_height(&view), Some(content_height(&prod)));
 }
+
+/// A long script scrolls in its box: the scrollbar's thumb, pressed and dragged down, moves
+/// the statements (a click there presses no button).
+#[test]
+fn the_statements_thumb_is_dragged() {
+    let project = Project::new("confirm-thumb");
+    let mut host = FakeHost::new(kernel::ProjectId::new(), &project.root);
+    let mut r = request(ConfirmKind::Run, false);
+    r.statements = vec![(0..80).map(|i| format!("SELECT {i};")).collect::<Vec<_>>().join("\n")];
+    let (mut view, answers) = asked(&mut host, r);
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let bounds = Rect::new(0.0, 0.0, 1000.0, 1200.0);
+    view.paint(ViewerPaint {
+        bounds,
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    // The thumb: the bar's topmost point (the box shows its first lines).
+    let on = (0..bounds.size.height as u32)
+        .flat_map(|y| (0..bounds.size.width as u32).map(move |x| (x, y)))
+        .map(|(x, y)| Point::new(x as f32, y as f32))
+        .find(|p| view.bar.contains(*p))
+        .expect("a scrollbar along the statements");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    assert_eq!(view.click(at), None);
+    assert!(view.bar.is_dragging(), "the thumb is held");
+    assert!(view.drag(Point::new(at.x, at.y + 40.0)));
+    assert!(view.scroll > 0.0, "the statements moved");
+    assert!(view.release());
+    assert!(!view.closed() && answers.lock().unwrap().is_empty(), "nothing answered");
+}

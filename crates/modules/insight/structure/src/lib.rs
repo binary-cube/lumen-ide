@@ -19,6 +19,7 @@ use kernel::{Point, Rect, Rgba};
 use languages::IconSvg;
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx};
 use ui_components::{
     Dock, PanelContext, Problem, ToolContent, ToolPanel, ToolPanelAction, ToolWindowProvider,
@@ -31,6 +32,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Structure",
     description: "The panel with the declaration at the cursor, its usages and the file's structure",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "braces", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -155,6 +157,8 @@ pub struct StructurePanel {
     bounds: Rect,
     /// Its scrollbar, hidden at rest (over its right padding).
     bar: ui_components::EdgeScrollbar,
+    /// Its controls' state of use (see [`StructurePanel::with_controls`]).
+    controls: Controls,
     targets: Vec<(Rect, ToolPanelAction)>,
     hover: Option<usize>,
     /// Bumped by every `update()`: what the header's wrapped lines were made from.
@@ -422,20 +426,20 @@ impl ToolPanel for StructurePanel {
         self.bar.set_auto_hiding(true);
         let (b, content) = (self.bounds, self.content_h);
         self.bar.paint(ctx.scene, ctx.palette, ctx.scale, b, content, self.scroll.round());
+        // What the scrollbar wants of the frames (its fade), for the questions before the next.
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.bar.next_frame()
+        self.controls.next_frame()
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        self.scroll = offset;
-        true
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some()
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn scroll(&mut self, dy: f32) -> bool {
@@ -447,8 +451,7 @@ impl ToolPanel for StructurePanel {
 
     fn click(&mut self, p: Point) -> Option<ToolPanelAction> {
         // Its scrollbar (when shown): scrolled there.
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return None;
         }
         self.targets.iter().find(|(r, _)| r.contains(p)).map(|(_, a)| a.clone())
@@ -458,7 +461,7 @@ impl ToolPanel for StructurePanel {
         let hover = self.targets.iter().position(|(r, _)| r.contains(p));
         let changed = hover != self.hover;
         self.hover = hover;
-        self.bar.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     fn clickable(&self, p: Point) -> bool {
@@ -488,6 +491,16 @@ fn runs(header: &str, colors: &[(Range<usize>, Rgba)]) -> Vec<(String, Option<Rg
 }
 
 impl StructurePanel {
+    /// Its controls (the scrollbar with the scroll it moves), the topmost first.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut outline = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut parts: [&mut dyn Control; 1] = [&mut outline];
+        f(&mut self.controls, &mut parts)
+    }
+
     fn clamp_scroll(&mut self) {
         let max = (self.content_h - self.bounds.size.height).max(0.0);
         self.scroll = self.scroll.clamp(0.0, max);

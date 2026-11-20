@@ -22,6 +22,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "React",
     description: "Hooks and API signatures: hover, parameter help, completion",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "package", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

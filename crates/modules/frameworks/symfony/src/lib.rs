@@ -43,6 +43,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Symfony",
     description: "The project's Twig templates, routes, console commands, services, parameters and translations: completion, go to definition, hover, Find Usages and Rename of routes, the missing ones pointed out",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "package", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// `%env(X)%`, `%env(int:X)%` (YAML and PHP configuration), `#[Autowire(env: 'X')]` and

@@ -7385,6 +7385,7 @@ dependencies = [
  "command-model",
  "extensions",
  "i18n",
+ "icons",
  "kernel",
  "refactor",
  "render-api",

@@ -20,6 +20,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Twig",
     description: "Twig: colors, embedded HTML / CSS / JS, folding on blocks",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-code", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

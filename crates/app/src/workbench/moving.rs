@@ -77,14 +77,11 @@ impl Workbench {
         true
     }
 
-    /// A press in a side panel (the project tree's row may be dragged into a folder): the
-    /// mouse must follow it.
-    pub fn drag_pending(&self) -> bool {
+    /// A press is held whose moves the mouse must follow: a side panel's (a row dragged into
+    /// a folder), the projects list's, or a window over the editor's (each says).
+    pub fn drag_pending(&mut self) -> bool {
         self.tools.sides.iter().any(|s| s.dragging)
-            || self.settings.slider_held()
-            || self.settings.scrollbar_held()
-            || self.dialogs.dialog.scrollbar_held()
-            || self.modal_view_dragging()
             || self.picker_pressed()
+            || Overlay::ALL.into_iter().any(|o| o.slot().held(self))
     }
 }

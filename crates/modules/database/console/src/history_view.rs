@@ -22,6 +22,7 @@ use database::history::{HistoryEntry, HistoryId, Outcome, Search};
 use i18n::t;
 use kernel::{Point, ProjectId, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
     EdgeScrollbar, KeyReach, Tip, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey,
@@ -30,6 +31,7 @@ use ui_components::{
 use ui_kit::{TextInput, draw_icon, draw_text};
 use workbench_model::WorkbenchHost;
 
+use crate::field::KeyField;
 use crate::history::Histories;
 use crate::runtime::Runtime;
 
@@ -95,7 +97,6 @@ impl ViewerProvider for HistoryProvider {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
-    Field,
     Row(usize),
     Insert,
     Run,
@@ -110,6 +111,8 @@ enum Hit {
 /// A row of the list (logical pixels).
 pub const ROW_H: f32 = 50.0;
 const FIELD_H: f32 = 36.0;
+/// The search's place among the window's parts.
+const SEARCH: usize = 1;
 const FOOTER_H: f32 = 64.0;
 /// The statement's box under the list: its lines at most, their height.
 const PREVIEW_LINES: usize = 6;
@@ -139,6 +142,8 @@ pub struct HistoryView {
     scroll: f32,
     max_scroll: f32,
     list: Rect,
+    /// Where the search was drawn last.
+    field: Rect,
     bar: EdgeScrollbar,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
@@ -150,6 +155,8 @@ pub struct HistoryView {
     /// Clear History asked: the footer asks first (`Some(yes)`: whether the action's button
     /// has the keys — "Cancel" by default).
     clearing: Option<bool>,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for HistoryView {
@@ -331,6 +338,31 @@ impl HistoryView {
         }
     }
 
+    /// Its parts (the list's scrollbar, the search), the topmost first, with their state of
+    /// use. The search has the keys the whole time (while Clear History asks, the question
+    /// takes them first), its editing ones its own, the list's (↑ ↓, ↵, ⌦ at its end) the
+    /// view's; what's shown follows what it changed.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut edited = false;
+        let mut list = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut query = KeyField {
+            input: &mut self.query,
+            area: self.field,
+            selects: false,
+            edited: &mut edited,
+        };
+        let mut parts: [&mut dyn Control; 2] = [&mut list, &mut query];
+        self.controls.focus(&mut parts, Some(SEARCH));
+        let answer = f(&mut self.controls, &mut parts);
+        if edited {
+            self.refilter();
+        }
+        answer
+    }
+
     fn hit(&self, p: Point) -> Option<Hit> {
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
@@ -419,6 +451,9 @@ impl Viewer for HistoryView {
         self.seen = None;
         self.shown_for = None;
         self.refresh();
+        // The search has the keys from now (its selection the copy's).
+        self.controls = Controls::sticky();
+        self.with_controls(|_, _| ());
     }
 
     fn subtitle(&self) -> Option<String> {
@@ -458,13 +493,11 @@ impl Viewer for HistoryView {
         true
     }
 
+    /// To the search (nothing while the question asks).
     fn text_input(&mut self, typed: &str) -> bool {
-        if self.clearing.is_some() {
-            return true;
+        if self.clearing.is_none() {
+            self.with_controls(|c, parts| c.text(parts, typed));
         }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.query.insert(&typed);
-        self.refilter();
         true
     }
 
@@ -503,7 +536,7 @@ impl Viewer for HistoryView {
             true,
             &t("console.history_search"),
         );
-        self.hits.push((field, Hit::Field));
+        self.field = field;
         let total = self.entries.as_ref().map_or(0, Vec::len);
         if total > 0 {
             let count = if self.query.text().trim().is_empty() {
@@ -726,12 +759,10 @@ impl Viewer for HistoryView {
             }
             return None;
         }
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return None;
         }
         match self.hit(p) {
-            Some(Hit::Field) => self.query.click(p.x),
             Some(Hit::Row(k)) => self.selected = k,
             Some(Hit::Insert) => {
                 self.choose(Pick::Insert);
@@ -785,15 +816,11 @@ impl Viewer for HistoryView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(offset) = self.bar.drag(p) {
-            self.scroll = offset;
-            return true;
-        }
-        false
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some()
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
@@ -802,14 +829,18 @@ impl Viewer for HistoryView {
             .filter(|h| self.clearing.is_none() || matches!(h, Hit::ClearYes | Hit::ClearNo));
         let changed = hover != self.hover;
         self.hover = hover;
-        changed | self.bar.hover(p)
+        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        if self.clearing.is_none()
+            && let Some(cursor) = self.controls.cursor_at(p)
+        {
+            return Some(cursor);
+        }
         match self.hit(p)? {
             Hit::ClearYes | Hit::ClearNo => Some(ViewerCursor::Pointer),
             _ if self.clearing.is_some() => None,
-            Hit::Field => Some(ViewerCursor::Text),
             _ => Some(ViewerCursor::Pointer),
         }
     }
@@ -867,36 +898,23 @@ impl Viewer for HistoryView {
             ViewerKey::Down => self.step(1),
             ViewerKey::PageUp => self.step(-8),
             ViewerKey::PageDown => self.step(8),
-            // ⌦ at the field's end (nothing to delete in it): the statement chosen.
-            ViewerKey::Delete
-                if self.query.cursor() >= self.query.text().len()
-                    && self.query.selected_text().is_empty() =>
-            {
-                self.delete();
-            }
-            ViewerKey::Left => self.query.move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.query.move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.query.home(reach.extend),
-            ViewerKey::End => self.query.end(reach.extend),
-            ViewerKey::Backspace => {
-                self.query.backspace(reach.word);
-                self.refilter();
-            }
-            ViewerKey::Delete => {
-                self.query.delete();
-                self.refilter();
-            }
             ViewerKey::Tab => return false,
+            // The search's editing keys; ⌦ at its end (nothing to delete in it): the
+            // statement chosen.
+            key => {
+                let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
+                if !used && key == ViewerKey::Delete {
+                    self.delete();
+                }
+            }
         }
         true
     }
 
+    /// The search's selection, else the entry chosen.
     fn selected_text(&self) -> Option<String> {
-        let selected = self.query.selected_text();
-        if !selected.is_empty() {
-            return Some(selected.to_owned());
-        }
-        self.chosen().map(|e| e.text.clone())
+        let search = |i| (i == SEARCH).then_some(&self.query as &dyn Control);
+        self.controls.selected_text_with(search).or_else(|| self.chosen().map(|e| e.text.clone()))
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -911,33 +929,12 @@ impl Viewer for HistoryView {
                     Some(ViewerAction::Request(ui_components::AppRequest::CopyText(text)));
                 true
             }
-            "select_all" => {
-                self.query.select_all();
-                true
-            }
-            "undo" => {
-                let done = self.query.undo();
-                self.refilter();
-                done
-            }
-            "redo" => {
-                let done = self.query.redo();
-                self.refilter();
-                done
-            }
-            "cut" => {
-                let had = !self.query.selected_text().is_empty();
-                if had {
-                    self.query.insert("");
-                    self.refilter();
-                }
-                had
-            }
             id if id.starts_with("search:") => {
                 self.set_query(&id["search:".len()..]);
                 true
             }
-            _ => false,
+            // The search's edit commands (⌘A, ⌘Z, ⇧⌘Z, ⌘X).
+            id => self.with_controls(|c, parts| c.command(parts, id)).is_some(),
         }
     }
 

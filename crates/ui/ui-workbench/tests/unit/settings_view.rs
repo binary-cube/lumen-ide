@@ -13,6 +13,7 @@ fn model() -> SettingsModel {
         languages: vec![("ro".into(), "Română".into()), ("en".into(), "English".into())],
         current_language: "ro".into(),
         file_icon_set: None,
+        icon_samples: Vec::new(),
         file_icon_sets: Vec::new(),
         icon_look: icons::IconLook::default(),
         icon_looks: icons::IconStyle::ALL
@@ -1072,4 +1073,72 @@ fn a_module_row_offers_on_hidden_and_at_startup_apart() {
         !view.module_hits.iter().any(|(_, a)| *a == SettingsAction::ToggleModuleHidden(id.clone())),
         "off: its „hidden” kept as it is"
     );
+}
+
+/// A dropdown row with more choices than its list shows: the list opens on a click, its
+/// scrollbar's thumb pressed and dragged scrolls it (the press chooses nothing), a choice
+/// afterwards is chosen.
+#[test]
+fn a_dropdown_s_list_scrolls_by_its_thumb() {
+    let mut model = model();
+    model.blocks = vec![ContributedBlock {
+        id: "logs",
+        page: "remote",
+        page_info: Some(REMOTE),
+        order: 100,
+        advanced: false,
+        language: None,
+        keywords: "".into(),
+        block: workbench_model::SettingsBlock {
+            title: "Levels".into(),
+            detail: String::new(),
+            rows: vec![workbench_model::SettingsRow::Dropdown {
+                key: "level",
+                label: "Level".into(),
+                detail: String::new(),
+                icon: Some("modules"),
+                choices: (0..40).map(|v| (v, format!("level {v}"))).collect(),
+                current: 0,
+                default: None,
+            }],
+        },
+    }];
+    let mut view = SettingsView::default();
+    view.set_viewport(Rect::new(0.0, 0.0, 1200.0, 800.0), 1.0);
+    view.open();
+    view.set_sections(&model);
+    assert!(view.step_section(2), "the page of the block");
+    let mut text = TextSystem::new();
+    let paint = |view: &mut SettingsView, text: &mut TextSystem| {
+        view.paint(&model, &Icons::builtin(), text, &mut Scene::default(), &Palette::dark());
+    };
+    paint(&mut view, &mut text);
+    let field = view.dropdowns[0].field;
+    assert_eq!(view.hit(Point::new(field.min_x() + 5.0, field.min_y() + 5.0)), None);
+    assert!(view.picker_open(), "its list opened");
+    paint(&mut view, &mut text);
+    let list = view.picker.list_area();
+    let edge = list.max_x() - 4.0;
+    let thumb = Point::new(edge, list.min_y() + 6.0);
+    view.hover(thumb);
+    assert_eq!(view.hit(thumb), None, "the thumb takes the press: nothing chosen");
+    assert!(view.picker_open());
+    assert!(view.scrollbar_held(), "the thumb holds the mouse");
+    assert!(view.drag_scrollbar(Point::new(edge, list.min_y() + 120.0)), "the list follows");
+    assert!(view.release());
+    assert!(!view.scrollbar_held());
+}
+
+/// A module's row says who made it, its version and when it changed, those known.
+#[test]
+fn a_module_s_row_says_its_author_version_and_date() {
+    let row = ModuleRow {
+        author: "Binary Cube".into(),
+        version: "1.0.0".into(),
+        updated: "2026-11-20".into(),
+        ..ModuleRow::default()
+    };
+    assert_eq!(super::modules::module_about(&row), "Binary Cube · 1.0.0 · 2026-11-20");
+    let unknown = ModuleRow { author: "Someone".into(), ..ModuleRow::default() };
+    assert_eq!(super::modules::module_about(&unknown), "Someone");
 }

@@ -14,12 +14,15 @@ use refactor::Plan;
 use refactor::moving::{MoveContext, MoveFacts, plan_move, scan_for_move};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx, Tone, radius, space};
+use ui_components::tool_panel::KeyReach;
 use ui_components::{Viewer, ViewerAction, ViewerKey, ViewerPaint};
 use ui_kit::{TextInput, TextInputStyle, draw_text};
 
+use crate::name_field::NameField;
 use crate::page::{MIN_LIST, PageScroll};
-use crate::plan_list::PlanList;
+use crate::plan_list::{Places, PlanList};
 
 /// The extension of the view's virtual tab.
 pub const EXTENSION: &str = "view-move";
@@ -33,9 +36,11 @@ pub struct MoveData {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
     Apply,
-    Field,
     Close,
 }
+
+/// The field's place among the controls (see [`MoveView::with_controls`]).
+const FIELD: usize = 2;
 
 /// Why the move can't be applied as typed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +59,10 @@ pub struct MoveView {
     context: Option<MoveContext>,
     /// The namespace (classes) or the folder, relative to the project (anything else).
     field: TextInput,
+    /// Where the field was drawn last.
+    field_area: Option<Rect>,
+    /// A key or a text reached the field: the plan follows it.
+    edited: bool,
     facts: Option<Arc<MoveFacts>>,
     scanning: Option<Receiver<MoveFacts>>,
     plan: Option<Plan>,
@@ -63,6 +72,10 @@ pub struct MoveView {
     hover: Option<Hit>,
     list: PlanList,
     page: PageScroll,
+    /// Its controls' state of use (see [`MoveView::with_controls`]).
+    controls: Controls,
+    /// What a press on the places decided, taken by the click.
+    clicked: Option<ViewerAction>,
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
     /// Whether the destination is taken, by the destination (asked of the disk once per
     /// destination typed, not on every frame).
@@ -146,9 +159,15 @@ impl MoveView {
 
     /// Types `text` into the field.
     pub fn type_text(&mut self, text: &str) {
-        let text: String = text.chars().filter(|c| !c.is_whitespace()).collect();
-        self.field.insert(&text);
-        self.replan();
+        self.with_controls(|c, parts| c.text(parts, text));
+        self.follow_field();
+    }
+
+    /// The field was reached by a key or a text: the plan follows it.
+    fn follow_field(&mut self) {
+        if std::mem::take(&mut self.edited) {
+            self.replan();
+        }
     }
 
     /// Sets the scanned files (from the background scan, or directly in tests).
@@ -216,10 +235,29 @@ impl MoveView {
         let shown = root.and_then(|r| path.strip_prefix(r).ok()).unwrap_or(path);
         shown.to_string_lossy().into_owned()
     }
+
+    /// Its controls (the page's scrollbar, the places, the field), the topmost first. The
+    /// field is the page's only one with keys: it has the focus from `set_data` on.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut places =
+            Places { list: &mut self.list, plan: self.plan.as_mut(), clicked: &mut self.clicked };
+        let mut field =
+            NameField { input: &mut self.field, area: self.field_area, edited: &mut self.edited };
+        let mut parts: [&mut dyn Control; 3] = [&mut self.page, &mut places, &mut field];
+        f(&mut self.controls, &mut parts)
+    }
 }
 
 impl Viewer for MoveView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
+        // The keys' part from the first data on: a press beside it leaves it the focus.
+        if self.controls.focused().is_none() {
+            self.controls = Controls::sticky();
+            self.with_controls(|c, parts| c.focus(parts, Some(FIELD)));
+        }
         let Some(data) = data.downcast_ref::<MoveData>() else { return };
         let context = data.context.clone();
         let initial = if context.rules.is_some() && !context.target.classes.is_empty() {
@@ -265,33 +303,25 @@ impl Viewer for MoveView {
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
+        if self.with_controls(|c, parts| c.key(parts, key, KeyReach::default())).is_some() {
+            self.follow_field();
+            return true;
+        }
         match key {
-            ViewerKey::Backspace => self.field.backspace(false),
-            ViewerKey::Delete => self.field.delete(),
-            ViewerKey::Left => self.field.move_left(false, false),
-            ViewerKey::Right => self.field.move_right(false, false),
-            ViewerKey::Home => self.field.home(false),
-            ViewerKey::End => self.field.end(false),
             ViewerKey::Enter => {
                 self.action = self.apply();
-                return self.action.is_some();
+                self.action.is_some()
             }
             ViewerKey::Escape => {
                 self.action = Some(ViewerAction::Close);
-                return true;
+                true
             }
-            _ => return false,
+            _ => false,
         }
-        self.replan();
-        true
     }
 
     fn command(&mut self, id: &str) -> bool {
-        if id == "select_all" {
-            self.field.select_all();
-            return true;
-        }
-        false
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {
@@ -299,27 +329,26 @@ impl Viewer for MoveView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // The page's scrollbar; nothing under the keys.
-        if self.page.press(p) || !self.page.contains(p) {
+        // Nothing under the keys.
+        if !self.page.contains(p) {
             return None;
         }
-        if self.list.contains(p) {
-            return self.list.click(self.plan.as_mut()?, p);
+        // The page's scrollbar, a place, the field.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            return self.clicked.take();
         }
         let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
         match hit {
-            Hit::Apply => return self.apply(),
-            Hit::Field => self.field.click(p.x),
-            Hit::Close => return Some(ViewerAction::Close),
+            Hit::Apply => self.apply(),
+            Hit::Close => Some(ViewerAction::Close),
         }
-        None
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
         let changed = hover != self.hover;
         self.hover = hover;
-        self.list.hover(p) | self.page.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -327,11 +356,11 @@ impl Viewer for MoveView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.page.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.page.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -413,7 +442,7 @@ impl Viewer for MoveView {
             "refactor.project_root"
         });
         self.field.paint(layer, ctx.text, field, true, &placeholder, &style);
-        self.hits.push((field, Hit::Field));
+        self.field_area = Some(field);
         let button = Rect::new(field.max_x() + px(space::MD), y, button_w, px(ds::BUTTON_H));
         let hovered = self.hover == Some(Hit::Apply);
         ds::primary_button(

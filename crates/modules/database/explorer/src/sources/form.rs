@@ -346,6 +346,66 @@ impl Editor {
         self.url = TextInput::new(&url);
     }
 
+    /// Every field there is now, with its text, in one order that [`Self::inputs_mut`]
+    /// keeps too: the filter, the source's own, its driver's, its options, its password
+    /// (a source selected), the folder's name (a folder selected).
+    pub fn inputs(&self) -> Vec<(Field, &TextInput)> {
+        let mut out = vec![
+            (Field::Filter, &self.filter),
+            (Field::Name, &self.name),
+            (Field::Comment, &self.comment),
+            (Field::Url, &self.url),
+            (Field::Startup, &self.startup),
+        ];
+        out.extend(self.specs.iter().map(|(id, input)| (Field::Spec(id.clone()), input)));
+        for (i, (key, value)) in self.options.iter().enumerate() {
+            out.extend([(Field::OptionKey(i), key), (Field::OptionValue(i), value)]);
+        }
+        if let Some(entry) = self.current() {
+            out.push((Field::Password, &entry.password));
+        }
+        if self.selected_folder.is_some() {
+            out.push((Field::FolderName, &self.folder_name));
+        }
+        out
+    }
+
+    /// [`Self::inputs`], to be edited (the same fields, in the same order).
+    pub fn inputs_mut(&mut self) -> Vec<(Field, &mut TextInput)> {
+        let Self {
+            filter,
+            name,
+            comment,
+            url,
+            startup,
+            specs,
+            options,
+            entries,
+            selected,
+            selected_folder,
+            folder_name,
+            ..
+        } = self;
+        let mut out = vec![
+            (Field::Filter, filter),
+            (Field::Name, name),
+            (Field::Comment, comment),
+            (Field::Url, url),
+            (Field::Startup, startup),
+        ];
+        out.extend(specs.iter_mut().map(|(id, input)| (Field::Spec(id.clone()), input)));
+        for (i, (key, value)) in options.iter_mut().enumerate() {
+            out.extend([(Field::OptionKey(i), key), (Field::OptionValue(i), value)]);
+        }
+        if let Some(entry) = selected.and_then(|i| entries.get_mut(i)) {
+            out.push((Field::Password, &mut entry.password));
+        }
+        if selected_folder.is_some() {
+            out.push((Field::FolderName, folder_name));
+        }
+        out
+    }
+
     pub fn input(&self, field: &Field) -> Option<&TextInput> {
         Some(match field {
             Field::Filter => &self.filter,

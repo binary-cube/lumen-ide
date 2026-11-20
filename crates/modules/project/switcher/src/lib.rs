@@ -26,6 +26,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Project switcher",
     description: "Each open project its number and shortcut (⌥⌘1…9), shown in the top bar",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "layers", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Opens the open projects' list.

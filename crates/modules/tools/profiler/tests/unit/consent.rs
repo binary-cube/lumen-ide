@@ -41,3 +41,25 @@ fn the_consent_window_chooses_a_length_and_esc_leaves() {
     assert!(matches!(view.press(cancel.center(), 1), Some(ViewerAction::Close)));
     assert!(!crate::recording::recording(), "nothing recorded");
 }
+
+/// The list opened from its field has the keys (Tab and Esc its own: Esc closes it, not the
+/// window) and the mouse there: its cursor, not the field's hand under it.
+#[test]
+fn the_opened_list_has_the_keys_and_the_mouse() {
+    let mut view = ConsentView::new();
+    paint(&mut view);
+    let on = view.field.center();
+    view.hover(on);
+    assert_eq!(view.cursor_at(on), Some(ViewerCursor::Pointer), "the field: a hand");
+    view.press(on, 1);
+    assert!(view.picker.is_open());
+    paint(&mut view);
+    assert_ne!(view.cursor_at(on), Some(ViewerCursor::Pointer), "the list's, over the field");
+    assert!(view.edit_key_with(ViewerKey::Tab, KeyReach::default()));
+    assert!(view.picker.is_open(), "Tab stays in the list");
+    assert!(view.edit_key_with(ViewerKey::Escape, KeyReach::default()));
+    assert!(!view.picker.is_open(), "Esc closes the list");
+    assert!(view.take_action().is_none(), "not the window");
+    assert!(view.edit_key_with(ViewerKey::Escape, KeyReach::default()));
+    assert!(matches!(view.take_action(), Some(ViewerAction::Close)));
+}

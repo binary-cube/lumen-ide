@@ -450,3 +450,24 @@ fn long_rows_are_highlighted_up_to_the_view_s_edge() {
     view.scroll_by(40.0, 0.0, &doc, &folds);
     assert_eq!(view.long_line_windows(&doc, &folds), Some(windows));
 }
+
+/// The lane on the right: its thumb pressed holds the mouse, dragged down the text follows
+/// (whole pixels), let go nothing follows and the bar stays a moment before it fades.
+#[test]
+fn the_lane_s_thumb_is_dragged() {
+    let mut text = TextSystem::new();
+    let doc = Document::new(&"a line of code\n".repeat(400));
+    let folds = Folds::default();
+    let mut view = EditorView::new(FontFamily::Monospace);
+    view.set_bounds(Rect::new(0.0, 0.0, 800.0, 600.0), 1.0);
+    paint_once(&mut view, &doc, &folds, &mut text);
+    let lane = view.vbar.track_rect();
+    let thumb = Point::new(lane.min_x() + lane.size.width / 2.0, lane.min_y() + 4.0);
+    view.hover(thumb, &doc, &folds);
+    assert!(view.scrollbar_press(thumb, &doc, &folds), "the lane takes the press");
+    assert!(view.scrollbar_drag(Point::new(thumb.x, thumb.y + 120.0), &doc, &folds));
+    assert!(view.scroll_y > 0.0, "the text followed");
+    assert_eq!(view.scroll_y, view.scroll_y.round(), "whole pixels");
+    assert!(view.scrollbar_release());
+    assert!(!view.scrollbar_drag(Point::new(thumb.x, thumb.y + 300.0), &doc, &folds));
+}

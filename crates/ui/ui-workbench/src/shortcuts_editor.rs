@@ -21,8 +21,11 @@ pub struct BindingRow {
     pub label: String,
     /// Its menu, or the view it works in (translated).
     pub group: String,
-    /// Where its keys work (`""`: everywhere; `editor`, `terminal`, a view's id).
+    /// Where its keys work (`""`: everywhere; `editor`, a language's editor, a view's id).
     pub place: String,
+    /// Text is typed where its keys work (everywhere, an editor): a plain character there
+    /// would take the typing.
+    pub typing: bool,
     /// Its shortcuts as written (`CmdOrCtrl+K`) and as the system shows them (`⌘K`).
     pub shortcuts: Vec<String>,
     pub shown: Vec<String>,
@@ -126,12 +129,11 @@ impl ShortcutsEditor {
         let command = self.open.clone()?;
         let row = self.rows.iter().find(|r| r.command == command)?.clone();
         let pressed = chord(spec)?;
-        // A plain character where text is typed (everywhere, the editor, the terminal) would
-        // take the typing: not taken, still recording.
-        let typing = matches!(row.place.as_str(), "" | "editor" | "terminal");
+        // A plain character where text is typed would take the typing: not taken, still
+        // recording.
         let bare = !(pressed.primary || pressed.alt || pressed.control)
             && matches!(pressed.key, command_model::ChordKey::Char(_));
-        if typing && bare {
+        if row.typing && bare {
             self.recording = true;
             return None;
         }

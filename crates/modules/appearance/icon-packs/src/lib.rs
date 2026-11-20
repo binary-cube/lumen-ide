@@ -221,6 +221,11 @@ macro_rules! file_set {
             name: concat!($name, " file icons"),
             description: $what,
             depends_on: &[],
+            info: extensions::ModuleInfo {
+                icon: "file",
+                author: Some($credit),
+                ..extensions::ModuleInfo::BUILT_IN
+            },
         };
 
         pub fn $make() -> DataFileSet {
@@ -307,6 +312,11 @@ macro_rules! pack {
             name: concat!($name, " icons"),
             description: $what,
             depends_on: &[],
+            info: extensions::ModuleInfo {
+                icon: "image",
+                author: Some($credit),
+                ..extensions::ModuleInfo::BUILT_IN
+            },
         };
 
         fn $make() -> DataPack {

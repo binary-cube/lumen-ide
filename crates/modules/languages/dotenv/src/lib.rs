@@ -57,6 +57,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: ".env",
     description: ".env files: colors, secrets hidden until hovered, sections, folding; keys followed through the code: definitions, hover, usages, rename, checks",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "key", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

@@ -59,3 +59,14 @@ fn a_plain_file_moves_to_the_folder_typed() {
     assert_eq!(view.problem(), Some(Problem::Same));
     assert!(view.apply().is_none());
 }
+
+/// A group too short for the form and a few places: the page's thumb, pressed and dragged,
+/// scrolls it.
+#[test]
+fn the_page_scrolls_by_its_thumb() {
+    let mut view = view("notes/todo.txt", "docs");
+    let (w, h) = (900.0, 260.0);
+    crate::page::tests::paint(&mut view, w, h);
+    crate::page::tests::drag_thumb(&mut view, w, 30.0);
+    assert!(view.page.offset() > 0.0, "the page scrolled");
+}

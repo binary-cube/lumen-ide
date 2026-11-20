@@ -255,7 +255,7 @@ impl TaskManager {
                 self.go_to(i);
                 self.open_detail();
                 if self.place() == DetailPlace::Page {
-                    self.focus = Focus::Detail;
+                    self.focus_on(Focus::Detail);
                 }
             }
         }
@@ -278,7 +278,7 @@ impl TaskManager {
             Some(i) => (i + n - 1) % n,
             None => 0,
         };
-        self.focus = self.stops[next].1;
+        self.focus_on(self.stops[next].1);
         // A narrow page's filter, opened over the bar, closes once left (empty).
         if self.focus != Focus::Tool(Tool::Filter) && self.filter.text().is_empty() {
             self.filter_open = false;
@@ -291,7 +291,7 @@ impl TaskManager {
             Focus::Tool(Tool::Scope) => self.set_all(!self.all),
             Focus::Tool(Tool::Grouping) => self.step_grouping(true),
             Focus::Tool(Tool::Filter) => {
-                self.focus = Focus::Table;
+                self.focus_on(Focus::Table);
                 self.filter_open = !self.filter.text().is_empty() && self.filter_open;
                 let model = self.model();
                 if self.cursor_index(&model).is_none() {
@@ -403,7 +403,7 @@ impl TaskManager {
         if self.detail_open() {
             self.close_detail();
             if self.focus == Focus::Detail {
-                self.focus = Focus::Table;
+                self.focus_on(Focus::Table);
             }
             return true;
         }
@@ -414,7 +414,7 @@ impl TaskManager {
             return true;
         }
         if self.focus != Focus::Table {
-            self.focus = Focus::Table;
+            self.focus_on(Focus::Table);
             return true;
         }
         false
@@ -422,14 +422,14 @@ impl TaskManager {
 
     fn focus_table_from_filter(&mut self) {
         if self.focus == Focus::Tool(Tool::Filter) {
-            self.focus = Focus::Table;
+            self.focus_on(Focus::Table);
         }
     }
 
     /// The filter has the keys (⌘F; typing): on a narrow page it opens over the bar.
     pub(super) fn focus_filter(&mut self) {
         self.popover = None;
-        self.focus = Focus::Tool(Tool::Filter);
+        self.focus_on(Focus::Tool(Tool::Filter));
         if self.layouts.last().is_some_and(|l| l.filter_icon) {
             self.filter_open = true;
         }
@@ -462,32 +462,15 @@ impl TaskManager {
         if let Some(used) = self.popover_key(key) {
             return used;
         }
+        // The filter's own keys, while it has them (Tab is the ring's).
+        if key != ViewerKey::Tab && self.part_key(key, reach) {
+            return true;
+        }
         let in_filter = self.focus == Focus::Tool(Tool::Filter);
         match key {
             ViewerKey::Tab => self.cycle(!reach.extend),
             ViewerKey::Escape => return self.escape(),
-            ViewerKey::Backspace => {
-                self.filter.backspace(reach.word);
-                self.filtered();
-            }
-            ViewerKey::Delete => {
-                self.filter.delete();
-                self.filtered();
-            }
-            ViewerKey::Left | ViewerKey::Right if in_filter => {
-                if key == ViewerKey::Left {
-                    self.filter.move_left(reach.word, reach.extend);
-                } else {
-                    self.filter.move_right(reach.word, reach.extend);
-                }
-            }
-            ViewerKey::Home | ViewerKey::End if in_filter => {
-                if key == ViewerKey::Home {
-                    self.filter.home(reach.extend);
-                } else {
-                    self.filter.end(reach.extend);
-                }
-            }
+            ViewerKey::Backspace | ViewerKey::Delete => self.erase_in_filter(key, reach),
             ViewerKey::Left | ViewerKey::Right => {
                 let right = key == ViewerKey::Right;
                 match self.focus {
@@ -512,7 +495,7 @@ impl TaskManager {
                 }
                 // From the filter or a control, the rows: the table has the keys.
                 if !in_filter {
-                    self.focus = Focus::Table;
+                    self.focus_on(Focus::Table);
                 }
                 return self.move_key(key);
             }
@@ -525,7 +508,7 @@ impl TaskManager {
         let shown = cards(self.frame.gpu.is_some() || self.frame.lines.is_empty());
         let at = shown.iter().position(|c| *c == card).unwrap_or(0);
         let next = if forward { (at + 1).min(shown.len() - 1) } else { at.saturating_sub(1) };
-        self.focus = Focus::Card(shown[next]);
+        self.focus_on(Focus::Card(shown[next]));
     }
 
     /// What has the keyboard after a click on `hit` (`None`: unchanged).

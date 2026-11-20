@@ -69,6 +69,16 @@ fn the_probes_count_only_while_recording() {
     assert!(
         total(&[("test-app", "frame")]) >= total(&[("test-app", "frame"), ("test-view", "paint")])
     );
+    // A phase named when it ends: its way down and its time under that name.
+    {
+        let _frame = time("test-app", "frame");
+        let mut phase = time("test-app", "paint");
+        phase.set_what("editors");
+    }
+    let named = take();
+    assert!(named.spans.iter().any(|s| s.0 == [("test-app", "frame"), ("test-app", "editors")]));
+    assert!(named.busy.iter().any(|b| b.0 == "test-app" && b.1 == "editors"));
+    assert!(named.busy.iter().all(|b| b.1 != "paint"), "never under its first name");
     stop();
     trigger("after", Cause::Input);
     assert_eq!(take(), Gathered::default());

@@ -24,9 +24,6 @@ impl Snippets {
     }
 }
 
-/// A PHP snippet without its opening tag would be read as HTML: one is put before it.
-const PHP_OPEN: &str = "<?php\n";
-
 impl SnippetHighlighter for Snippets {
     fn highlight(&self, extension: &str, code: &str) -> Option<Vec<(Range<usize>, Arc<str>)>> {
         let name = format!("snippet.{extension}");
@@ -36,7 +33,8 @@ impl SnippetHighlighter for Snippets {
         {
             return None;
         }
-        let prefix = if language.as_str() == "php" && !code.contains("<?") { PHP_OPEN } else { "" };
+        // What the language says a fragment needs before it to be read as it.
+        let prefix = self.support.languages.get(&language).map_or("", |d| d.fragment_prefix(code));
         let text = format!("{prefix}{code}");
         let doc = Document::new(&text);
         let snapshot = doc.buffer().snapshot();

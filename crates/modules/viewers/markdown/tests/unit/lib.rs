@@ -188,6 +188,53 @@ fn a_wide_code_block_scrolls_across_under_the_mouse() {
     paint(&mut viewer);
 }
 
+/// The bar across of the code block under the mouse: its thumb, pressed and dragged, scrolls
+/// the block (not the page, and no text is selected).
+#[test]
+fn a_code_block_s_bar_across_is_dragged_by_its_thumb() {
+    let mut viewer = MarkdownViewer::new(Path::new("/tmp/wide.md"));
+    viewer.set_source(&format!("```\n{}\n```\n\ntext\n", "y".repeat(500)));
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let bounds = Rect::new(0.0, 0.0, 800.0, 600.0);
+    let mut paint = |viewer: &mut MarkdownViewer| {
+        let mut scene = render_api::Scene::default();
+        viewer.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut viewer);
+    let view = viewer
+        .layout
+        .as_ref()
+        .and_then(|l| {
+            l.items.iter().find_map(|i| match i {
+                Item::Scroll { view, .. } => Some(*view),
+                _ => None,
+            })
+        })
+        .expect("a block scrolling across");
+    // Over the block: its bar shows at its bottom.
+    let thickness = ui_components::Scrollbar::track_thickness(1.0);
+    let thumb = Point::new(view.min_x() + 5.0, view.max_y() - thickness / 2.0);
+    viewer.hover(thumb);
+    paint(&mut viewer);
+    assert!(viewer.pointer_down(thumb, 1, PLAIN).is_none());
+    assert!(viewer.selecting.is_none(), "no text selection started");
+    assert!(viewer.drag(Point::new(thumb.x + 100.0, thumb.y)));
+    assert!(viewer.code_scroll.get(&0).is_some_and(|s| *s > 0.0), "the block scrolled");
+    assert_eq!(viewer.scroll, 0.0, "the page stayed");
+    assert!(viewer.release());
+}
+
 /// A viewer of `source` painted once in a view away from the window's corner.
 fn painted(source: &str) -> (MarkdownViewer, Rect) {
     let mut viewer = MarkdownViewer::new(Path::new("/tmp/select.md"));
@@ -365,6 +412,17 @@ fn the_scrollbar_is_dragged_and_takes_the_press_before_the_text() {
     assert!(v.scroll > jumped);
     assert!(v.release());
     assert!(!v.vbar.is_dragging());
+    // Painted again, as the app does after the release.
+    v.paint(ViewerPaint {
+        bounds: b,
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
     assert!(v.frame_deadline().is_some(), "it fades out after a while");
 }
 

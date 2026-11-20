@@ -1,6 +1,7 @@
 //! The Task Manager as a tab's view: what it reacts to — the mouse (its rows, headers,
-//! cards, toolbar, popovers, scrollbars and the detail's separator), the keys (typing into
-//! the filter, the rest through [`super::keys`]), its right-click menus and commands
+//! cards, toolbar, popovers, scrollbars and the detail's separator), the keys (typing,
+//! pasting and editing in the filter through its part, the rest through
+//! [`super::keys`]), its right-click menus and commands
 //! ([`super::commands`]), the wheel — and what it
 //! draws each frame, and the tooltips under the mouse.
 
@@ -8,18 +9,87 @@ use std::sync::Arc;
 
 use i18n::tr;
 use kernel::Point;
+use ui_components::control::{Control, Controls, Divider, NOWHERE, Scrolled};
 use ui_components::tooltip::Tip;
-use ui_components::{
-    KeyReach, Orientation, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
-};
+use ui_components::{KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint};
 
+use super::filter::{FilterField, typed_line};
 use super::summary::metrics;
 use super::texts::value;
-use super::{Hit, Popover, TaskManager};
+use super::{Focus, Hit, Popover, TaskManager};
 use crate::collector::Metric;
+use crate::layout::Tool;
 use crate::model::{Item, ViewModel};
 
+/// The detail's separator, first among its parts (see [`TaskManager::with_controls`]).
+const DIVIDER: usize = 0;
+
+/// The filter's field, last among its parts (never hit: it only takes the keys).
+const FILTER: usize = 3;
+
+/// Everywhere a point can be (the list's wheel area: the wheel anywhere the detail isn't is
+/// its, even before the mouse is first seen).
+const EVERYWHERE: kernel::Rect =
+    kernel::Rect::new(f32::MIN, f32::MIN, f32::INFINITY, f32::INFINITY);
+
 impl TaskManager {
+    /// Its parts, the topmost first, with their state of use: the detail's separator, the
+    /// detail (while open) and the list, each scrolled by the wheel over it and by its
+    /// scrollbar's thumb; the filter's field, which has the keys while the ring is on it.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let detail_area = self.layouts.last().and_then(|l| l.detail).filter(|_| self.detail_open());
+        let mut divider = Divider { splitter: &mut self.splitter, at: &mut self.split_at };
+        let mut detail = Scrolled {
+            bar: &mut self.detail_bar,
+            offset: &mut self.detail_scroll,
+            // Closed, it's nowhere: an empty area at the origin.
+            area: detail_area.unwrap_or_default(),
+            max: self.detail_max,
+        };
+        let mut list = Scrolled {
+            bar: &mut self.bar,
+            offset: &mut self.scroll,
+            area: EVERYWHERE,
+            max: self.max_scroll,
+        };
+        let mut filter = FilterField { input: &mut self.filter };
+        let mut parts: [&mut dyn Control; 4] = [&mut divider, &mut detail, &mut list, &mut filter];
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// The keyboard moves to `focus`: reaching the filter's stop gives its part the parts'
+    /// focus (the keys, the text, the commands), leaving it takes it away.
+    pub(super) fn focus_on(&mut self, focus: Focus) {
+        self.focus = focus;
+        let keys = (focus == Focus::Tool(Tool::Filter)).then_some(FILTER);
+        self.with_controls(|c, parts| c.focus(parts, keys));
+    }
+
+    /// The filter's part has the keys.
+    pub(super) fn filter_has_keys(&self) -> bool {
+        self.controls.focused() == Some(FILTER)
+    }
+
+    /// A key to the part with the keys (the filter's editing keys): `true` if used, the
+    /// rows filtered again by what it changed.
+    pub(super) fn part_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
+        if used {
+            self.filtered();
+        }
+        used
+    }
+
+    /// Backspace / Delete with the keys elsewhere: they still edit the filter (what's typed
+    /// anywhere goes there, so what undoes it does too), its focus left where it is.
+    pub(super) fn erase_in_filter(&mut self, key: ViewerKey, reach: KeyReach) {
+        self.with_controls(|_, parts| parts[FILTER].key(key, reach));
+        self.filtered();
+    }
+
     /// Over the detail (its own scroll) or the list.
     fn over_detail(&self, p: Point) -> bool {
         self.detail_open()
@@ -108,7 +178,7 @@ impl Viewer for TaskManager {
     /// Its filter has the keys: typed text goes there (elsewhere a typed character opens
     /// it — [`Viewer::key`] — and its actions' keys work).
     fn wants_text(&self) -> bool {
-        self.focus == super::Focus::Tool(crate::layout::Tool::Filter)
+        self.filter_has_keys()
     }
 
     /// A character typed while the filter hasn't the keys: it goes there.
@@ -117,16 +187,22 @@ impl Viewer for TaskManager {
         self.text_input(c.encode_utf8(&mut buffer))
     }
 
-    /// Typing goes into the filter (it has the keys then).
+    /// Typing goes into the filter: it gets the keys first (nothing to type: they stay).
     fn text_input(&mut self, text: &str) -> bool {
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
-        if text.is_empty() {
+        if typed_line(text).is_none() {
             return false;
         }
         self.focus_filter();
-        self.filter.insert(&text);
+        let typed = self.with_controls(|c, parts| c.text(parts, text)).is_some();
         self.filtered();
-        true
+        typed
+    }
+
+    /// Pasted while the filter has the keys: into it, as typed (on one line).
+    fn paste(&mut self, text: &str) -> bool {
+        let pasted = self.with_controls(|c, parts| c.paste(parts, text)).is_some();
+        self.filtered();
+        pasted
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -137,28 +213,24 @@ impl Viewer for TaskManager {
         self.key(key, reach)
     }
 
-    /// ⌘C: what's selected in the filter, else the keys' row (tab-separated).
+    /// ⌘C: what's selected in the filter while it has the keys, else the keys' row
+    /// (tab-separated).
     fn selected_text(&self) -> Option<String> {
-        let typed = self.filter.selected_text();
-        if !typed.is_empty() && self.focus == super::Focus::Tool(crate::layout::Tool::Filter) {
-            return Some(typed.to_owned());
-        }
-        self.row_text()
+        // Its part read as the field it lends (they select alike).
+        let filter: &dyn Control = &self.filter;
+        self.controls
+            .selected_text_with(|i| (i == FILTER).then_some(filter))
+            .or_else(|| self.row_text())
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ui_components::ViewMenuEntry>> {
         self.context_entries(p)
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        if self.mouse.is_some_and(|p| self.over_detail(p)) {
-            let before = self.detail_scroll;
-            self.detail_scroll = (self.detail_scroll + dy).clamp(0.0, self.detail_max);
-            return self.detail_scroll != before;
-        }
-        let before = self.scroll;
-        self.scroll = (self.scroll + dy).clamp(0.0, self.max_scroll);
-        self.scroll != before
+    /// The wheel: to the part under the mouse that scrolls (the detail or the list).
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        let at = self.mouse.unwrap_or(NOWHERE);
+        self.with_controls(|c, parts| c.scroll(parts, at, dx, dy)).is_some()
     }
 
     /// A press in its tab: how many clicks in a row (a column's edge double-clicked fits it).
@@ -185,24 +257,17 @@ impl Viewer for TaskManager {
         // A click shows no focus ring (a key does); what it pressed has the keys.
         self.ring = false;
         if let Some(focus) = self.hit(p).and_then(Self::focus_of) {
-            self.focus = focus;
+            self.focus_on(focus);
         } else if self.over_detail(p) {
-            self.focus = super::Focus::Detail;
+            self.focus_on(Focus::Detail);
         }
         // A press outside an open popover only closes it.
         if self.popover.is_some() && !matches!(self.hit(p), Some(Hit::PopoverArea | Hit::Menu(_))) {
             self.popover = None;
             return None;
         }
-        if self.splitter.begin_drag(p) {
-            return None;
-        }
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            return None;
-        }
-        if let Some(offset) = self.detail_bar.press(p) {
-            self.detail_scroll = offset;
+        // Its parts: the separator held, a scrollbar's thumb held or jumped to.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return None;
         }
         match self.hit(p) {
@@ -223,32 +288,30 @@ impl Viewer for TaskManager {
         if self.resizing.is_some() {
             return self.resize_to(p.x);
         }
-        if let Some(center) = self.splitter.drag_to(p) {
+        let Some((part, changed)) = self.with_controls(|c, parts| c.drag(parts, p)) else {
+            return false;
+        };
+        // The separator moved: the detail's share follows.
+        if part == DIVIDER {
+            let Some(center) = self.split_at.take() else { return false };
             self.drag_splitter(center);
             return true;
         }
-        if let Some(offset) = self.bar.drag(p) {
-            let changed = offset != self.scroll;
-            self.scroll = offset;
-            return changed;
-        }
-        if let Some(offset) = self.detail_bar.drag(p) {
-            let changed = offset != self.detail_scroll;
-            self.detail_scroll = offset;
-            return changed;
-        }
-        false
+        changed
     }
 
     fn release(&mut self) -> bool {
         if self.end_resize() {
             return true;
         }
-        if self.splitter.end_drag() {
+        let Some((part, changed)) = self.with_controls(|c, parts| c.release(parts)) else {
+            return false;
+        };
+        // The separator let go: the share it was left at is kept.
+        if part == DIVIDER && changed {
             self.keep_detail_share();
-            return true;
         }
-        self.bar.release() | self.detail_bar.release()
+        changed
     }
 
     /// How its actions went (toasts).
@@ -261,9 +324,10 @@ impl Viewer for TaskManager {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.resizing.is_some()
-            || (self.splitter.contains(p) && self.splitter.orientation() == Orientation::Vertical)
-        {
+        // Only a part's resize across (the separator beside the detail): the one above a
+        // detail below keeps the view's own cursor.
+        let part = self.controls.cursor_at(p).filter(|c| *c == ViewerCursor::ResizeHorizontal);
+        if self.resizing.is_some() || part.is_some() {
             return Some(ViewerCursor::ResizeHorizontal);
         }
         match self.hit(p) {
@@ -277,12 +341,10 @@ impl Viewer for TaskManager {
     /// Whether something clickable is under the mouse (the app redraws on every move).
     fn hover(&mut self, p: Point) -> bool {
         self.mouse = Some(p);
-        self.splitter.hover(p);
-        self.bar.hover(p);
-        self.detail_bar.hover(p);
+        self.with_controls(|c, parts| c.hover(parts, Some(p)));
         self.hover = self.hit(p);
         matches!(self.hover, Some(h) if !matches!(h, Hit::Filter | Hit::PopoverArea | Hit::CardChart(_) | Hit::DetailChart(_)))
-            || self.splitter.is_hovered()
+            || self.controls.hovered() == Some(DIVIDER)
     }
 
     fn tooltip_at(&self, p: Point) -> Option<Tip> {
@@ -346,8 +408,9 @@ impl Viewer for TaskManager {
         self.paused.then(|| i18n::t("tasks.state_paused"))
     }
 
+    /// A part moving (the separator's handle easing), as of the last paint.
     fn is_animating(&self) -> bool {
-        self.splitter.is_animating()
+        self.controls.is_animating()
     }
 
     /// The first look not come yet: its loader turns.
@@ -366,27 +429,9 @@ impl Viewer for TaskManager {
             return self.confirmed();
         }
         // The filter has the keys: the app's editing commands are its (⌘A, ⌘Z, ⌘⇧Z, ⌘X).
-        if self.wants_text() {
-            let edited = match id {
-                "select_all" => {
-                    self.filter.select_all();
-                    return true;
-                }
-                "undo" => self.filter.undo(),
-                "redo" => self.filter.redo(),
-                "cut" => {
-                    self.filter.insert("");
-                    true
-                }
-                _ => false,
-            };
-            if edited {
-                self.filtered();
-                return true;
-            }
-            if matches!(id, "undo" | "redo") {
-                return false;
-            }
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
+            self.filtered();
+            return true;
         }
         self.run_command(id)
     }
@@ -401,5 +446,6 @@ impl Viewer for TaskManager {
         }
         self.focused = ctx.focused;
         self.draw(ctx.scene, ctx.text, ctx.icons, ctx.palette, ctx.bounds, ctx.scale);
+        self.with_controls(|c, parts| c.settle(parts));
     }
 }

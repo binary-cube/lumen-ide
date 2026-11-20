@@ -107,3 +107,22 @@ fn a_picture_fits_its_area_centered() {
     assert_eq!(fitted(area, 400, 100), Rect::new(10.0, 45.0, 200.0, 50.0));
     assert_eq!(fitted(area, 100, 100), Rect::new(60.0, 20.0, 100.0, 100.0));
 }
+
+/// The filter is the list's control with the keyboard from the start: what's typed and ⌫
+/// reach it through the controls (the list filtered again), the arrows and Tab still choose
+/// the cards, and Tab without its reach does nothing (as before).
+#[test]
+fn the_filter_has_the_keyboard_through_the_controls() {
+    let mut view = opened();
+    assert_eq!(view.controls.focused(), Some(FILTER));
+    assert!(!view.text_input("\u{7}"), "a control character alone: nothing taken");
+    view.text_input("blogx");
+    assert!(view.shown().is_empty());
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.chosen().map(|p| p.window), Some(20), "`blog` again");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("blog"));
+    assert!(!view.edit_key(ViewerKey::Tab), "Tab is the cards' (with its reach)");
+    assert_eq!(view.controls.focused(), Some(FILTER), "the focus stays in the filter");
+    assert!(!view.command("undo"), "only ⌘A is the filter's");
+}

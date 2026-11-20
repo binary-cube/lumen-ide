@@ -131,11 +131,14 @@ fn the_latest_job_per_key_runs() {
     let counted = Arc::clone(&woken);
     let (gate_tx, gate) = std::sync::mpsc::channel::<()>();
     let gate = Mutex::new(gate);
+    let (started_tx, started) = std::sync::mpsc::channel::<()>();
+    let started_tx = Mutex::new(started_tx);
     let latest = Latest::new(
         "test-latest",
         move |(key, version): (u8, u32)| {
-            // The first job waits until the others are asked.
+            // The first job says it began, then waits until the others are asked.
             if version == 0 {
+                let _ = started_tx.lock().unwrap().send(());
                 let _ = gate.lock().unwrap().recv();
             }
             assert!(key != 9, "a job that panics");
@@ -146,6 +149,8 @@ fn the_latest_job_per_key_runs() {
         }),
     );
     latest.request(0, (0, 0));
+    // The worker busy with it before the others are asked: they wait together.
+    started.recv_timeout(Duration::from_secs(5)).unwrap();
     latest.request(1, (1, 1));
     latest.request(1, (1, 2));
     latest.request(9, (9, 1));

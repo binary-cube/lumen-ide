@@ -20,6 +20,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "SQLite",
     description: "SQLite databases as data sources: their tables, structure and rows, changed in transactions",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "database", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// The SQLite files' extensions (lowercase).

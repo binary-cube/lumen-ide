@@ -10,6 +10,7 @@ use std::path::Path;
 use kernel::{Point, Rect};
 use render_api::{ImageData, Quad};
 use text_layout::Font;
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
     AppRequest, KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -60,6 +61,8 @@ const ROWS: usize = 2;
 pub struct SwitcherView {
     projects: Vec<ProjectWindow>,
     filter: TextInput,
+    /// Its controls' state of use (see [`SwitcherView::with_controls`]).
+    controls: Controls,
     /// The projects the filter keeps (their places), and the one chosen among them.
     shown: Vec<usize>,
     selected: usize,
@@ -81,7 +84,78 @@ impl Drop for SwitcherView {
     }
 }
 
+/// The filter as the list's control: by the keyboard only (no caret is put with the
+/// mouse), it takes what's typed (control characters left out) and erases a character at a
+/// time (⌫, Delete), ⌘A selecting it; the other keys (Tab among them) choose the cards, so
+/// it keeps Tab and leaves them. `edited`: its text changed (the list is filtered again).
+struct FilterPart<'a> {
+    filter: &'a mut TextInput,
+    edited: &'a mut bool,
+}
+
+impl Control for FilterPart<'_> {
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, _reach: KeyReach) -> bool {
+        match key {
+            ViewerKey::Backspace => self.filter.backspace(false),
+            ViewerKey::Delete => self.filter.delete(),
+            _ => return false,
+        }
+        *self.edited = true;
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
+        if typed.is_empty() {
+            return false;
+        }
+        self.filter.insert(&typed);
+        *self.edited = true;
+        true
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        let selected = self.filter.selected_text();
+        (!selected.is_empty()).then(|| selected.to_owned())
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        if id != "select_all" {
+            return false;
+        }
+        self.filter.select_all();
+        true
+    }
+}
+
+/// The filter's place among the list's controls.
+const FILTER: usize = 0;
+
 impl SwitcherView {
+    /// Its controls (the filter), with their state of use; the list is filtered again when
+    /// the filter's text changed.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut edited = false;
+        let mut filter = FilterPart { filter: &mut self.filter, edited: &mut edited };
+        let mut parts: [&mut dyn Control; 1] = [&mut filter];
+        let answer = f(&mut self.controls, &mut parts);
+        if edited {
+            self.refilter();
+        }
+        answer
+    }
+
     /// The projects the filter keeps: by name, path or number; when nothing's typed, this
     /// window's chosen (the frame where you are; the arrows go to the others).
     fn refilter(&mut self) {
@@ -283,6 +357,8 @@ impl Viewer for SwitcherView {
             self.projects = data.projects.clone();
             self.refilter();
             self.sync_pictures();
+            // The keyboard in the filter from the start.
+            self.with_controls(|c, parts| c.focus(parts, Some(FILTER)));
         }
     }
 
@@ -366,13 +442,7 @@ impl Viewer for SwitcherView {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        let typed: String = text.chars().filter(|c| !c.is_control()).collect();
-        if typed.is_empty() {
-            return false;
-        }
-        self.filter.insert(&typed);
-        self.refilter();
-        true
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     /// Tab goes to the next card as → does, ⇧Tab to the one before as ←.
@@ -386,7 +456,11 @@ impl Viewer for SwitcherView {
         }
     }
 
+    /// The filter's keys first (erasing), then the cards'.
     fn edit_key(&mut self, key: ViewerKey) -> bool {
+        if self.with_controls(|c, parts| c.key(parts, key, KeyReach::default())).is_some() {
+            return true;
+        }
         match key {
             ViewerKey::Escape => self.action = Some(ViewerAction::Close),
             ViewerKey::Enter => self.take_chosen(),
@@ -394,32 +468,18 @@ impl Viewer for SwitcherView {
             ViewerKey::Right => self.step(1),
             ViewerKey::Up => self.step(-(COLUMNS as isize)),
             ViewerKey::Down => self.step(COLUMNS as isize),
-            ViewerKey::Backspace => {
-                self.filter.backspace(false);
-                self.refilter();
-            }
-            ViewerKey::Delete => {
-                self.filter.delete();
-                self.refilter();
-            }
             _ => return false,
         }
         true
     }
 
     fn command(&mut self, id: &str) -> bool {
-        match id {
-            "select_all" => {
-                self.filter.select_all();
-                true
-            }
-            _ => false,
-        }
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
+    /// Read from `&self`: the filter lends its field by its place.
     fn selected_text(&self) -> Option<String> {
-        let selected = self.filter.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| (i == FILTER).then_some(&self.filter as &dyn Control))
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {

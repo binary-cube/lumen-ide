@@ -21,6 +21,9 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// The icon of a server without one of its own (the `.sql` file's as well).
+const GENERIC_ICON: &str = "database";
+
 use database::console::TxState;
 use database::console::{
     ConsoleId, ConsoleSpec, Overrides, PlanInput, RunMode, RunPlan, SourceBrief, TxMode,
@@ -1078,11 +1081,13 @@ impl EditorToolbar for ConsoleBar {
         (!self.spec.is_attached()).then(|| self.title.clone())
     }
 
+    /// Its server's icon; the generic database one is the `.sql` file's own (as the file
+    /// icon set draws it), so the file's is kept then.
     fn icon(&self) -> Option<&'static str> {
         if self.spec.is_attached() {
             return None;
         }
-        self.brief.as_ref().map(|b| b.icon)
+        self.brief.as_ref().map(|b| b.icon).filter(|icon| *icon != GENERIC_ICON)
     }
 
     fn accent(&self, palette: &Palette) -> Option<Rgba> {

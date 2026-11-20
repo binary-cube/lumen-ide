@@ -99,3 +99,13 @@ fn shebang_parsing() {
     assert_eq!(shebang("#!/usr/local/bin/node\n"), Some("node"));
     assert_eq!(shebang("<?php"), None);
 }
+
+/// A language's fragment gets what it needs before it (PHP's opening tag), unless it
+/// already has it; a language that needs nothing gets nothing.
+#[test]
+fn a_fragment_gets_its_opening_only_when_it_needs_it() {
+    let php = LanguageDescriptor::new("php", "PHP").fragment_opening("<?php\n", "<?");
+    assert_eq!(php.fragment_prefix("echo $a;"), "<?php\n");
+    assert_eq!(php.fragment_prefix("<?= $a ?>"), "");
+    assert_eq!(LanguageDescriptor::new("css", "CSS").fragment_prefix("a {}"), "");
+}

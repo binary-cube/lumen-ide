@@ -238,6 +238,16 @@ impl Extractor for Delimited {
         self.0.extension()
     }
 
+    /// A `.csv` is the comma's with its header, a `.tsv` / `.tab` the tab's with its header
+    /// (the others, the user's own too, are chosen by name).
+    fn names_files(&self) -> &[&str] {
+        match self.0.id.as_str() {
+            "csv" => &["csv"],
+            "tsv-header" => &["tsv", "tab"],
+            _ => &[],
+        }
+    }
+
     fn open(&self, input: &Input) -> Box<dyn Stream> {
         Box::new(DelimitedStream {
             format: self.0.clone(),

@@ -32,6 +32,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Services",
     description: "The Services window at the bottom: what the modules have running (a data source's consoles, their results), as a tree with each node's tabs",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "services", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Shows / hides the window (⌘8 / Alt+8).

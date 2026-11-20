@@ -139,3 +139,34 @@ fn a_name_s_conflicts_are_found_on_a_worker() {
     }
     assert_eq!(view.conflicts().len(), 1, "there by a poll");
 }
+
+/// A group too short for the form and a few places: the page's thumb, pressed and dragged,
+/// scrolls it.
+#[test]
+fn the_page_scrolls_by_its_thumb() {
+    let mut view = view("save", &[("/p/a.php", "<?php function save() {} $r->save(); save();")]);
+    let (w, h) = (900.0, 260.0);
+    crate::page::tests::paint(&mut view, w, h);
+    crate::page::tests::drag_thumb(&mut view, w, 30.0);
+    assert!(view.page.offset() > 0.0, "the page scrolled");
+}
+
+/// The field keeps the keys wherever the page is pressed (beside it, on the title), and a
+/// press on it puts the caret where it's pressed.
+#[test]
+fn the_name_field_keeps_the_keys_after_a_press_beside_it() {
+    let mut view = view("save", &[("/p/a.php", "<?php function save() {}")]);
+    crate::page::tests::paint(&mut view, 900.0, 600.0);
+    let field = view.name_area.expect("the field was drawn");
+    // On the page's title, nowhere a part is.
+    assert_eq!(view.click(Point::new(field.min_x() + 1.0, 4.0)), None);
+    assert!(view.edit_key(ViewerKey::End), "the field still has the keys");
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.new_name(), "sav");
+    assert!(!view.edit_key(ViewerKey::Tab), "Tab isn't the page's");
+    // Pressed at its start: the caret goes there.
+    assert_eq!(view.click(Point::new(field.min_x() + 1.0, field.center().y)), None);
+    view.type_name("x");
+    assert_eq!(view.new_name(), "xsav");
+    assert!(view.command("select_all"));
+}

@@ -390,3 +390,224 @@ fn a_dragged_source_follows_the_mouse() {
     assert!(view.dragged_card(&ui_components::Palette::dark()).is_none());
     let _ = std::fs::remove_dir_all(&p.dir);
 }
+
+/// A form taller than its room scrolls by its thumb: pressed and dragged down, it moves (no
+/// field gets the keys).
+#[test]
+fn the_form_s_thumb_is_dragged() {
+    use ui_components::Viewer as _;
+    let p = project("thumb");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    view.editor_mut().unwrap().add("server");
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = render_api::Scene::default();
+    view.paint(ui_components::ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, 1100.0, 320.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    assert_eq!(view.form_scroll, 0.0);
+    let focus = view.focus.clone();
+    // Along the form's right edge (its lane reaches past the fields).
+    let area = view.form_area;
+    let on = (area.min_y() as u32..area.max_y() as u32)
+        .flat_map(|y| (area.min_x() as u32..1100).map(move |x| (x, y)))
+        .map(|(x, y)| kernel::Point::new(x as f32, y as f32))
+        .find(|p| view.form_bar.contains(*p))
+        .expect("the form's scrollbar");
+    let at = kernel::Point::new(on.x + 1.0, on.y + 2.0);
+    assert_eq!(view.click(at), None);
+    assert!(view.drag(kernel::Point::new(at.x, at.y + 30.0)));
+    assert!(view.form_scroll > 0.0, "the form moved");
+    assert!(view.release());
+    assert_eq!(view.focus, focus, "no field took it");
+    let _ = std::fs::remove_dir_all(&p.dir);
+}
+
+/// The wheel goes to the part under the mouse, through the window's controls: an open
+/// list over everything, else the sources' list over it, else the form.
+#[test]
+fn the_wheel_goes_to_the_part_under_the_mouse() {
+    use crate::sources::modal::Choice;
+    use ui_components::Viewer as _;
+    let p = project("wheel");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    for _ in 0..40 {
+        view.editor_mut().unwrap().add("server");
+    }
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = render_api::Scene::default();
+    view.paint(ui_components::ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, 1100.0, 320.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let list = view.list_area;
+    view.hover(kernel::Point::new(list.min_x() + 20.0, list.min_y() + 20.0));
+    assert!(view.scroll(0.0, 30.0));
+    assert!(view.list_scroll > 0.0 && view.form_scroll == 0.0, "the list moved");
+    let form = view.form_area;
+    view.hover(kernel::Point::new(form.min_x() + 40.0, form.min_y() + 40.0));
+    let listed = view.list_scroll;
+    assert!(view.scroll(0.0, 30.0));
+    assert!(view.form_scroll > 0.0 && view.list_scroll == listed, "the form moved");
+    // A list opened under the mouse (it hasn't moved since): the list's wheel, nothing else.
+    view.open_popup(Choice::AddDriver);
+    paint_modal(&mut view);
+    let (listed, formed) = (view.list_scroll, view.form_scroll);
+    view.scroll(0.0, 30.0);
+    assert_eq!((view.list_scroll, view.form_scroll), (listed, formed));
+    let _ = std::fs::remove_dir_all(&p.dir);
+}
+
+/// Tab (⇧Tab back) and ↑ ↓ move the keys along a driver's fields in the editor's order,
+/// around the ends, the text typed going to the one reached; on the filter's row ↑ ↓ move
+/// the selection instead, the keys staying in the filter.
+#[test]
+fn tab_and_the_arrows_follow_the_fields_and_the_filter_row() {
+    use ui_components::{KeyReach, Viewer as _, ViewerKey};
+    let p = project("order");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    view.editor_mut().unwrap().add("server");
+    view.editor_mut().unwrap().add("server");
+    let order = view.editor().unwrap().texts();
+    assert!(order.len() > 3 && order.contains(&Field::Password), "{order:?}");
+    view.focus = Some(order[0].clone());
+    for field in order.iter().skip(1).chain(order.first()) {
+        assert!(view.edit_key(ViewerKey::Tab));
+        assert_eq!(view.focus(), Some(field), "Tab: the next, around the end");
+    }
+    let back = KeyReach { word: false, extend: true };
+    assert!(view.edit_key_with(ViewerKey::Tab, back));
+    assert_eq!(view.focus(), order.last(), "⇧Tab: the one before");
+    assert!(view.edit_key(ViewerKey::Down));
+    assert_eq!(view.focus(), order.first(), "↓ as Tab in the form");
+    assert!(view.edit_key(ViewerKey::Up));
+    assert_eq!(view.focus(), order.last(), "↑ as ⇧Tab");
+    // The keys went along: typed into the field reached.
+    assert!(view.edit_key(ViewerKey::Down) && view.edit_key(ViewerKey::Down));
+    assert_eq!(view.focus(), Some(&Field::Comment));
+    view.type_text("a note");
+    assert_eq!(view.editor().unwrap().comment.text(), "a note");
+    // The filter's row: the selection moves, the keys stay in the filter.
+    view.focus = Some(Field::Filter);
+    let before = view.editor().unwrap().selected;
+    assert!(view.edit_key(ViewerKey::Up));
+    assert_ne!(view.editor().unwrap().selected, before, "another source selected");
+    assert_eq!(view.focus(), Some(&Field::Filter));
+    assert!(view.edit_key(ViewerKey::Down));
+    assert_eq!(view.editor().unwrap().selected, before);
+    view.type_text("zz");
+    assert_eq!(view.editor().unwrap().filter.text(), "zz");
+    let _ = std::fs::remove_dir_all(&p.dir);
+}
+
+/// Esc in the filter clears it first (the modal stays); once empty, Esc closes (here it
+/// asks first: a source was added).
+#[test]
+fn esc_clears_the_filter_first() {
+    use ui_components::{Viewer as _, ViewerKey};
+    let p = project("esc");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    view.editor_mut().unwrap().add("server");
+    view.focus = Some(Field::Filter);
+    view.type_text("shop");
+    assert!(view.edit_key(ViewerKey::Escape));
+    assert_eq!(view.editor().unwrap().filter.text(), "", "cleared");
+    assert!(!view.asks_to_discard() && view.take_action().is_none(), "still open");
+    assert_eq!(view.focus(), Some(&Field::Filter));
+    assert!(view.edit_key(ViewerKey::Escape));
+    assert!(view.asks_to_discard(), "then it's closing");
+    let _ = std::fs::remove_dir_all(&p.dir);
+}
+
+/// The password is never copied nor cut (the cut is the modal's all the same); another
+/// field's selection is, a cut with nothing selected isn't used, a newline typed is dropped.
+#[test]
+fn the_password_is_never_copied_nor_cut() {
+    use ui_components::Viewer as _;
+    let p = project("password");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    view.editor_mut().unwrap().add("server");
+    view.focus = Some(Field::Password);
+    view.type_text("hunter2");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text(), None, "never copied");
+    assert!(view.command("cut"), "the modal's: nothing behind it gets it");
+    assert_eq!(view.editor().unwrap().current().unwrap().password.text(), "hunter2", "not cut");
+    view.focus = Some(Field::Comment);
+    view.type_text("a\nb");
+    assert_eq!(view.editor().unwrap().comment.text(), "ab", "a newline isn't a space");
+    assert!(!view.command("cut"), "nothing selected: not used");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("ab"));
+    assert!(view.command("cut"));
+    assert_eq!(view.editor().unwrap().comment.text(), "");
+    assert!(view.command("undo"));
+    assert_eq!(view.editor().unwrap().comment.text(), "ab");
+    let _ = std::fs::remove_dir_all(&p.dir);
+}
+
+/// A press on a field gives it the keys and puts its caret; a second (or third) of a quick
+/// series selects no word.
+#[test]
+fn a_second_click_on_a_field_selects_no_word() {
+    use crate::sources::modal::Hit;
+    use ui_components::Viewer as _;
+    let p = project("clicks");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    view.editor_mut().unwrap().add("server");
+    view.focus = Some(Field::Name);
+    view.type_text(" hello world");
+    let named = view.editor().unwrap().name.text().to_owned();
+    view.focus = None;
+    paint_modal(&mut view);
+    let field = |view: &SourcesView, f: Field| {
+        let r = view.hits.iter().find(|(_, h)| *h == Hit::Field(f.clone())).map(|(r, _)| *r);
+        let r = r.unwrap_or_else(|| panic!("{f:?} drawn"));
+        kernel::Point::new(r.min_x() + r.size.width / 4.0, r.min_y() + r.size.height / 2.0)
+    };
+    let name = field(&view, Field::Name);
+    assert_eq!(view.press(name, 1), None);
+    assert_eq!(view.focus(), Some(&Field::Name), "the keys to it");
+    for clicks in [2, 3] {
+        view.press(name, clicks);
+        view.release();
+        assert_eq!(view.selected_text(), None, "{clicks} clicks: nothing selected");
+    }
+    // The field's part itself, however many clicks it's told of: the caret only.
+    let hits = view.hits.clone();
+    let input = &mut view.editor_mut().unwrap().name;
+    let mut part =
+        crate::sources::modal::fields::FieldPart { field: Field::Name, input, hits: &hits };
+    for clicks in [2, 3] {
+        assert_eq!(
+            ui_components::control::Control::press(&mut part, name, clicks),
+            ui_components::control::Press::Held
+        );
+        assert_eq!(part.input.selected_text(), "", "{clicks} clicks: no word, nothing");
+    }
+    // Another field pressed: the keys go to it.
+    let comment = field(&view, Field::Comment);
+    view.press(comment, 1);
+    view.release();
+    view.type_text("x");
+    assert_eq!(view.focus(), Some(&Field::Comment));
+    assert_eq!(view.editor().unwrap().comment.text(), "x");
+    assert_eq!(view.editor().unwrap().name.text(), named, "the name untouched");
+    let _ = std::fs::remove_dir_all(&p.dir);
+}

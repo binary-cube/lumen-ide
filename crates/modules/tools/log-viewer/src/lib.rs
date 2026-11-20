@@ -28,6 +28,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Log viewer",
     description: "The app's log read back: its lines in a grid, filtered, followed live",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-lines", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

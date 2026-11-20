@@ -1,6 +1,127 @@
 //! The screen as a view: what it reacts to, and how its parts are laid out.
 
+use super::parts::{ListsAsked, ListsLane, MessagePart, PlacesLane};
+use super::text_selection::CodeText;
 use super::*;
+
+/// The places of its parts in [`CommitView::with_controls`]: the dividers and the panes'
+/// scrollbars come before the message.
+const MESSAGE: usize = 7;
+const CODE: usize = 8;
+const PLACES: usize = 9;
+const LISTS: usize = 10;
+
+impl CommitView {
+    /// Its parts used as controls, the topmost first, with their state of use: the
+    /// dividers (each keeping its share in the project's sizes), the panes' scrollbars with
+    /// their offsets, the message, the code's text; then the keyboard's lanes without a
+    /// place of their own (the places' filter, the lists: their presses are the screen's,
+    /// which gives them the focus). The message has the keys when no other lane does; the
+    /// places' rows follow their filter.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let sizes = self.sizes.as_ref();
+        let [d0, d1, d2, d3] = &mut self.dividers.0;
+        let [b0, b1, b2] = &mut self.bars;
+        let [s0, s1, s2] = &mut self.scrolls;
+        let (mut g0, mut g1) = (Grip { divider: d0, sizes }, Grip { divider: d1, sizes });
+        let (mut g2, mut g3) = (Grip { divider: d2, sizes }, Grip { divider: d3, sizes });
+        let mut t0 = Thumb { bar: b0, offset: s0 };
+        let mut t1 = Thumb { bar: b1, offset: s1 };
+        let mut t2 = Thumb { bar: b2, offset: s2 };
+        let draft = self.repo.as_ref().map(|repo| repo.root());
+        let mut message = MessagePart { field: &mut self.message, draft };
+        let mut code = CodeText { code: &mut self.code, diff: self.diff.as_ref() };
+        let mut edited = false;
+        let filter = &mut self.places_filter;
+        let mut places = PlacesLane { filter, edited: &mut edited, leave: &mut self.leave_places };
+        let mut lists = ListsLane { asked: &mut self.lists_asked };
+        let mut parts: [&mut dyn Control; 11] = [
+            &mut g0,
+            &mut g1,
+            &mut g2,
+            &mut g3,
+            &mut t0,
+            &mut t1,
+            &mut t2,
+            &mut message,
+            &mut code,
+            &mut places,
+            &mut lists,
+        ];
+        if self.controls.focused().is_none() {
+            self.controls.focus(&mut parts, Some(MESSAGE));
+        }
+        let answer = f(&mut self.controls, &mut parts);
+        if edited {
+            self.places_scroll = 0.0;
+            self.lay_places();
+        }
+        answer
+    }
+
+    /// Where the keyboard goes: the lane with the focus.
+    pub(super) fn keys(&self) -> Keys {
+        match self.controls.focused() {
+            Some(PLACES) => Keys::Places,
+            Some(LISTS) => Keys::Lists,
+            _ => Keys::Message,
+        }
+    }
+
+    /// The keyboard given to `keys`' lane.
+    pub(super) fn set_keys(&mut self, keys: Keys) {
+        let lane = match keys {
+            Keys::Message => MESSAGE,
+            Keys::Lists => LISTS,
+            Keys::Places => PLACES,
+        };
+        self.with_controls(|c, parts| c.focus(parts, Some(lane)));
+    }
+
+    /// A key the lists were asked (they have the keyboard): ↑ ↓ (pages, ends) through the
+    /// files of both (⇧: choosing a run on the shown file's list), ↵ opens the shown one,
+    /// Tab to the message.
+    fn lists_key(&mut self, key: ViewerKey, reach: ui_components::KeyReach) {
+        match key {
+            // ⇧: the run chosen grows (or shrinks) along the shown file's list.
+            ViewerKey::Up if reach.extend => self.extend(-1),
+            ViewerKey::Down if reach.extend => self.extend(1),
+            ViewerKey::Up => self.step(-1),
+            ViewerKey::Down => self.step(1),
+            ViewerKey::PageUp => self.step(-10),
+            ViewerKey::PageDown => self.step(10),
+            ViewerKey::Home => self.step(isize::MIN / 2),
+            ViewerKey::End => self.step(isize::MAX / 2),
+            ViewerKey::Enter => self.pending = self.open_shown(),
+            ViewerKey::Tab => self.set_keys(Keys::Message),
+            _ => {}
+        }
+    }
+
+    /// Text typed or `pasted`, to the lane with the keys. In the lists, Space moves the
+    /// shown file to the other list; anything else goes to the message (the keyboard with
+    /// it). `true` if a lane took it.
+    fn take_text(&mut self, text: &str, pasted: bool) -> bool {
+        let give = |c: &mut Controls, parts: &mut [&mut dyn Control], text: &str| {
+            if pasted { c.paste(parts, text) } else { c.text(parts, text) }
+        };
+        let answered = self.with_controls(|c, parts| give(c, parts, text));
+        if answered == Some(LISTS)
+            && let Some(ListsAsked::Text(typed)) = self.lists_asked.take()
+        {
+            if typed == " " {
+                self.toggle_shown();
+                return true;
+            }
+            self.set_keys(Keys::Message);
+            return self.with_controls(|c, parts| give(c, parts, &typed)).is_some();
+        }
+        answered.is_some()
+    }
+}
 
 impl Viewer for CommitView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
@@ -73,7 +194,7 @@ impl Viewer for CommitView {
     }
 
     fn is_animating(&self) -> bool {
-        self.dividers.0.iter().any(Divider::is_animating)
+        self.controls.is_animating()
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
@@ -82,6 +203,8 @@ impl Viewer for CommitView {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        // A divider dragged keeps its cursor wherever the pointer goes (the parts answer
+        // only where the mouse hovered).
         let divider = self.dividers.0.iter().find_map(|divider| divider.cursor(p));
         divider.or_else(|| {
             // A hunk's buttons are over the code: theirs first.
@@ -89,11 +212,10 @@ impl Viewer for CommitView {
             if matches!(hit, Some(Hit::StageHunk(_) | Hit::DiscardHunk(_))) {
                 return Some(ViewerCursor::Pointer);
             }
-            if self.code.is_over(p) {
-                return Some(ViewerCursor::Text);
+            if let Some(cursor) = self.controls.cursor_at(p) {
+                return Some(cursor);
             }
-            let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
-            Some(match hit {
+            Some(match hit? {
                 Hit::Message | Hit::PlacesFilter => ViewerCursor::Text,
                 Hit::Commit if !self.can_commit() => ViewerCursor::Arrow,
                 _ => ViewerCursor::Pointer,
@@ -233,87 +355,48 @@ impl Viewer for CommitView {
 
     /// The message takes several lines (a summary, a blank line, the details).
     fn field_takes_lines(&self) -> bool {
-        self.keys == Keys::Message
+        self.keys() == Keys::Message
     }
 
-    /// In the lists, Space moves the shown file to the other list; anything else typed goes
-    /// to the message (the keyboard with it).
     fn text_input(&mut self, text: &str) -> bool {
-        match self.keys {
-            Keys::Places => {
-                self.edit_places_filter(|input| input.insert(text));
-                return true;
-            }
-            Keys::Lists if text == " " => {
-                self.toggle_shown();
-                return true;
-            }
-            Keys::Lists => self.keys = Keys::Message,
-            Keys::Message => {}
-        }
-        self.message.insert(text);
-        self.keep_draft();
-        true
+        self.take_text(text, false)
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
         self.edit_key_with(key, ui_components::KeyReach::default())
     }
 
-    /// In the lists: ↑ ↓ (pages, ends) through the files of both (⇧: choosing a run on the
-    /// shown file's list), ↵ opens the shown one, Tab
-    /// to the message. The message's keys: ⌥ / Ctrl by word, ⇧ selecting, ↑ ↓ by lines; ↵ a
-    /// new line (⌘ / Ctrl+↵ commits: the view's `commit`), Tab to the files.
+    /// To the lane with the keys ([`super::parts`]); Tab moves between the message and the
+    /// lists (to the lists only when there are files), Esc or Tab from the places' filter
+    /// back to the message. ⌘ / Ctrl+↵ commits (the view's `commit`).
     fn edit_key_with(&mut self, key: ViewerKey, reach: ui_components::KeyReach) -> bool {
-        let (word, extend) = (reach.word, reach.extend);
-        if self.keys == Keys::Places {
-            return self.places_key(key, reach);
-        }
-        if self.keys == Keys::Lists {
-            match key {
-                // ⇧: the run chosen grows (or shrinks) along the shown file's list.
-                ViewerKey::Up if extend => self.extend(-1),
-                ViewerKey::Down if extend => self.extend(1),
-                ViewerKey::Up => self.step(-1),
-                ViewerKey::Down => self.step(1),
-                ViewerKey::PageUp => self.step(-10),
-                ViewerKey::PageDown => self.step(10),
-                ViewerKey::Home => self.step(isize::MIN / 2),
-                ViewerKey::End => self.step(isize::MAX / 2),
-                ViewerKey::Enter => self.pending = self.open_shown(),
-                ViewerKey::Tab => self.keys = Keys::Message,
-                _ => return false,
-            }
-            return true;
-        }
-        match key {
-            ViewerKey::Tab => {
+        match self.with_controls(|c, parts| c.key(parts, key, reach)) {
+            Some(MESSAGE) if key == ViewerKey::Tab => {
                 if !self.files.is_empty() {
-                    self.keys = Keys::Lists;
+                    self.set_keys(Keys::Lists);
                 }
-                return true;
             }
-            ViewerKey::Backspace => self.message.backspace(word),
-            ViewerKey::Delete => self.message.delete(),
-            ViewerKey::Left => self.message.left(word, extend),
-            ViewerKey::Right => self.message.right(word, extend),
-            ViewerKey::Up => self.message.vertical(false, extend),
-            ViewerKey::Down => self.message.vertical(true, extend),
-            ViewerKey::Home => self.message.home(word, extend),
-            ViewerKey::End => self.message.end(word, extend),
-            ViewerKey::Enter => self.message.newline(),
-            _ => return false,
+            Some(PLACES) if std::mem::take(&mut self.leave_places) => {
+                self.set_keys(Keys::Message);
+            }
+            Some(LISTS) => {
+                if let Some(ListsAsked::Key(key, reach)) = self.lists_asked.take() {
+                    self.lists_key(key, reach);
+                }
+            }
+            Some(_) => {}
+            None => return false,
         }
-        self.keep_draft();
         true
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.text_input(text)
+        self.take_text(text, true)
     }
 
+    /// Read from `&self`: the lane with the keys' own.
     fn selected_text(&self) -> Option<String> {
-        if self.keys == Keys::Places {
+        if self.keys() == Keys::Places {
             let selected = self.places_filter.selected_text();
             return (!selected.is_empty()).then(|| selected.to_owned());
         }
@@ -326,25 +409,13 @@ impl Viewer for CommitView {
 
     /// The app's edit commands, for the message.
     fn command(&mut self, id: &str) -> bool {
-        // The places' filter with the keyboard: the edit commands are its.
-        if self.keys == Keys::Places {
-            let edited = match id {
-                "select_all" => {
-                    self.places_filter.select_all();
-                    return true;
-                }
-                "cut" => {
-                    self.edit_places_filter(|input| input.insert(""));
-                    return true;
-                }
-                "undo" => self.places_filter.undo(),
-                "redo" => self.places_filter.redo(),
-                _ => return false,
-            };
-            if edited {
-                self.places_scroll = 0.0;
-                self.lay_places();
-            }
+        // The places' filter with the keyboard: the edit commands are its, and nothing else
+        // is taken meanwhile.
+        if self.keys() == Keys::Places {
+            return self.with_controls(|c, parts| c.command(parts, id)).is_some();
+        }
+        // The message with the keyboard: its edit commands.
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
             return true;
         }
         if self.file_command(id) {
@@ -360,24 +431,18 @@ impl Viewer for CommitView {
             return true;
         }
         match id {
-            "select_all" if self.keys == Keys::Lists => {
+            "select_all" if self.keys() == Keys::Lists => {
                 self.mark_all();
-                return true;
-            }
-            "select_all" => self.message.select_all(),
-            "cut" => self.message.insert(""),
-            "undo" => {
-                self.message.undo();
-            }
-            "redo" => {
-                self.message.redo();
+                true
             }
             // ⌘ / Ctrl+↵ (the module's command).
-            "commit" => return self.commit(),
-            _ => return false,
+            "commit" => self.commit(),
+            // The lists with the keyboard: the message still takes the other edits.
+            _ => {
+                let draft = self.repo.as_ref().map(|repo| repo.root());
+                MessagePart { field: &mut self.message, draft }.command(id)
+            }
         }
-        self.keep_draft();
-        true
     }
 
     fn pointer_down(
@@ -404,29 +469,26 @@ impl Viewer for CommitView {
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        let sizes = self.sizes.as_ref();
-        if self.dividers.0.iter_mut().any(|divider| divider.press(p, clicks, sizes)) {
-            return None;
-        }
-        for (bar, scroll) in self.bars.iter_mut().zip(&mut self.scrolls) {
-            if let Some(offset) = bar.press(p) {
-                *scroll = offset;
+        // A divider (two clicks: back where it starts), a pane's scrollbar, the message (two
+        // clicks: a word; three: its line), the code's text. A press on none of them keeps
+        // the keyboard where it is (the screen's own parts move it: [`Self::click`]).
+        let pressed = self.with_controls(|c, parts| {
+            let had = c.focused();
+            let pressed = c.press(parts, p, clicks);
+            if pressed.is_none() {
+                c.focus(parts, had);
+            }
+            pressed
+        });
+        match pressed {
+            // A divider, a scrollbar, the code: the code's selection stays theirs.
+            Some((i, _)) if i < MESSAGE || i == CODE => return None,
+            // Anywhere else a selection of the code ends.
+            Some(_) => {
+                self.code.clear();
                 return None;
             }
-        }
-        let on_message = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
-            == Some(Hit::Message);
-        self.selecting = on_message;
-        if on_message {
-            self.keys = Keys::Message;
-        }
-        if self.press_code(p, on_message) {
-            return None;
-        }
-        if on_message || self.message.contains(p) {
-            // Two clicks: a word; three: its line.
-            self.selecting = self.message.press(p, clicks, false);
-            return None;
+            None => self.code.clear(),
         }
         // A branch or a tag of the places, twice: switched to; a stash: brought back.
         if clicks == 2
@@ -444,40 +506,16 @@ impl Viewer for CommitView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if self.dividers.0.iter_mut().fold(false, |any, divider| any | divider.drag(p)) {
-            return true;
-        }
-        for (bar, scroll) in self.bars.iter_mut().zip(&mut self.scrolls) {
-            if let Some(offset) = bar.drag(p) {
-                *scroll = offset;
-                return true;
-            }
-        }
-        if self.drag_code(p) {
-            return true;
-        }
-        if self.selecting {
-            self.message.drag(p);
-        }
-        self.selecting
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        let sizes = self.sizes.as_ref();
-        let dividers =
-            self.dividers.0.iter_mut().fold(false, |any, divider| any | divider.release(sizes));
-        let bars = self.bars.iter_mut().fold(false, |any, bar| any | bar.release());
-        self.code.release()
-            | std::mem::take(&mut self.selecting)
-            | dividers
-            | bars
-            | self.message.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
-    /// The files' scrollbar fading: a frame when it next changes.
+    /// The panes' scrollbars and the message's fading: a frame when they next change.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        let bars = self.bars.iter().filter_map(ui_components::EdgeScrollbar::next_frame);
-        bars.chain(self.message.next_frame()).min()
+        self.controls.next_frame()
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
@@ -485,9 +523,9 @@ impl Viewer for CommitView {
         // A file or a list clicked: the keyboard goes through the lists; the places' filter
         // keeps it only while it's clicked.
         if matches!(hit, Hit::Check(..) | Hit::Row(..) | Hit::All(_)) {
-            self.keys = Keys::Lists;
-        } else if self.keys == Keys::Places && hit != Hit::PlacesFilter {
-            self.keys = Keys::Message;
+            self.set_keys(Keys::Lists);
+        } else if self.keys() == Keys::Places && hit != Hit::PlacesFilter {
+            self.set_keys(Keys::Message);
         }
         match hit {
             Hit::Check(i, staged) => self.toggle(i, staged),
@@ -514,7 +552,7 @@ impl Viewer for CommitView {
             }
             Hit::Place(i) => return self.pick_place(i),
             Hit::PlacesFilter => {
-                self.keys = Keys::Places;
+                self.set_keys(Keys::Places);
                 self.places_filter.click(p.x);
             }
             Hit::ClearPlacesFilter => self.edit_places_filter(|input| input.set_text("")),
@@ -527,9 +565,7 @@ impl Viewer for CommitView {
         let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
         let changed = hover != self.hover;
         self.hover = hover;
-        let bars = self.bars.iter_mut().fold(false, |any, bar| any | bar.hover(p));
-        let dividers = self.dividers.0.iter_mut().fold(false, |any, d| any | d.hover(p));
-        dividers | bars | self.message.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
@@ -540,8 +576,9 @@ impl Viewer for CommitView {
             return self.places_scroll != before;
         }
         // Over the message: its own lines scroll.
-        if self.message.contains(self.pointer) {
-            return self.message.scroll_by(dy);
+        let pointer = self.pointer;
+        if self.with_controls(|c, parts| c.scroll(parts, pointer, dx, dy)).is_some() {
+            return true;
         }
         let Some(pane) = self.panes.iter().position(|r| r.contains(self.pointer)) else {
             return false;
@@ -622,6 +659,7 @@ impl Viewer for CommitView {
         for divider in &self.dividers.0 {
             divider.paint(ctx.scene);
         }
+        self.with_controls(|c, parts| c.settle(parts));
         self.reveal = false;
     }
 }

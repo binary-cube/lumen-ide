@@ -13,6 +13,7 @@ use std::sync::Arc;
 
 use i18n::{t, tr};
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls};
 use ui_components::ds::Ctx;
 use ui_components::picker::{Picker, PickerEvent, PickerItem};
 use ui_components::{
@@ -172,6 +173,8 @@ pub struct BranchPicker {
     done: bool,
     /// The mouse is over the list (the wheel scrolls it, not what's under it).
     inside: bool,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for BranchPicker {
@@ -219,6 +222,16 @@ impl BranchPicker {
         }
     }
 
+    /// Its parts used as controls (the list), with their state of use. The list has the
+    /// focus from the moment it opens (its keys, its search, the wheel), and keeps Tab.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut parts: [&mut dyn Control; 1] = [&mut self.picker];
+        f(&mut self.controls, &mut parts)
+    }
+
     /// Where it opens from: under the branch, else under the bar's middle.
     fn anchor(&self, bounds: Rect, scale: f32) -> Rect {
         self.list.as_ref().and_then(|l| l.anchor).unwrap_or_else(|| {
@@ -240,6 +253,7 @@ impl Viewer for BranchPicker {
         self.picker.open(list.items.clone(), chosen);
         self.picker.always_search();
         self.list = Some(Arc::new(list.clone()));
+        self.with_controls(|c, parts| c.focus(parts, Some(0)));
     }
 
     fn closed(&self) -> bool {
@@ -251,7 +265,7 @@ impl Viewer for BranchPicker {
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        self.picker.text_input(typed)
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
@@ -263,7 +277,7 @@ impl Viewer for BranchPicker {
     }
 
     fn command(&mut self, id: &str) -> bool {
-        self.picker.command(id)
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -271,13 +285,15 @@ impl Viewer for BranchPicker {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let event = self.picker.key(key, reach);
+        self.with_controls(|c, parts| c.key(parts, key, reach));
+        let event = self.picker.take_event();
         self.picked(event);
         true
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        let event = self.picker.press_with(p, clicks);
+        self.with_controls(|c, parts| c.press(parts, p, clicks));
+        let event = self.picker.take_event();
         self.picked(event);
         self.action.take()
     }
@@ -287,20 +303,24 @@ impl Viewer for BranchPicker {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.picker.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.picker.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        self.picker.scroll(dy)
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.with_controls(|c, parts| c.scroll_hovered(parts, dx, dy)).is_some()
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.inside = self.picker.contains(p);
-        self.picker.hover(p)
+        let (inside, changed) = self.with_controls(|c, parts| {
+            let inside = parts.iter().any(|part| part.area().is_some_and(|r| r.contains(p)));
+            (inside, c.hover(parts, Some(p)))
+        });
+        self.inside = inside;
+        changed
     }
 
     fn takes_scroll(&self) -> bool {
@@ -308,11 +328,11 @@ impl Viewer for BranchPicker {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        self.picker.cursor_at(p).or(Some(ViewerCursor::Arrow))
+        self.controls.cursor_at(p).or(Some(ViewerCursor::Arrow))
     }
 
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.picker.next_frame()
+        self.controls.next_frame()
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
@@ -320,6 +340,7 @@ impl Viewer for BranchPicker {
         let ds = Ctx::new(palette, scale);
         let anchor = self.anchor(bounds, scale);
         self.picker.paint(scene, text, icons, &ds, (anchor, bounds), &t("git.branch_search"));
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn take_action(&mut self) -> Option<ViewerAction> {

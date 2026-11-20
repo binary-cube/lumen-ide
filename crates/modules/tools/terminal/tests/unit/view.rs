@@ -321,6 +321,12 @@ fn a_full_screen_program_gets_the_wheel() {
     assert!(!view.scroll(0.0, -2.0 * line), "nothing scrolled here");
     assert_eq!(std::mem::take(&mut *sent.lock().unwrap()), b"\x1b[A\x1b[A");
     assert_eq!(view.grid.display_offset, 0);
+    // Its lane pressed: no bar there to take it (the press is the screen's).
+    let lane = Point::new(view.bar_area.min_x() + 4.0, view.bar_area.min_y() + 2.0);
+    view.hover(lane);
+    view.press(lane, 1);
+    assert!(!view.controls.held(), "no bar held");
+    view.release();
 }
 
 /// Clear Terminal (⌘K / Ctrl+Shift+K, sent to the view as its action): the history gone,

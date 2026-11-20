@@ -234,6 +234,14 @@ pub const OWN_THREADS: [&str; 2] = [THREAD, READ_THREAD];
 /// The thread a recording is read on (its view's), the recorder's too.
 pub const READ_THREAD: &str = "profiler-read";
 
+/// The threads without a name, together: the app names all its own, so these are the
+/// system's workers (on macOS the dispatch queues: the GPU driver handing the frames over
+/// and taking them back, the frames' pacing) — their time grows with the frames drawn.
+pub const SYSTEM_WORKERS: &str = "system-workers";
+
+/// What threads without a name were called in recordings made before (read the same).
+pub const UNNAMED: &str = "unnamed";
+
 /// The owners as the app gave them, every name cleaned.
 fn clean(owners: &Owners) -> Owners {
     Owners(owners.0.iter().map(|(t, o)| (profiling::name(t), profiling::name(o))).collect())
@@ -266,7 +274,7 @@ fn thread_times(plan: &Plan, owners: &Owners) -> Vec<(u64, String, Duration)> {
         .filter(|(_, name, _)| !OWN_THREADS.contains(&name.as_str()))
         .map(|(id, name, cpu)| {
             let name = anonymous_thread(&profiling::name(&name), owners);
-            (id, if name.is_empty() { "unnamed".to_owned() } else { name }, cpu)
+            (id, if name.is_empty() { SYSTEM_WORKERS.to_owned() } else { name }, cpu)
         })
         .collect()
 }

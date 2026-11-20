@@ -29,6 +29,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "JavaScript / TypeScript",
     description: "JavaScript, TypeScript and TSX: colors, folding, declarations, JSON in JSON.parse",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-code", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// `process.env.X`, `process.env['X']`, `import.meta.env.X` (Vite's): the variables the
@@ -93,6 +94,7 @@ impl Module for JavaScriptModule {
         );
         ctx.contribute(
             LanguageDescriptor::new("javascript", "JavaScript")
+                .icon_sample(1, "app.js")
                 .word_chars("$")
                 .quotes(&['"', '\'', '`'])
                 .extensions(&["js", "mjs", "cjs", "jsx"])

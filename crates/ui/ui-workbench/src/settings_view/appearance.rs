@@ -199,14 +199,7 @@ impl SettingsView {
             &i18n::t("settings.file_icons"),
             Some(&i18n::t("settings.file_icons_detail")),
         ) + px(16.0);
-        // A few files (name, our icon, its language) and folders.
-        const FILES: &[(&str, &str, &str)] = &[
-            ("index.php", "file-code", "php"),
-            ("app.js", "file-code", "javascript"),
-            ("style.css", "file-style", "css"),
-            ("package.json", "file-json", "json"),
-            ("README.md", "file-text", "markdown"),
-        ];
+        // A few folders, then the files the languages show there (name, icon, language).
         const FOLDERS: &[&str] = &["src", "tests"];
         let cols = GRID_COLUMNS;
         let gap = px(14.0);
@@ -245,10 +238,10 @@ impl SettingsView {
                     Some(id) => (id, palette.tint(&icons::Tint::Own)),
                     None => ours("folder", icons::Tint::Folder),
                 })
-                .chain(FILES.iter().map(|(name, icon, language)| {
+                .chain(model.icon_samples.iter().map(|(name, icon, language)| {
                     match choice.set.and_then(|s| icons.file_icon_in(s, name, language)) {
                         Some(id) => (id, palette.tint(&icons::Tint::Own)),
-                        None => ours(icon, icons::Tint::Language((*language).to_owned())),
+                        None => ours(icon, icons::Tint::Language(language.clone())),
                     }
                 }));
             let size = px(20.0);

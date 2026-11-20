@@ -618,3 +618,275 @@ fn a_session_without_a_fixed_tab_gets_it_back_behind_the_one_shown() {
 fn busy(view: &LogView) -> bool {
     ui_components::Viewer::is_loading(view)
 }
+
+/// Paints the log in a wide tab.
+fn paint_wide(view: &mut LogView) {
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, 1400.0, 600.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+}
+
+/// The point on the right edge of `lane` near its top where a press makes `held` true
+/// (an auto-hiding thumb shown first by a scroll of the view).
+fn thumb_in(view: &mut LogView, lane: Rect, held: fn(&LogView) -> bool) -> Option<Point> {
+    (0..20).find_map(|dy| {
+        (0..16).find_map(|dx| {
+            let at =
+                Point::new(lane.max_x() - 1.0 - dx as f32, lane.min_y() + 4.0 + dy as f32 * 4.0);
+            Viewer::press(view, at, 1);
+            if held(view) {
+                return Some(at);
+            }
+            view.release();
+            None
+        })
+    })
+}
+
+/// Many commits: the list's thumb pressed and dragged down scrolls it; the separator before
+/// the details pressed and dragged left widens them, kept in the project's sizes once let go.
+#[test]
+fn the_commits_thumb_and_a_separator_are_dragged() {
+    let log: Vec<_> = (0..200)
+        .map(|i| {
+            let parent = format!("c{}", i + 1);
+            let parents = [parent.as_str()];
+            entry(&format!("c{i}"), if i < 199 { &parents[..] } else { &[] })
+        })
+        .collect();
+    let mut view = view_with(log);
+    let sizes = workbench_model::LayoutSizes::new();
+    view.set_data(&sizes);
+    paint_wide(&mut view);
+    // A hidden bar shows once the list scrolls; back at the top after.
+    view.hover(Point::new(view.list.min_x() + 40.0, view.list.min_y() + 40.0));
+    assert!(view.scroll(0.0, 1.0));
+    paint_wide(&mut view);
+    assert!(view.scroll(0.0, -1.0));
+    paint_wide(&mut view);
+    let lane = view.list;
+    let at = thumb_in(&mut view, lane, |v| v.list_bar.is_dragging()).expect("the list's thumb");
+    assert!(view.drag(Point::new(at.x, at.y + 80.0)));
+    assert!(view.scroll > 0.0, "the commits scrolled");
+    assert!(view.release());
+    assert!(!view.list_bar.is_dragging());
+    // The separator between the list and the details, in its seam.
+    let seam = view.splitters[1].bounds();
+    let grab = Point::new(seam.min_x() + seam.size.width / 2.0, seam.min_y() + 200.0);
+    let before = view.details_w;
+    view.press(grab, 1);
+    assert!(view.splitters[1].is_dragging(), "the separator taken");
+    let to = Point::new(grab.x - 80.0, grab.y);
+    assert!(view.drag(to));
+    assert!(view.details_w > before, "{} > {before}", view.details_w);
+    // Dragged, it keeps its cursor wherever the pointer went.
+    assert_eq!(view.cursor_at(to), Some(ViewerCursor::ResizeHorizontal));
+    assert!(view.release());
+    assert_eq!(sizes.get(DETAILS_SIZE), Some(view.details_w.round()));
+}
+
+/// A commit with many files: the details' thumb pressed and dragged down scrolls them.
+#[test]
+fn the_details_thumb_is_dragged() {
+    let files: Vec<_> = (0..80)
+        .map(|i| version_control::FileChange {
+            path: format!("src/file{i}.php"),
+            old_path: None,
+            state: FileState::Modified,
+        })
+        .collect();
+    let message = (0..60).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n");
+    let repo: Arc<dyn Repository> = Arc::new(FakeRepository {
+        log: vec![entry("m", &[])],
+        details: vec![CommitDetails {
+            commit: commit("m", "a long one"),
+            email: String::new(),
+            message: format!("a long one\n\n{message}"),
+            parents: Vec::new(),
+            files,
+        }],
+        ..Default::default()
+    });
+    let mut view = LogView::default();
+    view.set_data(&LogData { repo, path: None, commit: None, queries: None, reference: None });
+    settle(&mut view);
+    assert!(view.edit_key(ViewerKey::Down));
+    settle(&mut view);
+    paint_wide(&mut view);
+    paint_wide(&mut view);
+    assert!(view.detail_scroll.overflows());
+    // A hidden bar shows once the details scroll; back at the top after.
+    let room = view.detail_room;
+    view.hover(Point::new(room.min_x() + 40.0, room.min_y() + 40.0));
+    assert!(view.scroll(0.0, 1.0));
+    paint_wide(&mut view);
+    assert!(view.scroll(0.0, -1.0));
+    paint_wide(&mut view);
+    let at = thumb_in(&mut view, room, |v| v.detail_bar.is_dragging()).expect("the thumb");
+    assert!(view.drag(Point::new(at.x, at.y + 60.0)));
+    assert!(view.detail_scroll.offset() > 0.0, "the details scrolled");
+    assert!(view.release());
+}
+
+/// A log whose first commit, selected, changed six files, painted: the files' place.
+fn view_with_files() -> (LogView, Rect) {
+    let files: Vec<_> = (0..6)
+        .map(|i| version_control::FileChange {
+            path: format!("src/file{i}.php"),
+            old_path: None,
+            state: FileState::Modified,
+        })
+        .collect();
+    let repo: Arc<dyn Repository> = Arc::new(FakeRepository {
+        log: vec![entry("m", &[]), entry("n", &[])],
+        details: vec![CommitDetails {
+            commit: commit("m", "one"),
+            email: String::new(),
+            message: "one".into(),
+            parents: Vec::new(),
+            files,
+        }],
+        ..Default::default()
+    });
+    let mut view = LogView::default();
+    view.set_data(&LogData { repo, path: None, commit: None, queries: None, reference: None });
+    settle(&mut view);
+    assert!(view.edit_key(ViewerKey::Down));
+    settle(&mut view);
+    paint_wide(&mut view);
+    paint_wide(&mut view);
+    let (files, _) = *view.hits.iter().find(|(_, h)| *h == Hit::Files).unwrap();
+    (view, files)
+}
+
+/// The first point down the files' place that is on a file's row.
+fn on_a_file(view: &mut LogView, files: Rect) -> Point {
+    let x = files.min_x() + 60.0;
+    let mut y = files.min_y();
+    while y < files.max_y() {
+        let p = Point::new(x, y);
+        if view.tree.file_at(p).is_some() {
+            return p;
+        }
+        y += 2.0;
+    }
+    panic!("no file's row in {files:?}");
+}
+
+/// The files' tree given the keys by a press on it.
+fn press_files(view: &mut LogView, files: Rect) {
+    let on = Point::new(files.min_x() + 60.0, files.max_y() - 10.0);
+    view.hover(on);
+    view.press(on, 1);
+    view.release();
+    assert!(view.files_focused(), "the tree has the keys");
+}
+
+/// The details' files through their controls: a press on the tree gives it the keys (Tab
+/// isn't its, ↓ walks its rows), a press on a commit's row takes them back to the commits.
+#[test]
+fn the_files_tree_takes_the_keys_when_pressed() {
+    let (mut view, files) = view_with_files();
+    press_files(&mut view, files);
+    assert!(!view.edit_key(ViewerKey::Tab), "Tab isn't the tree's");
+    assert!(view.edit_key(ViewerKey::Down));
+    assert!(view.files_focused());
+    let (row, _) = *view.hits.iter().find(|(_, h)| matches!(h, Hit::Row(_))).unwrap();
+    view.press(row.center(), 1);
+    assert!(!view.files_focused(), "a commit pressed: the commits have the keys");
+}
+
+/// The text field typed in, then a file's menu asked for: the tree gets the focus and the
+/// typing goes on (the text, the editing keys and every other key are the field's, the
+/// tree's selection stays); Esc leaves the field, the tree keeping the focus and its keys.
+#[test]
+fn a_file_s_menu_asked_for_while_typing_leaves_the_typing_on() {
+    let (mut view, files) = view_with_files();
+    let (field, _) = *view.hits.iter().find(|(_, h)| *h == Hit::TextField).unwrap();
+    view.press(field.center(), 1);
+    view.release();
+    assert_eq!(view.bar.focus, Some(filters::Field::Text));
+    assert!(view.text_input("ab"));
+    let on = on_a_file(&mut view, files);
+    assert!(view.context_menu(on).is_some(), "the file's menu");
+    assert!(view.files_focused(), "the tree has the focus");
+    assert!(view.wants_text());
+    let chosen = view.tree.selected_file();
+    assert!(view.text_input("c"));
+    assert_eq!(view.bar.text.text(), "abc", "typing in the bar while the tree is focused");
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.bar.text.text(), "ab");
+    assert!(view.edit_key(ViewerKey::Down), "kept by the field");
+    assert!(view.edit_key(ViewerKey::Tab), "kept by the field");
+    assert_eq!(view.tree.selected_file(), chosen, "the tree's rows stay");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("ab"), "the field's selection");
+    assert!(view.edit_key(ViewerKey::Escape));
+    assert_eq!(view.bar.focus, None, "Esc: the field left");
+    assert!(view.files_focused(), "the tree keeps the focus");
+    assert!(view.edit_key(ViewerKey::Down), "the tree's keys again");
+    assert_ne!(view.tree.selected_file(), chosen, "↓ walked its rows");
+    assert!(!view.text_input("d"), "the tree isn't searching: nothing takes the text");
+    assert_eq!(view.bar.text.text(), "ab");
+}
+
+/// A filter's list opened from its command while the tree has the focus: the list's search
+/// takes the keys and the text, the tree keeps the focus; Esc closes the list, the tree
+/// still focused.
+#[test]
+fn a_filter_s_list_opened_while_the_tree_is_focused() {
+    let (mut view, files) = view_with_files();
+    press_files(&mut view, files);
+    assert!(view.command("filter:branch"));
+    assert_eq!(view.bar.focus, Some(filters::Field::Query), "its search typed in");
+    assert!(view.files_focused());
+    assert!(view.text_input("ma"));
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.bar.popup.as_ref().unwrap().query.text(), "m");
+    assert!(view.edit_key(ViewerKey::Escape));
+    assert!(view.bar.popup.is_none(), "Esc: the list closes");
+    assert_eq!(view.bar.focus, None);
+    assert!(view.files_focused(), "the tree keeps the focus");
+}
+
+/// The files' search typed in, then a filter's list opened from its command: the text typed
+/// (and pasted) goes on to the files' search while the keys are the list's; the tree not
+/// focused any more, the text is the bar's field's again.
+#[test]
+fn the_text_goes_to_the_files_search_while_it_searches() {
+    let (mut view, files) = view_with_files();
+    press_files(&mut view, files);
+    view.tree.searching = true;
+    assert!(view.command("filter:branch"));
+    assert!(view.text_input("s"));
+    assert!(view.paste("t"));
+    assert_eq!(view.tree.query.text(), "st", "the files' search has the text");
+    let popup = view.bar.popup.as_mut().unwrap();
+    assert!(popup.query.text().is_empty());
+    popup.query.set_text("ma");
+    popup.query.end(false);
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.bar.popup.as_ref().unwrap().query.text(), "m", "the keys are the list's");
+    assert_eq!(view.tree.query.text(), "st");
+    assert!(view.edit_key(ViewerKey::Escape));
+    assert!(view.bar.popup.is_none());
+    assert!(view.files_focused() && view.tree.searching, "the tree keeps searching");
+    // The text field pressed into: the tree loses the focus, the text is the field's.
+    let (field, _) = *view.hits.iter().find(|(_, h)| *h == Hit::TextField).unwrap();
+    view.press(field.center(), 1);
+    view.release();
+    assert!(!view.files_focused());
+    assert!(view.text_input("x"));
+    assert_eq!(view.bar.text.text(), "x");
+    assert_eq!(view.tree.query.text(), "st");
+}

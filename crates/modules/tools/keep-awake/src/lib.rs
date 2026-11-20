@@ -38,6 +38,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Keep awake",
     description: "The computer doesn't go to sleep while it's on (work running in a terminal, transfers)",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "sun", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Turns it on or off.

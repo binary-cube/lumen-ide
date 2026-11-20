@@ -33,6 +33,7 @@ use database::profile::rules::Finding;
 use kernel::{Memo, Point, Rect, Rgba};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls, Divider, NOWHERE, Press, Thumb};
 use ui_components::ds::{self, Ctx, Tone, radius};
 use ui_components::{
     AppRequest, Level, Orientation, PressMods, ServiceId, Splitter, SplitterStyle, TablePaint, Tip,
@@ -212,7 +213,11 @@ pub struct ProfileView {
     notifications: Vec<Notification>,
     export: Option<Pending>,
     /// Where the mouse was last (the wheel goes to what's under it).
-    pointer: Option<Point>,
+    /// What a press on a side panel's list hit (taken by the view after it).
+    finding_pressed: Option<FindingHit>,
+    detail_pressed: Option<DetailHit>,
+    /// The wheel over a side panel moved its list.
+    panel_scrolled: bool,
     /// The tables' view: its table, what it was made of (the profile, the facts, the findings
     /// shown), what each row is.
     tables: TreeTable,
@@ -229,6 +234,10 @@ pub struct ProfileView {
     /// The body's view's room this frame (the tables' and the comparison's take the panel's
     /// too, when it's beside).
     body: Rect,
+    /// Its parts' state of use (see `with_controls`).
+    controls: Controls,
+    /// Where the held splitter's line goes (turned into the panel's width).
+    split_at: Option<f32>,
 }
 
 impl std::fmt::Debug for ProfileView {
@@ -293,7 +302,9 @@ impl ProfileView {
             action: None,
             notifications: Vec::new(),
             export: None,
-            pointer: None,
+            finding_pressed: None,
+            detail_pressed: None,
+            panel_scrolled: false,
             tables: TreeTable::new(Vec::new()),
             tables_built: TablesTable::default(),
             tables_made: None,
@@ -302,6 +313,8 @@ impl ProfileView {
             stats_asked: false,
             compare: None,
             body: Rect::default(),
+            controls: Controls::default(),
+            split_at: None,
         }
     }
 

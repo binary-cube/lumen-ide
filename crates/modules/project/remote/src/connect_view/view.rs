@@ -121,8 +121,7 @@ impl Viewer for ConnectView {
         if self.on_list && self.step != Step::Connection {
             return self.list_key(key);
         }
-        let field = self.focused;
-        let editing = self.fields().contains(&field);
+        let field = self.focused();
         // The path's suggestions (the local copy's, the server's): ↑ ↓ choose, Tab / ↵
         // complete, Esc closes them.
         if matches!(field, Field::Local | Field::Path) && !self.suggestions.is_empty() {
@@ -161,19 +160,11 @@ impl Viewer for ConnectView {
                 self.action = Some(ViewerAction::Close);
                 return true;
             }
-            ViewerKey::Backspace if editing => {
-                self.input_mut(field).backspace(false);
-                self.edited(field);
+            // The focused field's editing keys, when it's the step's.
+            _ => {
+                let reach = ui_components::KeyReach::default();
+                return self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
             }
-            ViewerKey::Delete if editing => {
-                self.input_mut(field).delete();
-                self.edited(field);
-            }
-            ViewerKey::Left if editing => self.input_mut(field).move_left(false, false),
-            ViewerKey::Right if editing => self.input_mut(field).move_right(false, false),
-            ViewerKey::Home if editing => self.input_mut(field).home(false),
-            ViewerKey::End if editing => self.input_mut(field).end(false),
-            _ => return false,
         }
         true
     }
@@ -190,12 +181,8 @@ impl Viewer for ConnectView {
             self.suggestions.clear();
             return true;
         }
-        if id == "select_all" && self.fields().contains(&self.focused) {
-            let field = self.focused;
-            self.input_mut(field).select_all();
-            return true;
-        }
-        false
+        // Select All in the focused field, when it's the step's.
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
     fn modal_icon(&self) -> Option<&'static str> {
@@ -243,25 +230,36 @@ impl Viewer for ConnectView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // An open list takes the click (outside it, it closes).
-        if self.picker.is_open() {
-            let event = self.picker.press(p);
-            self.picked(event);
-            return None;
-        }
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            return None;
-        }
-        match self.hit(p)? {
-            Hit::Field(field) => {
-                if field != self.focused {
+        // Its controls first: an open list takes the click (outside it, it closes; one
+        // click: its search selects no word; the keys stay in the field), the scrollbar's
+        // thumb is held or jumped to, a field takes the caret and the keys.
+        let before = self.focused();
+        let pressed = self.with_controls(|c, parts| {
+            let had = c.focused();
+            let pressed = c.press(parts, p, 1);
+            if pressed.is_some_and(|(part, _)| !Self::is_field(part)) {
+                c.focus(parts, had);
+            }
+            pressed
+        });
+        match pressed {
+            Some((part, _)) if Self::is_field(part) => {
+                if self.focused() != before {
                     self.suggestions.clear();
                 }
-                self.focused = field;
                 self.on_list = false;
-                self.input_mut(field).click(p.x);
+                return None;
             }
+            Some(_) => {
+                let event = self.picker.take_event();
+                self.picked(event);
+                return None;
+            }
+            None => {}
+        }
+        match self.hit(p)? {
+            // Taken by its control above.
+            Hit::Field(_) => {}
             Hit::Protocol(i) => self.select_protocol(i),
             Hit::Auth(kind) => self.auth = kind,
             Hit::SavedIn(at) => self.saved_in = at,
@@ -325,8 +323,9 @@ impl Viewer for ConnectView {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.picker.is_open() {
-            return Some(self.picker.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
+        // An open list's (a hand on its rows, the arrow elsewhere: never what's under it).
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
         }
         match self.hit(p)? {
             Hit::Field(_) => None,
@@ -335,21 +334,19 @@ impl Viewer for ConnectView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != self.scroll;
-        self.scroll = offset;
-        changed
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
+        // Its controls: an open list takes the mouse over everything.
+        let bar = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         if self.picker.is_open() {
-            return self.picker.hover(p);
+            return bar;
         }
-        let bar = self.bar.hover(p);
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
@@ -439,8 +436,8 @@ impl Viewer for ConnectView {
         let content = self.max_scroll + body.size.height;
         self.bar.paint(ctx.scene, p, ctx.scale, body, content, self.scroll.round());
         let completing = match self.step {
-            Step::Folder => self.focused == Field::Path,
-            Step::Contents => self.focused == Field::Local,
+            Step::Folder => self.focused() == Field::Path,
+            Step::Contents => self.focused() == Field::Local,
             Step::Connection => false,
         };
         if completing && !self.on_list {

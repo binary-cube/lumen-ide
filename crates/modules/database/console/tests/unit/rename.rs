@@ -163,3 +163,53 @@ fn the_rename_modal_draws_its_problem() {
     assert!(view.command("name:orders"));
     assert!(view.command("go"));
 }
+
+/// The name's field is the modal's control with the keys the whole time: typed, edited,
+/// pressed and dragged through the view's controls; a press on a button leaves it the keys.
+#[test]
+fn the_name_s_field_has_the_keys_through_its_controls() {
+    let mut view = RenameView::default();
+    view.set_data(&RenameRequest {
+        id: 1,
+        project: ProjectId::new(),
+        console: ConsoleId::new(),
+        name: "console".into(),
+        source_name: "shop".into(),
+        taken: Vec::new(),
+    });
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1000.0, HEIGHT * 2.0),
+        scale: 2.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    // Its name selected as it opens: the copy's (through the controls), typed over.
+    assert_eq!(view.selected_text().as_deref(), Some("console"));
+    assert!(view.text_input("orders"));
+    assert!(view.edit_key(ViewerKey::Backspace));
+    assert_eq!(view.input.text(), "order");
+    // Pressed and dragged back over it: selected, then cut.
+    let f = view.field;
+    let mid = f.min_y() + f.size.height / 2.0;
+    view.hover(Point::new(f.max_x() - 4.0, mid));
+    assert_eq!(view.cursor_at(Point::new(f.max_x() - 4.0, mid)), Some(ViewerCursor::Text));
+    assert_eq!(view.click(Point::new(f.max_x() - 4.0, mid)), None);
+    assert!(view.drag(Point::new(f.min_x(), mid)));
+    view.release();
+    assert!(view.command("cut"));
+    assert_eq!(view.input.text(), "");
+    // Cancel's place pressed off it: the field still types.
+    let cancel = view.hits.iter().find(|(_, h)| *h == Hit::Cancel).map(|(r, _)| *r).unwrap();
+    let off = Point::new(cancel.min_x() - 4.0, cancel.min_y() + 2.0);
+    view.click(off);
+    assert!(view.text_input("x"));
+    assert_eq!(view.input.text(), "x");
+}

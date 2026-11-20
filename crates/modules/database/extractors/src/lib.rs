@@ -37,6 +37,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Data extractors",
     description: "What a grid's rows become when copied or exported (SQL INSERTs and UPDATEs, a WHERE clause, CSV and the user's separated formats, JSON, Markdown, HTML, XML, an aligned table, Excel), the one chosen kept per project",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "table", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// The project's choice and the skips saved (a grid's popover runs it).

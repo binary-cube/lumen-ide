@@ -105,25 +105,34 @@ impl CodeSelection {
     }
 }
 
-impl CommitView {
-    /// A press at `p`: on the code it starts a selection (`true`); anywhere else it ends one.
-    pub(super) fn press_code(&mut self, p: Point, on_message: bool) -> bool {
-        let on_row = self.diff.as_ref().is_some_and(|diff| {
-            let row = self.code.place_at(p).map(|(row, _)| row);
+/// The changes' code as a form's control: over it the cursor is the text's; a press on a
+/// line of code starts a selection (held until let go), a drag reaches further.
+pub(super) struct CodeText<'a> {
+    pub(super) code: &'a mut CodeSelection,
+    pub(super) diff: Option<&'a FileDiff>,
+}
+
+impl Control for CodeText<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.code.is_over(p)
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> ui_components::control::Press {
+        use ui_components::control::Press;
+        let row = self.code.place_at(p).map(|(row, _)| row);
+        let on_row = self.diff.is_some_and(|diff| {
             row.is_some_and(|row| matches!(diff.rows.get(row), Some(DiffRow::Line(..))))
         });
         self.code.clear();
-        if on_message || !on_row || !self.code.is_over(p) {
-            return false;
+        if !on_row || !self.code.is_over(p) {
+            return Press::Ignored;
         }
-        let place = self.code.place_at(p);
-        self.code.range = place.map(|at| (at, at));
+        self.code.range = self.code.place_at(p).map(|at| (at, at));
         self.code.dragging = true;
-        true
+        Press::Held
     }
 
-    /// The mouse dragged: `true` if it's selecting code.
-    pub(super) fn drag_code(&mut self, p: Point) -> bool {
+    fn drag(&mut self, p: Point) -> bool {
         if !self.code.dragging {
             return false;
         }
@@ -133,6 +142,16 @@ impl CommitView {
         true
     }
 
+    fn release(&mut self) -> bool {
+        self.code.release()
+    }
+
+    fn cursor(&self, _p: Point) -> Option<ui_components::ViewerCursor> {
+        Some(ui_components::ViewerCursor::Text)
+    }
+}
+
+impl CommitView {
     /// The code selected, its line breaks included; hunk headers aren't code.
     pub(super) fn selected_code(&self) -> Option<String> {
         let (from, to) = self.code.ordered()?;

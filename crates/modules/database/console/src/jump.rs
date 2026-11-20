@@ -17,6 +17,9 @@ use database::console::{ConsoleId, JumpRequest};
 use i18n::t;
 use kernel::{FuzzyStyle, Point, ProjectId, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Thumb};
+
+use crate::field::KeyField;
 use ui_components::ds::{self, Ctx, Elevation, radius, space};
 use ui_components::{
     KeyReach, Tip, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind,
@@ -208,13 +211,15 @@ pub fn filter(query: &str, items: &[(&str, Option<&str>)]) -> Vec<Found> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hit {
     Esc,
-    Field,
     /// A row (0: "New Query Console"; then the matches).
     Row(usize),
     Rename(usize),
     Delete(usize),
     Inside,
 }
+
+/// The filter's place among the popover's parts.
+const FILTER: usize = 1;
 
 /// A row (logical pixels).
 pub const ROW_H: f32 = 56.0;
@@ -244,6 +249,8 @@ pub struct JumpView {
     /// The first row shown.
     first: usize,
     panel: Rect,
+    /// Where the filter was drawn last.
+    field: Rect,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     action: Option<ViewerAction>,
@@ -253,6 +260,8 @@ pub struct JumpView {
     bar: ui_components::EdgeScrollbar,
     /// A row's height, as last painted (physical pixels: the scrollbar's unit).
     unit: f32,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for JumpView {
@@ -400,6 +409,35 @@ impl JumpView {
         self.console_at(row).is_some_and(|id| self.finish(JumpPick::Delete(id)))
     }
 
+    /// Its parts (the list's scrollbar, the filter), the topmost first, with their state of
+    /// use. The thumb moves an offset in pixels; the list follows it to the nearest row. The
+    /// filter has the keys the whole time; what's found follows what it changed.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let before = self.unit * self.first as f32;
+        let mut offset = before;
+        let mut edited = false;
+        let mut list = Thumb { bar: &mut self.bar, offset: &mut offset };
+        let mut filter = KeyField {
+            input: &mut self.filter,
+            area: self.field,
+            selects: false,
+            edited: &mut edited,
+        };
+        let mut parts: [&mut dyn Control; 2] = [&mut list, &mut filter];
+        self.controls.focus(&mut parts, Some(FILTER));
+        let answer = f(&mut self.controls, &mut parts);
+        if offset != before {
+            self.scroll_to(offset);
+        }
+        if edited {
+            self.refilter();
+        }
+        answer
+    }
+
     fn hit(&self, p: Point) -> Option<Hit> {
         if !self.panel.contains(p) {
             return None;
@@ -466,6 +504,9 @@ impl Viewer for JumpView {
         self.found_for = None;
         self.selected = 0;
         self.refilter();
+        // The filter has the keys from now (its selection the copy's).
+        self.controls = Controls::sticky();
+        self.with_controls(|_, _| ());
     }
 
     fn closed(&self) -> bool {
@@ -477,9 +518,7 @@ impl Viewer for JumpView {
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.filter.insert(&typed);
-        self.refilter();
+        self.with_controls(|c, parts| c.text(parts, typed));
         true
     }
 
@@ -578,7 +617,7 @@ impl Viewer for JumpView {
             true,
             &t("console.jump_filter"),
         );
-        self.hits.push((field, Hit::Field));
+        self.field = field;
         // The rows shown.
         let list_top = field.max_y() + px(space::SM) + pad;
         let list = Rect::new(panel.min_x(), list_top, panel.size.width, shown as f32 * px(ROW_H));
@@ -738,28 +777,15 @@ impl Viewer for JumpView {
         ds::footer(layer, text, &ds, foot, hints);
     }
 
-    /// A press on the list's scrollbar takes its thumb (a drag follows); elsewhere a click.
-    fn press(&mut self, p: Point, _clicks: u32) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll_to(offset);
+    /// A press on the list's scrollbar takes its thumb (a drag follows), on the filter puts
+    /// its caret; elsewhere a row's or the popover's own.
+    fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
+        if self.with_controls(|c, parts| c.press(parts, p, clicks)).is_some() {
             return None;
         }
-        self.click(p)
-    }
-
-    fn drag(&mut self, p: Point) -> bool {
-        self.bar.drag(p).is_some_and(|offset| self.scroll_to(offset))
-    }
-
-    fn release(&mut self) -> bool {
-        self.bar.release()
-    }
-
-    fn click(&mut self, p: Point) -> Option<ViewerAction> {
         match self.hit(p) {
             // Outside it (a popover: nothing is lost) or on `esc`: it closes.
             None | Some(Hit::Esc) => return Some(ViewerAction::Close),
-            Some(Hit::Field) => self.filter.click(p.x),
             Some(Hit::Row(row)) => {
                 self.choose(row);
             }
@@ -772,6 +798,20 @@ impl Viewer for JumpView {
             Some(Hit::Inside) => {}
         }
         self.action.take()
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        let first = self.first;
+        self.with_controls(|c, parts| c.drag(parts, p));
+        self.first != first
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
+    }
+
+    fn click(&mut self, p: Point) -> Option<ViewerAction> {
+        self.press(p, 1)
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
@@ -792,14 +832,17 @@ impl Viewer for JumpView {
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
-        let changed = hover != self.hover || self.bar.hover(p);
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        let changed = hover != self.hover || parts;
         self.hover = hover;
         changed
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
+        }
         match self.hit(p)? {
-            Hit::Field => Some(ViewerCursor::Text),
             Hit::Inside => None,
             _ => Some(ViewerCursor::Pointer),
         }
@@ -839,26 +882,17 @@ impl Viewer for JumpView {
             ViewerKey::Down => self.step(1),
             ViewerKey::PageUp => self.step(-(VISIBLE as isize)),
             ViewerKey::PageDown => self.step(VISIBLE as isize),
-            ViewerKey::Left => self.filter.move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.filter.move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.filter.home(reach.extend),
-            ViewerKey::End => self.filter.end(reach.extend),
-            ViewerKey::Backspace => {
-                self.filter.backspace(reach.word);
-                self.refilter();
-            }
-            ViewerKey::Delete => {
-                self.filter.delete();
-                self.refilter();
-            }
             ViewerKey::Tab => self.step(if reach.extend { -1 } else { 1 }),
+            // The filter's editing keys.
+            key => {
+                self.with_controls(|c, parts| c.key(parts, key, reach));
+            }
         }
         true
     }
 
     fn selected_text(&self) -> Option<String> {
-        let selected = self.filter.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| (i == FILTER).then_some(&self.filter as &dyn Control))
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -867,33 +901,12 @@ impl Viewer for JumpView {
             "open" => self.choose(row),
             "rename" => self.rename(row),
             "delete" => self.delete(row),
-            "select_all" => {
-                self.filter.select_all();
-                true
-            }
-            "undo" => {
-                let done = self.filter.undo();
-                self.refilter();
-                done
-            }
-            "redo" => {
-                let done = self.filter.redo();
-                self.refilter();
-                done
-            }
-            "cut" => {
-                let had = !self.filter.selected_text().is_empty();
-                if had {
-                    self.filter.insert("");
-                    self.refilter();
-                }
-                had
-            }
             id if id.starts_with("filter:") => {
                 self.set_filter(&id["filter:".len()..]);
                 true
             }
-            _ => false,
+            // The filter's edit commands (⌘A, ⌘Z, ⇧⌘Z, ⌘X).
+            id => self.with_controls(|c, parts| c.command(parts, id)).is_some(),
         }
     }
 

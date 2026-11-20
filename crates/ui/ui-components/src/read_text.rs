@@ -517,6 +517,70 @@ fn wrap(text: &mut TextSystem, value: &str, font: &Font, width: f32) -> Vec<Rang
     rows
 }
 
+/// A text to read as a form's control: pressed, a selection is made (held until let go);
+/// with the focus, it copies and selects all; its right-click menu is its own.
+impl crate::control::Control for ReadText {
+    fn hit(&self, p: Point) -> bool {
+        self.contains(p)
+    }
+
+    fn press_with(
+        &mut self,
+        p: Point,
+        clicks: u32,
+        mods: crate::PressMods,
+    ) -> crate::control::Press {
+        if ReadText::press(self, p, clicks, mods.shift) {
+            crate::control::Press::Held
+        } else {
+            crate::control::Press::Ignored
+        }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        ReadText::drag(self, p)
+    }
+
+    fn release(&mut self) -> bool {
+        ReadText::release(self)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        ReadText::hover(self, p.unwrap_or(Point::new(f32::MIN, f32::MIN)))
+    }
+
+    fn cursor(&self, p: Point) -> Option<crate::ViewerCursor> {
+        self.over_text(p).then_some(crate::ViewerCursor::Text)
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        self.scroll_by(dy)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        ReadText::selected_text(self)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        match id {
+            "select_all" => self.select_all(),
+            _ => false,
+        }
+    }
+
+    fn menu(&mut self, _p: Point) -> Option<Vec<crate::ViewMenuEntry>> {
+        Some(ReadText::menu(self))
+    }
+
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        self.next_frame()
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/read_text.rs"]
 mod tests;

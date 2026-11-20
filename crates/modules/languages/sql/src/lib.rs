@@ -28,6 +28,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "SQL",
     description: "SQL: colors, folding, keywords and functions per dialect, formatting",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "database", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

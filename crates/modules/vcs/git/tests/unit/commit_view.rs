@@ -66,6 +66,72 @@ fn the_files_scrollbar_shows_while_scrolled() {
     assert_eq!(view.bars[STAGED].opacity_at(later), 0.0);
 }
 
+/// The files' scrollbar shown: its thumb pressed and dragged down scrolls the list, and a
+/// divider pressed and dragged moves it, both through the view's own press, drag, release.
+#[test]
+fn the_files_thumb_and_a_divider_are_dragged() {
+    let files = (0..60)
+        .map(|i| StagedFile {
+            path: format!("f{i}.php"),
+            staged: Some(FileState::Modified),
+            unstaged: None,
+        })
+        .collect();
+    let mut view = CommitView { files, ..CommitView::default() };
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut paint = |view: &mut CommitView| {
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 900.0, 600.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut render_api::Scene::default(),
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut view);
+    // A hidden bar shows once the list scrolls; back at the top after.
+    let pane = view.panes[STAGED];
+    view.pointer = pane.origin;
+    assert!(view.scroll(0.0, 1.0));
+    paint(&mut view);
+    assert!(view.scroll(0.0, -1.0));
+    paint(&mut view);
+    let held = (0..20).find_map(|dy| {
+        (0..16).find_map(|dx| {
+            let at =
+                Point::new(pane.max_x() - 1.0 - dx as f32, pane.min_y() + 4.0 + dy as f32 * 4.0);
+            view.press(at, 1);
+            if view.bars[STAGED].is_dragging() {
+                return Some(at);
+            }
+            view.release();
+            None
+        })
+    });
+    let at = held.expect("the thumb found");
+    assert!(view.drag(Point::new(at.x, at.y + 80.0)));
+    assert!(view.scrolls[STAGED] > 0.0, "the files scrolled");
+    assert!(view.release());
+    assert!(!view.bars[STAGED].is_dragging());
+    // The divider between the lists and the changes: dragged to the right.
+    let before = view.panes[DIFF].min_x();
+    let y = pane.min_y() + pane.size.height / 2.0;
+    let grip = (0..60)
+        .map(|dx| Point::new(pane.max_x() + dx as f32, y))
+        .find(|p| view.dividers.0[0].cursor(*p).is_some())
+        .expect("the divider beside the lists");
+    view.press(grip, 1);
+    assert!(view.drag(Point::new(grip.x + 60.0, y)));
+    assert!(view.release(), "it was dragged");
+    paint(&mut view);
+    assert!(view.panes[DIFF].min_x() > before, "the changes start further right");
+}
+
 /// The draft stays with the repository: another commit view finds it, until it's committed.
 #[test]
 fn the_draft_is_kept_until_committed() {
@@ -370,7 +436,7 @@ fn a_press_in_the_git_window_keeps_its_modifiers() {
 #[test]
 fn shift_and_the_arrows_choose_a_run_from_the_keyboard() {
     let mut view = three_files();
-    view.keys = Keys::Lists;
+    view.set_keys(Keys::Lists);
     let extend = ui_components::KeyReach { extend: true, ..Default::default() };
     view.edit_key_with(ViewerKey::Down, extend);
     view.edit_key_with(ViewerKey::Down, extend);
@@ -392,7 +458,7 @@ fn shift_and_the_arrows_choose_a_run_from_the_keyboard() {
 #[test]
 fn the_list_s_ends_and_a_file_taken_out_keep_the_run_right() {
     let mut view = three_files();
-    view.keys = Keys::Lists;
+    view.set_keys(Keys::Lists);
     view.diff_rx = None;
     let extend = ui_components::KeyReach { extend: true, ..Default::default() };
     view.edit_key_with(ViewerKey::Up, extend);
@@ -522,7 +588,7 @@ fn the_lists_are_gone_through_with_the_keyboard() {
     view.hits = vec![(Rect::new(0.0, 0.0, 100.0, 20.0), Hit::Row(i, true))];
     view.click(Point::new(5.0, 5.0));
     settle(&mut view);
-    assert_eq!(view.keys, Keys::Lists);
+    assert_eq!(view.keys(), Keys::Lists);
     let rows = view.rows().len();
     view.edit_key(ViewerKey::End);
     assert_eq!(view.shown_row(), view.rows().last().copied());
@@ -535,11 +601,11 @@ fn the_lists_are_gone_through_with_the_keyboard() {
     settle(&mut view);
     assert!(repo.staged.lock().unwrap().is_empty(), "Space unstaged it");
     view.edit_key(ViewerKey::Tab);
-    assert_eq!(view.keys, Keys::Message);
+    assert_eq!(view.keys(), Keys::Message);
     view.edit_key(ViewerKey::Tab);
-    assert_eq!(view.keys, Keys::Lists);
+    assert_eq!(view.keys(), Keys::Lists);
     view.text_input("F");
-    assert!(view.keys == Keys::Message && view.message.text() == "F");
+    assert!(view.keys() == Keys::Message && view.message.text() == "F");
     drafts().remove(repo.root());
 }
 
@@ -592,7 +658,7 @@ fn the_places_filter_takes_the_keyboard_while_it_s_clicked() {
     view.hits = vec![(field, Hit::PlacesFilter), (Rect::new(0.0, 40.0, 100.0, 20.0), Hit::Refresh)];
     view.places_scroll = 50.0;
     view.click(Point::new(5.0, 5.0));
-    assert_eq!(view.keys, Keys::Places);
+    assert_eq!(view.keys(), Keys::Places);
     view.text_input("vend");
     let shown: Vec<_> = view.place_rows.iter().map(|r| r.place.clone()).collect();
     assert_eq!(shown.last(), Some(&places::Place::Submodule("vendor/y".into())));
@@ -605,12 +671,12 @@ fn the_places_filter_takes_the_keyboard_while_it_s_clicked() {
     assert!(view.command("select_all"));
     assert_eq!(view.selected_text().as_deref(), Some("ven"));
     view.edit_key(ViewerKey::Escape);
-    assert!(view.places_filter.text().is_empty() && view.keys == Keys::Places);
+    assert!(view.places_filter.text().is_empty() && view.keys() == Keys::Places);
     view.edit_key(ViewerKey::Escape);
-    assert_eq!(view.keys, Keys::Message);
+    assert_eq!(view.keys(), Keys::Message);
     view.click(Point::new(5.0, 5.0));
     view.click(Point::new(5.0, 45.0));
-    assert_eq!(view.keys, Keys::Message, "a click elsewhere takes it away");
+    assert_eq!(view.keys(), Keys::Message, "a click elsewhere takes it away");
 }
 
 /// A message pasted comes whole: its summary, the blank line, its details (the app gives a
@@ -627,9 +693,9 @@ fn a_pasted_message_keeps_its_lines() {
     let message = "feat: a summary\n\n  - one detail\n  - another";
     assert!(view.paste(message));
     assert_eq!(view.message.text(), message);
-    view.keys = Keys::Places;
+    view.set_keys(Keys::Places);
     assert!(!view.field_takes_lines());
-    view.keys = Keys::Lists;
+    view.set_keys(Keys::Lists);
     assert!(!view.field_takes_lines());
     drafts().remove(repo.root());
 }
@@ -683,4 +749,42 @@ fn a_place_s_branch_has_the_log_s_menu() {
     );
     assert!(view.command(&format!("branch.rename:{i}")));
     assert!(matches!(view.take_action(), Some(ViewerAction::WithHost(_))));
+}
+
+/// The keyboard's lanes are its parts' focus: the lists have it, a press in the message
+/// gives it to the message (its text typed there, kept), a ⇧ press there selects nothing
+/// more than a press (⇧ chooses files), the wheel over it scrolls its own lines only.
+#[test]
+fn a_press_in_the_message_gives_it_the_keys_back() {
+    let mut view = three_files();
+    view.set_keys(Keys::Lists);
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 900.0, 600.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let (field, _) = *view.hits.iter().find(|(_, h)| *h == Hit::Message).unwrap();
+    let inside = Point::new(field.min_x() + 10.0, field.min_y() + 10.0);
+    let shift = ui_components::PressMods { shift: true, ..Default::default() };
+    view.press_with(inside, 1, shift);
+    view.release();
+    assert_eq!(view.keys(), Keys::Message);
+    assert_eq!(chosen(&view), ["a"], "the press chose no files");
+    assert!(view.text_input("x"));
+    assert_eq!(view.message.text(), "x");
+    assert!(view.edit_key(ViewerKey::Tab), "Tab: to the lists");
+    assert_eq!(view.keys(), Keys::Lists);
+    view.hover(inside);
+    view.pointer = inside;
+    let scrolls = view.scrolls;
+    view.scroll(0.0, 40.0);
+    assert_eq!(view.scrolls, scrolls, "the panes stay: the wheel was the message's");
 }

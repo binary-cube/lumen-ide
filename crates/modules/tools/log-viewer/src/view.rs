@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use i18n::{t, tr};
 use kernel::{Point, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, NOWHERE};
 use ui_components::data_grid::{DataGrid, GridPaint};
 use ui_components::ds::{self, Ctx};
 use ui_components::tool_panel::KeyReach;
@@ -19,8 +20,15 @@ use ui_kit::draw_text;
 
 use crate::source::LogSource;
 
+mod parts;
+
 /// The bar's height (logical pixels).
 const BAR_H: f32 = 44.0;
+/// Its parts' places (see [`LogFileView::with_controls`]): the bar's buttons, the details.
+const BUTTONS: usize = 0;
+const DETAILS: usize = 1;
+/// The grid, under the others: it has the keys.
+const GRID: usize = 2;
 /// The details' header (logical pixels), and their share of the height under the bar.
 const DETAILS_HEAD: f32 = 34.0;
 const DETAILS_SHARE: f32 = 0.4;
@@ -50,8 +58,10 @@ pub struct LogFileView {
     details_area: Rect,
     details_close: Rect,
     close_hover: bool,
-    /// The mouse is over the details (the wheel scrolls them).
-    hover_in_details: bool,
+    /// Where the mouse was last (the wheel goes to the part there).
+    mouse: Option<Point>,
+    /// Its parts' state of use (see [`LogFileView::with_controls`]).
+    controls: Controls,
     /// The details' line as written (what "Copy the Line" copies).
     details_raw: String,
 }
@@ -60,6 +70,16 @@ pub struct LogFileView {
 /// line as written.
 const COPY_MESSAGE: &str = "log.copy_message";
 const COPY_LINE: &str = "log.copy_line";
+
+/// The details' menu after the text's own: the message, the line as written.
+fn details_menu() -> Vec<ui_components::ViewMenuEntry> {
+    use ui_components::ViewMenuEntry;
+    vec![
+        ViewMenuEntry::Separator,
+        ViewMenuEntry::item(COPY_MESSAGE, t("log_viewer.copy_message")),
+        ViewMenuEntry::item(COPY_LINE, t("log_viewer.copy_line")),
+    ]
+}
 
 impl std::fmt::Debug for LogFileView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -82,9 +102,29 @@ impl LogFileView {
             details_area: Rect::default(),
             details_close: Rect::default(),
             close_hover: false,
-            hover_in_details: false,
+            mouse: None,
+            controls: Controls::default(),
             details_raw: String::new(),
         }
+    }
+
+    /// Its parts (the bar's buttons, the details while shown, the grid under them), the
+    /// topmost first, with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut buttons = parts::BarButtons { buttons: &self.buttons, hover: &mut self.hover };
+        let mut details = parts::DetailsPart {
+            read: self.details.as_mut().map(|(_, r)| r),
+            area: self.details_area,
+            close: self.details_close,
+            close_hover: &mut self.close_hover,
+            extra: details_menu,
+        };
+        let mut grid = parts::GridPart { grid: self.grid.as_mut(), area: self.grid_area };
+        let mut parts: [&mut dyn Control; 3] = [&mut buttons, &mut details, &mut grid];
+        f(&mut self.controls, &mut parts)
     }
 
     /// The row chosen in the grid (the source's), if any.
@@ -127,10 +167,6 @@ impl LogFileView {
         if let Some((row, _)) = self.details.take() {
             self.details_closed = Some(row);
         }
-    }
-
-    fn in_details(&self, p: Point) -> bool {
-        self.details.is_some() && self.details_area.contains(p)
     }
 
     /// The details' panel under the grid: a line, "Details" and ×, their text.
@@ -291,7 +327,11 @@ impl Viewer for LogFileView {
             let wake: std::sync::Arc<dyn Fn() + Send + Sync> =
                 ctx.waker.clone().unwrap_or_else(|| std::sync::Arc::new(|| {}));
             match LogSource::open(self.path.clone(), wake) {
-                Some(source) => self.grid = Some(DataGrid::new(source, None)),
+                Some(source) => {
+                    self.grid = Some(DataGrid::new(source, None));
+                    // The grid has the keys from the start.
+                    self.with_controls(|c, parts| c.focus(parts, Some(GRID)));
+                }
                 None => self.failed = true,
             }
         }
@@ -343,23 +383,24 @@ impl Viewer for LogFileView {
         self.is_loading()
     }
 
+    /// A press to the part there: a bar's button does what it does, × closes the details,
+    /// the details' text and the grid take their own.
     fn pointer_down(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
-        if let Some(button) = self.button_at(p) {
-            self.press_button(button);
-            return self.action.take();
-        }
-        if self.in_details(p) {
-            if self.details_close.contains(p) {
-                self.close_details();
-            } else if let Some((_, read)) = &mut self.details {
-                read.press(p, clicks, mods.shift);
+        let pressed = self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods));
+        match pressed.map(|(part, _)| part) {
+            Some(BUTTONS) => {
+                if let Some(button) = self.button_at(p) {
+                    self.press_button(button);
+                }
+                return self.action.take();
             }
-            return self.action.take();
-        }
-        if let Some(grid) = &mut self.grid
-            && self.grid_area.contains(p)
-        {
-            grid.press(p, clicks, mods);
+            Some(DETAILS) => {
+                if self.details_close.contains(p) {
+                    self.close_details();
+                }
+                return self.action.take();
+            }
+            _ => {}
         }
         self.sync_details();
         self.action.take()
@@ -369,61 +410,47 @@ impl Viewer for LogFileView {
         self.pointer_down(p, 1, PressMods::default())
     }
 
+    /// The held part (a selection in the details or the grid, a column, a thumb) follows.
     fn drag(&mut self, p: Point) -> bool {
-        let text = self.details.as_mut().is_some_and(|(_, r)| r.drag(p));
-        text | self.grid.as_mut().is_some_and(|g| g.drag(p))
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, changed)| changed)
     }
 
     fn release(&mut self) -> bool {
-        let text = self.details.as_mut().is_some_and(|(_, r)| r.release());
-        text | self.grid.as_mut().is_some_and(DataGrid::release)
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let hover = self.button_at(p);
-        let close = self.in_details(p) && self.details_close.contains(p);
-        let changed = hover != self.hover || close != self.close_hover;
-        self.hover = hover;
-        self.close_hover = close;
-        self.hover_in_details = self.in_details(p);
-        let text = self.details.as_mut().is_some_and(|(_, r)| r.hover(p));
-        changed | text | self.grid.as_mut().is_some_and(|g| g.hover(p))
+        self.mouse = Some(p);
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.button_at(p).is_some() || (self.in_details(p) && self.details_close.contains(p)) {
-            return Some(ViewerCursor::Pointer);
-        }
-        if self.in_details(p) {
-            let over = self.details.as_ref().is_some_and(|(_, r)| r.over_text(p));
-            return Some(if over { ViewerCursor::Text } else { ViewerCursor::Arrow });
-        }
-        self.grid.as_ref()?.cursor_at(p)
+        self.controls.cursor_at(p)
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
-        self.grid.as_ref()?.tooltip_at(p)
+        self.controls.tooltip_at(p)
     }
 
+    /// The wheel to the topmost part under the mouse that scrolls (the details over the grid).
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
-        if self.hover_in_details
-            && let Some((_, read)) = &mut self.details
-        {
-            return read.scroll_by(dy);
-        }
-        self.grid.as_mut().is_some_and(|g| g.scroll(dx, dy))
+        // The mouse not over it yet: the grid's (it's under every part, everywhere).
+        let at = self.mouse.unwrap_or(NOWHERE);
+        self.with_controls(|c, parts| c.scroll(parts, at, dx, dy)).is_some()
     }
 
+    /// The part with the keys takes the typing: the grid, while a field of it is open.
     fn wants_text(&self) -> bool {
-        self.grid.as_ref().is_some_and(DataGrid::wants_text)
+        self.controls.focused() == Some(GRID)
+            && self.grid.as_ref().is_some_and(DataGrid::wants_text)
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        self.grid.as_mut().is_some_and(|g| g.text_input(typed))
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn key(&mut self, c: char) -> bool {
-        self.grid.as_mut().is_some_and(|g| g.type_char(c))
+        self.with_controls(|controls, parts| controls.char_key(parts, c)).is_some()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -431,7 +458,7 @@ impl Viewer for LogFileView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let used = self.grid.as_mut().is_some_and(|g| g.edit_key(key, reach));
+        let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
         // Esc the grid didn't take: the details close.
         if !used && key == ViewerKey::Escape && self.details.is_some() {
             self.close_details();
@@ -445,25 +472,22 @@ impl Viewer for LogFileView {
         self.grid.as_mut().is_some_and(DataGrid::select_all)
     }
 
-    /// The details' text selected first (what was chosen last), else the grid's cells.
+    /// The details' text selected first (what was chosen last: they never take the focus),
+    /// else what the part with the keys has selected (the grid's cells).
     fn selected_text(&self) -> Option<String> {
         if let Some(text) = self.details.as_ref().and_then(|(_, r)| r.selected_text()) {
             return Some(text);
         }
-        self.grid.as_ref()?.selected_text()
+        self.controls.selected_text_with(|part| match part {
+            GRID => self.grid.as_ref().map(|g| g as &dyn Control),
+            _ => None,
+        })
     }
 
+    /// The menu of the part there: the details' (the text's own, then the line's), or the
+    /// grid's.
     fn context_menu(&mut self, p: Point) -> Option<Vec<ui_components::ViewMenuEntry>> {
-        use ui_components::ViewMenuEntry;
-        if self.in_details(p) {
-            // The text's own menu (Copy, Copy All), then the line's.
-            let mut menu = self.details.as_ref().map(|(_, r)| r.menu()).unwrap_or_default();
-            menu.push(ViewMenuEntry::Separator);
-            menu.push(ViewMenuEntry::item(COPY_MESSAGE, t("log_viewer.copy_message")));
-            menu.push(ViewMenuEntry::item(COPY_LINE, t("log_viewer.copy_line")));
-            return Some(menu);
-        }
-        self.grid.as_mut()?.context_menu(p)
+        self.with_controls(|c, parts| c.menu(parts, p)).map(|(_, menu)| menu)
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -483,7 +507,7 @@ impl Viewer for LogFileView {
             self.action = Some(ViewerAction::Request(ui_components::AppRequest::CopyText(text)));
             return true;
         }
-        let used = self.grid.as_mut().is_some_and(|g| g.command(id));
+        let used = self.with_controls(|c, parts| c.command(parts, id)).is_some();
         // A row chosen by a command (select, find): its details follow.
         self.sync_details();
         used

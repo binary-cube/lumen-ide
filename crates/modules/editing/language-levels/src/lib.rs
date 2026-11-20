@@ -17,6 +17,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Language versions",
     description: "The version picker in the status bar: for the project or only for the file",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "layers", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

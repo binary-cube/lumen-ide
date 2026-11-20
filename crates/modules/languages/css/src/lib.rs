@@ -20,6 +20,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "CSS",
     description: "CSS: colors, folding on rules and comments",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "file-style", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -50,6 +51,7 @@ impl Module for CssModule {
     fn activate(&self, ctx: &mut ModuleContext<'_>) -> Result<(), ModuleError> {
         ctx.contribute(
             LanguageDescriptor::new("css", "CSS")
+                .icon_sample(2, "style.css")
                 .word_chars("-")
                 .extensions(&["css"])
                 .block_comment("/*", "*/")

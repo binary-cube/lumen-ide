@@ -16,6 +16,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Lua",
     description: "Lua: colors, folding, indentation, lua-language-server as its language server",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "moon", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

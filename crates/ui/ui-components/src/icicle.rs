@@ -210,6 +210,8 @@ pub struct Icicle {
     row_h: f32,
     scroll: f32,
     crumbs: Vec<(Rect, Hit)>,
+    /// What it did last as a control (a press), taken by its view.
+    event: Option<IcicleEvent>,
 }
 
 impl Icicle {
@@ -803,6 +805,53 @@ fn cut(r: Rect, clip: Option<Rect>) -> Rect {
 impl std::fmt::Debug for IciclePaint<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IciclePaint").field("bounds", &self.bounds).finish_non_exhaustive()
+    }
+}
+
+impl Icicle {
+    /// What it did last as a control ([`crate::control::Control`]): a node chosen, a zoom.
+    pub fn take_event(&mut self) -> Option<IcicleEvent> {
+        self.event.take()
+    }
+}
+
+/// A flame graph as a form's control: a press chooses a bar (or a crumb, back), the wheel
+/// goes down its levels, with the focus the keys walk it; its tooltip says a bar's time.
+impl crate::control::Control for Icicle {
+    fn area(&self) -> Option<Rect> {
+        Some(self.bounds).filter(|b| b.size.width > 0.0)
+    }
+
+    fn press(&mut self, p: Point, _clicks: u32) -> crate::control::Press {
+        self.event = Icicle::press(self, p);
+        crate::control::Press::Took
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        match p {
+            Some(p) => Icicle::hover(self, p),
+            None => self.leave(),
+        }
+    }
+
+    fn cursor(&self, p: Point) -> Option<crate::ViewerCursor> {
+        self.node_at(p).map(|_| crate::ViewerCursor::Pointer)
+    }
+
+    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        Icicle::scroll(self, dy)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, _reach: crate::tool_panel::KeyReach) -> bool {
+        Icicle::key(self, key)
+    }
+
+    fn tooltip(&self, p: Point) -> Option<Tip> {
+        self.tooltip_at(p)
     }
 }
 

@@ -32,6 +32,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Code quality",
     description: "Formats and checks code with the project's tools, on demand and on save",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "alert", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 pub const FORMAT_FILE: CommandId = workbench_model::REFORMAT_FILE;

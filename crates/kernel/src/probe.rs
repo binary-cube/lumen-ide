@@ -249,6 +249,21 @@ pub struct Timer {
     here: std::marker::PhantomData<*const ()>,
 }
 
+impl Timer {
+    /// Names what it timed once it's known (a phase named when it ends).
+    pub fn set_what(&mut self, what: &'static str) {
+        if self.started.is_none() {
+            return;
+        }
+        self.what = what;
+        OPEN.with(|open| {
+            if let Some(me) = open.borrow_mut().get_mut(self.depth) {
+                me.1 = what;
+            }
+        });
+    }
+}
+
 impl Drop for Timer {
     fn drop(&mut self) {
         let Some(started) = self.started else { return };

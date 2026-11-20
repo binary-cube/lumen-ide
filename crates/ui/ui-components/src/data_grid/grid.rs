@@ -925,3 +925,85 @@ fn filter_value_label(value: &super::source::CellValue) -> Option<String> {
 pub(super) fn horizontal_bar(palette: &Palette) -> Scrollbar {
     Scrollbar::new(ScrollbarStyle::from_palette(palette), Orientation::Horizontal)
 }
+
+/// A data grid as a form's control: a press on a cell, a header, a column's edge or a tool
+/// (⇧ / ⌘ extend the choice), held while a selection, a column or its scrollbars are dragged;
+/// with the focus its keys, its cell's editing and its commands. What a press decided is
+/// taken from it by its view ([`DataGrid::take_action`]).
+impl<S: GridSource> crate::control::Control for DataGrid<S> {
+    fn area(&self) -> Option<Rect> {
+        Some(self.geometry.bounds).filter(|b| b.size.width > 0.0)
+    }
+
+    fn press_with(
+        &mut self,
+        p: Point,
+        clicks: u32,
+        mods: crate::PressMods,
+    ) -> crate::control::Press {
+        DataGrid::press(self, p, clicks, mods);
+        crate::control::Press::Held
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        DataGrid::drag(self, p)
+    }
+
+    fn release(&mut self) -> bool {
+        DataGrid::release(self)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        DataGrid::hover(self, p.unwrap_or(crate::control::NOWHERE))
+    }
+
+    fn cursor(&self, p: Point) -> Option<crate::ViewerCursor> {
+        self.cursor_at(p)
+    }
+
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        DataGrid::scroll(self, dx, dy)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    /// Tab moves between its cells.
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: crate::ViewerKey, reach: crate::KeyReach) -> bool {
+        self.edit_key(key, reach)
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.text_input(typed)
+    }
+
+    /// A character over the selected cell with no field open: its editor starts with it.
+    fn char_key(&mut self, key: char) -> bool {
+        self.type_char(key)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        DataGrid::selected_text(self)
+    }
+
+    /// Its commands, and ⌘A: all its cells chosen.
+    fn command(&mut self, id: &str) -> bool {
+        match id {
+            "select_all" => self.select_all(),
+            _ => DataGrid::command(self, id),
+        }
+    }
+
+    fn tooltip(&self, p: Point) -> Option<crate::tooltip::Tip> {
+        self.tooltip_at(p)
+    }
+
+    fn menu(&mut self, p: Point) -> Option<Vec<crate::ViewMenuEntry>> {
+        self.context_menu(p)
+    }
+}

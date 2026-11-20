@@ -145,6 +145,10 @@ fn the_keyboard_order_is_the_drawing_order() {
     let drawn_bottom_up = [
         // The resources pinned in the editor's corner: under everything.
         Overlay::ResourcePills,
+        // The parameters' hint, under the completion list (both by the caret).
+        Overlay::ParamHint,
+        // The completion list: floating, under the windows that could open over it.
+        Overlay::Completion,
         Overlay::ProjectsMenu,
         Overlay::Settings,
         Overlay::About,
@@ -162,6 +166,8 @@ fn the_keyboard_order_is_the_drawing_order() {
         Overlay::Toasts,
         // Files dragged from the file manager: over everything, the notifications too.
         Overlay::FileDrop,
+        // The code's hover card: over everything (a click or the wheel on it stays there).
+        Overlay::CodeHover,
     ];
     let mut top_down = drawn_bottom_up;
     top_down.reverse();
@@ -220,6 +226,9 @@ fn the_kinds_are_modals_and_popovers() {
                 | Overlay::StatusPopover
                 | Overlay::ResourcePills
                 | Overlay::FileDrop
+                | Overlay::CodeHover
+                | Overlay::Completion
+                | Overlay::ParamHint
         );
         assert_eq!(kind, if popover { Popover } else { Modal }, "{o:?}");
     }
@@ -371,7 +380,7 @@ fn a_dialog_s_list_follows_its_thumb() {
     let moved = wb.dialogs.dialog.list_offset();
     assert!(moved > 0.0, "the list followed");
     assert!(wb.mouse_up(&mut text));
-    assert!(!wb.dialogs.dialog.scrollbar_held(), "released");
+    assert!(!wb.dialogs.dialog.held(), "released");
     assert!(!wb.drag_pending());
     assert_eq!(wb.dialogs.dialog.list_offset(), moved, "released: it stays");
     assert!(wb.dialogs.dialog.is_open(), "a press on its scrollbar doesn't answer it");
@@ -402,4 +411,32 @@ fn a_bars_dropdown_list_answers_with_the_rows_command() {
         Some(MouseResult::MenuCommand(format!("{}env:dev", crate::workbench::BAR_MENU)))
     );
     assert_eq!(wb.active_overlay(), None);
+}
+
+/// The editor's cards float: the editor keeps the keyboard (they're never the overlay on
+/// top), nothing is blocked while they show.
+#[test]
+fn the_editor_s_cards_float() {
+    let (wb, dir, _text) = opened("cards");
+    let _ = std::fs::remove_dir_all(&dir);
+    for o in [Overlay::CodeHover, Overlay::Completion, Overlay::ParamHint] {
+        assert!(o.slot().floats(&wb), "{o:?}");
+        assert!(!o.slot().covers_home(&wb), "{o:?}");
+    }
+}
+
+/// A hover card waiting for its delay goes at a press elsewhere and at the wheel (it would
+/// pop up afterwards, over a word that moved).
+#[test]
+fn a_waiting_hover_card_goes_at_a_press_and_the_wheel() {
+    let (mut wb, dir, mut text) = opened("waiting-card");
+    let p = Point::new(300.0, 200.0);
+    wb.code_hover.track(Some(0..3), p, false);
+    assert!(wb.code_hover.deadline().is_some(), "waiting");
+    wb.mouse_down(&mut text, Point::new(310.0, 220.0), false, false, false, 1);
+    assert!(wb.code_hover.deadline().is_none(), "a press elsewhere: gone");
+    wb.code_hover.track(Some(0..3), p, false);
+    wb.scroll(Point::new(310.0, 220.0), 0.0, 10.0);
+    assert!(wb.code_hover.deadline().is_none(), "the wheel: gone");
+    let _ = std::fs::remove_dir_all(&dir);
 }

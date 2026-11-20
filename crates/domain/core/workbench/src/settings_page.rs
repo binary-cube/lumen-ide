@@ -65,6 +65,8 @@ pub enum SettingsRow {
         key: &'static str,
         label: String,
         detail: String,
+        /// An icon before its label (a module's), a name of the app's set.
+        icon: Option<&'static str>,
         choices: Vec<(i64, String)>,
         current: i64,
         default: Option<i64>,

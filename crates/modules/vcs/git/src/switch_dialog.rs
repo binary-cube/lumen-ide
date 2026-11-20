@@ -10,6 +10,7 @@ use std::sync::mpsc::Receiver;
 
 use i18n::{t, tr};
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls, Scrolled};
 use ui_components::ds::{self, Ctx};
 use ui_components::{
     EdgeScrollbar, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -98,8 +99,14 @@ pub struct SwitchDialog {
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
     list: Rect,
     scroll: f32,
+    /// How far the files scroll, and where the dialog was drawn (the wheel is the files'
+    /// anywhere over it): from the last paint.
+    max_scroll: f32,
+    bounds: Rect,
     bar: EdgeScrollbar,
     badges: Vec<(Rect, version_control::FileState)>,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for SwitchDialog {
@@ -175,6 +182,22 @@ impl SwitchDialog {
 
     fn content(&self) -> f32 {
         self.request.as_ref().map_or(0, |r| r.files.len()) as f32 * ROW_H
+    }
+
+    /// Its parts used as controls (the files' scrollbar with the offset it moves, the wheel
+    /// anywhere over the dialog), the topmost first, with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut files = Scrolled {
+            bar: &mut self.bar,
+            offset: &mut self.scroll,
+            area: self.bounds,
+            max: self.max_scroll,
+        };
+        let mut parts: [&mut dyn Control; 1] = [&mut files];
+        f(&mut self.controls, &mut parts)
     }
 }
 
@@ -309,7 +332,9 @@ impl Viewer for SwitchDialog {
         );
         self.list = list;
         let content = self.content() * scale + px(8.0);
-        self.scroll = self.scroll.clamp(0.0, (content - list.size.height).max(0.0));
+        self.bounds = b;
+        self.max_scroll = (content - list.size.height).max(0.0);
+        self.scroll = self.scroll.clamp(0.0, self.max_scroll);
         let rows_layer = scene.push_layer(Some(list));
         for (i, file) in r.files.iter().enumerate() {
             let top = list.min_y() + px(4.0) + i as f32 * px(ROW_H) - self.scroll;
@@ -347,10 +372,8 @@ impl Viewer for SwitchDialog {
         self.bar.paint(scene, p, scale, list, content, self.scroll);
     }
 
-    fn press(&mut self, p: Point, _clicks: u32) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-        }
+    fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
+        self.with_controls(|c, parts| c.press(parts, p, clicks));
         None
     }
 
@@ -359,27 +382,21 @@ impl Viewer for SwitchDialog {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        match self.bar.drag(p) {
-            Some(offset) => {
-                self.scroll = offset;
-                true
-            }
-            None => false,
-        }
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        let before = self.scroll;
-        self.scroll = (self.scroll + dy).max(0.0);
-        self.scroll != before
+    /// The files', wherever the mouse is over the dialog (told no point: its middle).
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        let over = self.bounds.center();
+        self.with_controls(|c, parts| c.scroll(parts, over, dx, dy)).is_some()
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.bar.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn cursor_at(&self, _p: Point) -> Option<ViewerCursor> {

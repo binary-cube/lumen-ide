@@ -1,6 +1,8 @@
 //! The sources' window as a viewer: its modal frame, its keys, the mouse.
 
 use super::*;
+use fields::FieldPart;
+use ui_components::control::Shown;
 
 impl Viewer for SourcesView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
@@ -126,6 +128,141 @@ impl Viewer for SourcesView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let used = self.key_pressed(key, reach);
+        self.sync_focus();
+        used
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        let used = self.run_command(id);
+        self.sync_focus();
+        used
+    }
+
+    fn click(&mut self, p: Point) -> Option<ViewerAction> {
+        let action = self.pressed_at(p);
+        self.sync_focus();
+        action
+    }
+
+    /// The focused field's (never the password's), its part lent to be read.
+    fn selected_text(&self) -> Option<String> {
+        let editor = self.editor.as_ref()?;
+        let fields: Vec<FieldPart<'_, &ui_kit::TextInput>> = editor
+            .inputs()
+            .into_iter()
+            .map(|(field, input)| FieldPart { field, input, hits: &self.hits })
+            .collect();
+        self.controls.0.selected_text_with(|i| {
+            let part = fields.get(i.checked_sub(FIELDS)?)?;
+            // A place out of step with the field having the keys lends nothing.
+            (self.focus.as_ref() == Some(&part.field)).then_some(part as &dyn Control)
+        })
+    }
+
+    fn take_action(&mut self) -> Option<ViewerAction> {
+        self.action.take()
+    }
+
+    /// The part under the mouse (an open list over everything, the sources' list, the
+    /// form), as it is now (a list may have opened under it since it last moved).
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        let at = self.last_hover;
+        self.with_controls(|c, parts| {
+            c.hover(parts, at);
+            c.scroll_hovered(parts, dx, dy)
+        })
+        .is_some()
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        if let Some((item, from)) = self.pressed {
+            let far = (p.x - from.x).abs().max((p.y - from.y).abs()) > 4.0;
+            if self.dragging.is_some() || far {
+                self.dragging = Some(item);
+                self.drag_at = p;
+                self.drop = self.place_at(p);
+                return true;
+            }
+        }
+        // A field holding the pointer is only among all the parts (made for it alone).
+        let dragged = self.with_controls(|c, parts| c.drag(parts, p)).or_else(|| {
+            if self.controls.0.held() {
+                self.with_fields(|c, parts| c.drag(parts, p))
+            } else {
+                None
+            }
+        });
+        match dragged {
+            Some((FORM, _)) => {
+                self.form_scroll = self.form_scroll.clamp(0.0, self.form_max);
+                true
+            }
+            // A field's selection, when the pointer is over it.
+            Some((part, changed)) => part < FIELDS || changed,
+            None => false,
+        }
+    }
+
+    fn release(&mut self) -> bool {
+        self.pressed = None;
+        let (dragged, drop) = (self.dragging.take(), self.drop.take());
+        if let (Some(item), Some(place)) = (dragged, drop) {
+            self.move_to(item, place);
+            return true;
+        }
+        let parts = self.with_fields(|c, parts| c.release(parts));
+        dragged.is_some() | parts.is_some_and(|(_, changed)| changed)
+    }
+
+    fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
+        self.close_popup();
+        self.list_menu(p)
+    }
+
+    fn hover(&mut self, p: Point) -> bool {
+        self.last_hover = Some(p);
+        // An open list takes the mouse over everything.
+        let parts = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        if self.picker.is_open() {
+            return parts;
+        }
+        let hover = self.hit(p);
+        let changed = hover != self.hover;
+        self.hover = hover;
+        changed | parts
+    }
+
+    fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        // A part's (an open list's anywhere: never what's under it).
+        if let Some(cursor) = self.controls.0.cursor_at(p) {
+            return Some(cursor);
+        }
+        match self.hit(p)? {
+            Hit::Field(_) => Some(ViewerCursor::Text),
+            _ => Some(ViewerCursor::Pointer),
+        }
+    }
+
+    fn tooltip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
+        // Not through an open list over them.
+        if self.popup.is_some() {
+            return None;
+        }
+        let (r, label) = self.tips.iter().find(|(r, _)| r.contains(p))?;
+        Some(ui_components::tooltip::Tip::new(*r, label.clone()))
+    }
+}
+
+/// The open list's and the form's places among the window's parts; the fields come after
+/// them, from `FIELDS` on, in the editor's order ([`Editor::inputs`]).
+const PICKER: usize = 0;
+const FORM: usize = 2;
+const FIELDS: usize = 3;
+
+impl SourcesView {
+    /// A key: an open list's; Tab, ↑ ↓ the view's own order; ↵ OK; esc; the field's.
+    fn key_pressed(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         // An open list has the keys.
         if self.picker.is_open() {
             let event = self.picker.key(key, reach);
@@ -155,20 +292,13 @@ impl Viewer for SourcesView {
                     self.close();
                 }
             }
+            // The editing keys: the focused field's.
             key => {
                 let Some(field) = self.focus.clone() else { return false };
-                let Some(input) = self.focused_input() else { return false };
-                let edits = matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
-                match key {
-                    ViewerKey::Left => input.move_left(reach.word, reach.extend),
-                    ViewerKey::Right => input.move_right(reach.word, reach.extend),
-                    ViewerKey::Home => input.home(reach.extend),
-                    ViewerKey::End => input.end(reach.extend),
-                    ViewerKey::Backspace => input.backspace(reach.word),
-                    ViewerKey::Delete => input.delete(),
-                    _ => return false,
+                if self.with_fields(|c, parts| c.key(parts, key, reach)).is_none() {
+                    return false;
                 }
-                if edits {
+                if matches!(key, ViewerKey::Backspace | ViewerKey::Delete) {
                     self.edited(&field);
                 }
             }
@@ -176,7 +306,8 @@ impl Viewer for SourcesView {
         true
     }
 
-    fn command(&mut self, id: &str) -> bool {
+    /// An edit command, a footer's button, a list's row, a file picked.
+    fn run_command(&mut self, id: &str) -> bool {
         // The footer's buttons (the window draws them).
         if let Some(&(_, button)) = FOOTER.iter().find(|(i, _)| *i == id) {
             self.footer(button);
@@ -196,32 +327,17 @@ impl Viewer for SourcesView {
             }
             return true;
         }
+        #[cfg(feature = "snapshot")]
+        if let Some(sample) = id.strip_prefix("snapshot:") {
+            return self.snapshot(sample);
+        }
         let field = self.focus.clone();
-        let used = match id {
-            "select_all" => self.focused_input().is_some_and(|i| {
-                i.select_all();
-                true
-            }),
-            "undo" | "redo" => {
-                self.focused_input().is_some_and(|i| if id == "redo" { i.redo() } else { i.undo() })
-            }
-            "cut" => {
-                // A password is never cut out (nor copied).
-                if field == Some(Field::Password) {
-                    return true;
-                }
-                self.focused_input().is_some_and(|i| {
-                    let had = !i.selected_text().is_empty();
-                    if had {
-                        i.insert("");
-                    }
-                    had
-                })
-            }
-            #[cfg(feature = "snapshot")]
-            id if id.starts_with("snapshot:") => self.snapshot(&id["snapshot:".len()..]),
-            _ => return false,
-        };
+        // The password's cut is the modal's all the same: its field takes none, and it never
+        // reaches what's behind the window.
+        if id == "cut" && field == Some(Field::Password) {
+            return true;
+        }
+        let used = self.with_fields(|c, parts| c.command(parts, id)).is_some();
         if used
             && matches!(id, "undo" | "redo" | "cut")
             && let Some(field) = field
@@ -231,45 +347,18 @@ impl Viewer for SourcesView {
         used
     }
 
-    /// Never the password's text.
-    fn selected_text(&self) -> Option<String> {
-        let field = self.focus.as_ref()?;
-        if *field == Field::Password {
-            return None;
-        }
-        let input = self.editor.as_ref()?.input(field)?;
-        let selected = input.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
-    }
-
-    fn take_action(&mut self) -> Option<ViewerAction> {
-        self.action.take()
-    }
-
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        if self.picker.is_open() {
-            return self.picker.scroll(dy);
-        }
-        let at = self.hover_point();
-        if self.list_area.contains(at) {
-            self.list_scroll = (self.list_scroll + dy).clamp(0.0, self.list_max);
-        } else {
-            self.form_scroll = (self.form_scroll + dy).clamp(0.0, self.form_max);
-        }
-        true
-    }
-
-    fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.form_bar.press(p) {
-            self.form_scroll = offset;
+    /// A press at `p`: on an open list, a field, or what's drawn there.
+    fn pressed_at(&mut self, p: Point) -> Option<ViewerAction> {
+        let inside = self.picker.contains(p);
+        let opener = self.popup.clone();
+        let mut pressed = self.with_fields(|c, parts| c.press(parts, p, 1));
+        if pressed.is_some_and(|(part, _)| part == FORM) {
             return None;
         }
         // An open list takes the click: a row chosen; outside it, it closes — and the click
         // goes on, but on the field (or `+`) that opened it (that only closes it).
-        if self.picker.is_open() {
-            let inside = self.picker.contains(p);
-            let event = self.picker.press(p);
-            let opener = self.popup.clone();
+        if pressed.is_some_and(|(part, _)| part == PICKER) {
+            let event = self.picker.take_event();
             self.picked(event);
             let hit = self.hit(p);
             let same = matches!((&hit, &opener), (Some(Hit::Choice(c)), Some(o)) if c == o)
@@ -277,6 +366,21 @@ impl Viewer for SourcesView {
             if inside || same {
                 return self.action.take();
             }
+            // Closed, it lets the click on to a field under it (never to a bar).
+            pressed = self.with_fields(|c, parts| {
+                let mut shown: Vec<Shown<'_>> = parts
+                    .iter_mut()
+                    .enumerate()
+                    .map(|(i, part)| Shown { part: &mut **part, shown: i >= FIELDS })
+                    .collect();
+                let mut fields: Vec<&mut dyn Control> =
+                    shown.iter_mut().map(|s| s as &mut dyn Control).collect();
+                c.press(&mut fields, p, 1)
+            });
+        }
+        // A field took it (its caret placed, the focus on it).
+        if pressed.is_some_and(|(part, _)| part >= FIELDS) {
+            return self.action.take();
         }
         let hit = self.hit(p);
         let Some(hit) = hit else {
@@ -314,14 +418,8 @@ impl Viewer for SourcesView {
                 }
                 self.confirm_close = false;
             }
-            Hit::Field(field) => {
-                if let Some(editor) = &mut self.editor
-                    && let Some(input) = editor.input_mut(&field)
-                {
-                    input.click(p.x);
-                }
-                self.focus = Some(field);
-            }
+            // Its part took the press (a field not in the editor takes none).
+            Hit::Field(_) => {}
             Hit::Tab(tab) => self.set_tab(tab),
             Hit::Tool(tool) => self.tool(tool),
             Hit::Choice(choice) => self.open_popup(choice),
@@ -400,72 +498,87 @@ impl Viewer for SourcesView {
         self.action.take()
     }
 
-    fn drag(&mut self, p: Point) -> bool {
-        if let Some((item, from)) = self.pressed {
-            let far = (p.x - from.x).abs().max((p.y - from.y).abs()) > 4.0;
-            if self.dragging.is_some() || far {
-                self.dragging = Some(item);
-                self.drag_at = p;
-                self.drop = self.place_at(p);
-                return true;
+    /// Its parts (an open list, over everything; the sources' list, the form and its
+    /// scrollbar: the rest of the window), the topmost first, with their state of use: what
+    /// the mouse moving and the wheel need, without the fields.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        self.with_parts(false, f)
+    }
+
+    /// [`Self::with_controls`] and the fields after them: a press, a key, the text, an edit
+    /// command. The focus given to the parts is the field having the keys (`focus`, as the
+    /// view moves it: Tab, ↑ ↓, a list's row); one a part took is the view's after.
+    pub(super) fn with_fields<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        self.with_parts(true, f)
+    }
+
+    /// The parts' focus put back on the field having the keys (the editor's fields may have
+    /// moved in its order since: another source selected).
+    pub(super) fn sync_focus(&mut self) {
+        self.with_fields(|_, _| ());
+    }
+
+    fn with_parts<R>(
+        &mut self,
+        fields: bool,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        // The sources' list has no scrollbar: one never drawn is never hit.
+        let mut no_bar = ui_components::EdgeScrollbar::default();
+        let mut list = Scrolled {
+            bar: &mut no_bar,
+            offset: &mut self.list_scroll,
+            area: self.list_area,
+            max: self.list_max,
+        };
+        let mut form = Scrolled {
+            bar: &mut self.form_bar,
+            offset: &mut self.form_scroll,
+            area: self.bounds,
+            max: self.form_max,
+        };
+        let controls = &mut self.controls.0;
+        if !fields {
+            let mut parts: [&mut dyn Control; FIELDS] = [&mut self.picker, &mut list, &mut form];
+            return f(controls, &mut parts);
+        }
+        let hits = &self.hits;
+        let mut inputs: Vec<FieldPart<'_, &mut ui_kit::TextInput>> = self
+            .editor
+            .as_mut()
+            .map(Editor::inputs_mut)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(field, input)| FieldPart { field, input, hits })
+            .collect();
+        let at = self
+            .focus
+            .as_ref()
+            .and_then(|f| inputs.iter().position(|part| part.field == *f))
+            .map(|i| FIELDS + i);
+        let (out, focused) = {
+            let mut parts: Vec<&mut dyn Control> = Vec::with_capacity(FIELDS + inputs.len());
+            parts.extend([&mut self.picker as &mut dyn Control, &mut list, &mut form]);
+            parts.extend(inputs.iter_mut().map(|part| part as &mut dyn Control));
+            controls.focus(&mut parts, at);
+            let out = f(controls, &mut parts);
+            (out, controls.focused())
+        };
+        // A field the parts' focus went to has the keys; none: none has them. The open list
+        // focused leaves the field's (the keys go back to it once the list closes).
+        if focused != at {
+            match focused.map(|i| i.checked_sub(FIELDS).and_then(|i| inputs.get(i))) {
+                None => self.focus = None,
+                Some(Some(part)) => self.focus = Some(part.field.clone()),
+                Some(None) => {}
             }
         }
-        if let Some(offset) = self.form_bar.drag(p) {
-            self.form_scroll = offset.clamp(0.0, self.form_max);
-            return true;
-        }
-        match self.focused_input() {
-            Some(input) if input.contains(p) => {
-                input.extend_to(p.x);
-                true
-            }
-            _ => false,
-        }
-    }
-
-    fn release(&mut self) -> bool {
-        self.pressed = None;
-        let (dragged, drop) = (self.dragging.take(), self.drop.take());
-        if let (Some(item), Some(place)) = (dragged, drop) {
-            self.move_to(item, place);
-            return true;
-        }
-        dragged.is_some() | self.form_bar.release()
-    }
-
-    fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
-        self.close_popup();
-        self.list_menu(p)
-    }
-
-    fn hover(&mut self, p: Point) -> bool {
-        self.last_hover = Some(p);
-        if self.picker.is_open() {
-            return self.picker.hover(p);
-        }
-        let hover = self.hit(p);
-        let changed = hover != self.hover;
-        self.hover = hover;
-        changed | self.form_bar.hover(p)
-    }
-
-    fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        // An open list: its own cursor, never what's under it.
-        if self.picker.is_open() {
-            return Some(self.picker.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
-        }
-        match self.hit(p)? {
-            Hit::Field(_) => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
-        }
-    }
-
-    fn tooltip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
-        // Not through an open list over them.
-        if self.popup.is_some() {
-            return None;
-        }
-        let (r, label) = self.tips.iter().find(|(r, _)| r.contains(p))?;
-        Some(ui_components::tooltip::Tip::new(*r, label.clone()))
+        out
     }
 }

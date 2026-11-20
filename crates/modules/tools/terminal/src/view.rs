@@ -18,6 +18,7 @@ use terminal_session::{
 };
 use text_layout::{Font, TextSystem};
 use theming::caret::CaretShape;
+use ui_components::control::{Control, Controls, Shown, Thumb};
 use ui_components::{
     KeyPress, Palette, PressedKey, Viewer, ViewerAction, ViewerCursor, ViewerPaint,
 };
@@ -206,6 +207,8 @@ pub struct TerminalView {
     /// The history's scrollbar, in its lane right of the grid.
     bar: ui_components::EdgeScrollbar,
     bar_area: Rect,
+    /// Its parts' state of use (see [`TerminalView::with_controls`]).
+    controls: Controls,
     /// The tab's name from its program (as the settings say when): read when the screen
     /// changes, kept for the tabs' drawing.
     program_title: Option<String>,
@@ -641,6 +644,26 @@ impl TerminalView {
         Some((content * k, offset * k))
     }
 
+    /// Its parts (the history's scrollbar with its offset, shown while there's a history),
+    /// with their state of use. The bar moves by its own pixels: the history follows it, by
+    /// whole lines. The keys and the text go to the shell, never through them.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let metrics = self.bar_metrics();
+        let before = metrics.map_or(0.0, |(_, offset)| offset);
+        let mut offset = before;
+        let mut history = Thumb { bar: &mut self.bar, offset: &mut offset };
+        let mut history = Shown { part: &mut history, shown: metrics.is_some() };
+        let mut parts: [&mut dyn Control; 1] = [&mut history];
+        let answer = f(&mut self.controls, &mut parts);
+        if offset != before {
+            self.scroll_to(offset);
+        }
+        answer
+    }
+
     /// The history scrolled to `offset` (the bar's, from the top). `true` if it moved.
     fn scroll_to(&mut self, offset: f32) -> bool {
         let g = &self.grid;
@@ -1048,15 +1071,12 @@ impl Viewer for TerminalView {
 
     fn hover(&mut self, p: Point) -> bool {
         self.pointer = Some(p);
-        self.bar.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        // The scrollbar: its thumb taken, or the history jumped there.
-        if self.bar_metrics().is_some()
-            && let Some(offset) = self.bar.press(p)
-        {
-            self.scroll_to(offset);
+        // Its parts: the scrollbar's thumb taken, or the history jumped there.
+        if self.with_controls(|c, parts| c.press(parts, p, clicks)).is_some() {
             return None;
         }
         self.begin_selection(p, clicks);
@@ -1074,15 +1094,19 @@ impl Viewer for TerminalView {
         self.press(p, clicks)
     }
 
+    /// The part holding the pointer follows it (`true` if the history moved), else the
+    /// selection does.
     fn drag(&mut self, p: Point) -> bool {
-        if self.bar.is_dragging() {
-            return self.bar.drag(p).is_some_and(|offset| self.scroll_to(offset));
+        let shown = self.grid.display_offset;
+        if self.with_controls(|c, parts| c.drag(parts, p)).is_some() {
+            return self.grid.display_offset != shown;
         }
         self.drag_selection(p)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release() | self.end_selection()
+        let part = self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, c)| c);
+        part | self.end_selection()
     }
 
     fn link_hover(&mut self, p: Option<Point>) -> bool {

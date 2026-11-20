@@ -27,7 +27,13 @@ impl Module for Broken {
 }
 
 fn manifest(id: &'static str, deps: &'static [&'static str]) -> ModuleManifest {
-    ModuleManifest { id: ModuleId::new_static(id), name: id, description: "", depends_on: deps }
+    ModuleManifest {
+        id: ModuleId::new_static(id),
+        name: id,
+        description: "",
+        depends_on: deps,
+        info: crate::ModuleInfo::BUILT_IN,
+    }
 }
 
 fn registry() -> ModuleRegistry {
@@ -103,6 +109,7 @@ fn one_modules_data_is_released() {
         name: id,
         description: "",
         depends_on: &[],
+        info: crate::ModuleInfo::BUILT_IN,
     };
     let mut registry = ModuleRegistry::default();
     registry.register(Box::new(Holding(manifest("a"), AtomicBool::new(true))));

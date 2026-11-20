@@ -68,6 +68,13 @@ pub struct LanguageDescriptor {
     /// element it closes (HTML and what embeds it: PHP, Blade, Twig, JSX). The language's
     /// own reading of its markup: where the last element still open in a text starts.
     pub closing_tags: Option<UnclosedElement>,
+    /// What a fragment of it (a snippet in a document, a tooltip's example) needs before it
+    /// to be read as this language, and what says it already has it: PHP's `<?php` unless
+    /// `<?` is in it (else it reads as HTML).
+    pub fragment_opening: Option<(&'static str, &'static str)>,
+    /// A file of it shown in the file icons' preview (in the settings): its place among
+    /// them and its name (`index.php`). `None`: not shown there.
+    pub icon_sample: Option<(u8, &'static str)>,
 }
 
 impl LanguageDescriptor {
@@ -83,6 +90,29 @@ impl LanguageDescriptor {
             quotes: &['"', '\''],
             indent_after: &[],
             closing_tags: None,
+            fragment_opening: None,
+            icon_sample: None,
+        }
+    }
+
+    /// A file named `name` shown in the file icons' preview, at place `order`.
+    pub fn icon_sample(mut self, order: u8, name: &'static str) -> Self {
+        self.icon_sample = Some((order, name));
+        self
+    }
+
+    /// A fragment of it needs `opening` before it unless it holds `marker`.
+    pub fn fragment_opening(mut self, opening: &'static str, marker: &'static str) -> Self {
+        self.fragment_opening = Some((opening, marker));
+        self
+    }
+
+    /// What goes before `fragment` so it reads as this language (nothing when it needs none
+    /// or has it).
+    pub fn fragment_prefix(&self, fragment: &str) -> &'static str {
+        match self.fragment_opening {
+            Some((opening, marker)) if !fragment.contains(marker) => opening,
+            _ => "",
         }
     }
 

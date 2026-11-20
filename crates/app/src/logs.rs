@@ -35,6 +35,7 @@ pub const MODULE_LEVELS: [&str; 6] = ["off", "error", "warn", "info", "debug", "
 struct Noted {
     id: String,
     name: &'static str,
+    icon: &'static str,
     target: &'static str,
     active: bool,
 }
@@ -42,10 +43,10 @@ struct Noted {
 static MODULES: LazyLock<RwLock<Vec<Noted>>> = LazyLock::new(|| RwLock::new(Vec::new()));
 
 /// Module `id` (named `name`) writes its lines under `target`: listed in the log's settings.
-pub fn note_module(id: &str, name: &'static str, target: &'static str) {
+pub fn note_module(id: &str, name: &'static str, icon: &'static str, target: &'static str) {
     let Ok(mut modules) = MODULES.write() else { return };
     if !modules.iter().any(|m| m.id == id) {
-        modules.push(Noted { id: id.to_owned(), name, target, active: false });
+        modules.push(Noted { id: id.to_owned(), name, icon, target, active: false });
     }
 }
 
@@ -58,18 +59,19 @@ pub fn set_active<'a>(active: impl IntoIterator<Item = &'a str>) {
     }
 }
 
-/// The active modules' rows: their target and name (one per target: several modules of one
-/// crate write as one), by name.
-fn listed() -> Vec<(&'static str, String)> {
+/// The active modules' rows: their target, name and icon (one per target: several modules
+/// of one crate write as one), by name.
+fn listed() -> Vec<(&'static str, String, &'static str)> {
     let Ok(modules) = MODULES.read() else { return Vec::new() };
-    let mut rows: Vec<(&'static str, String)> = Vec::new();
+    let mut rows: Vec<(&'static str, String, &'static str)> = Vec::new();
     for m in modules.iter().filter(|m| m.active) {
-        if rows.iter().any(|(t, _)| *t == m.target) {
+        if rows.iter().any(|(t, ..)| *t == m.target) {
             continue;
         }
-        rows.push((m.target, crate::workbench::frameworks::localized(&m.id, "_name", m.name)));
+        let name = crate::workbench::frameworks::localized(&m.id, "_name", m.name);
+        rows.push((m.target, name, m.icon));
     }
-    rows.sort_by_key(|(_, name)| name.to_lowercase());
+    rows.sort_by_key(|(_, name, _)| name.to_lowercase());
     rows
 }
 
@@ -258,23 +260,25 @@ impl SettingsContribution for LogSettings {
         // Every module at once: a level for all of them, or all back as the others.
         let same = listed
             .first()
-            .map(|(t, _)| module_choice(&chosen, t))
-            .filter(|first| listed.iter().all(|(t, _)| module_choice(&chosen, t) == *first));
+            .map(|(t, ..)| module_choice(&chosen, t))
+            .filter(|first| listed.iter().all(|(t, ..)| module_choice(&chosen, t) == *first));
         let mut all = vec![(ALL_MIXED, t("settings.log_all_mixed"))];
         all.extend(module_choices());
         rows.push(SettingsRow::Dropdown {
             key: ALL,
             label: t("settings.log_modules"),
             detail: t("settings.log_modules_detail"),
+            icon: None,
             choices: if same.is_some() { module_choices() } else { all },
             current: same.unwrap_or(ALL_MIXED),
             default: Some(0),
         });
-        for (target, name) in &listed {
+        for (target, name, icon) in &listed {
             rows.push(SettingsRow::Dropdown {
                 key: target,
                 label: name.clone(),
                 detail: (*target).to_owned(),
+                icon: Some(icon),
                 choices: module_choices(),
                 current: module_choice(&chosen, target),
                 default: Some(0),
@@ -304,7 +308,7 @@ impl SettingsContribution for LogSettings {
                 if value == ALL_MIXED {
                     return;
                 }
-                listed().iter().fold(modules, |m, (target, _)| with_level(&m, target, level))
+                listed().iter().fold(modules, |m, (target, ..)| with_level(&m, target, level))
             } else {
                 with_level(&modules, key, level)
             };

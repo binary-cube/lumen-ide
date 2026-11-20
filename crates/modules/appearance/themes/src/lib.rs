@@ -26,6 +26,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Themes",
     description: "The bundled themes and the theme files' format (the user's themes too)",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "palette", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

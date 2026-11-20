@@ -19,6 +19,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Dockerfile",
     description: "Dockerfile: colors, the shell commands as Bash, folding, dockerfile-language-server as its language server",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "docker", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

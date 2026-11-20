@@ -107,7 +107,6 @@ impl DataView {
             top = banner.max_y();
         }
         let area = Rect::new(right.min_x(), top, right.size.width, (right.max_y() - top).max(0.0));
-        self.grid_area = area;
         self.structure_area = area;
         match self.tab {
             Tab::Data => match &mut self.grid {
@@ -283,7 +282,8 @@ impl DataView {
         );
         let row_h = px(ROW_H);
         let content = self.tables.len() as f32 * row_h + px(2.0 * LIST_TOP);
-        self.list_scroll = self.list_scroll.clamp(0.0, (content - rows.size.height).max(0.0));
+        self.list_max = (content - rows.size.height).max(0.0);
+        self.list_scroll = self.list_scroll.clamp(0.0, self.list_max);
         let layer = scene.push_layer(Some(rows));
         if self.tables_loading && self.tables.is_empty() {
             ds::loader(

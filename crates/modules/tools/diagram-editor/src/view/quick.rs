@@ -52,7 +52,8 @@ impl Quick {
         })
     }
 
-    fn tip(self) -> &'static str {
+    /// Its tooltip's text key.
+    pub(super) fn tip(self) -> &'static str {
         match self {
             Self::Scheme(0) => "diagram_editor.quick_theme_colors",
             Self::Scheme(_) => "diagram_editor.quick_colors",
@@ -155,9 +156,9 @@ impl DiagramView {
         let height = size + 2.0 * pad;
         let sheet = self.sheet();
         // Clear of the shape's arrows (out of its sides, 24 px).
-        let gap = px(30.0);
-        let above = chosen.min_y() - gap - height;
-        let y = if above >= sheet.min_y() + px(4.0) { above } else { chosen.max_y() + gap };
+        let clear = px(30.0);
+        let above = chosen.min_y() - clear - height;
+        let y = if above >= sheet.min_y() + px(4.0) { above } else { chosen.max_y() + clear };
         let x = (chosen.center().x - width / 2.0)
             .min(sheet.max_x() - px(4.0) - width)
             .max(sheet.min_x() + px(4.0));
@@ -235,11 +236,6 @@ impl DiagramView {
             _ => Vec::new(),
         });
         d.edit(tx, None)
-    }
-
-    /// A button's tooltip.
-    pub(super) fn quick_tip(&self, p: Point) -> Option<(Rect, String)> {
-        self.quick_at(p).map(|(r, q)| (r, i18n::t(q.tip())))
     }
 
     /// The bar drawn (over the sheet).

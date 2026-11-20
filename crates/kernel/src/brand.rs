@@ -15,6 +15,9 @@ pub const BUNDLE_ID: &str = env!("BRAND_BUNDLE_ID");
 /// there.
 pub const REPOSITORY: &str = env!("BRAND_REPOSITORY");
 
+/// Who makes it (the modules that come with the app are theirs).
+pub const PUBLISHER: &str = env!("BRAND_PUBLISHER");
+
 /// The app's version, as the app set it at its start ([`set_version`]: its own package's);
 /// `0.0.0` before (a test). Given at run time, not built into every crate: only the app's
 /// package carries the release's version, so a new one rebuilds the app, not the workspace.
@@ -28,6 +31,20 @@ pub fn set_version(version: &'static str) {
 }
 
 static VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
+/// When the app's version was released (`YYYY-MM-DD`), as the app set it at its start
+/// ([`set_released`]); empty before (a test).
+pub fn released() -> &'static str {
+    RELEASED.get().copied().unwrap_or("")
+}
+
+/// The app's release date, set once at its start (its package's, written beside the
+/// version at each release).
+pub fn set_released(date: &'static str) {
+    let _ = RELEASED.set(date);
+}
+
+static RELEASED: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 
 /// The app's icon (256 × 256 PNG, round art on a transparent background, made by `cargo
 /// xtask icon`): the windows' and the Dock's (outside the bundle), the calm scene's mark.

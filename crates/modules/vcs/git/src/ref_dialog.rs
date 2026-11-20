@@ -14,6 +14,9 @@ use std::sync::mpsc::Receiver;
 
 use i18n::{t, tr};
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Controls, Shown};
+
+use crate::dialog_field::DialogField;
 use ui_components::ds::{self, Ctx};
 use ui_components::{
     KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -191,20 +194,11 @@ enum Hit {
     Checkout,
 }
 
-/// The field with the keys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-enum Field {
-    #[default]
-    Name,
-    Message,
-}
-
 #[derive(Default)]
 pub struct RefDialog {
     request: Option<RefRequest>,
     name: TextInput,
     message: TextInput,
-    field: Field,
     checkout: bool,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
@@ -215,7 +209,13 @@ pub struct RefDialog {
     done: bool,
     notes: Vec<Notification>,
     waker: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
+
+/// The places of its parts in [`RefDialog::with_controls`].
+const NAME: usize = 0;
+const MESSAGE: usize = 1;
 
 impl std::fmt::Debug for RefDialog {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -289,15 +289,23 @@ impl RefDialog {
         true
     }
 
-    fn hit(&self, p: Point) -> Option<Hit> {
-        self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
+    /// Its parts used as controls (the name's field, the message's: a tag's only), the
+    /// topmost first, with their state of use. A field has the focus from the start and
+    /// keeps it whatever else is pressed (the checkbox); Tab moves it only for a tag.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let tag = self.is_tag();
+        let mut name = DialogField { input: &mut self.name };
+        let mut field = DialogField { input: &mut self.message };
+        let mut message = Shown { part: &mut field, shown: tag };
+        let mut parts: [&mut dyn Control; 2] = [&mut name, &mut message];
+        f(&mut self.controls, &mut parts)
     }
 
-    fn input(&mut self) -> &mut TextInput {
-        match self.field {
-            Field::Name => &mut self.name,
-            Field::Message => &mut self.message,
-        }
+    fn hit(&self, p: Point) -> Option<Hit> {
+        self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
 
     /// What it reports once done.
@@ -336,6 +344,9 @@ impl Viewer for RefDialog {
         self.name.select_all();
         self.checkout = true;
         self.request = Some(request.clone());
+        // A press beside the fields leaves the focus where it was.
+        self.controls = Controls::sticky();
+        self.with_controls(|c, parts| c.focus(parts, Some(NAME)));
     }
 
     fn subtitle(&self) -> Option<String> {
@@ -385,13 +396,12 @@ impl Viewer for RefDialog {
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.input().insert(&typed);
-        true
+        self.with_controls(|c, parts| c.text(parts, typed)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.text_input(text.lines().next().unwrap_or_default())
+        let line = text.lines().next().unwrap_or_default();
+        self.with_controls(|c, parts| c.paste(parts, line)).is_some()
     }
 
     fn poll(&mut self) -> bool {
@@ -437,7 +447,14 @@ impl Viewer for RefDialog {
             Rect::new(b.min_x() + pad, b.min_y() + px(10.0), b.size.width - 2.0 * pad, px(36.0));
         let placeholder = if self.is_tag() { t("git.tag_name") } else { t("git.branch_name") };
         let bad = problem.is_some() && !self.name.text().is_empty();
-        self.name.paint(layer, text, field, self.field == Field::Name, &placeholder, &style(bad));
+        self.name.paint(
+            layer,
+            text,
+            field,
+            self.controls.focused() == Some(NAME),
+            &placeholder,
+            &style(bad),
+        );
         self.hits.push((field, Hit::Name));
         let small = ds.ui_font(-1.0);
         let mut y = field.max_y() + px(8.0);
@@ -476,7 +493,7 @@ impl Viewer for RefDialog {
             RefKindAsked::NewTag { .. } => {
                 // The message (an annotated tag).
                 let field = Rect::new(b.min_x() + pad, y, b.size.width - 2.0 * pad, px(36.0));
-                let focused = self.field == Field::Message;
+                let focused = self.controls.focused() == Some(MESSAGE);
                 self.message.paint(
                     layer,
                     text,
@@ -492,17 +509,10 @@ impl Viewer for RefDialog {
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        match self.hit(p) {
-            Some(Hit::Name) => {
-                self.field = Field::Name;
-                self.name.press(p.x, clicks);
-            }
-            Some(Hit::Message) => {
-                self.field = Field::Message;
-                self.message.press(p.x, clicks);
-            }
-            Some(Hit::Checkout) => self.checkout = !self.checkout,
-            None => {}
+        // A field takes its press (the caret put, a word or all of it selected) and the keys.
+        let pressed = self.with_controls(|c, parts| c.press(parts, p, clicks));
+        if pressed.is_none() && self.hit(p) == Some(Hit::Checkout) {
+            self.checkout = !self.checkout;
         }
         self.action.take()
     }
@@ -512,22 +522,23 @@ impl Viewer for RefDialog {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.input().extend_to(p.x);
-        true
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
+    /// The fields' own over them; the checkbox's a hand.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        match self.hit(p)? {
-            Hit::Name | Hit::Message => Some(ViewerCursor::Text),
-            _ => Some(ViewerCursor::Pointer),
-        }
+        self.controls.cursor_at(p).or_else(|| self.hit(p).map(|_| ViewerCursor::Pointer))
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -540,24 +551,18 @@ impl Viewer for RefDialog {
                 self.give();
             }
             ViewerKey::Escape => self.action = Some(ViewerAction::Close),
-            ViewerKey::Tab if self.is_tag() => {
-                self.field = if self.field == Field::Name { Field::Message } else { Field::Name };
-            }
-            ViewerKey::Left => self.input().move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.input().move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.input().home(reach.extend),
-            ViewerKey::End => self.input().end(reach.extend),
-            ViewerKey::Backspace => self.input().backspace(reach.word),
-            ViewerKey::Delete => self.input().delete(),
-            _ => return false,
+            _ => return self.with_controls(|c, parts| c.key(parts, key, reach)).is_some(),
         }
         true
     }
 
+    /// Read from `&self`: the focused field's own, lent by its place.
     fn selected_text(&self) -> Option<String> {
-        let input = if self.field == Field::Name { &self.name } else { &self.message };
-        let selected = input.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        self.controls.selected_text_with(|i| match i {
+            NAME => Some(&self.name as &dyn Control),
+            MESSAGE => Some(&self.message as &dyn Control),
+            _ => None,
+        })
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -567,20 +572,7 @@ impl Viewer for RefDialog {
                 self.action = Some(ViewerAction::Close);
                 true
             }
-            "select_all" => {
-                self.input().select_all();
-                true
-            }
-            "undo" => self.input().undo(),
-            "redo" => self.input().redo(),
-            "cut" => {
-                let had = !self.input().selected_text().is_empty();
-                if had {
-                    self.input().insert("");
-                }
-                had
-            }
-            _ => false,
+            _ => self.with_controls(|c, parts| c.command(parts, id)).is_some(),
         }
     }
 

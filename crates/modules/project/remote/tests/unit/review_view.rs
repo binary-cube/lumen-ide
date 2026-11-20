@@ -360,3 +360,18 @@ fn while_transferring_the_list_is_locked_and_esc_stops() {
     assert!(view.cancel.load(Ordering::Relaxed), "Esc stops it");
     assert!(view.take_action().is_none(), "the review stays open, to say how it went");
 }
+
+/// The list's scrollbar: its thumb pressed and dragged down scrolls the list.
+#[test]
+fn the_list_scrolls_by_its_thumb() {
+    let mut view = review(Vec::new());
+    let area = Rect::new(0.0, 0.0, 400.0, 200.0);
+    let palette = ui_components::Palette::dark();
+    view.max_scroll = 800.0;
+    view.bar.paint(&mut render_api::Scene::default(), &palette, 1.0, area, 1000.0, 0.0);
+    let edge = area.max_x() - 4.0;
+    assert!(view.click(Point::new(edge, 6.0)).is_none());
+    assert!(view.drag(Point::new(edge, 80.0)), "the thumb followed");
+    assert!(view.scroll > 0.0, "the list scrolled");
+    assert!(view.release());
+}

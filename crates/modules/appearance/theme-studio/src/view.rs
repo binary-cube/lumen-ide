@@ -39,9 +39,11 @@ impl Viewer for Studio {
         self.sliders.clear();
         let b = ctx.bounds;
         ctx.scene.push_layer(Some(b)).quad(Quad::filled(b, ctx.palette.editor_background));
-        let Some(input) = self.input.clone() else { return };
-        let Some(draft) = self.draft.clone() else { return };
-        self.paint_frame(ctx, &input, &draft);
+        if let (Some(input), Some(draft)) = (self.input.clone(), self.draft.clone()) {
+            self.paint_frame(ctx, &input, &draft);
+        }
+        // What the parts want of the frames, for the questions before the next one.
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -60,60 +62,41 @@ impl Viewer for Studio {
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
         self.last_input = Some(std::time::Instant::now());
-        // The settings' scrollbar (when shown).
-        if !self.gallery_open
-            && !self.picker.is_open()
-            && let Some(offset) = self.bar.press(p)
-        {
-            *self.scroll_mut() = offset;
-            return None;
-        }
-        if self.picker.is_open() {
-            if let Some(action) = self.picker.mouse_down(p, &Hex) {
-                self.picker_action(action);
-            } else {
-                self.sync_picker_color();
+        // The parts first: the picker (over everything while open), the settings' scrollbar,
+        // a slider, what an open menu or the gallery lets through, the fields, a handle.
+        match self.with_controls(|c, parts| c.press(parts, p, 1)) {
+            Some((PICKER, _)) => {
+                match self.picker_asked.take() {
+                    Some(action) => self.picker_action(action),
+                    None => self.sync_picker_color(),
+                }
+                // Pressed in the square / on a strip: the preview request waits for the drag
+                // (returning it now would count as the click's action and no drag would start).
+                if self.picker.dragging() {
+                    return None;
+                }
+                return self.pending.take();
             }
-            // Pressed in the square / on a strip: the preview request waits for the drag
-            // (returning it now would count as the click's action and no drag would start).
-            if self.picker.dragging() {
+            // A slider: held (dragged), its stop chosen at once; the keys step it afterwards.
+            // The preview is taken with the drag (returning it now would end it).
+            Some((SLIDERS, _)) => {
+                self.follow_slider();
                 return None;
             }
-            return self.pending.take();
-        }
-        // A slider (where the panel shows it): held (dragged), its stop chosen at once; the
-        // keys step it afterwards.
-        let slider = self.sliders.iter().find(|(a, _)| a.rect.contains(p) && self.list.contains(p));
-        if let Some((area, row)) = slider.cloned() {
-            self.slider_held = Some(row);
-            self.slider_focused = Some(row);
-            self.editing_name = false;
-            self.editing_query = false;
-            self.slide(&area, row, p.x);
-            // The preview is taken with the drag (returning it now would end it).
-            return None;
+            Some((NAME | QUERY, _)) => {
+                self.highlight = None;
+                return self.pending.take();
+            }
+            Some((HANDLE, _)) => {
+                self.focus_part(None);
+                self.highlight = None;
+                return None;
+            }
+            // The scrollbar; a press an open menu closed, or one the gallery didn't let through.
+            Some(_) => return None,
+            None => {}
         }
         let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| h.clone());
-        // A menu open: a click anywhere else closes it.
-        if self.menu_for.is_some() && !matches!(hit, Some(Hit::MenuItem(..)) | Some(Hit::Menu(_))) {
-            self.menu_for = None;
-            return None;
-        }
-        // The gallery open: only its own parts take clicks (it closes by ×, Esc or a choice).
-        if self.gallery_open
-            && !matches!(hit, Some(Hit::Gallery(_)) | Some(Hit::Choice(Row::Add | Row::Preset, _)))
-        {
-            return None;
-        }
-        self.editing_name = hit == Some(Hit::Name);
-        if self.editing_name {
-            self.name.click(p.x);
-        }
-        self.editing_query = matches!(hit, Some(Hit::Search));
-        if self.editing_query {
-            self.query.click(p.x);
-        }
-        self.slider_focused = None;
         if hit.is_some() && !matches!(hit, Some(Hit::Found(_))) {
             self.highlight = None;
         }
@@ -147,10 +130,6 @@ impl Viewer for Studio {
                 self.preview();
             }
             Hit::Fold(i) => self.toggle_layer(i),
-            Hit::Handle(i) => {
-                self.drag = Some(effects::Drag { layer: i, y: p.y });
-                return None;
-            }
             Hit::Toggle(i) => self.toggle_effect(i),
             Hit::Menu(i) => self.menu_for = if self.menu_for == Some(i) { None } else { Some(i) },
             Hit::MenuItem(i, item) => self.menu_item(i, item),
@@ -177,7 +156,7 @@ impl Viewer for Studio {
                     anchor.size.width.min(40.0 * self.scale),
                     anchor.size.height,
                 );
-                self.picker.open(swatch, color, ColorFormat::Hex, &Hex);
+                self.open_picker(swatch, color);
                 self.picking = Some((key, color));
             }
             Hit::ResetToken(key) => self.reset_token(&key),
@@ -185,10 +164,11 @@ impl Viewer for Studio {
             Hit::AddColor(layer, key) => self.change_colors(layer, key, true),
             Hit::DropColor(layer, key) => self.change_colors(layer, key, false),
             Hit::Overlay => self.use_everywhere(),
-            Hit::Name | Hit::Search => {}
+            // The fields' and the handles' presses are their parts'.
+            Hit::Name | Hit::Search | Hit::Handle(_) => {}
             Hit::ClearSearch => {
                 self.query.set_text("");
-                self.editing_query = true;
+                self.focus_part(Some(QUERY));
             }
             Hit::Found(n) => self.jump_to(n),
             Hit::PreviewMoving(moving) => self.preview_still = !moving,
@@ -212,68 +192,55 @@ impl Viewer for Studio {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        if let Some(offset) = self.bar.drag(p) {
-            *self.scroll_mut() = offset;
-            return true;
+        let Some((part, moved)) = self.with_controls(|c, parts| c.drag(parts, p)) else {
+            return false;
+        };
+        match part {
+            PICKER => {
+                if moved {
+                    self.sync_picker_color();
+                }
+                moved
+            }
+            SLIDERS => self.follow_slider(),
+            // The scrollbar's thumb, an effect's card.
+            _ => true,
         }
-        if let Some(drag) = &mut self.drag {
-            drag.y = p.y;
-            return true;
-        }
-        if let Some(row) = self.slider_held {
-            let area = self.sliders.iter().find(|(_, r)| *r == row).map(|(a, _)| a.clone());
-            return area.is_some_and(|area| self.slide(&area, row, p.x));
-        }
-        if self.picker.mouse_drag(p, &Hex) {
-            self.sync_picker_color();
-            return true;
-        }
-        false
     }
 
     fn release(&mut self) -> bool {
-        self.finish_drag()
-            | self.slider_held.take().is_some()
-            | self.picker.mouse_up()
-            | self.bar.release()
+        match self.with_controls(|c, parts| c.release(parts)) {
+            // An effect's card dropped where it is.
+            Some((HANDLE, _)) => self.finish_drag(),
+            Some((_, changed)) => changed,
+            None => false,
+        }
     }
 
-    /// Its scrollbar fading: a frame when it next changes.
+    /// A part fading (the scrollbar): a frame when it next changes.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.bar.next_frame()
+        self.controls.next_frame()
     }
 
     fn hover(&mut self, p: Point) -> bool {
         self.last_input = Some(std::time::Instant::now());
-        if self.picker.is_open() {
-            self.picker.hover(p);
-            return self.picker.over_control(p);
+        let changed = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        // Under the open picker: a redraw over its controls.
+        if self.controls.hovered() == Some(PICKER) {
+            return self.controls.cursor_at(p).is_some();
         }
         self.hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| h.clone());
-        let bar = !self.gallery_open && self.bar.hover(p);
-        bar || self.hover.as_ref().is_some_and(|h| !matches!(h, Hit::Name | Hit::Search))
+        changed || self.hover.as_ref().is_some_and(|h| !matches!(h, Hit::Name | Hit::Search))
     }
 
     fn wants_text(&self) -> bool {
-        self.editing_name || self.editing_query || self.picker.is_open()
+        self.editing_name() || self.editing_query() || self.picker.is_open()
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        if self.picker.is_open() {
-            self.picker.type_text(typed, &Hex);
-            self.sync_picker_color();
-            return true;
-        }
-        if self.editing_name {
-            self.name.insert(typed);
-            return true;
-        }
-        if self.editing_query {
-            self.query.insert(typed);
-            *self.scroll_mut() = 0.0;
-            return true;
-        }
-        false
+        let took = self.with_controls(|c, parts| c.text(parts, typed));
+        self.follow_keys();
+        took.is_some()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -281,75 +248,31 @@ impl Viewer for Studio {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if self.picker.is_open() {
-            match key {
-                ViewerKey::Escape => self.picker_action(PickerAction::Cancel),
-                ViewerKey::Enter => {
-                    if let Some(action) = self.picker.confirm() {
-                        self.picker_action(action);
-                    }
-                }
-                ViewerKey::Backspace => {
-                    self.picker.backspace(&Hex);
-                    self.sync_picker_color();
-                }
-                ViewerKey::Left => self.picker.move_cursor(false, false),
-                ViewerKey::Right => self.picker.move_cursor(true, false),
-                _ => return false,
+        // Tab isn't the studio's (no part moves on with it).
+        if key == ViewerKey::Tab {
+            return false;
+        }
+        // The part with the keys: the picker, a field, the slider pressed last.
+        if let Some(part) = self.with_controls(|c, parts| c.key(parts, key, reach)) {
+            if part == SLIDERS {
+                return self.follow_slider();
             }
+            self.follow_keys();
             return true;
         }
-        if self.editing_name {
-            match key {
-                ViewerKey::Backspace => self.name.backspace(false),
-                ViewerKey::Left => self.name.move_left(false, false),
-                ViewerKey::Right => self.name.move_right(false, false),
-                ViewerKey::Enter | ViewerKey::Escape => self.editing_name = false,
-                _ => return false,
-            }
+        if key != ViewerKey::Escape {
+            return false;
+        }
+        if self.menu_for.take().is_some() {
             return true;
         }
-        if self.editing_query {
-            match key {
-                ViewerKey::Backspace => self.query.backspace(false),
-                ViewerKey::Left => self.query.move_left(false, false),
-                ViewerKey::Right => self.query.move_right(false, false),
-                // Enter: the first found shown.
-                ViewerKey::Enter => self.jump_to(0),
-                ViewerKey::Escape => {
-                    self.query.set_text("");
-                    self.editing_query = false;
-                }
-                _ => return false,
-            }
-            return true;
-        }
-        if key == ViewerKey::Escape && self.menu_for.take().is_some() {
-            return true;
-        }
-        if key == ViewerKey::Escape && self.gallery_open {
+        if self.gallery_open {
             self.close_gallery();
             return true;
         }
-        // The slider clicked last: the arrows step it (Shift: a bigger step).
-        if let Some(row) = self.slider_focused {
-            let delta = match key {
-                ViewerKey::Left | ViewerKey::Down => -1,
-                ViewerKey::Right | ViewerKey::Up => 1,
-                ViewerKey::Escape => {
-                    self.slider_focused = None;
-                    return true;
-                }
-                _ => return false,
-            };
-            let Some(draft) = &self.draft else { return false };
-            let next = ui_components::form::stepped(
-                row.current(draft),
-                row.stops(draft),
-                delta,
-                reach.extend,
-            );
-            self.set_stop(row, next);
+        // The slider pressed last lets go of the keys.
+        if self.focused_part() == Some(SLIDERS) {
+            self.focus_part(None);
             return true;
         }
         false
@@ -374,7 +297,7 @@ impl Viewer for Studio {
                 None => (query, false),
             };
             self.query.set_text(query);
-            self.editing_query = true;
+            self.focus_part(Some(QUERY));
             if go {
                 self.jump_to(0);
             }
@@ -408,17 +331,20 @@ impl Viewer for Studio {
             return true;
         }
         if id == "search" || id == "find" {
-            self.editing_query = true;
-            self.editing_name = false;
+            self.focus_part(Some(QUERY));
             self.query.select_all();
             return true;
         }
-        if id == "select_all" && (self.editing_name || self.editing_query) {
-            if self.editing_name {
-                self.name.select_all();
-            } else {
-                self.query.select_all();
-            }
+        let picking = self.picker.is_open();
+        // ⌘A in the field with the keys; under the open picker (it takes no edit command),
+        // the field's that has the focus there.
+        let taken = self.with_controls(|c, parts| {
+            c.command(parts, id).or_else(|| {
+                let under = c.focused().filter(|_| picking)?;
+                parts.get_mut(under)?.command(id).then_some(under)
+            })
+        });
+        if taken.is_some() {
             return true;
         }
         // The color picked with the screen eyedropper (`#rrggbb`).
@@ -448,5 +374,43 @@ impl Viewer for Studio {
     fn purge(&mut self) {
         self.live = None;
         self.gallery_painters.clear();
+    }
+}
+
+impl Studio {
+    /// What a key or a text in a part asked: the picker's color applied, given up or
+    /// changed; a field let go, the search's first result shown, its results from the top.
+    fn follow_keys(&mut self) {
+        if let Some(action) = self.picker_asked.take() {
+            self.picker_action(action);
+        }
+        if std::mem::take(&mut self.picker_recolored) {
+            self.sync_picker_color();
+        }
+        if self.name_asked.take() == Some(parts::FieldAsk::Leave) {
+            self.leave(NAME);
+        }
+        match self.query_asked.take() {
+            Some(parts::FieldAsk::Leave) => self.leave(QUERY),
+            Some(parts::FieldAsk::Jump) => self.jump_to(0),
+            Some(parts::FieldAsk::Searched) => *self.scroll_mut() = 0.0,
+            None => {}
+        }
+    }
+
+    /// What a slider asked: its stop at the pointer (`true` if it changed), or a step from
+    /// the keys (`false` with nothing to step).
+    fn follow_slider(&mut self) -> bool {
+        match self.slider_asked.take() {
+            Some(parts::SliderAsk::Slide(area, row, x)) => self.slide(&area, row, x),
+            Some(parts::SliderAsk::Step(row, delta, big)) => {
+                let Some(draft) = &self.draft else { return false };
+                let next =
+                    ui_components::form::stepped(row.current(draft), row.stops(draft), delta, big);
+                self.set_stop(row, next);
+                true
+            }
+            None => false,
+        }
     }
 }

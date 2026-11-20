@@ -57,3 +57,56 @@ fn applying_drops_it_after_only_when_asked() {
     assert!(d.closed());
     assert!(repo.stashes().is_empty(), "popped");
 }
+
+/// Paints the dialog in a modal's room.
+fn paint(d: &mut StashDialog) {
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    d.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 560.0, 300.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+}
+
+/// A press in the message's field and a drag select what it covers; a drag after a press
+/// on an option selects nothing.
+#[test]
+fn a_drag_in_the_message_selects_it() {
+    let mut d = pushing(true, Vec::new());
+    d.paste("a message to select");
+    paint(&mut d);
+    let (field, _) = *d.hits.iter().find(|(_, h)| *h == Hit::Message).unwrap();
+    let mid = field.min_y() + field.size.height / 2.0;
+    let (keep, _) = *d.hits.iter().find(|(_, h)| *h == Hit::KeepIndex).unwrap();
+    d.press(Point::new(keep.min_x() + 4.0, keep.min_y() + 4.0), 1);
+    d.drag(Point::new(field.min_x() + 4.0, mid));
+    d.release();
+    assert!(d.keep_index && d.selected_text().is_none(), "the option ticked, nothing selected");
+    d.press(Point::new(field.max_x() - 4.0, mid), 1);
+    assert!(d.drag(Point::new(field.min_x() + 4.0, mid)));
+    d.release();
+    assert_eq!(d.selected_text().as_deref(), Some("a message to select"));
+}
+
+/// The message's field has the keys from the start and keeps them through a press on an
+/// option: the keys and the text typed after it still edit the message.
+#[test]
+fn the_message_keeps_the_keys_through_a_press_on_an_option() {
+    let mut d = pushing(true, Vec::new());
+    assert_eq!(d.controls.focused(), Some(0));
+    paint(&mut d);
+    let (keep, _) = *d.hits.iter().find(|(_, h)| *h == Hit::KeepIndex).unwrap();
+    d.press(Point::new(keep.min_x() + 4.0, keep.min_y() + 4.0), 1);
+    assert_eq!(d.controls.focused(), Some(0), "the field kept the keys");
+    assert!(d.text_input("wip"));
+    assert!(d.edit_key(ViewerKey::Backspace));
+    assert!(!d.edit_key(ViewerKey::Tab), "one field: Tab is no move");
+    assert_eq!(d.message.text(), "wi");
+}

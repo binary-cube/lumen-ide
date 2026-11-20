@@ -8,6 +8,7 @@ pub use ui_components::Painter;
 pub use ui_components::backdrop::{self, BackdropStyle};
 pub use ui_components::card_preview::{self, CardPreview};
 pub use ui_components::chart;
+pub use ui_components::control;
 pub use ui_components::data_grid;
 pub use ui_components::decorations;
 pub use ui_components::ds;

@@ -34,6 +34,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Task Manager",
     description: "What each part of the app costs (CPU, memory, GPU), sortable and filterable, with the last minute in small graphs",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "cpu", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 /// Opens the Task Manager (or brings its tab to the front).

@@ -12,12 +12,13 @@ use refactor::application::{RenameContext, plan_rename};
 use refactor::{Certainty, Plan};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls};
 use ui_components::ds::{self, Ctx, Tone, radius};
 use ui_components::{Viewer, ViewerAction, ViewerKey, ViewerPaint};
 use ui_kit::draw_text;
 
 use crate::page::{MIN_LIST, PageScroll};
-use crate::plan_list::PlanList;
+use crate::plan_list::{Places, PlanList};
 
 /// The extension of the view's virtual tab.
 pub const EXTENSION: &str = "view-usages";
@@ -36,6 +37,10 @@ pub struct UsagesView {
     cancel: Arc<AtomicBool>,
     list: PlanList,
     page: PageScroll,
+    /// Its controls' state of use (see [`UsagesView::with_controls`]).
+    controls: Controls,
+    /// What a press on the places decided, taken by the click.
+    clicked: Option<ViewerAction>,
     action: Option<ViewerAction>,
     close: Rect,
     close_hovered: bool,
@@ -113,6 +118,17 @@ impl UsagesView {
         });
         self.finding = Some(rx);
     }
+
+    /// Its controls (the page's scrollbar, the places), the topmost first.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut places =
+            Places { list: &mut self.list, plan: self.plan.as_mut(), clicked: &mut self.clicked };
+        let mut parts: [&mut dyn Control; 2] = [&mut self.page, &mut places];
+        f(&mut self.controls, &mut parts)
+    }
 }
 
 impl Viewer for UsagesView {
@@ -155,21 +171,22 @@ impl Viewer for UsagesView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // The page's scrollbar; nothing under the keys.
-        if self.page.press(p) || !self.page.contains(p) {
+        // Nothing under the keys.
+        if !self.page.contains(p) {
             return None;
         }
-        if self.close.contains(p) {
-            return Some(ViewerAction::Close);
+        // The page's scrollbar, a place.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            return self.clicked.take();
         }
-        self.list.click(self.plan.as_mut()?, p)
+        self.close.contains(p).then_some(ViewerAction::Close)
     }
 
     fn hover(&mut self, p: Point) -> bool {
         let close = self.close.contains(p);
         let changed = close != self.close_hovered;
         self.close_hovered = close;
-        self.list.hover(p) | self.page.hover(p) | changed
+        self.with_controls(|c, parts| c.hover(parts, Some(p))) | changed
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -177,11 +194,11 @@ impl Viewer for UsagesView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.page.drag(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.page.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {

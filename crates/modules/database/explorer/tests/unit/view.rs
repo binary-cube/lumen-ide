@@ -521,6 +521,8 @@ fn a_narrow_view_keeps_its_header_and_toolbar_apart_and_says_what_each_button_do
     let grid = view.grid.as_ref().unwrap();
     assert!(!grid.collapsed_tools().is_empty());
     let more = grid.tool_area(Tool::More).expect("the … shown");
+    // The grid's tooltip is where the mouse is.
+    view.hover(mid(more));
     let tip = view.tooltip_at(mid(more)).expect("its tooltip");
     assert!(!tip.label.is_empty());
     // The header: Data / Structure and the list's tables have theirs.
@@ -774,4 +776,156 @@ fn a_file_s_size_is_known_before_a_table_is_clicked() {
     view.select(0);
     assert_eq!(view.file_bytes, Some(len));
     let _ = std::fs::remove_file(&path);
+}
+
+/// A store with many tables, the first of them with many columns (both lists scroll).
+fn tall_store(name: &str) -> PathBuf {
+    let path = temp_store(name);
+    let factory = database::drivers::find("sqlite").unwrap();
+    let target =
+        database::Target { database: path.to_string_lossy().into_owned(), ..Default::default() };
+    let mut session = (factory.create)().connect(&target, &database::Secret::new("")).unwrap();
+    let columns: Vec<String> = (0..60).map(|i| format!("c{i} TEXT")).collect();
+    let mut sqls =
+        vec![format!("CREATE TABLE aaa_wide (id INTEGER PRIMARY KEY, {})", columns.join(", "))];
+    sqls.extend((0..60).map(|i| format!("CREATE TABLE t{i:02} (id INTEGER PRIMARY KEY)")));
+    sqls.push("INSERT INTO aaa_wide (id) VALUES (1)".into());
+    for sql in sqls {
+        session
+            .execute(&sql, &mut database::Collect::default(), &database::Cancel::default())
+            .unwrap();
+    }
+    path
+}
+
+/// The topmost point of `bar` in `area`.
+fn bar_in(area: kernel::Rect, bar: &ui_components::EdgeScrollbar) -> Option<Point> {
+    (area.min_y() as u32..area.max_y() as u32)
+        .flat_map(|y| (area.min_x() as u32..area.max_x() as u32 + 1).map(move |x| (x, y)))
+        .map(|(x, y)| Point::new(x as f32, y as f32))
+        .find(|p| bar.contains(*p))
+}
+
+/// The tables' list and the structure scroll by their thumbs: shown by a scroll, pressed
+/// and dragged down, each moves (no table chosen, nothing else moved).
+#[test]
+fn the_list_s_and_the_structure_s_thumbs_are_dragged() {
+    let path = tall_store("thumbs");
+    let mut view = DataView::new(path.clone(), sqlite_files());
+    view.start();
+    assert!(until(&mut view, |v| !v.tables_loading));
+    show(&mut view, "aaa_wide");
+    paint_at(&mut view, 1200.0);
+    // The list: a scroll shows its bar (hidden at rest).
+    let list = view.list_area;
+    view.hover(mid(list));
+    assert!(view.scroll(0.0, 1.0));
+    paint_at(&mut view, 1200.0);
+    let selected = view.selected;
+    let on = bar_in(list, &view.list_bar).expect("the list's bar");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    assert_eq!(view.pointer_down(at, 1, PressMods::default()), None);
+    let pressed = view.list_scroll;
+    assert!(view.drag(Point::new(at.x, at.y + 60.0)));
+    assert!(view.list_scroll > pressed, "the list moved");
+    assert!(view.release());
+    assert_eq!(view.selected, selected, "no table chosen");
+    // The structure: its tab, a scroll over it shows its bar.
+    view.tab = Tab::Structure;
+    paint_at(&mut view, 1200.0);
+    let area = view.structure_area;
+    view.hover(mid(area));
+    assert!(view.scroll(0.0, 1.0));
+    paint_at(&mut view, 1200.0);
+    let on = bar_in(area, &view.structure_bar).expect("the structure's bar");
+    let at = Point::new(on.x + 1.0, on.y + 2.0);
+    let list_scroll = view.list_scroll;
+    assert_eq!(view.pointer_down(at, 1, PressMods::default()), None);
+    let pressed = view.structure_scroll;
+    assert!(view.drag(Point::new(at.x, at.y + 60.0)));
+    assert!(view.structure_scroll > pressed, "the structure moved");
+    assert!(view.release());
+    assert_eq!(view.list_scroll, list_scroll);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+/// The view's parts take the pointer through its controls: the wheel over the tables'
+/// list moves it (over the grid it doesn't), a press on the grid's cells reaches the grid
+/// with its modifiers (⇧ extends the choice), and on the Structure tab the grid takes none.
+#[test]
+fn the_list_and_the_grid_take_the_pointer_through_the_controls() {
+    let path = temp_store("controls");
+    let mut view = DataView::new(path, sqlite_files());
+    view.start();
+    assert!(until(&mut view, |v| !v.tables_loading));
+    show(&mut view, "users");
+    paint_at(&mut view, 1400.0);
+    let list = view.list_area;
+    // Three tables fit: never past the list's end.
+    view.hover(mid(list));
+    view.scroll(0.0, 30.0);
+    assert_eq!(view.list_scroll, 0.0, "nothing to scroll");
+    // As with many tables: the list has room to scroll.
+    view.list_max = 100.0;
+    assert!(view.scroll(0.0, 30.0));
+    assert_eq!(view.list_scroll, 30.0);
+    let grid = ui_components::control::Control::area(view.grid.as_ref().unwrap()).unwrap();
+    view.hover(mid(grid));
+    view.scroll(0.0, 30.0);
+    assert_eq!(view.list_scroll, 30.0, "the grid's wheel, not the list's");
+    // A cell (under the grid's tools and header), then ⇧ on the row under it.
+    let x = grid.min_x() + 120.0;
+    let first = (0..400)
+        .map(|dy| kernel::Point::new(x, grid.min_y() + dy as f32))
+        .find(|p| {
+            view.pointer_down(*p, 1, PressMods::default());
+            view.release();
+            view.grid.as_ref().unwrap().selection().count() == 1
+        })
+        .expect("a cell of the grid");
+    let below = kernel::Point::new(x, first.y + 40.0);
+    let shift = PressMods { shift: true, ..PressMods::default() };
+    view.pointer_down(below, 1, shift);
+    view.release();
+    assert!(view.grid.as_ref().unwrap().selection().count() > 1, "⇧ extends the choice");
+    // The structure shown: the grid's place takes no press.
+    assert!(view.command("structure"));
+    view.pointer_down(first, 1, PressMods::default());
+    view.release();
+    assert!(view.grid.as_ref().unwrap().selection().count() > 1, "the grid untouched");
+}
+
+/// The grid has the keys without a press, through the view's controls: ↓ moves its
+/// choice, what it has chosen is the copy's (none while the structure is shown); the wheel
+/// over the tables' list is the list's even at its top, never the grid's under it.
+#[test]
+fn the_grid_has_the_keys_and_the_list_keeps_its_wheel_through_the_controls() {
+    let path = temp_store("keys");
+    let mut view = DataView::new(path.clone(), sqlite_files());
+    view.start();
+    assert!(until(&mut view, |v| !v.tables_loading));
+    show(&mut view, "users");
+    paint_at(&mut view, 1400.0);
+    let list = view.list_area;
+    view.hover(mid(list));
+    assert!(view.scroll(0.0, -30.0), "at its top, the wheel is still the list's");
+    assert_eq!(view.list_scroll, 0.0);
+    let grid = ui_components::control::Control::area(view.grid.as_ref().unwrap()).unwrap();
+    let x = grid.min_x() + 120.0;
+    (0..400)
+        .map(|dy| kernel::Point::new(x, grid.min_y() + dy as f32))
+        .find(|p| {
+            view.pointer_down(*p, 1, PressMods::default());
+            view.release();
+            view.grid.as_ref().unwrap().selection().count() == 1
+        })
+        .expect("a cell of the grid");
+    let first = view.selected_text();
+    assert!(first.is_some(), "the chosen cell is the copy's");
+    assert!(view.edit_key(ViewerKey::Down), "↓ moves in the grid");
+    assert_ne!(view.selected_text(), first, "another cell chosen");
+    assert!(view.command("structure"));
+    assert!(view.selected_text().is_none(), "the structure shown: nothing of the grid's");
+    assert!(!view.edit_key(ViewerKey::Down));
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
 }

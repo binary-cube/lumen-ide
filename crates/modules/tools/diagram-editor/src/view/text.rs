@@ -5,10 +5,12 @@
 //! step of the history, nothing if it didn't change.
 
 use kernel::{Point, Rect};
+use ui_components::control::{Control, Press};
 use ui_components::ds::Ctx;
-use ui_components::{KeyReach, MultilineField, MultilineSpec, ViewerKey};
+use ui_components::{KeyReach, MultilineField, MultilineSpec, PressMods, ViewerKey};
 
 use super::DiagramView;
+use super::parts::Asked;
 use crate::label;
 
 /// A text being edited.
@@ -125,34 +127,6 @@ impl DiagramView {
         true
     }
 
-    /// A key while editing: the field's (Esc ends it). `true`: used.
-    pub(super) fn text_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let (word, extend) = (reach.word, reach.extend);
-        let Some(e) = self.editing.as_mut() else { return false };
-        let f = &mut e.field;
-        match key {
-            ViewerKey::Escape => return self.end_text(),
-            ViewerKey::Backspace => f.backspace(word),
-            ViewerKey::Delete => f.delete(),
-            ViewerKey::Left => f.left(word, extend),
-            ViewerKey::Right => f.right(word, extend),
-            ViewerKey::Up => f.vertical(false, extend),
-            ViewerKey::Down => f.vertical(true, extend),
-            ViewerKey::Home => f.home(word, extend),
-            ViewerKey::End => f.end(word, extend),
-            ViewerKey::Enter => f.newline(),
-            _ => return false,
-        }
-        true
-    }
-
-    /// Typed text while editing.
-    pub(super) fn text_typed(&mut self, typed: &str) -> bool {
-        let Some(e) = self.editing.as_mut() else { return false };
-        e.field.insert(typed);
-        true
-    }
-
     /// A text made at diagram point `at` (centered, on the grid), its field opened with its
     /// placeholder chosen (typing replaces it).
     pub(super) fn new_text_at(&mut self, at: Point) -> bool {
@@ -189,28 +163,6 @@ impl DiagramView {
         true
     }
 
-    /// A press while editing: in the field, its; outside, the editing ends. `true`: the
-    /// field took it.
-    pub(super) fn text_press(&mut self, p: Point, clicks: u32, extend: bool) -> bool {
-        let Some(e) = self.editing.as_mut() else { return false };
-        if e.drawn.contains(p) {
-            e.field.press(p, clicks, extend);
-            return true;
-        }
-        self.end_text();
-        false
-    }
-
-    pub(super) fn text_field(&mut self) -> Option<&mut MultilineField> {
-        self.editing.as_mut().map(|e| &mut e.field)
-    }
-
-    pub(super) fn text_selected(&self) -> Option<String> {
-        let e = self.editing.as_ref()?;
-        let s = e.field.selected_text();
-        (!s.is_empty()).then(|| s.to_owned())
-    }
-
     /// The field over its cell (at least wide and tall enough to type in).
     pub(super) fn paint_text_field(
         &mut self,
@@ -244,17 +196,90 @@ impl DiagramView {
     }
 }
 
+/// The text being edited as a control: a press in its field puts the caret (⇧ extends, two
+/// a word, three a line) and a drag selects; it has the keys, the typing and the edit
+/// commands while it's open (Tab included: nothing moves the focus away); Esc, or the focus
+/// gone (a press anywhere else), asks the view to end it.
+pub(super) struct TextPart<'a> {
+    pub(super) editing: Option<&'a mut Editing>,
+    pub(super) asked: &'a mut Option<Asked>,
+}
+
+impl Editing {
+    /// Its field, as a control read from `&self` (its selection).
+    pub(super) fn field_control(&self) -> &dyn Control {
+        &self.field
+    }
+}
+
+#[cfg(test)]
+impl DiagramView {
+    /// The text edited in place: what it has selected.
+    pub(super) fn text_selected(&self) -> Option<String> {
+        Control::selected_text(&self.editing.as_ref()?.field)
+    }
+}
+
+impl TextPart<'_> {
+    fn field(&mut self) -> Option<&mut MultilineField> {
+        self.editing.as_mut().map(|e| &mut e.field)
+    }
+}
+
+impl Control for TextPart<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.editing.as_ref().is_some_and(|e| e.drawn.contains(p))
+    }
+
+    fn press_with(&mut self, p: Point, clicks: u32, mods: PressMods) -> Press {
+        let Some(field) = self.field() else { return Press::Ignored };
+        field.press(p, clicks, mods.shift);
+        Press::Held
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.field().is_some_and(|f| f.drag(p))
+    }
+
+    fn release(&mut self) -> bool {
+        self.field().is_some_and(MultilineField::release)
+    }
+
+    fn focusable(&self) -> bool {
+        self.editing.is_some()
+    }
+
+    fn set_focus(&mut self, focused: bool) {
+        if !focused && self.editing.is_some() {
+            *self.asked = Some(Asked::EndText);
+        }
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        if key == ViewerKey::Escape && self.editing.is_some() {
+            *self.asked = Some(Asked::EndText);
+            return true;
+        }
+        self.field().is_some_and(|f| Control::key(f, key, reach))
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.field().is_some_and(|f| Control::text(f, typed))
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        self.editing.as_ref().and_then(|e| Control::selected_text(&e.field))
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        self.field().is_some_and(|f| Control::command(f, id))
+    }
+}
+
 #[cfg(test)]
 #[path = "../../tests/unit/view_text.rs"]
 mod tests;
-
-impl DiagramView {
-    /// One of the small fields with the keys: a number typed in the panel, the palette's
-    /// search.
-    pub(super) fn small_field(&mut self) -> Option<&mut ui_kit::TextInput> {
-        if let Some((_, input)) = self.props.typing.as_mut() {
-            return Some(input);
-        }
-        self.palette.searching.then_some(&mut self.palette.search)
-    }
-}

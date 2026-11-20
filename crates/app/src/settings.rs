@@ -216,19 +216,15 @@ pub const MODULES_DISABLED: Setting<Vec<String>> = Setting::new("modules", "disa
 /// the next start.
 pub const MODULES_HIDDEN: Setting<Vec<String>> = Setting::new("modules", "hidden", Vec::new);
 
-/// The modules [`HIDDEN_BY_DEFAULT`] the user showed again (`[modules] shown`).
+/// The modules hidden by default (their manifest says so) the user showed again
+/// (`[modules] shown`).
 pub const MODULES_SHOWN: Setting<Vec<String>> = Setting::new("modules", "shown", Vec::new);
-
-/// The modules hidden until the user shows them (feature flags: work put aside for now,
-/// its code kept). Our own diagram editor: draw.io opens the `.drawio` files meanwhile
-/// (docs/plan/82). An id here never changes (it's what `[modules] shown` names).
-pub const HIDDEN_BY_DEFAULT: &[&str] = &["tool.diagram-editor"];
 
 /// Whether module `id` runs hidden, as the settings say: hidden by the user, or by default
 /// and not shown again.
 pub fn module_hidden(settings: &settings_model::SettingsService, id: &str) -> bool {
     settings.get(&MODULES_HIDDEN).iter().any(|h| h == id)
-        || (HIDDEN_BY_DEFAULT.contains(&id)
+        || (crate::modules::hidden_by_default(id)
             && !settings.get(&MODULES_SHOWN).iter().any(|s| s == id))
 }
 

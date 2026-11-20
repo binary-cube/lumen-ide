@@ -2,6 +2,7 @@
 //! each frame.
 
 use super::*;
+use ui_components::KeyReach;
 
 impl Viewer for Canvas {
     fn set_data(&mut self, data: &dyn std::any::Any) {
@@ -41,51 +42,16 @@ impl Viewer for Canvas {
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
-        if let Some(search) = &mut self.search {
-            let catalog = self.graph.as_ref().map(|g| g.catalog.as_slice()).unwrap_or(&[]);
-            search.insert(typed, catalog);
-            return true;
-        }
-        if let Some(edit) = &mut self.editing {
-            edit.insert(typed);
-            self.relayout();
-            return true;
-        }
-        false
+        let took = self.with_controls(|c, parts| c.text(parts, typed));
+        self.follow_keys();
+        took.is_some()
     }
 
+    /// The search's keys while it's open, else the edited code's.
     fn edit_key(&mut self, key: ViewerKey) -> bool {
-        if let Some(search) = &mut self.search {
-            match key {
-                ViewerKey::Escape => self.search = None,
-                ViewerKey::Backspace => {
-                    let catalog = self.graph.as_ref().map(|g| g.catalog.as_slice()).unwrap_or(&[]);
-                    search.backspace(catalog);
-                }
-                ViewerKey::Left | ViewerKey::Right | ViewerKey::Home | ViewerKey::End => {
-                    search.all = false;
-                }
-                ViewerKey::Up => search.step(-1),
-                ViewerKey::Down | ViewerKey::Tab => search.step(1),
-                ViewerKey::Enter => {
-                    let i = search.results.get(search.selected).copied();
-                    self.pending = i.and_then(|i| self.jump(i));
-                    self.search = None;
-                }
-                _ => return false,
-            }
-            return true;
-        }
-        if let Some(edit) = &mut self.editing {
-            if key == ViewerKey::Escape {
-                self.finish_edit();
-                return true;
-            }
-            let used = edit.key(key);
-            self.relayout();
-            return used;
-        }
-        false
+        let used = self.with_controls(|c, parts| c.key(parts, key, KeyReach::default()));
+        self.follow_keys();
+        used.is_some()
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -93,14 +59,8 @@ impl Viewer for Canvas {
             return used;
         }
         // ⌘A in search: selects all text.
-        if id == "select_all" {
-            return match &mut self.search {
-                Some(search) => {
-                    search.all = !search.query.is_empty();
-                    true
-                }
-                None => false,
-            };
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
+            return true;
         }
         // `edit`: editing the selected declaration (like a click in its code).
         if id == "edit"

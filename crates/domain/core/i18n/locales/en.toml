@@ -5747,6 +5747,7 @@ paused_count = "{shown} lines, paused · {new} new"
 off = "The log is off: nothing is written to disk (Settings → Log)."
 
 [profiler]
+system_workers = "the system's (GPU driver, frames)"
 more_rows = "{count, plural, one {# more row} other {# more rows}}"
 no_folder = "there's no folder for the app's data"
 already = "another recording is under way"

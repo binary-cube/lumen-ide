@@ -32,6 +32,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Claude Code",
     description: "Claude Code as an agent the editor hosts: its sessions listed, started and taken up again",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "sparkles", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

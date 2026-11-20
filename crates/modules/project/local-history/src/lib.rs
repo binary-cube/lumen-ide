@@ -43,6 +43,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Local History",
     description: "A version of every file kept on each save, compared or brought back — no git needed",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "clock", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 pub const SHOW_HISTORY: CommandId = CommandId("history.show");

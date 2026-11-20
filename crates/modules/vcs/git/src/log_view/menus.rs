@@ -38,7 +38,7 @@ impl LogView {
             }
             Hit::Files => {
                 let i = self.tree.file_at(p)?;
-                self.files_focus = true;
+                self.focus_files();
                 Some(self.file_menu(i))
             }
             Hit::Branch(i) => {

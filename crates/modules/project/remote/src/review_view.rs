@@ -22,6 +22,7 @@ use remote::application::{
 use remote::{RemoteError, content_hash};
 use render_api::Quad;
 use text_layout::Font;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Check, Ctx, Tone, radius};
 use ui_components::{
     Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint, ViewerProvider,
@@ -127,6 +128,8 @@ pub struct TransferReview {
     scroll: f32,
     max_scroll: f32,
     bar: ui_components::EdgeScrollbar,
+    /// Its controls' state of use (see [`TransferReview::with_controls`]).
+    controls: Controls,
     /// The highlighted row last scrolled into sight.
     shown: Option<usize>,
     hits: Vec<(Rect, Hit)>,
@@ -150,6 +153,7 @@ impl Default for TransferReview {
             scroll: 0.0,
             max_scroll: 0.0,
             bar: Default::default(),
+            controls: Controls::default(),
             shown: None,
             hits: Vec::new(),
             hover: None,
@@ -258,6 +262,16 @@ fn compare_with_server(
 }
 
 impl TransferReview {
+    /// Its controls (the list's scrollbar), with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut list = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut parts: [&mut dyn Control; 1] = [&mut list];
+        f(&mut self.controls, &mut parts)
+    }
+
     fn wake(&self) -> impl Fn() + Send + Sync + 'static {
         let waker = self.waker.clone();
         move || {
@@ -552,8 +566,8 @@ impl Viewer for TransferReview {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
+        // Its controls first: the scrollbar's thumb is held or jumped to.
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
             return None;
         }
         let hit = self.hit(p)?;
@@ -594,18 +608,15 @@ impl Viewer for TransferReview {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != self.scroll;
-        self.scroll = offset;
-        changed
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let bar = self.bar.hover(p);
+        let bar = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         // While transferring, only the stop lights up.
         let hover = self.hit(p).filter(|h| self.phase != Phase::Applying || *h == Hit::Stop);
         let changed = hover != self.hover;

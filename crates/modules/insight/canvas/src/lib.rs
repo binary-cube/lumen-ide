@@ -15,6 +15,7 @@
 
 mod edit;
 mod graph;
+mod keys;
 mod layout;
 mod search;
 
@@ -55,6 +56,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "Canvas",
     description: "The dependency graph between files, classes and functions, with their code",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "graph", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]
@@ -268,6 +270,13 @@ struct Canvas {
     offsets: HashMap<CardKind, Point>,
     search: Option<search::Search>,
     editing: Option<edit::CodeEdit>,
+    /// What the keys asked (see [`keys`]): a search result to jump to, the cards laid out
+    /// again, the edit ended.
+    search_chosen: Option<Option<usize>>,
+    edit_relaid: bool,
+    edit_finished: bool,
+    /// Its controls' state of use (see [`Canvas::with_controls`]).
+    controls: ui_components::control::Controls,
     /// Action produced by keys, picked up by the app.
     pending: Option<ViewerAction>,
     /// Builds its graphs.
@@ -297,6 +306,10 @@ impl Default for Canvas {
             offsets: HashMap::new(),
             search: None,
             editing: None,
+            search_chosen: None,
+            edit_relaid: false,
+            edit_finished: false,
+            controls: ui_components::control::Controls::default(),
             pending: None,
             builder: graph::Builder::default(),
             rebuild: None,
@@ -416,6 +429,46 @@ impl Canvas {
         self.graph = Some(Arc::clone(graph));
         self.relayout();
         self.fit_pending = true;
+    }
+
+    /// What takes its keys (the search while open, else the code being edited), the first
+    /// open one with the focus.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(
+            &mut ui_components::control::Controls,
+            &mut [&mut dyn ui_components::control::Control],
+        ) -> R,
+    ) -> R {
+        let catalog = self.graph.as_ref().map(|g| g.catalog.as_slice()).unwrap_or(&[]);
+        let mut search =
+            keys::SearchPart { search: &mut self.search, catalog, chosen: &mut self.search_chosen };
+        let mut code = keys::EditPart {
+            editing: &mut self.editing,
+            relaid: &mut self.edit_relaid,
+            finished: &mut self.edit_finished,
+        };
+        let mut parts: [&mut dyn ui_components::control::Control; 2] = [&mut search, &mut code];
+        let open = parts.iter().position(|c| c.focusable());
+        if self.controls.focused() != open {
+            self.controls.focus(&mut parts, open);
+        }
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// What a key or a text asked: the search's result jumped to (the search closed), the
+    /// cards laid out again, the edit ended.
+    fn follow_keys(&mut self) {
+        if let Some(chosen) = self.search_chosen.take() {
+            self.pending = chosen.and_then(|i| self.jump(i));
+            self.search = None;
+        }
+        if std::mem::take(&mut self.edit_relaid) {
+            self.relayout();
+        }
+        if std::mem::take(&mut self.edit_finished) {
+            self.finish_edit();
+        }
     }
 
     /// Ends editing: the new text (if changed) becomes an action for the app.

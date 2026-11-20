@@ -46,19 +46,12 @@ impl Workbench {
         primary: bool,
         clicks: u32,
     ) -> MouseResult {
-        self.param_hint.hide();
         self.drag_unit = None;
         self.tooltips.hide();
-        // A click on the code hover card stays there (the editor below doesn't move); on
-        // its scrollbar, the content follows the thumb (a drag goes on).
-        if self.code_hover.scrollbar_press(p) {
-            return MouseResult::StartDrag;
-        }
-        if self.code_hover.contains(p) {
-            return MouseResult::None;
-        }
-        self.code_hover.hide();
-        // A notification's card takes the click on it, over everything (modals too).
+        // What goes when the mouse presses elsewhere goes (the editor's cards); a floating
+        // window under the mouse (the hover card, a notification, the completion list)
+        // takes the click on it, over everything (modals too).
+        self.elsewhere(p, true);
         if let Some(o) = self.floating_at(p) {
             return o.slot().click(self, text, p, clicks);
         }
@@ -84,39 +77,13 @@ impl Workbench {
         if let Some(changed) = self.drag_picker(p) {
             return changed;
         }
-        if let Some(changed) = self.drag_menu_drawer(p) {
+        // A window over the editor holding a press of its own (a thumb, a slider, a view's
+        // drag): each says, the app names none.
+        if let Some(changed) = Overlay::ALL.into_iter().find_map(|o| o.slot().drag(self, text, p)) {
             return changed;
-        }
-        if self.completion.scrollbar_held() {
-            return self.completion.scrollbar_drag(p);
-        }
-        if self.code_hover.scrollbar_held() {
-            return self.code_hover.scrollbar_drag(p);
-        }
-        if self.dialogs.dialog.scrollbar_held() {
-            return self.dialogs.dialog.scrollbar_drag(p);
-        }
-        if self.choice_menu.scrollbar_held() {
-            return self.choice_menu.scrollbar_drag(p);
-        }
-        // A scrollbar of the settings, held: the navigation or the content follows.
-        if self.settings.scrollbar_held() {
-            return self.settings.drag_scrollbar(p);
-        }
-        // A slider in the settings, held: each stop it reaches is chosen (saved, shown).
-        if self.settings.slider_held() {
-            if let Some(SettingsAction::Choose { block, key, value }) = self.settings.drag(p) {
-                self.settings_choose(block, key, value);
-                self.settings_model.blocks = self.settings_blocks();
-                return true;
-            }
-            return false;
         }
         if let Some(side) = self.tools.sides.iter_mut().find(|s| s.dragging) {
             return side.panel.drag(p);
-        }
-        if let Some(changed) = self.drag_modal_view(p) {
-            return changed;
         }
         if let Some(changed) = self.drag_tool_window(p) {
             return changed;
@@ -155,51 +122,9 @@ impl Workbench {
             self.take_viewer_action(text);
             return changed;
         }
-        if let Some(center) = self.tools.terminal_splitter.drag_to(p) {
-            // Dragged: its own size again, where it's dragged to.
-            self.tools.bottom_size = tool_windows::BottomSize::Kept;
-            // The terminal spans from the separator to the bottom (above the status bar).
-            let s = self.scale;
-            let bottom = self.size.height as f32 - StatusBar::height(s);
-            let height = (bottom - center - SPLITTER_WIDTH * s / 2.0) / s;
-            let max = (bottom / s * 0.75).max(TERMINAL_MIN_HEIGHT);
-            let height = height.clamp(TERMINAL_MIN_HEIGHT, max).round();
-            let sizes = &self.data.sizes;
-            if sizes.get(workbench_model::sizes::DOCK_BOTTOM) != Some(height) {
-                sizes.set(workbench_model::sizes::DOCK_BOTTOM, height);
-                self.layout();
-            }
-            return true;
-        }
-        if let Some(center) = self.tools.side_splitter.drag_to(p) {
-            // The right panel: from the separator to the right toolbar.
-            let right =
-                self.tools.side_on(ui_workbench::Dock::Right).map_or(0.0, |s| s.bounds.max_x());
-            let width = (right - center - SPLITTER_WIDTH * self.scale / 2.0) / self.scale;
-            // Never narrower than its header needs (its title and buttons side by side).
-            let least = SIDE_PANEL_MIN.max(self.header_min(ui_workbench::Dock::Right));
-            let max = (self.size.width as f32 / self.scale * 0.5).max(least);
-            let width = width.clamp(least, max).round();
-            let sizes = &self.data.sizes;
-            if sizes.get(workbench_model::sizes::DOCK_RIGHT) != Some(width) {
-                sizes.set(workbench_model::sizes::DOCK_RIGHT, width);
-                self.layout();
-            }
-            return true;
-        }
-        if let Some(center) = self.tools.splitter.drag_to(p) {
-            // The panel starts after the tool strip, not at the window's edge.
-            let left = self.tools.sidebar.min_x();
-            let width = (center - left - SPLITTER_WIDTH * self.scale / 2.0) / self.scale;
-            let least = TREE_MIN_WIDTH.max(self.header_min(ui_workbench::Dock::Left));
-            let max = (self.size.width as f32 / self.scale * 0.6).max(least);
-            let width = width.clamp(least, max).round();
-            let sizes = &self.data.sizes;
-            if sizes.get(workbench_model::sizes::DOCK_LEFT) != Some(width) {
-                sizes.set(workbench_model::sizes::DOCK_LEFT, width);
-                self.layout();
-            }
-            return true;
+        // A dock's separator held: its dock takes the size it's dragged to.
+        if let Some(changed) = self.drag_divider(p) {
+            return changed;
         }
         let Some(tab) = self.tabs.get_mut(self.active) else { return false };
         if tab.view.scrollbar_drag(p, &tab.doc, &tab.folds) {
@@ -254,22 +179,14 @@ impl Workbench {
     /// When something waiting for the mouse to rest appears (the code hover card, a
     /// tooltip): one redraw is scheduled for then, instead of frames meanwhile.
     pub fn hover_deadline(&self) -> Option<std::time::Instant> {
-        // A card due but waited for from a language server: its grace's end instead (no
-        // frames meanwhile; `served_deadline` has it).
-        let card = self
-            .code_hover
-            .deadline()
-            .filter(|at| *at > std::time::Instant::now() || !self.served_hover_waiting());
-        // A category of the menu drawer the mouse rests on: shown then.
-        let drawer = self.menu_drawer.as_ref().and_then(|d| d.deadline());
-        [card, self.tooltips.deadline(), drawer].into_iter().flatten().min()
+        // A tooltip, and what each window over the editor waits for (its slot says).
+        let windows = Overlay::ALL.into_iter().filter_map(|o| o.slot().rest_deadline(self));
+        self.tooltips.deadline().into_iter().chain(windows).min()
     }
 
     /// An animation (e.g. hover on a separator) is in progress: another frame is needed.
     pub fn animating(&self) -> bool {
-        self.tools.splitter.is_animating()
-            || self.tools.side_splitter.is_animating()
-            || self.tools.terminal_splitter.is_animating()
+        self.dividers_animating()
             || self.tool_window_animating()
             || self.tools.sides.iter().any(|s| s.panel.is_animating())
             // Every group's editors: another group's scroll strip shrinks back too.
@@ -281,8 +198,6 @@ impl Workbench {
                 .is_some_and(|v| v.viewer.is_animating() || v.split.splitter.is_animating())
             || self.tooltips.is_animating()
             || self.chrome.top_bar_reveal.animating()
-            || self.code_hover.is_animating()
-            || self.param_hint.is_animating()
             || self.editors.split.animating()
             || self.toolbars_animating()
             || Overlay::ALL.into_iter().any(|o| o.slot().animating(self))
@@ -296,7 +211,7 @@ impl Workbench {
                 .get(self.active)
                 .and_then(|t| t.viewer.as_ref())
                 .is_some_and(|v| v.viewer.is_loading())
-            || self.modal_view_loading()
+            || Overlay::ALL.into_iter().any(|o| o.slot().is_open(self) && o.slot().loading(self))
             || self.toolbars_loading()
             || self.tools.sides.iter().any(|s| s.panel.is_loading())
     }
@@ -307,14 +222,8 @@ impl Workbench {
         if let Some(changed) = self.release_picker() {
             return changed;
         }
-        if self.settings.release()
-            || self.release_menu_drawer()
-            || self.completion.scrollbar_release()
-            || self.code_hover.scrollbar_release()
-            || self.dialogs.dialog.scrollbar_release()
-            || self.choice_menu.scrollbar_release()
-        {
-            return true;
+        if let Some(changed) = Overlay::ALL.into_iter().find_map(|o| o.slot().release(self, text)) {
+            return changed;
         }
         if let Some(side) = self.tools.sides.iter_mut().find(|s| s.dragging) {
             side.dragging = false;
@@ -332,10 +241,6 @@ impl Workbench {
                 }
                 None => {}
             }
-            return changed;
-        }
-        if let Some(changed) = self.release_modal_view() {
-            self.take_modal_action(text);
             return changed;
         }
         if self.release_tool_window() {
@@ -372,10 +277,7 @@ impl Workbench {
             tab.view.reveal_cursor(&tab.doc, &tab.folds, text, &self.palette);
             self.focus = Focus::Editor;
         }
-        self.tools.splitter.end_drag()
-            | self.tools.side_splitter.end_drag()
-            | self.tools.terminal_splitter.end_drag()
-            | scrollbar
+        self.release_divider() | scrollbar
     }
 
     /// `p` is on the active tab's text editor (a file, not a view).
@@ -389,22 +291,15 @@ impl Workbench {
 
     /// Scroll on the panel under the cursor (physical pixels, positive = down / right).
     pub fn scroll(&mut self, at: Point, dx: f32, dy: f32) -> bool {
-        // The card under the mouse scrolls its explanation (the editor behind it doesn't).
-        if self.code_hover.contains(at) {
-            return self.code_hover.scroll_by(dy);
-        }
-        self.code_hover.hide();
-        // Nothing under a notification scrolls.
+        // What goes when the wheel turns elsewhere goes (the hover card); a floating window
+        // under the mouse scrolls itself, nothing under it does.
+        self.elsewhere(at, false);
         if let Some(scrolled) = self.floating_at(at).and_then(|o| o.slot().scroll(self, dx, dy)) {
             return scrolled;
         }
         // The overlay on top scrolls (nothing behind a modal does; a popover lets it through).
         if let Some(scrolled) = self.active_overlay().and_then(|o| o.slot().scroll(self, dx, dy)) {
             return scrolled;
-        }
-        // The completion list under the mouse scrolls (the editor behind it doesn't).
-        if self.completion.contains(at) {
-            return self.completion.scroll_by(dy);
         }
         if let Some(scrolled) = self.scroll_tool_window(at, dx, dy) {
             return scrolled;

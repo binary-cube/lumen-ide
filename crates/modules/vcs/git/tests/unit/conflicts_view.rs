@@ -101,3 +101,74 @@ fn a_file_s_menu_has_its_resolutions() {
         assert!(ids.contains(&format!("{prefix}0")), "{prefix}");
     }
 }
+
+/// Many conflicted files: the tree's thumb (on the list's right edge) pressed and dragged
+/// down scrolls them, through the view's own press, drag and release.
+#[test]
+fn the_files_scroll_by_their_thumb() {
+    let names = (0..80).map(|i| format!("f{i:02}.php")).collect();
+    let mut list = ConflictsList { files: names, ..ConflictsList::default() };
+    let files = list
+        .files
+        .iter()
+        .map(|path| crate::files_tree::changed(path, None, FileState::Conflicted))
+        .collect();
+    list.tree.set_flat(true);
+    list.tree.set_files(files);
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let bounds = Rect::new(0.0, 0.0, 400.0, 300.0);
+    let mut paint = |list: &mut ConflictsList| {
+        list.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut render_api::Scene::default(),
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut list);
+    // A hidden bar shows once the list scrolls; back at the top after.
+    assert!(list.scroll(0.0, 1.0));
+    paint(&mut list);
+    assert!(list.scroll(0.0, -1.0));
+    paint(&mut list);
+    let held = (0..40).find_map(|dy| {
+        (0..16).find_map(|dx| {
+            let at = Point::new(bounds.max_x() - 1.0 - dx as f32, 60.0 + dy as f32 * 4.0);
+            list.press(at, 1);
+            // The search's field takes a drag too (its text selected): not the thumb.
+            if !list.tree.searching && list.drag(Point::new(at.x, at.y + 80.0)) {
+                return Some(at);
+            }
+            list.release();
+            None
+        })
+    });
+    assert!(held.is_some(), "the thumb found and dragged");
+    assert!(list.release());
+    assert!(list.scroll(0.0, -1.0), "it had scrolled down");
+}
+
+/// The tree has the keys without a press (through its parts' focus), and a press away from
+/// it (on nothing) doesn't take them: ↓ walks its rows, Tab isn't used.
+#[test]
+fn the_tree_keeps_the_keys_through_its_controls() {
+    let names = (0..20).map(|i| format!("f{i:02}.php")).collect();
+    let mut list = ConflictsList { files: names, ..ConflictsList::default() };
+    let files = list
+        .files
+        .iter()
+        .map(|path| crate::files_tree::changed(path, None, FileState::Conflicted))
+        .collect();
+    list.tree.set_flat(true);
+    list.tree.set_files(files);
+    assert!(list.edit_key(ViewerKey::Down), "the tree's keys from the start");
+    assert!(list.press(Point::new(-50.0, -50.0), 1).is_none());
+    assert!(list.edit_key(ViewerKey::Down), "kept after a press on nothing");
+    assert!(!list.edit_key(ViewerKey::Tab));
+}

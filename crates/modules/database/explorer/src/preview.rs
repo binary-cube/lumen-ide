@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use i18n::t;
 use kernel::{Point, Rect};
 use render_api::Quad;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
     EdgeScrollbar, Viewer, ViewerAction, ViewerKey, ViewerKind, ViewerPaint, ViewerProvider,
@@ -97,6 +98,8 @@ pub struct PreviewView {
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     action: Option<ViewerAction>,
+    /// Its parts' state of use (see [`Self::with_controls`]).
+    controls: Controls,
 }
 
 impl std::fmt::Debug for PreviewView {
@@ -128,6 +131,16 @@ impl PreviewView {
             r.answer(false);
         }
         self.action = Some(ViewerAction::Close);
+    }
+
+    /// Its parts (the statements' scrollbar), the topmost first, with their state of use.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut statements = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut parts: [&mut dyn Control; 1] = [&mut statements];
+        f(&mut self.controls, &mut parts)
     }
 
     fn hit(&self, p: Point) -> Option<Hit> {
@@ -300,7 +313,12 @@ impl Viewer for PreviewView {
         }
     }
 
+    /// A press on the statements' scrollbar takes its thumb (a drag follows); elsewhere the
+    /// tick.
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            return None;
+        }
         if self.hit(p) == Some(Hit::Confirm) {
             self.confirmed = !self.confirmed;
         }
@@ -321,7 +339,15 @@ impl Viewer for PreviewView {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed | self.bar.hover(p)
+        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {

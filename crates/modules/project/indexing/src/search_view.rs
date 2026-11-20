@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use kernel::Point;
 use text_search::{SearchQuery, Strategy};
+use ui_components::control::{Control, Controls, NOWHERE};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{
     AppRequest, Painter, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
@@ -23,6 +24,10 @@ use crate::search_panel::{
     ExactState, ProjectSearch, ProjectSearchAction, SUGGESTIONS, focus_line,
 };
 use crate::semantic::{SearchMode, SemanticSearch};
+
+mod panel_part;
+
+use panel_part::{Ask, PanelPart};
 
 /// The extension of the view (the app opens it over the window).
 pub const SEARCH_VIEW: &str = "view-project-search";
@@ -150,6 +155,10 @@ impl ViewerProvider for SearchProvider {
 #[derive(Default)]
 pub(crate) struct SearchView {
     panel: ProjectSearch,
+    /// Its controls' state of use (see [`SearchView::with_controls`]).
+    controls: Controls,
+    /// What the panel asked of the view at its last press, key or text.
+    ask: Option<Ask>,
     data: Option<SearchData>,
     /// The mode shown last (a change redraws: the model downloading…).
     mode: SearchMode,
@@ -259,6 +268,34 @@ fn hit_of(found: &Found) -> text_search::Hit {
 }
 
 impl SearchView {
+    /// Its controls (the panel: its fields, its rows, its scrollbar), the topmost first,
+    /// with their state of use; what the panel asked is answered after.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut panel = PanelPart { panel: &mut self.panel, scale: self.scale, ask: &mut self.ask };
+        let mut parts: [&mut dyn Control; 1] = [&mut panel];
+        let answer = f(&mut self.controls, &mut parts);
+        if let Some(ask) = self.ask.take() {
+            self.answer(ask);
+        }
+        answer
+    }
+
+    /// What the panel asked: an action, a field's caret, a search again, the folders.
+    fn answer(&mut self, ask: Ask) {
+        match ask {
+            Ask::Act(action) => self.act(action),
+            Ask::Field(action, p) => {
+                self.act(action);
+                self.panel.place_caret(p);
+            }
+            Ask::Typed => self.typed(),
+            Ask::Suggest => self.suggest(),
+        }
+    }
+
     fn root(&self) -> Option<PathBuf> {
         self.data.as_ref().map(|d| d.queries.root())
     }
@@ -561,6 +598,8 @@ impl Viewer for SearchView {
         }
         self.data = Some(data.clone());
         self.panel.open();
+        // The keyboard in the panel from the start (its search's field).
+        self.with_controls(|c, parts| c.focus(parts, Some(PANEL)));
         self.mode = self.mode();
         self.refresh();
     }
@@ -586,95 +625,44 @@ impl Viewer for SearchView {
         let mode = self.mode.clone();
         let painter = Painter { text: ctx.text, scene: ctx.scene, palette, icons };
         self.panel.paint(&mode, &file_icon, painter);
+        // What the panel wants of the frames, as drawn.
+        self.with_controls(|c, parts| c.settle(parts));
     }
 
     /// Outside the panel: nothing (it closes only with esc). A click anywhere but on the
     /// folders suggested or the folder's field closes their list (what it hit still acts).
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
-        // The scrollbar first: its thumb taken (dragged next), or the list moved there.
-        if self.panel.press_bar(p) {
-            return None;
-        }
-        let hit = self.panel.hit(p);
-        let keeps_list = matches!(
-            hit,
-            Some(ProjectSearchAction::Suggestion(_) | ProjectSearchAction::FocusScope)
-        );
-        if !keeps_list {
-            self.panel.clear_suggestions();
-        }
-        if let Some(action) = hit {
-            let field = matches!(
-                action,
-                ProjectSearchAction::FocusQuery
-                    | ProjectSearchAction::FocusScope
-                    | ProjectSearchAction::FocusMask
-                    | ProjectSearchAction::FocusReplace
-            );
-            self.act(action);
-            if field {
-                self.panel.place_caret(p);
-            }
-        }
+        self.with_controls(|c, parts| c.press(parts, p, 1));
         self.action.take()
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        self.panel.hover(p)
+        self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.panel.drag_bar(p)
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.panel.release_bar()
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        let clickable = matches!(
-            self.panel.hit(p),
-            Some(
-                ProjectSearchAction::Open(_)
-                    | ProjectSearchAction::OpenFolder(_)
-                    | ProjectSearchAction::Recent(_)
-                    | ProjectSearchAction::ForgetRecent(_)
-                    | ProjectSearchAction::ClearRecent
-                    | ProjectSearchAction::EnableSemantic
-                    | ProjectSearchAction::Suggestion(_)
-                    | ProjectSearchAction::Toggle(_)
-                    | ProjectSearchAction::ToggleReplace
-                    | ProjectSearchAction::ReplaceAll
-            )
-        ) || self.panel.over_esc(p);
-        clickable.then_some(ViewerCursor::Pointer)
+        self.controls.cursor_at(p)
     }
 
-    /// A name cut short: the whole of it (its path); the folder's button: what it does.
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
-        let button = self.panel.scope_button();
-        if button.contains(p) {
-            return Some(ui_components::Tip::new(button, i18n::t("search.folder")));
-        }
-        let replace = self.panel.replace_button();
-        if replace.contains(p) {
-            return Some(ui_components::Tip::new(replace, i18n::t("search.replace")));
-        }
-        if let Some((rect, option)) = self.panel.option_at(p) {
-            return Some(ui_components::Tip::new(rect, i18n::t(option.tooltip_key())));
-        }
-        let (rect, path) = self.panel.tip_at(p)?;
-        Some(ui_components::Tip::new(rect, path))
+        self.controls.tooltip_at(p)
     }
 
-    /// By rows (as the editor's lines).
-    fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        let line = (20.0 * self.scale.max(1.0)).max(1.0);
-        let rows = (dy / line).round() as isize;
-        if rows != 0 {
-            self.panel.scroll(rows);
-        }
-        rows != 0
+    /// The panel's, over the whole window: with the mouse not moved over it yet (it opened
+    /// under a still mouse), the wheel is still its.
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        self.with_controls(|c, parts| {
+            c.scroll_hovered(parts, dx, dy).or_else(|| c.scroll(parts, NOWHERE, dx, dy))
+        })
+        .is_some()
     }
 
     fn wants_text(&self) -> bool {
@@ -682,13 +670,11 @@ impl Viewer for SearchView {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        self.panel.typing().insert(text);
-        self.typed();
-        true
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn paste(&mut self, text: &str) -> bool {
-        self.text_input(text)
+        self.with_controls(|c, parts| c.paste(parts, text)).is_some()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -696,81 +682,23 @@ impl Viewer for SearchView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let suggesting = self.panel.has_suggestions();
-        match key {
-            // Esc closes the folders suggested first; then it all, a search typed or not (as
-            // the IDEs do).
-            ViewerKey::Escape if suggesting => self.panel.clear_suggestions(),
-            ViewerKey::Escape => self.act(ProjectSearchAction::Close),
-            // In the folder's field: the folder lit is taken (to go on into it); with none
-            // suggested, back to the search.
-            // In the replacement's field: back to the search (Replace All is its button).
-            ViewerKey::Enter if self.panel.in_replace() => self.panel.focus_replace(false),
-            ViewerKey::Enter if self.panel.in_scope() => {
-                if self.panel.take_suggestion(None) {
-                    self.typed();
-                } else {
-                    self.panel.focus_scope(false);
-                }
-            }
-            ViewerKey::Enter => {
-                if let Some(action) = self.panel.selected_action() {
-                    self.act(action);
-                }
-            }
-            // Between the search's field and the folder's (its row shown the first time).
-            // To the next field shown (the folder's row the first time).
-            ViewerKey::Tab => {
-                if self.panel.scope_open() || self.panel.replace_open() {
-                    self.panel.next_field();
-                    self.suggest();
-                } else {
-                    self.act(ProjectSearchAction::ToggleScope);
-                }
-            }
-            ViewerKey::Up if suggesting => self.panel.move_suggestion(-1),
-            ViewerKey::Down if suggesting => self.panel.move_suggestion(1),
-            ViewerKey::Up => self.panel.move_selection(-1),
-            ViewerKey::Down => self.panel.move_selection(1),
-            ViewerKey::PageUp => self.panel.move_selection(-8),
-            ViewerKey::PageDown => self.panel.move_selection(8),
-            ViewerKey::Left => self.panel.typing().move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.panel.typing().move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.panel.typing().home(reach.extend),
-            ViewerKey::End => self.panel.typing().end(reach.extend),
-            // On a recent search (the field empty): ⌫ / Delete forget it.
-            ViewerKey::Backspace | ViewerKey::Delete
-                if self.panel.showing_recent() && self.panel.input.text().is_empty() =>
-            {
-                let selected = self.panel.selected_action();
-                if let Some(ProjectSearchAction::Recent(i)) = selected {
-                    self.act(ProjectSearchAction::ForgetRecent(i));
-                }
-            }
-            ViewerKey::Backspace => {
-                self.panel.typing().backspace(reach.word);
-                self.typed();
-            }
-            ViewerKey::Delete => {
-                self.panel.typing().delete();
-                self.typed();
-            }
-        }
-        true
+        self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
 
     /// ⌘A in its field; `refresh`: searched again (the index or the model got ready).
     fn command(&mut self, id: &str) -> bool {
-        match id {
-            "select_all" => self.panel.typing().select_all(),
-            "refresh" => self.refresh(),
-            _ => return false,
+        if id == "refresh" {
+            self.refresh();
+            return true;
         }
-        true
+        self.with_controls(|c, parts| c.command(parts, id)).is_some()
     }
 
+    /// Read from `&self`: the panel lends its search's field by its place (what's copied
+    /// is what's searched).
     fn selected_text(&self) -> Option<String> {
-        Some(self.panel.input.selected_text().to_owned()).filter(|t| !t.is_empty())
+        self.controls
+            .selected_text_with(|i| (i == PANEL).then_some(&self.panel.input as &dyn Control))
     }
 
     /// The model's state changed (downloading, loaded), lines found arrived: a redraw (and
@@ -813,9 +741,12 @@ impl Viewer for SearchView {
     }
 
     fn is_animating(&self) -> bool {
-        self.panel.is_animating()
+        self.controls.is_animating()
     }
 }
+
+/// The panel's place among the view's controls.
+const PANEL: usize = 0;
 
 /// The most files a file name's pattern lists.
 const NAMED_MOST: usize = 200;

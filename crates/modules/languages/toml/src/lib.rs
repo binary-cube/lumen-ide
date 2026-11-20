@@ -18,6 +18,7 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     name: "TOML",
     description: "TOML: colors, folding, indentation, taplo as its language server",
     depends_on: &[],
+    info: extensions::ModuleInfo { icon: "settings", ..extensions::ModuleInfo::BUILT_IN },
 };
 
 #[derive(Debug, Default)]

@@ -9,6 +9,7 @@ use icons::Icons;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 use text_layout::TextSystem;
+use ui_components::control::{Control, Controls, Thumb};
 use ui_kit::{KeyHint, draw_text};
 use workbench_model::{SettingsGroup, SettingsPage, SettingsRow};
 
@@ -71,6 +72,9 @@ pub struct SettingsModel {
     /// The file icons chosen (`None`: ours, by language), and the sets to choose from.
     pub file_icon_set: Option<u8>,
     pub file_icon_sets: Vec<FileIconChoice>,
+    /// The files the preview shows, as the languages say (name, our icon, language), in
+    /// their order.
+    pub icon_samples: Vec<(String, &'static str, String)>,
     /// Keymap presets: (id, name), the active one, and its shortcuts (command, keys as
     /// the system shows them).
     pub keymaps: Vec<(String, String)>,
@@ -134,6 +138,12 @@ pub struct ModuleRow {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// Its icon (a name of the app's set).
+    pub icon: &'static str,
+    /// Who made it, its version, when it last changed (`YYYY-MM-DD`; empty: unknown).
+    pub author: String,
+    pub version: String,
+    pub updated: String,
     /// On (from the next start).
     pub enabled: bool,
     /// Working now.
@@ -375,6 +385,8 @@ pub struct SettingsView {
     /// A dropdown's list, open: the shared picker, and the row it's for.
     picker: ui_components::picker::Picker,
     picker_for: Option<Dropdown>,
+    /// Its controls' state of use (see [`Self::with_controls`]).
+    controls: Controls,
     /// The window's area (a dropdown's list stays within it).
     viewport: Rect,
     blocks_bottom: f32,
@@ -736,9 +748,11 @@ impl SettingsView {
     /// The action at point `p` (a click outside the panel does nothing). Clicking
     /// a section activates it (no action for the app).
     pub fn hit(&mut self, p: Point) -> Option<SettingsAction> {
-        // A dropdown's list open: it takes the click (a choice, or closed by one outside).
-        if self.picker.is_open() {
-            let event = self.picker.press(p);
+        // Its controls first: an open dropdown list takes the click (a choice, or closed by
+        // one outside), a scrollbar's thumb is held or jumped to (nothing under it reached).
+        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            self.limit_scroll();
+            let event = self.picker.take_event();
             return self.picked(event);
         }
         // A dropdown's field (in the content): its list opens.
@@ -763,15 +777,6 @@ impl SettingsView {
         let at = self.modal.hit(p);
         if at == Some(ModalHit::Close) {
             return Some(SettingsAction::Close);
-        }
-        // The scrollbars: the thumb dragged or jumped to (nothing under them reached).
-        if self.modal.press_nav_bar(p) {
-            return None;
-        }
-        if let Some(offset) = self.bar.press(p) {
-            self.scroll = offset;
-            self.limit_scroll();
-            return None;
         }
         let in_content = at == Some(ModalHit::Content);
         // The shortcuts' editor: its search, its commands, their buttons.
@@ -888,10 +893,11 @@ impl SettingsView {
 
     pub fn hover(&mut self, p: Point) -> bool {
         self.mouse = Some(p);
+        // Its controls: an open list takes the mouse over everything.
+        let bar = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         if self.picker.is_open() {
-            return self.picker.hover(p);
+            return bar;
         }
-        let bar = self.bar.hover(p);
         // Rows scrolled under the header aren't lit there.
         let in_content = self.modal.hit(p) == Some(ModalHit::Content);
         let shortcut = if in_content { p } else { Point::new(f32::MIN, f32::MIN) };
@@ -929,7 +935,7 @@ impl SettingsView {
 
     /// The mouse was released (a held slider lets go). `true` if one was held.
     pub fn release(&mut self) -> bool {
-        let bars = self.bar.release() | self.modal.release_nav_bar();
+        let bars = self.with_controls(|c, parts| c.release(parts)).is_some();
         self.slider_held.take().is_some() | bars
     }
 
@@ -937,7 +943,7 @@ impl SettingsView {
     pub fn over_clickable(&self, p: Point) -> bool {
         // A dropdown's list open: a hand on its rows only (never what's under it).
         if self.picker.is_open() {
-            return self.picker.cursor_at(p) == Some(ui_components::ViewerCursor::Pointer);
+            return Control::cursor(&self.picker, p) == Some(ui_components::ViewerCursor::Pointer);
         }
         let in_content = self.modal.hit(p) == Some(ModalHit::Content);
         matches!(self.modal.hit(p), Some(ModalHit::Section(_)))
@@ -1026,7 +1032,7 @@ impl SettingsView {
         // The app's pages draw their own content first; a page's blocks follow it.
         let fixed = match active {
             MODULES => {
-                self.paint_modules(model, area);
+                self.paint_modules(model, icons, area);
                 true
             }
             ICONS => {
@@ -1139,26 +1145,28 @@ impl SettingsView {
         ]
     }
 
-    /// One of the scrollbars (the navigation's, the content's) is held: the mouse's moves
-    /// drag it.
-    pub fn scrollbar_held(&self) -> bool {
-        self.bar.is_dragging() || self.modal.nav_bar_held()
+    /// Its controls (an open dropdown list, the navigation's bar, the content's), the
+    /// topmost first, with their state of use: pressed, held, hovered alike, none named.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut content = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
+        let mut nav = self.modal.nav_grab();
+        let mut parts: [&mut dyn Control; 3] = [&mut self.picker, &mut nav, &mut content];
+        f(&mut self.controls, &mut parts)
     }
 
-    /// The held scrollbar dragged to `p`: `true` if it moved.
+    /// One of its controls holds the pointer: the mouse's moves drag it.
+    pub fn scrollbar_held(&self) -> bool {
+        self.controls.held()
+    }
+
+    /// The control holding the pointer dragged to `p`: `true` if it moved.
     pub fn drag_scrollbar(&mut self, p: Point) -> bool {
-        if self.modal.nav_bar_held() {
-            return self.modal.drag_nav_bar(p);
-        }
-        match self.bar.drag(p) {
-            Some(offset) => {
-                let before = self.scroll;
-                self.scroll = offset;
-                self.limit_scroll();
-                before != self.scroll
-            }
-            None => false,
-        }
+        let moved = self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, m)| m);
+        self.limit_scroll();
+        moved
     }
 
     /// Forgets what the last paint recorded (the clickable areas, the anchors), before
