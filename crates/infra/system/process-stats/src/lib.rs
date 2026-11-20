@@ -249,8 +249,11 @@ mod own {
         K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
     };
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetCurrentProcess, GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
+
+    /// What `GetExitCodeProcess` says of a process still running (`STILL_ACTIVE`).
+    const STILL_ACTIVE: u32 = 259;
 
     pub fn footprint(pid: u32) -> Option<u64> {
         let own = pid == std::process::id();
@@ -265,6 +268,18 @@ mod own {
         };
         if handle.is_null() {
             return None;
+        }
+        // An ended program is still there while someone holds a handle to it (its parent
+        // waiting, a console host): it holds nothing any more.
+        if !own {
+            let mut code = 0u32;
+            // SAFETY: `handle` is valid (checked above), `code` an owned u32 the call fills.
+            let read = unsafe { GetExitCodeProcess(handle, &mut code) };
+            if read == 0 || code != STILL_ACTIVE {
+                // SAFETY: a handle this function opened, closed once.
+                unsafe { CloseHandle(handle) };
+                return None;
+            }
         }
         // SAFETY: `counters` is an owned, zeroed `PROCESS_MEMORY_COUNTERS_EX` of the size
         // given, which the call fills; `handle` is valid (checked above).
