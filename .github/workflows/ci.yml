@@ -63,6 +63,10 @@ jobs:
         with:
           # The whole history: the git tests read this repository's own (history, blame).
           fetch-depth: 0
+          # No credentials kept: from v6 they're an `includeIf` of a file outside the
+          # repository, which the app's git refuses as untrusted (rightly so) — the tests
+          # reading this repository would fail. Nothing here pushes.
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99"
