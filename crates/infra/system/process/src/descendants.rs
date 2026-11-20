@@ -40,24 +40,17 @@ impl Descendants {
     /// Everything `root` started, and what those started, now (empty if `root` isn't
     /// running).
     pub fn of(root: u32) -> Self {
-        let mut system = System::new();
-        system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
-            true,
-            ProcessRefreshKind::nothing(),
-        );
-        let rows = system
-            .processes()
-            .iter()
-            .filter(|(_, p)| !gone(p.status()))
-            .map(|(pid, p)| Row {
-                pid: pid.as_u32(),
-                parent: p.parent().map(Pid::as_u32),
-                start: p.start_time(),
-                name: p.name().to_string_lossy().into_owned(),
-            })
-            .collect::<Vec<_>>();
-        Self(tree(&rows, root))
+        Self(tree(&rows(), root))
+    }
+
+    /// What each of `roots` started, and what those started, now — the roots themselves not
+    /// among them, each program once. A root is named by its id and its start time: one
+    /// whose id names another program now is left out.
+    pub fn under(roots: &[(u32, u64)]) -> Self {
+        if roots.is_empty() {
+            return Self::default();
+        }
+        Self(forest(&rows(), roots))
     }
 
     /// Whether nothing was found.
@@ -127,6 +120,41 @@ pub(crate) struct Row {
 /// The descendants of `root` in `rows`: each once, a child only if it started no earlier
 /// than its parent (an id reused later never adopts an older program); `root` not among
 /// them, nor a cycle a stale table could hold.
+/// The system's processes now, those ended left out.
+fn rows() -> Vec<Row> {
+    let mut system = System::new();
+    system.refresh_processes_specifics(ProcessesToUpdate::All, true, ProcessRefreshKind::nothing());
+    system
+        .processes()
+        .iter()
+        .filter(|(_, p)| !gone(p.status()))
+        .map(|(pid, p)| Row {
+            pid: pid.as_u32(),
+            parent: p.parent().map(Pid::as_u32),
+            start: p.start_time(),
+            name: p.name().to_string_lossy().into_owned(),
+        })
+        .collect()
+}
+
+/// The trees under `roots` (each still the program it was: its start time the same), the
+/// roots left out, each program once.
+pub(crate) fn forest(rows: &[Row], roots: &[(u32, u64)]) -> Vec<Found> {
+    let mut found: Vec<Found> = Vec::new();
+    for &(pid, start) in roots {
+        if !rows.iter().any(|r| r.pid == pid && r.start == start) {
+            continue;
+        }
+        for f in tree(rows, pid) {
+            let root = roots.iter().any(|&(p, _)| p == f.pid);
+            if !root && !found.iter().any(|g| g.pid == f.pid) {
+                found.push(f);
+            }
+        }
+    }
+    found
+}
+
 pub(crate) fn tree(rows: &[Row], root: u32) -> Vec<Found> {
     let Some(root_start) = rows.iter().find(|r| r.pid == root).map(|r| r.start) else {
         return Vec::new();

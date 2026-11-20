@@ -72,6 +72,33 @@ pub fn start() {
     });
 }
 
+/// The programs this run started for the project at `root` (ids and start times), from the
+/// registry's memory (none without one: tests, snapshots): those that ran in its folder or
+/// one of its folders, unless another open project (`others`) is nearer to them (a project
+/// inside it is that one's).
+pub fn project_programs(root: &Path, others: &[std::path::PathBuf]) -> Vec<(u32, u64)> {
+    let Some(registry) = REGISTRY.get() else { return Vec::new() };
+    owned_by(registry.programs(), root, others)
+}
+
+/// Of `programs` (id, start, folder), those of the project at `root`: [`project_programs`].
+pub(crate) fn owned_by(
+    programs: Vec<(u32, u64, Option<std::path::PathBuf>)>,
+    root: &Path,
+    others: &[std::path::PathBuf],
+) -> Vec<(u32, u64)> {
+    programs
+        .into_iter()
+        .filter(|(_, _, folder)| {
+            folder.as_deref().is_some_and(|f| {
+                f.starts_with(root)
+                    && !others.iter().any(|o| o.starts_with(root) && o != root && f.starts_with(o))
+            })
+        })
+        .map(|(pid, start, _)| (pid, start))
+        .collect()
+}
+
 /// A normal exit: this instance's file removed (kept with only what's still to ask about).
 pub fn finish() {
     if let Some(registry) = REGISTRY.get() {

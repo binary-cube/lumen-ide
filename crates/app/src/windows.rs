@@ -189,10 +189,18 @@ impl Application for AppWindows {
                 // A window's going is timed: its parts are what a slow close comes from.
                 let asked = started.elapsed();
                 let gone = std::time::Instant::now();
-                if self.windows.len() == 1 {
+                let project_leaving = if self.windows.len() == 1 {
                     self.leaving = leaving();
-                }
+                    None
+                } else {
+                    self.project_leaving(i)
+                };
                 self.windows.remove(i);
+                // Its window gone (its terminals closed): what its programs detached is
+                // stopped, on a thread of its own.
+                if let Some(left) = project_leaving {
+                    stop_project_leaving(left);
+                }
                 if asked + gone.elapsed() >= std::time::Duration::from_millis(100) {
                     tracing::info!(?asked, dropped = ?gone.elapsed(), "a window's close was slow");
                 }
@@ -287,6 +295,54 @@ fn leaving() -> Option<process::descendants::Descendants> {
         return None;
     }
     Some(process::descendants::Descendants::of(std::process::id()))
+}
+
+impl AppWindows {
+    /// The window `i` closing while others stay: what its project's programs started (an
+    /// agent's helper detached into its own group would outlive it), taken while it still
+    /// hangs together under them (macOS, as [`leaving`]). Nothing when the same project is
+    /// open in another window, nor for a window with no project; a project open inside its
+    /// folder keeps what ran there; the programs themselves end with the window as before.
+    fn project_leaving(&self, i: usize) -> Option<process::descendants::Descendants> {
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        let root = self.windows.get(i)?.1.project_root()?;
+        let others: Vec<std::path::PathBuf> = self
+            .windows
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != i)
+            .filter_map(|(_, (_, app))| app.project_root())
+            .collect();
+        if others.contains(&root) {
+            return None;
+        }
+        let programs = crate::left_behind::project_programs(&root, &others);
+        let left = process::descendants::Descendants::under(&programs);
+        (!left.is_empty()).then_some(left)
+    }
+}
+
+/// How long a closed project's helpers have, once asked, to end by themselves.
+const PROJECT_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Stops what [`AppWindows::project_leaving`] took, on a thread of its own (the window
+/// already gone), saying what in the log.
+fn stop_project_leaving(left: process::descendants::Descendants) {
+    let spawned = std::thread::Builder::new().name("project-leaving".into()).spawn(move || {
+        let started = std::time::Instant::now();
+        let forced = left.stop(PROJECT_GRACE);
+        tracing::info!(
+            programs = left.len(),
+            forced,
+            took = ?started.elapsed(),
+            "a closed project's helpers stopped"
+        );
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "can't stop a closed project's helpers");
+    }
 }
 
 /// How long what the app started has, once asked, to end by itself.

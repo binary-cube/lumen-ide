@@ -88,6 +88,28 @@ fn ends(path: &Path, len: u64) -> std::io::Result<(Vec<u8>, Vec<u8>, bool)> {
     Ok((head, tail, false))
 }
 
+/// `file`'s first `cwd` and `timestamp`, looked for from its start in pieces of
+/// [`format::HEAD`] (each keeping [`format::OVERLAP`] of the one before), at most
+/// [`format::DEEP`] bytes.
+fn deeper(path: &Path, facts: &mut Facts) {
+    let Ok(file) = File::open(path) else { return };
+    let mut file = file.take(format::DEEP);
+    let mut piece: Vec<u8> = Vec::with_capacity(format::HEAD + format::OVERLAP);
+    let mut buf = vec![0u8; format::HEAD];
+    loop {
+        let Ok(read) = file.read(&mut buf) else { return };
+        if read == 0 {
+            return;
+        }
+        let keep = piece.len().saturating_sub(format::OVERLAP);
+        piece.drain(..keep);
+        piece.extend_from_slice(&buf[..read]);
+        if format::deep_facts(facts, &piece) {
+            return;
+        }
+    }
+}
+
 /// The sessions' facts, kept by file and stamp.
 pub struct Sessions {
     kept: Kept<Facts>,
@@ -110,7 +132,13 @@ impl Sessions {
     fn facts(&self, file: &Path, stamp: Stamp) -> Option<Facts> {
         self.kept.get(file, stamp, || {
             let (head, tail, whole) = ends(file, stamp.1).ok()?;
-            Some(format::facts(&head, &tail, whole))
+            let mut facts = format::facts(&head, &tail, whole);
+            // Its first lines too long for the head (no whole one read): its folder and its
+            // start looked for further on, in pieces.
+            if !whole && (facts.cwds.is_empty() || facts.started.is_none()) {
+                deeper(file, &mut facts);
+            }
+            Some(facts)
         })
     }
 

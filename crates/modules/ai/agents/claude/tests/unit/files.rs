@@ -120,3 +120,29 @@ fn a_session_that_moved_with_its_project_is_listed_there() {
     assert_eq!(titles, ["Moved one"]);
     let _ = std::fs::remove_dir_all(projects);
 }
+
+/// A session whose first line is longer than the head (a pasted picture before its `cwd`):
+/// its folder and its start are found further on, so another path named the same way still
+/// isn't listed, and its start is known.
+#[test]
+fn a_session_with_a_long_first_line_is_still_told_apart() {
+    let projects = scratch();
+    let root = Path::new("/work/api.shop");
+    let folder = projects.join(format::folder_name("/work/api.shop"));
+    std::fs::create_dir_all(&folder).unwrap();
+    let long = |id: &str, cwd: &str| {
+        format!(
+            "{}\n{}\n",
+            serde_json::json!({"attachment": "x".repeat(300 * 1024), "cwd": cwd,
+                "sessionId": id, "timestamp": "2026-11-12T08:00:00Z", "type": "user"}),
+            serde_json::json!({"type": "ai-title", "aiTitle": "Long"}),
+        )
+    };
+    std::fs::write(folder.join("mine.jsonl"), long("mine", "/work/api.shop")).unwrap();
+    std::fs::write(folder.join("theirs.jsonl"), long("theirs", "/work/api-shop")).unwrap();
+    let found = Sessions::default().of(&projects, root, 10);
+    let ids: Vec<&str> = found.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, ["mine"]);
+    assert!(found[0].started.is_some(), "its start read further on");
+    let _ = std::fs::remove_dir_all(projects);
+}

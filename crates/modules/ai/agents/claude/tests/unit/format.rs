@@ -74,3 +74,14 @@ fn a_hostile_id_is_refused() {
     let row = serde_json::json!({"type": "user", "sessionId": "x & del", "cwd": "/p"});
     assert_eq!(facts(format!("{row}\n").as_bytes(), &[], true).id, None);
 }
+
+/// A text field found in a piece of a line (its escapes undone); cut before its end: not.
+#[test]
+fn a_text_field_is_read_from_a_piece_of_a_line() {
+    let line = br#"{"a":"x","cwd":"/work/a \"b\"","timestamp":"2026-11-12T08:00:00Z"}"#;
+    assert_eq!(text_field(line, "cwd").as_deref(), Some("/work/a \"b\""));
+    assert_eq!(text_field(&line[..20], "cwd"), None, "cut: not whole");
+    let mut facts = Facts::default();
+    assert!(deep_facts(&mut facts, line));
+    assert_eq!(facts.cwds, ["/work/a \"b\""]);
+}

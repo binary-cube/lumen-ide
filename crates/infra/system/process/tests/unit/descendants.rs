@@ -110,3 +110,26 @@ fn one_that_won_t_end_when_asked_is_made_to() {
     let _ = shell.kill();
     let _ = shell.wait();
 }
+
+/// Under several roots: each root's tree (a root whose start differs is another program
+/// now: left out), the roots themselves not among them, each program once.
+#[test]
+fn the_forest_under_roots_leaves_them_out() {
+    let row =
+        |pid, parent, start| Row { pid, parent: Some(parent), start, name: format!("p{pid}") };
+    let rows = vec![
+        Row { pid: 1, parent: None, start: 0, name: "init".into() },
+        row(10, 1, 100),
+        row(11, 10, 110),
+        row(12, 11, 120),
+        row(20, 1, 200),
+        row(21, 20, 210),
+        row(30, 1, 300),
+        row(31, 30, 310),
+    ];
+    let pids: Vec<u32> = forest(&rows, &[(10, 100), (11, 110), (20, 200), (30, 999)])
+        .iter()
+        .map(|f| f.pid)
+        .collect();
+    assert_eq!(pids, [12, 21], "the roots out; 30 is another program now");
+}

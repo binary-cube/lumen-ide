@@ -112,6 +112,31 @@ pub(crate) fn key_of(agent: &str, id: &str) -> Option<String> {
         .map(|f| f.key.clone())
 }
 
+/// The tab of `session`, if one is followed: by its id, or — its file seen before the
+/// follower's next read — the one new tab of its agent in its folder started just before
+/// it, which takes its id now (taking it up again from the list brings that tab to the
+/// front, never a second one). Several new tabs that could be its: none chosen here (the
+/// follower sorts them in order).
+pub(crate) fn tab_of(session: &agents::AgentSession) -> Option<String> {
+    if let Some(key) = key_of(session.agent, &session.id) {
+        return Some(key);
+    }
+    let started = session.started?;
+    let mut followed = lock(&FOLLOWED);
+    let mut new = followed.iter_mut().filter(|f| {
+        f.id.is_none()
+            && f.agent == session.agent
+            && f.folder == session.folder
+            && started >= f.since.saturating_sub(NEW_WITHIN)
+    });
+    let only = new.next()?;
+    if new.next().is_some() {
+        return None;
+    }
+    only.id = Some(session.id.clone());
+    Some(only.key.clone())
+}
+
 /// A session's tab followed from now on (`id`: `None` for a new one).
 pub(crate) fn follow(
     key: String,

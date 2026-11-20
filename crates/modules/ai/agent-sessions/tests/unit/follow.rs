@@ -108,3 +108,26 @@ fn a_rename_waits_for_its_agent_to_end() {
     assert!(!lock(&PENDING).iter().any(|p| p.key == key), "written once");
     forget(&key);
 }
+
+/// A new session taken up from the list before the follower saw its file: its new tab takes
+/// it at once (no second tab); two new tabs that could be its: neither chosen here.
+#[test]
+fn a_session_resumed_early_finds_its_new_tab() {
+    let folder = PathBuf::from(format!("/p-{}", kernel::id::new_uuid()));
+    let new = |key: &str, since: i64| Followed {
+        folder: folder.clone(),
+        ..followed(key, None, since, "New")
+    };
+    let mut s = session("fresh", "Fresh", 2_000);
+    s.folder = folder.clone();
+    lock(&FOLLOWED).push(new("k-a", 1_999));
+    assert_eq!(tab_of(&s).as_deref(), Some("k-a"));
+    assert_eq!(key_of("fake", "fresh").as_deref(), Some("k-a"), "it took the id");
+    // Two new tabs of the same agent, the same folder: not guessed.
+    let mut other = session("second", "Second", 3_000);
+    other.folder = folder.clone();
+    lock(&FOLLOWED).push(new("k-b", 2_999));
+    lock(&FOLLOWED).push(new("k-c", 2_999));
+    assert_eq!(tab_of(&other), None);
+    lock(&FOLLOWED).retain(|f| f.folder != folder);
+}

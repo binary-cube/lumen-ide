@@ -630,7 +630,7 @@ impl SessionsPanel {
         }
         // Known by its agent's and its own ids — or by the tab a new session that took this
         // id has: the same session, the same tab.
-        let key = crate::follow::key_of(agent.id(), &session.id)
+        let key = crate::follow::tab_of(&session)
             .unwrap_or_else(|| format!("{}-{}", agent.id(), session.id));
         let folder = session.folder.clone();
         crate::follow::follow(

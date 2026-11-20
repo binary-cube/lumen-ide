@@ -5,32 +5,6 @@ făcute se șterg.
 
 ## Următorul (cerut)
 
-- **Jurnalul aplicației, organizat și sigur** (cerut 2026-11-20, foarte important). Ce
-  avem acum: `tracing` + `tracing-subscriber` scriu un singur fișier
-  (`~/.config/<id>/<id>.log`), golit de tot când trece de 5 MB. Nu există rotație, nici
-  ascunderea datelor sensibile; doar regula „secretele nu se loghează”, ținută de mână. Ce
-  vrem, ca la un logger matur (canale, handler-e, rotație):
-  - **Rotație după mărime și după zi:** `<id>.log`, `<id>.1.log` … până la N fișiere și o
-    limită totală. Cel mai vechi pleacă primul, nimic nu se pierde brusc ca acum. Scrierea
-    rămâne pe un fir al ei, cu o coadă mărginită; un disc plin nu blochează aplicația.
-    Variante: un writer mic al nostru (mărime + număr de fișiere), sau un crate
-    (`tracing-appender` face doar rotație după timp; `file-rotate`, `logroller` fac și după
-    mărime). De măsurat și de ales.
-  - **Ascunderea datelor sensibile** (Rust n-are ceva gata în `tracing`): un `Layer` care, la
-    scriere, ascunde după numele câmpului (`password`, `token`, `secret`, `authorization`,
-    `api_key`, `cookie`…) și după formă (`Bearer …`, `user:parolă@` în URL-uri, șiruri de
-    conexiune, chei private PEM). În plus, tipuri `Secret` al căror `Debug`/`Display` dă
-    `***`, ca să nu ajungă nimic întreg în jurnal din greșeală. Teste cu exemple reale din
-    toate modulele (baze de date, HTTP, remote, agenți).
-  - **Organizat:** un rând pe eveniment cu ora, nivelul, firul și modulul, plus câmpuri
-    structurate; opțional JSON lines, pentru citit cu unelte. Nivelul se alege per modul
-    din setări, nu doar prin `RUST_LOG`. Sesiunea fiecărei porniri are un id în fiecare rând
-    (mai multe instanțe scriu în același dosar). Panicile și blocajele (watchdog,
-    `hang.txt`) ajung acolo.
-  - **În aplicație:** „Show Log” deschide jurnalul (vizualizatorul de log existent),
-    „Reveal Log Folder”, și o arhivă de trimis la un raport de bug, cu datele deja ascunse.
-  - Să meargă pe Windows (fișier deschis de alt proces, căi lungi).
-
 - **Terminalul: istoricul comenzilor pe proiect** — **făcut 2026-11-18**, cu setarea
   „Istoricul comenzilor pe proiect” (implicit pornită): fișierul în
   `<date>/terminal-history/<cheia proiectului>/` (cheia: hash-ul căii rădăcinii, `0600`);
@@ -95,74 +69,17 @@ făcute se șterg.
   Componentele: formularul nostru (`form`), lista de coloane ca grilă editabilă (cea din
   sursele de date), editorul read-only pentru preview.
 
-- **Logurile: debug pentru noi, liniște pentru public** (cerut 2026-11-16). De analizat tot
-  codul și de făcut o diferență clară, bine scrisă, între rularea noastră (debug) și
-  aplicația publicată (release). Debug-ul rămâne, dar nu costă nimic în producție.
-  Ce e acum:
-  - `crates/app/src/main.rs`: același filtru `info,wgpu_core=warn,…` în debug și release,
-    schimbat doar prin `RUST_LOG`. Fără consolă (Finder / Dock, Windows), logul merge în
-    `<config>/<id>.log`, care se golește doar peste 5 MB.
-  - ~70 de `tracing::debug!` și ~11 `eprintln!` (în afara testelor), plus diagnosticele
-    `EDITOR_DEBUG_*` și overlay-ul F12.
+- **Logurile: ce rămâne după planul 89** (cerut 2026-11-16; jurnalul JSON, rotația, ascunderea
+  secretelor, nivelurile din setări și pe module, mesajele cu câmpuri, vizualizatorul: făcute în
+  planul 89). Rămân:
+  - **Arhiva pentru un raport de bug** (în `ROADMAP.md`).
+  - Hotărâte 2026-11-20 (scrise în planul 89): `debug` / `trace` rămân în release, iar
+    diagnosticele rămân cum sunt.
 
-  De făcut:
-  - **Nivelul implicit după build**: `debug_assertions` → `info` (plus `debug` pentru
-    crate-urile noastre, la cerere); release → `warn`. `RUST_LOG` îl suprascrie în ambele.
-  - **Ce nu ajunge deloc în release**: nivelurile `debug` / `trace` scoase la compilare
-    (feature-ul `release_max_level_*` din `tracing`), ca să nu se mai formateze nimic.
-  - **Trecerea prin tot codul**: fiecare `debug!` / `info!` / `eprintln!` verificat:
-    - ce e zgomot pe cadru sau pe tastă se scoate;
-    - ce ajută la depanare rămâne la `debug`;
-    - ce trebuie să vadă utilizatorul devine `warn` / `error`;
-    - `eprintln!` doar în xtask, teste și uneltele de măsurare (snapshot);
-    - niciun secret în log (parole, tokenuri, căi cu date private).
-  - **Diagnosticele** (`EDITOR_DEBUG_*`, `--snapshot`, overlay-ul F12): hotărât ce rămâne
-    în release (ascuns) și ce se compilează doar în debug.
-  - **Fișierul de log**: rotit (`.log` + `.log.1`) în loc de golit, limita păstrată; în
-    release se scriu doar avertismentele și erorile.
-  - Regula scrisă în `.claude/rules/project-conventions.md` (ce nivel pentru ce), ca
-    modulele noi s-o urmeze.
-
-- **Fața grafică a agenților (ACP) — păstrată în cod, neoferită** (hotărât 2026-11-15).
-  Modulul `agent-chat` (`crates/modules/ai/agent-chat`), clientul `acp-client` și domeniul
-  `acp` rămân în workspace, compilate și testate, dar aplicația nu înregistrează modulul
-  (`crates/app/src/modules.rs`). Panoul de sesiuni deschide sesiunile în terminal, iar
-  „Deschide ca conversație” nu apare, pentru că nimeni nu răspunde la `OpenAgentChat`.
-  De reluat când vin ceilalți agenți (Codex, Gemini), care pot avea nevoie de ea:
-  - înregistrarea modulului;
-  - încercarea pe viu cu adaptorul (`@agentclientprotocol/claude-agent-acp`);
-  - instalarea adaptorului din interfață (rândul cu comanda și butonul);
-  - Markdown în răspunsuri, ieșirea uneltelor, câmpul pe mai multe rânduri.
-
-  Planul: `79-agenti-si-mcp.md`, 79d.
-
-  **Înainte de a o oferi, de reparat** (găsite de review-ul din 2026-11-15, verificate în
-  cod):
-  - `acp-client`: scrierea în stdin-ul agentului se face sub lacătul comun și pe firul UI.
-    Un agent care scrie mult (reluarea istoricului) poate bloca totul. Trebuie un fir
-    `acp-write` hrănit de un canal, nimic de I/O sub lacăt, iar `wake()` apelat după ce
-    lacătul e eliberat.
-  - `acp-client`: un rând care nu e UTF-8 oprește citirea, pe stderr (agentul se blochează
-    când se umple pipe-ul) sau pe stdout (un `Exited` fals). Trebuie
-    `read_until` + `from_utf8_lossy`, rândurile de erori tăiate la ~4 KB, iar un rând rău
-    sărit.
-  - Permisiunile: un singur loc, deci a doua o șterge pe prima, fără răspuns. La Esc,
-    protocolul cere ca fiecare permisiune deschisă să primească `cancelled`. Trebuie o
-    coadă, cu răspuns la `stop()` și la `ended()`.
-  - Așezarea pe rânduri: cheia face hash pe toată conversația la fiecare bucată, iar
-    `counts` e O(n·m). Trebuie o versiune per element, numărarea o dată per diff (multiset),
-    înălțimi și lățimi ținute, istoricul așezat pe bucăți.
-  - Memoria: ieșirea uneltelor (nedesenată) și textele diff-urilor, ținute nelimitat.
-  - Închiderea procesului (`taskkill` pe Windows) blochează firul UI: trebuie făcută pe un
-    worker.
-  - După „Instalează”, adaptorul nu mai e căutat din nou. Trebuie o stare „aștept
-    instalarea” și o reîncercare. Un `begin()` fără agent trebuie să devină `Failed`.
-  - O reluare fără `loadSession` devine pe tăcute o sesiune nouă: trebuie spus.
-- **O sesiune pornită cu „+” și reluată apoi din listă** deschide un al doilea tab: id-ul
-  ei se află abia după ce e scrisă. De legat tab-ul de id când apare fișierul sesiunii.
-- **Sesiunile Claude cu primul rând peste 64 KB** nu-și au `cwd` citit, deci paza contra
-  unui alt dosar cu același nume nu le prinde. De citit înainte până la primul `cwd`, cu o
-  limită.
+- (Făcute 2026-11-20) **Sesiunile agenților:** una pornită cu „+” și reluată din listă
+  înainte să-i vadă firul de urmărire fișierul își găsește tab-ul nou pe loc
+  (`follow::tab_of`), fără un al doilea; una a lui Claude cu primul rând peste 64 KB își are
+  dosarul și ora pornirii căutate mai departe, în bucăți, cel mult 4 MB (`files::deeper`).
 
 - ~~**Dosarele de grup în `crates/domain` și `crates/infra`**~~ — **făcut 2026-11-12**
   (varianta A, aleasă de utilizator).

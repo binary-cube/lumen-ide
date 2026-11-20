@@ -13,6 +13,12 @@ use serde_json::Value;
 pub const HEAD: usize = 64 * 1024;
 pub const TAIL: usize = 64 * 1024;
 
+/// How far from a file's start its first `cwd` is looked for when its first lines are
+/// longer than [`HEAD`] (a pasted image, a long first message): read in pieces, never whole.
+pub const DEEP: u64 = 4 * 1024 * 1024;
+/// What a piece keeps of the one before it (a value cut between two pieces is found whole).
+pub const OVERLAP: usize = 8 * 1024;
+
 /// The most working folders kept of a session.
 pub const CWDS_MAX: usize = 16;
 
@@ -96,6 +102,30 @@ fn typed(record: &Value) -> Option<&str> {
     };
     let text = text.trim();
     (!text.is_empty() && !text.starts_with('<')).then_some(text)
+}
+
+/// The text value of the first `"key":"…"` in `bytes` (a piece of a JSON line, maybe cut),
+/// read as JSON (its escapes undone); `None` if it isn't there whole.
+pub fn text_field(bytes: &[u8], key: &str) -> Option<String> {
+    let needle = format!("\"{key}\":\"");
+    let at = bytes.windows(needle.len()).position(|w| w == needle.as_bytes())?;
+    let value = &bytes[at + needle.len() - 1..];
+    serde_json::Deserializer::from_slice(value).into_iter::<String>().next()?.ok()
+}
+
+/// The start's `cwd` and `timestamp` read from `next` pieces of the file (each given with
+/// what's kept of the one before it): for a session whose first lines are too long for
+/// [`HEAD`]. Stops once both are found.
+pub fn deep_facts(facts: &mut Facts, piece: &[u8]) -> bool {
+    if facts.cwds.is_empty()
+        && let Some(cwd) = text_field(piece, "cwd")
+    {
+        facts.cwds.push(cwd);
+    }
+    if facts.started.is_none() {
+        facts.started = text_field(piece, "timestamp").as_deref().and_then(seconds);
+    }
+    !facts.cwds.is_empty() && facts.started.is_some()
 }
 
 /// An ISO 8601 moment in seconds since the epoch.

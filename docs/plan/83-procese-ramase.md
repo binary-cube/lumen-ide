@@ -222,9 +222,20 @@ fiecare eșantion (la 2 s) cerea ~14 cadre în fiecare fereastră vizibilă.
   programele altor teste, care rulează în paralel.
 
 **Lăsat.**
-- **Oprirea ajutoarelor desprinse ale unui singur proiect** când i se închide fereastra, iar
-  altele rămân deschise. Registrul (`process-registry`) știe proiectul fiecărui program
-  pornit, deci se poate: rădăcinile acelui proiect și descendenții lor. E nevoie de multă
-  grijă: un proiect deschis în două ferestre, sau un proiect într-un dosar al altuia.
-  Până atunci, un asemenea ajutor trăiește până la ieșirea din aplicație.
+- (Făcut 2026-11-20) **Oprirea ajutoarelor desprinse ale unui singur proiect**, când i se
+  închide fereastra și altele rămân deschise.
+  - La închidere, registrul (`Registry::programs`, din memoria firului lui) dă programele
+    pornite de această rulare și dosarul fiecăruia.
+  - Ale proiectului sunt cele din dosarul lui sau dintr-un subdosar, dacă niciun alt proiect
+    deschis nu e mai aproape de ele: un proiect aflat în dosarul altuia își păstrează
+    programele.
+  - Descendenții lor (`Descendants::under`, o singură citire a tabelului de procese) sunt
+    luați înainte să cadă terminalele ferestrei, fără rădăcini: acestea se închid cu
+    fereastra, ca înainte. Fiecare rădăcină e verificată după pid și ora pornirii.
+  - După ce fereastra a plecat, cele încă pornite sunt oprite pe firul `project-leaving`:
+    `SIGTERM`, apoi `SIGKILL` după 2 s, doar dacă sunt încă același program.
+  - Nimic nu se oprește dacă același proiect e deschis în altă fereastră. Fereastră fără
+    proiect: nimic. Doar pe macOS, ca la ultima fereastră.
+  - Teste: regula proiectului cel mai apropiat (`owned_by`), pădurea sub mai multe rădăcini
+    (`forest`: rădăcinile lăsate afară, un id refolosit sărit).
 - Pe Linux și Windows: fără fereastră de oprire (vezi mai sus de ce).

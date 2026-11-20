@@ -68,3 +68,26 @@ fn what_was_left_is_listed_in_the_task_manager_with_stop() {
     // Nothing a closing would stop.
     assert!(workbench_model::ResourceReporter::running(&Reporter).is_empty());
 }
+
+/// A closed project's programs: those that ran in its folder or below, unless another open
+/// project is nearer (a project inside it keeps its own); none of another project's.
+#[test]
+fn a_closed_project_owns_only_what_ran_nearest_to_it() {
+    use std::path::PathBuf;
+    let p = |s: &str| Some(PathBuf::from(s));
+    let programs = vec![
+        (1, 10, p("/work/shop")),
+        (2, 20, p("/work/shop/tools")),
+        (3, 30, p("/work/shop/admin")),
+        (4, 40, p("/work/shop/admin/src")),
+        (5, 50, p("/work/shopping")),
+        (6, 60, None),
+    ];
+    let others = [PathBuf::from("/work/shop/admin"), PathBuf::from("/work/other")];
+    let owned = owned_by(programs.clone(), Path::new("/work/shop"), &others);
+    assert_eq!(owned, [(1, 10), (2, 20)]);
+    // The inner project closing: its own only.
+    let outer = [PathBuf::from("/work/shop")];
+    let owned = owned_by(programs, Path::new("/work/shop/admin"), &outer);
+    assert_eq!(owned, [(3, 30), (4, 40)]);
+}

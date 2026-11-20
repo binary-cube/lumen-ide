@@ -302,3 +302,22 @@ Modulul `app-log`: „Show Log”, filtrele, urmărirea fișierului, „Reveal L
   `info` (accentul), debug și trace `wrench` (estompat). Exemplul WHERE e
   `level = 'ERROR' · target LIKE '%database%' · msg LIKE '%save%'`. Celelalte surse ale grilei
   nu se schimbă.
+
+## Hotărâri după (2026-11-20)
+
+- **`debug` / `trace` rămân în build-ul de release.** Măsurat (release, macOS): o linie
+  `debug!` sub nivelul ales costă ~0,4 ns, adică 10 milioane în 3,7 ms (testul ignorat
+  `a_debug_line_below_the_level_costs_next_to_nothing`). Filtrul e ținut minte la locul
+  fiecărei linii, deci nu se formatează nimic. Scoaterea lor la compilare
+  (`release_max_level_*`) n-ar câștiga nimic măsurabil, dar ar opri nivelul Debug ales din
+  setări, de care e nevoie pentru un raport de bug.
+- **Diagnosticele rămân cum sunt.** `EDITOR_DEBUG_WINDOWS`, `EDITOR_DEBUG_RESIZE` și
+  `EDITOR_DEBUG_EYEDROPPER` sunt citite o singură dată, la pornire, și nu fac nimic dacă nu
+  sunt puse. Sunt folosite la măsurători pe build-ul publicat, pe mașina utilizatorului.
+  Overlay-ul de diagnostic (F12, Help → Diagnostic Overlay) e o comandă a utilizatorului,
+  bună la un raport de bug. `--snapshot` există doar cu feature-ul `snapshot`, care nu intră
+  în build-ul publicat.
+- `eprintln!` rămâne doar în xtask, teste, capturi și uneltele din linia de comandă.
+  Driverul de probă (`toy.rs`) își scrie intenționat parola pe ieșirea de erori: testele
+  verifică așa că aplicația o ascunde din ce scrie un driver.
+

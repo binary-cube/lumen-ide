@@ -54,6 +54,13 @@ pub fn name(day: &str, index: u32, own: Option<&str>) -> String {
     }
 }
 
+/// `path` opened to add to (made if it isn't there), readable too: a file opened only to
+/// add to can't be locked on Windows (its lock needs read or write access), so another
+/// instance's would never be told from this one's.
+fn append_to(path: &Path) -> io::Result<std::fs::File> {
+    OpenOptions::new().create(true).read(true).append(true).open(path)
+}
+
 /// Opens where `day`'s lines go in `dir`: the day's last file while it has room (`limits`),
 /// else the next; the day's own when another instance holds it (`run`'s).
 pub fn open(dir: &Path, day: &str, run: &str, limits: Limits) -> io::Result<Current> {
@@ -67,7 +74,7 @@ pub fn open(dir: &Path, day: &str, run: &str, limits: Limits) -> io::Result<Curr
                 index += 1;
                 continue;
             }
-            let file = OpenOptions::new().create(true).append(true).open(&path)?;
+            let file = append_to(&path)?;
             // Held by another instance: this one writes its own.
             if own.is_none() && file.try_lock().is_err() {
                 break;
@@ -95,7 +102,7 @@ pub fn next(dir: &Path, current: &Current, run: &str, limits: Limits) -> io::Res
         let path = dir.join(name(&current.day, index, own));
         let size = std::fs::metadata(&path).map_or(0, |m| m.len());
         if size < limits.file {
-            let file = OpenOptions::new().create(true).append(true).open(&path)?;
+            let file = append_to(&path)?;
             let _ = file.try_lock();
             return Ok(Current { file, path, day: current.day.clone(), index, size });
         }

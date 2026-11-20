@@ -21,6 +21,9 @@ pub const COALESCE: Duration = Duration::from_millis(300);
 /// The longest news are joined (a stream of them still gets written).
 const COALESCE_MAX: Duration = Duration::from_secs(2);
 
+/// The longest an answer of the registry's thread is waited for (it's in memory there).
+const ASK_WAIT: Duration = Duration::from_millis(200);
+
 /// How often the programs whose end isn't told are looked at.
 pub const CHECK_EVERY: Duration = Duration::from_secs(10);
 
@@ -36,6 +39,9 @@ enum News {
     Finish(Sender<()>),
     /// Written now, then told (tests).
     Flush(Sender<()>),
+    /// The programs this run started (pid, start time, the folder they ran for), still
+    /// running as far as told.
+    Programs(Sender<Vec<(u32, u64, Option<PathBuf>)>>),
 }
 
 /// This instance's registry.
@@ -87,6 +93,17 @@ impl Registry {
     /// Programs answered (pid, start time): no longer kept.
     pub fn forget(&self, programs: Vec<(u32, u64)>) {
         self.tell(News::Forget(programs));
+    }
+
+    /// The programs this run started, still running as far as told: their ids, start
+    /// times and the folders they ran for. Kept in memory by the registry's thread: at most
+    /// a moment (`ASK_WAIT`).
+    pub fn programs(&self) -> Vec<(u32, u64, Option<PathBuf>)> {
+        let (tx, rx) = mpsc::channel();
+        if !self.tell(News::Programs(tx)) {
+            return Vec::new();
+        }
+        rx.recv_timeout(ASK_WAIT).unwrap_or_default()
     }
 
     /// Everything told so far written (tests; at most a second).
@@ -231,6 +248,15 @@ impl Keeper {
             News::Flush(done) => {
                 self.write();
                 let _ = done.send(());
+            }
+            News::Programs(answer) => {
+                let programs = self
+                    .kept
+                    .iter()
+                    .filter(|k| !k.adopted)
+                    .map(|k| (k.record.pid, k.record.started, k.record.project_path()))
+                    .collect();
+                let _ = answer.send(programs);
             }
             News::Finish(done) => {
                 self.kept.retain(|k| k.adopted);
