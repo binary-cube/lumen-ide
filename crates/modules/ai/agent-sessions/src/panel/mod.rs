@@ -35,6 +35,7 @@ mod paint;
 use i18n::t;
 use kernel::{Point, Rect};
 use ui_components::ds::{self, Ctx};
+use ui_components::picker::{PickerEvent, PickerItem};
 use ui_components::{
     Asked, EdgeScrollbar, KeyReach, PanelButton, PanelContext, ToolPanel, ToolPanelAction,
     ViewMenuEntry, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
@@ -61,8 +62,6 @@ const NEW: &str = "new";
 const REFRESH: &str = "refresh";
 /// The header's filter: only the favorites listed.
 const ONLY_FAVORITES: &str = "only-favorites";
-/// The agents' filter's rows (`agent-filter:<id>`; with nothing after it: every agent).
-const AGENT_FILTER: &str = "agent-filter:";
 /// The width kept for a row's age (`now`, `12m`, `3d`): its star stands in one column left
 /// of it, whatever the age says.
 const AGE_COLUMN: f32 = 34.0;
@@ -174,6 +173,10 @@ pub struct SessionsPanel {
     agent_filter: Option<&'static str>,
     filter_field: Option<Rect>,
     hover_filter: bool,
+    /// The agents' filter's list, open under it (the shared picker), and the agent of each
+    /// of its rows (`None`: every one).
+    filter_list: ui_components::picker::Picker,
+    filter_rows: Vec<Option<&'static str>>,
     /// Each row's star as drawn (a click on it adds the session to the favorites or takes
     /// it off), and the one under the mouse.
     stars: Vec<(Rect, Star)>,
@@ -256,6 +259,8 @@ impl Default for SessionsPanel {
             agent_filter: None,
             filter_field: None,
             hover_filter: false,
+            filter_list: ui_components::picker::Picker::default(),
+            filter_rows: Vec::new(),
             stars: Vec::new(),
             hover_star: None,
             more_rect: None,
@@ -723,25 +728,120 @@ impl SessionsPanel {
         self.agent_filter.is_some() || self.agents_read().len() > 1
     }
 
-    /// The agents' filter's list: every agent, then each one with sessions, the chosen
-    /// checked.
-    fn agent_filter_menu(&self) -> Vec<ViewMenuEntry> {
-        let mut rows = vec![
-            ViewMenuEntry::item(AGENT_FILTER, t("agents.all_agents"))
-                .checked_if(self.agent_filter.is_none()),
-            ViewMenuEntry::Separator,
-        ];
+    /// The agents' filter's list opened under it: every agent, then each one with sessions,
+    /// the chosen one checked.
+    fn open_agent_filter(&mut self) {
         let mut ids = self.agents_read();
         if let Some(chosen) = self.agent_filter.filter(|a| !ids.contains(a)) {
             ids.push(chosen);
         }
-        rows.extend(ids.into_iter().map(|id| {
-            let icon = self.icons.iter().find(|(a, _)| *a == id).map_or(crate::ICON, |(_, i)| *i);
-            ViewMenuEntry::item(format!("{AGENT_FILTER}{id}"), self.agent_name(id))
-                .with_icon(icon)
-                .checked_if(self.agent_filter == Some(id))
-        }));
-        rows
+        let mut rows: Vec<Option<&'static str>> = vec![None];
+        rows.extend(ids.into_iter().map(Some));
+        let items = rows
+            .iter()
+            .map(|row| match row {
+                None => PickerItem { label: t("agents.all_agents"), ..PickerItem::default() },
+                Some(id) => PickerItem {
+                    label: self.agent_name(id),
+                    icon: Some(
+                        self.icons.iter().find(|(a, _)| a == id).map_or(crate::ICON, |(_, i)| *i),
+                    ),
+                    ..PickerItem::default()
+                },
+            })
+            .collect();
+        let chosen = rows.iter().position(|r| *r == self.agent_filter);
+        self.filter_list.open(items, chosen);
+        self.filter_rows = rows;
+    }
+
+    /// What the agents' list answered: a row chosen filters by its agent.
+    fn filter_list_event(&mut self, event: Option<PickerEvent>) -> bool {
+        match event {
+            Some(PickerEvent::Chosen(i)) => {
+                match self.filter_rows.get(i).copied() {
+                    Some(Some(id)) => self.filter_by_agent(id),
+                    Some(None) => self.filter_by_agent(""),
+                    None => {}
+                }
+                true
+            }
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    /// The panel: its search, its agents' field, its rows (the agents' list over them is
+    /// painted after).
+    fn paint_panel(&mut self, ctx: &mut ViewerPaint<'_>) {
+        if ctx.waker.is_some() {
+            self.waker.clone_from(&ctx.waker);
+        }
+        self.take_read();
+        if self.read_at.is_none_or(|at| at.elapsed() >= STALE) {
+            self.read();
+        }
+        let ds = Ctx::new(ctx.palette, ctx.scale);
+        let b = ctx.bounds;
+        let margin = ds.px(FIELD_MARGIN);
+        self.field = Rect::new(
+            b.min_x() + margin,
+            b.min_y() + ds.px(4.0),
+            (b.size.width - margin * 2.0).max(0.0),
+            ds.px(FIELD_H),
+        );
+        // The agents' filter on the search's right, while there's a choice to make.
+        self.filter_field = None;
+        if self.filters_agents() {
+            let width = ds.px(FILTER_W).min(self.field.size.width * 0.45).round();
+            let gap = ds.px(6.0);
+            self.field.size.width = (self.field.size.width - width - gap).max(0.0);
+            self.filter_field = Some(Rect::new(
+                self.field.max_x() + gap,
+                self.field.min_y(),
+                width,
+                self.field.size.height,
+            ));
+        }
+        let top = self.field.max_y() + ds.px(8.0);
+        self.list = Rect::new(b.min_x(), top, b.size.width, (b.max_y() - top).max(0.0));
+        self.filter();
+        if self.root.is_some() {
+            self.paint_search(ctx, &ds);
+            self.paint_agent_filter(ctx, &ds);
+        }
+        let b = self.list;
+        let layer = ctx.scene.push_layer(Some(b));
+        if self.root.is_none() {
+            ds::empty_state(layer, ctx.text, &ds, b, &t("agents.no_project"), None);
+            return;
+        }
+        if self.read_at.is_none() {
+            let label = t("agents.reading");
+            let mid = b.min_y() + ds.px(24.0);
+            ds::loader(
+                layer,
+                ctx.text,
+                &ds,
+                b.min_x() + ds.px(16.0),
+                mid,
+                &ds::Loader::with_text(&label),
+            );
+            return;
+        }
+        if self.shown.is_empty() && self.missing.is_empty() {
+            if self.only_favorites && self.query.text().trim().is_empty() {
+                let detail = t("agents.no_favorites_detail");
+                ds::empty_state(layer, ctx.text, &ds, b, &t("agents.no_favorites"), Some(&detail));
+            } else if self.sessions.is_empty() {
+                let detail = t("agents.none_detail");
+                ds::empty_state(layer, ctx.text, &ds, b, &t("agents.none"), Some(&detail));
+            } else {
+                ds::empty_state(layer, ctx.text, &ds, b, &t("agents.not_found"), None);
+            }
+            return;
+        }
+        self.paint_rows(ctx, &ds);
     }
 
     /// Agent `id`'s name (its id when it's no longer offered).
@@ -1084,83 +1184,35 @@ impl ToolPanel for SessionsPanel {
     }
 
     fn paint(&mut self, mut ctx: ViewerPaint<'_>) {
-        if ctx.waker.is_some() {
-            self.waker.clone_from(&ctx.waker);
+        self.paint_panel(&mut ctx);
+        // The agents' list, over everything, under its field.
+        if let Some(anchor) = self.filter_field
+            && self.filter_list.is_open()
+        {
+            let ds = Ctx::new(ctx.palette, ctx.scale);
+            let bounds = ctx.bounds;
+            self.filter_list.paint(ctx.scene, ctx.text, ctx.icons, &ds, (anchor, bounds), "");
+        } else {
+            self.filter_list.close();
         }
-        self.take_read();
-        if self.read_at.is_none_or(|at| at.elapsed() >= STALE) {
-            self.read();
-        }
-        let ds = Ctx::new(ctx.palette, ctx.scale);
-        let b = ctx.bounds;
-        let margin = ds.px(FIELD_MARGIN);
-        self.field = Rect::new(
-            b.min_x() + margin,
-            b.min_y() + ds.px(4.0),
-            (b.size.width - margin * 2.0).max(0.0),
-            ds.px(FIELD_H),
-        );
-        // The agents' filter on the search's right, while there's a choice to make.
-        self.filter_field = None;
-        if self.filters_agents() {
-            let width = ds.px(FILTER_W).min(self.field.size.width * 0.45).round();
-            let gap = ds.px(6.0);
-            self.field.size.width = (self.field.size.width - width - gap).max(0.0);
-            self.filter_field = Some(Rect::new(
-                self.field.max_x() + gap,
-                self.field.min_y(),
-                width,
-                self.field.size.height,
-            ));
-        }
-        let top = self.field.max_y() + ds.px(8.0);
-        self.list = Rect::new(b.min_x(), top, b.size.width, (b.max_y() - top).max(0.0));
-        self.filter();
-        if self.root.is_some() {
-            self.paint_search(&mut ctx, &ds);
-            self.paint_agent_filter(&mut ctx, &ds);
-        }
-        let b = self.list;
-        let layer = ctx.scene.push_layer(Some(b));
-        if self.root.is_none() {
-            ds::empty_state(layer, ctx.text, &ds, b, &t("agents.no_project"), None);
-            return;
-        }
-        if self.read_at.is_none() {
-            let label = t("agents.reading");
-            let mid = b.min_y() + ds.px(24.0);
-            ds::loader(
-                layer,
-                ctx.text,
-                &ds,
-                b.min_x() + ds.px(16.0),
-                mid,
-                &ds::Loader::with_text(&label),
-            );
-            return;
-        }
-        if self.shown.is_empty() && self.missing.is_empty() {
-            if self.only_favorites && self.query.text().trim().is_empty() {
-                let detail = t("agents.no_favorites_detail");
-                ds::empty_state(layer, ctx.text, &ds, b, &t("agents.no_favorites"), Some(&detail));
-            } else if self.sessions.is_empty() {
-                let detail = t("agents.none_detail");
-                ds::empty_state(layer, ctx.text, &ds, b, &t("agents.none"), Some(&detail));
-            } else {
-                ds::empty_state(layer, ctx.text, &ds, b, &t("agents.not_found"), None);
-            }
-            return;
-        }
-        self.paint_rows(&mut ctx, &ds);
     }
 
     fn scroll(&mut self, dy: f32) -> bool {
+        if self.filter_list.is_open() {
+            return self.filter_list.scroll(dy);
+        }
         let before = self.scroll;
         self.scroll = (self.scroll + dy).clamp(0.0, self.max_scroll);
         self.scroll != before
     }
 
     fn click(&mut self, p: Point) -> Option<ToolPanelAction> {
+        // The agents' list open: it takes the click (a row, or closed by one outside).
+        if self.filter_list.is_open() {
+            let event = self.filter_list.press(p);
+            self.filter_list_event(event);
+            return None;
+        }
         if let Some(offset) = self.bar.press(p) {
             self.scroll = offset;
             return None;
@@ -1176,7 +1228,10 @@ impl ToolPanel for SessionsPanel {
         // The agents' filter: its list, under it.
         if let Some(anchor) = self.filter_field.filter(|r| r.contains(p)) {
             self.typing = false;
-            return Some(ToolPanelAction::MenuUnder { anchor, entries: self.agent_filter_menu() });
+            if anchor.size.width > 0.0 {
+                self.open_agent_filter();
+            }
+            return None;
         }
         // The search: its ×, or the keys to it (a click elsewhere takes them back).
         if self.clear.is_some_and(|r| r.contains(p)) {
@@ -1271,6 +1326,9 @@ impl ToolPanel for SessionsPanel {
     }
 
     fn hover(&mut self, p: Point) -> bool {
+        if self.filter_list.is_open() {
+            return self.filter_list.hover(p);
+        }
         let mut changed = self.bar.hover(p);
         let folder = self.folder_at(p);
         changed |= folder != self.hovered_folder;
@@ -1293,11 +1351,11 @@ impl ToolPanel for SessionsPanel {
 
     /// Clicked into (or a session renamed), it takes the keys (its rows stay the mouse's).
     fn takes_keys(&self) -> bool {
-        self.typing || self.renaming.is_some()
+        self.typing || self.renaming.is_some() || self.filter_list.is_open()
     }
 
     fn wants_text(&self) -> bool {
-        self.typing || self.renaming.is_some()
+        self.typing || self.renaming.is_some() || self.filter_list.searches()
     }
 
     fn text_input(&mut self, typed: &str) -> bool {
@@ -1324,6 +1382,11 @@ impl ToolPanel for SessionsPanel {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        // The agents' list open: its keys (↑ ↓ ↵, Esc closes it).
+        if self.filter_list.is_open() {
+            let event = self.filter_list.key(key, reach);
+            return self.filter_list_event(event) || true;
+        }
         // Renaming: ↵ gives the name, Esc leaves it as it was.
         if let Some(renaming) = &mut self.renaming {
             match key {
@@ -1530,10 +1593,6 @@ impl ToolPanel for SessionsPanel {
 
     fn menu_command(&mut self, id: &str) -> bool {
         if self.folder_command(id) {
-            return true;
-        }
-        if let Some(agent) = id.strip_prefix(AGENT_FILTER) {
-            self.filter_by_agent(agent);
             return true;
         }
         // A session's marks, its rename, what's copied of it.

@@ -15,7 +15,8 @@ use ui_components::ds::{self, Ctx, radius};
 use ui_components::editor_toolbar::{
     EditorState, EditorToolbar, StatementMark, ToolbarAction, ToolbarPaint,
 };
-use ui_components::{Tip, ViewMenuEntry, ViewerAction, ViewerCursor, WithHost};
+use ui_components::picker::PickerItem;
+use ui_components::{Tip, ViewerAction, ViewerCursor, WithHost};
 use ui_kit::{draw_icon, draw_text};
 
 use crate::runs::Runs;
@@ -185,25 +186,29 @@ impl HttpBar {
         self.runs.environment(&self.file).unwrap_or_else(|| t("http.no_environment"))
     }
 
-    fn environment_menu(&self) -> Vec<ViewMenuEntry> {
+    /// The environments' list (the shared dropdown list): none, each environment, then
+    /// adding one and editing them; each row's command, the chosen one's place.
+    fn environment_list(&self) -> (Vec<(String, PickerItem)>, Option<usize>) {
         let chosen = self.runs.environment(&self.file);
-        let check =
-            |entry: ViewMenuEntry, on: bool| if on { entry.with_icon("check") } else { entry };
-        let mut entries =
-            vec![check(ViewMenuEntry::item("env:", t("http.no_environment")), chosen.is_none())];
+        let row = |label: String, icon: Option<&'static str>| PickerItem {
+            label,
+            icon,
+            ..PickerItem::default()
+        };
+        let mut rows = vec![("env:".to_owned(), row(t("http.no_environment"), None))];
         let names =
             self.names.lock().unwrap_or_else(PoisonError::into_inner).clone().unwrap_or_default();
+        let mut at = chosen.is_none().then_some(0);
         for name in names {
-            let on = chosen.as_deref() == Some(name.as_str());
-            entries.push(check(ViewMenuEntry::item(format!("env:{name}"), name), on));
+            if chosen.as_deref() == Some(name.as_str()) {
+                at = Some(rows.len());
+            }
+            rows.push((format!("env:{name}"), row(name, Some("globe"))));
         }
-        entries.push(ViewMenuEntry::Separator);
-        entries.push(ViewMenuEntry::item("env-add:public", t("http.add_public_env")));
-        entries.push(ViewMenuEntry::item("env-add:private", t("http.add_private_env")));
-        entries.push(
-            ViewMenuEntry::item("env-edit", t("http.edit_environments")).with_icon("file-json"),
-        );
-        entries
+        rows.push(("env-add:public".to_owned(), row(t("http.add_public_env"), Some("plus"))));
+        rows.push(("env-add:private".to_owned(), row(t("http.add_private_env"), Some("plus"))));
+        rows.push(("env-edit".to_owned(), row(t("http.edit_environments"), Some("file-json"))));
+        (rows, at)
     }
 
     /// The environment file opened in the editor (made with an example first if it isn't
@@ -250,7 +255,8 @@ impl HttpBar {
             }
             Tool::Environment => {
                 self.read_names();
-                return Some(ToolbarAction::Menu { anchor, entries: self.environment_menu() });
+                let (rows, chosen) = self.environment_list();
+                return Some(ToolbarAction::List { anchor, rows, chosen });
             }
             Tool::Graph => self.show_graph(),
         }

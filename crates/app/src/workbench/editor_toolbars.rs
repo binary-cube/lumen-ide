@@ -224,6 +224,14 @@ impl Workbench {
                 self.open_context_menu(bar_menu(entries), at);
                 MouseResult::Redraw
             }
+            ToolbarAction::List { anchor, rows, chosen } => {
+                self.close_hovers_for_menu();
+                let (ids, items): (Vec<String>, Vec<_>) = rows.into_iter().unzip();
+                self.dropdown_list.open(items, chosen);
+                self.dropdown_anchor = anchor;
+                self.dropdown_ids = ids;
+                MouseResult::Redraw
+            }
         }
     }
 

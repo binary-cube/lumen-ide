@@ -12,6 +12,7 @@ pub use ui_components::data_grid;
 pub use ui_components::decorations;
 pub use ui_components::ds;
 pub use ui_components::editor_toolbar;
+pub use ui_components::picker;
 pub use ui_components::screen_widgets;
 pub use ui_components::services;
 pub use ui_components::severity;

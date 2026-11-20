@@ -42,6 +42,7 @@ pub mod shortcuts;
 pub mod slider;
 pub mod snippets;
 pub mod splitter;
+pub mod table;
 pub mod tag_colors;
 pub mod toast;
 pub mod tool_panel;

@@ -52,7 +52,14 @@ pub struct LogFileView {
     close_hover: bool,
     /// The mouse is over the details (the wheel scrolls them).
     hover_in_details: bool,
+    /// The details' line as written (what "Copy the Line" copies).
+    details_raw: String,
 }
+
+/// The details' right-click menu: what's selected, the message, the line as written.
+const COPY_SELECTION: &str = "log.copy_selection";
+const COPY_MESSAGE: &str = "log.copy_message";
+const COPY_LINE: &str = "log.copy_line";
 
 impl std::fmt::Debug for LogFileView {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -76,6 +83,7 @@ impl LogFileView {
             details_close: Rect::default(),
             close_hover: false,
             hover_in_details: false,
+            details_raw: String::new(),
         }
     }
 
@@ -107,6 +115,7 @@ impl LogFileView {
             Some(raw) => {
                 self.details =
                     Some((row, ui_components::ReadText::new(crate::entry::details(&raw))));
+                self.details_raw = raw;
                 true
             }
             // Its block still coming: made at a later poll.
@@ -445,10 +454,35 @@ impl Viewer for LogFileView {
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ui_components::ViewMenuEntry>> {
+        use ui_components::ViewMenuEntry;
+        if self.in_details(p) {
+            let selected = self.details.as_ref().is_some_and(|(_, r)| r.has_selection());
+            return Some(vec![
+                ViewMenuEntry::item(COPY_SELECTION, t("log_viewer.copy_selection"))
+                    .with_icon("copy")
+                    .disabled_if(!selected),
+                ViewMenuEntry::item(COPY_MESSAGE, t("log_viewer.copy_message")),
+                ViewMenuEntry::item(COPY_LINE, t("log_viewer.copy_line")),
+            ]);
+        }
         self.grid.as_mut()?.context_menu(p)
     }
 
     fn command(&mut self, id: &str) -> bool {
+        // The details' menu: what it copies.
+        let copied = match id {
+            COPY_SELECTION => self.details.as_ref().and_then(|(_, r)| r.selected_text()),
+            COPY_MESSAGE => self
+                .details
+                .is_some()
+                .then(|| crate::entry::parse(&self.details_raw).cell(crate::entry::MSG).to_owned()),
+            COPY_LINE => self.details.is_some().then(|| self.details_raw.clone()),
+            _ => None,
+        };
+        if let Some(text) = copied {
+            self.action = Some(ViewerAction::Request(ui_components::AppRequest::CopyText(text)));
+            return true;
+        }
         let used = self.grid.as_mut().is_some_and(|g| g.command(id));
         // A row chosen by a command (select, find): its details follow.
         self.sync_details();

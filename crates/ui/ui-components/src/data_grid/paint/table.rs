@@ -38,8 +38,8 @@ impl<S: GridSource> DataGrid<S> {
         }
         let rows_ready =
             (first..last).any(|i| self.source.row_state(self.row_at(i)) == RowState::Ready);
-        let name_font = ds.ui_font(-0.5).with_weight(Font::SEMIBOLD);
-        let type_font = ds.ui_font(-2.0);
+        let name_font = crate::table::name_font(ds);
+        let type_font = crate::table::subtitle_font(ds);
         let cell_font = ds.ui_font(-0.5);
         let scale = ds.scale.max(0.01);
         let mut buffer = String::new();
@@ -159,9 +159,7 @@ impl<S: GridSource> DataGrid<S> {
             let row = self.row_at(i);
             let top = body.min_y() + i as f32 * row_h - self.scroll_y;
             let line = Rect::new(cells.min_x(), top, cells.size.width, row_h);
-            if i % 2 == 1 {
-                layer.quad(Quad::filled(line, p.text.with_alpha(0.018)));
-            }
+            crate::table::stripe(layer, ds, line, i as usize);
             let state = self.source.row_state(row);
             let baseline = ui_kit::centered_baseline(top, row_h, &metrics);
             for (pos, &col) in visible.iter().enumerate() {
@@ -260,20 +258,14 @@ impl<S: GridSource> DataGrid<S> {
             }
         }
         // The columns' separators.
-        for pos in 0..visible.len() {
-            let x = (x0 + edges[pos + 1]).round();
-            if x >= cells.min_x() && x <= cells.max_x() {
-                layer.quad(Quad::filled(
-                    Rect::new(
-                        x,
-                        body.min_y(),
-                        ds.line(),
-                        (content_h - self.scroll_y).min(body.size.height).max(0.0),
-                    ),
-                    p.border.with_alpha(0.55),
-                ));
-            }
-        }
+        crate::table::column_lines(
+            layer,
+            ds,
+            (0..visible.len()).map(|pos| x0 + edges[pos + 1]),
+            body.min_y(),
+            (content_h - self.scroll_y).min(body.size.height).max(0.0),
+            cells,
+        );
         // Rows to be deleted: struck through.
         for i in first..last {
             let row = self.row_at(i);
@@ -406,7 +398,7 @@ impl<S: GridSource> DataGrid<S> {
 
         // The headers.
         let layer = scene.push_layer(Some(header));
-        layer.quad(Quad::filled(header, p.text.with_alpha(0.03)));
+        crate::table::header_band(layer, ds, header);
         let corner = Rect::new(header.min_x(), header.min_y(), gutter, header.size.height);
         self.hits.push((corner, Hit::Corner));
         let layer = scene.push_layer(Some(Rect::new(
@@ -487,15 +479,7 @@ impl<S: GridSource> DataGrid<S> {
                 p.text_muted,
                 Align::Left,
             );
-            layer.quad(Quad::filled(
-                Rect::new(
-                    right.round(),
-                    header.min_y() + px(8.0),
-                    ds.line(),
-                    header.size.height - px(16.0),
-                ),
-                p.border,
-            ));
+            crate::table::header_edge(layer, ds, right + ds.line() / 2.0, header, false);
         }
         // Where a header being moved would go.
         if let Some(to) = self.drop_at
@@ -510,7 +494,11 @@ impl<S: GridSource> DataGrid<S> {
             scene.push_layer(Some(area)).quad(Quad::filled(r, p.accent));
         }
         let layer = scene.push_layer(Some(area));
-        ds::divider(layer, ds, area.min_x(), area.max_x(), header.max_y() - ds.line());
+        crate::table::header_rule(
+            layer,
+            ds,
+            Rect::new(area.min_x(), header.min_y(), area.size.width, header.size.height),
+        );
 
         // Nothing to show: why.
         if rows == 0 {

@@ -627,6 +627,11 @@ pub struct Workbench {
     settings_language: Option<String>,
     /// "Copy": the ways to copy a file's path / reference, with previews.
     choice_menu: ui_workbench::ChoiceMenu,
+    /// A dropdown's list a bar asked for (`ToolbarAction::List`): the shared picker, the
+    /// field it opened under, and each row's command (back to the bar).
+    dropdown_list: ui_workbench::picker::Picker,
+    dropdown_anchor: kernel::Rect,
+    dropdown_ids: Vec<String>,
     /// The right-click menu (drawn by us, the same on every system).
     context_menu: ui_workbench::ContextMenu,
     /// The app's menus in a drawer from the window's bar: made when it first opens, gone
@@ -877,6 +882,9 @@ impl Workbench {
             settings_model: SettingsModel::default(),
             settings_language: None,
             choice_menu: Default::default(),
+            dropdown_list: Default::default(),
+            dropdown_anchor: kernel::Rect::default(),
+            dropdown_ids: Vec::new(),
             context_menu: Default::default(),
             menu_drawer: None,
             choice_purpose: ChoicePurpose::None,

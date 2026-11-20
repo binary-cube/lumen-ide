@@ -86,6 +86,10 @@ pub enum ToolbarAction {
     /// A menu shown under `anchor` (a button's dropdown); the chosen row's id comes back as
     /// an [`EditorToolbar::command`].
     Menu { anchor: Rect, entries: Vec<ViewMenuEntry> },
+    /// A dropdown's list shown under `anchor` (the shared picker, as every dropdown's):
+    /// each row's command (back as an [`EditorToolbar::command`]), its look, and the row
+    /// chosen now.
+    List { anchor: Rect, rows: Vec<(String, crate::picker::PickerItem)>, chosen: Option<usize> },
 }
 
 /// The editor's state the bar follows ([`EditorToolbar::sync_editor`]), while it asks to.

@@ -613,6 +613,8 @@ pub(super) enum Overlay {
     /// The app's menus, from the window's bar (see `menu_drawer`).
     MenuDrawer,
     ContextMenu,
+    /// A dropdown's list, asked by a bar or a panel (the shared picker, under its field).
+    DropdownList,
     ChoiceMenu,
     Dialog,
     ModalView,
@@ -625,12 +627,13 @@ pub(super) enum Overlay {
 }
 
 impl Overlay {
-    pub const ALL: [Overlay; 12] = [
+    pub const ALL: [Overlay; 13] = [
         Overlay::FileDrop,
         Overlay::Toasts,
         Overlay::StatusPopover,
         Overlay::MenuDrawer,
         Overlay::ContextMenu,
+        Overlay::DropdownList,
         Overlay::ChoiceMenu,
         Overlay::Dialog,
         Overlay::ModalView,

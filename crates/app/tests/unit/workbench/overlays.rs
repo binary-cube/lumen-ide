@@ -151,6 +151,8 @@ fn the_keyboard_order_is_the_drawing_order() {
         Overlay::ModalView,
         Overlay::Dialog,
         Overlay::ChoiceMenu,
+        // A dropdown's list (a bar's), over what it was opened from.
+        Overlay::DropdownList,
         Overlay::ContextMenu,
         // The app's menus from the window's bar: over everything they could open.
         Overlay::MenuDrawer,
@@ -212,6 +214,7 @@ fn the_kinds_are_modals_and_popovers() {
         let popover = matches!(
             o,
             Overlay::ContextMenu
+                | Overlay::DropdownList
                 | Overlay::ChoiceMenu
                 | Overlay::Toasts
                 | Overlay::StatusPopover
@@ -373,4 +376,30 @@ fn a_dialog_s_list_follows_its_thumb() {
     assert_eq!(wb.dialogs.dialog.list_offset(), moved, "released: it stays");
     assert!(wb.dialogs.dialog.is_open(), "a press on its scrollbar doesn't answer it");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A bar's dropdown list: shown by the app as the shared picker, a popover with the keys;
+/// a row taken goes back to the bar as its command, and the list closes.
+#[test]
+fn a_bars_dropdown_list_answers_with_the_rows_command() {
+    let (mut wb, dir, mut text) = opened("dropdown-list");
+    let row = |label: &str| ui_workbench::picker::PickerItem {
+        label: label.to_owned(),
+        ..Default::default()
+    };
+    let action = ui_workbench::editor_toolbar::ToolbarAction::List {
+        anchor: kernel::Rect::new(100.0, 40.0, 160.0, 28.0),
+        rows: vec![("env:".to_owned(), row("None")), ("env:dev".to_owned(), row("dev"))],
+        chosen: Some(0),
+    };
+    wb.toolbar_action(&mut text, action);
+    assert_eq!(wb.active_overlay(), Some(Overlay::DropdownList));
+    wb.edit_key(&mut text, EditKey::Move { motion: Motion::Down, extend: false });
+    wb.edit_key(&mut text, EditKey::Enter { shift: false });
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(
+        wb.take_request(),
+        Some(MouseResult::MenuCommand(format!("{}env:dev", crate::workbench::BAR_MENU)))
+    );
+    assert_eq!(wb.active_overlay(), None);
 }

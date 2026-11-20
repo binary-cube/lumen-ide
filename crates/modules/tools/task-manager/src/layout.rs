@@ -21,6 +21,9 @@ use ui_components::Orientation;
 use ui_components::columns::{self, Choice, ColumnFit, ColumnSpec};
 use ui_components::overflow::{self, OverflowItem, OverflowLayout, OverflowSpec, Side};
 
+/// How far the columns' chooser ("⋯") stays from the table's right edge (logical pixels).
+const CHOOSER_GAP: f32 = 10.0;
+
 use crate::model::Grouping;
 
 /// The breakpoints between the classes (logical pixels): compact, narrow, medium, wide.
@@ -526,11 +529,19 @@ pub fn layout(spec: &LayoutSpec, previous: Option<WidthClass>) -> PageLayout {
     out.detail_layout = detail.map(|d| detail_layout(d.size.width, scale));
     out.table = Some(table);
     if list_mode == ListMode::Table {
-        let header_h = px(28.0);
+        let header_h = px(ui_components::table::HEADER_H);
         let header = r(table.min_x(), table.min_y(), table.size.width, header_h);
+        // The columns' chooser: a square button, centered in the header, kept off the
+        // table's rounded edge.
         let chooser_w = px(28.0);
-        out.chooser = Some(r(header.max_x() - chooser_w, header.min_y(), chooser_w, header_h));
-        out.columns = fit_columns(spec, class, table, chooser_w + px(4.0));
+        let chooser_gap = px(CHOOSER_GAP);
+        out.chooser = Some(r(
+            header.max_x() - chooser_gap - chooser_w,
+            header.min_y() + (header_h - chooser_w) / 2.0,
+            chooser_w,
+            chooser_w,
+        ));
+        out.columns = fit_columns(spec, class, table, chooser_w + chooser_gap + px(4.0));
         out.header = Some(header);
         out.rows =
             r(table.min_x(), header.max_y(), table.size.width, table.max_y() - header.max_y());

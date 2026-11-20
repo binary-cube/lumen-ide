@@ -80,8 +80,9 @@ pub fn paint(ctx: ViewerPaint<'_>, stopping: &Stopping, scroll: f32, bar: &mut E
     y += bar_h + px(GAP);
     // The programs, in a box like a form's field.
     let rows = count.clamp(1, VISIBLE_ROWS);
-    let frame = Rect::new(left, y, width, px(ROW_H * rows as f32 + INSET * 2.0));
     let line = ds.line();
+    // Its rows and their insets inside its border: what it holds is exactly what it shows.
+    let frame = Rect::new(left, y, width, px(ROW_H * rows as f32 + INSET * 2.0) + line * 2.0);
     layer.quad(Quad::filled(frame, p.input_border).rounded(px(ds::radius::MD)));
     let inner = Rect::new(
         frame.min_x() + line,
@@ -102,7 +103,10 @@ pub fn paint(ctx: ViewerPaint<'_>, stopping: &Stopping, scroll: f32, bar: &mut E
     let top = inner.min_y() + px(INSET) - px(scroll);
     // A list that scrolls keeps its scrollbar's lane free on the right, with room between
     // (the bar widens under the mouse: it never touches the text).
-    let lane = if max_scroll(stopping) > 0.0 {
+    // It scrolls only when more programs than its rows are listed.
+    let content = px(ROW_H) * count as f32 + px(INSET) * 2.0;
+    let scrolls = max_scroll(stopping) > 0.0;
+    let lane = if scrolls {
         ui_components::Scrollbar::track_thickness(scale) + px(BAR_INSET + BAR_GAP)
     } else {
         0.0
@@ -150,7 +154,6 @@ pub fn paint(ctx: ViewerPaint<'_>, stopping: &Stopping, scroll: f32, bar: &mut E
         ds::draw_ellipsized(list, text, &program.name, &name_font, (name_x, base), room, ink);
     }
     // More than fits: the app's scrollbar along the box's right edge (nothing when it fits).
-    let content = px(ROW_H) * count as f32 + px(INSET) * 2.0;
     // Off the box's edges a little (its border, its rounded corners), as a field's is.
     let area = Rect::new(
         inner.min_x(),
@@ -158,6 +161,9 @@ pub fn paint(ctx: ViewerPaint<'_>, stopping: &Stopping, scroll: f32, bar: &mut E
         inner.size.width - px(BAR_INSET),
         inner.size.height - px(BAR_INSET) * 2.0,
     );
+    // Nothing to scroll: no bar (its area is the box's less its insets, so the rows would
+    // seem not to fit by those few pixels).
+    let content = if scrolls { content } else { area.size.height };
     bar.paint(scene, p, scale, area, content, px(scroll));
 }
 

@@ -172,6 +172,7 @@ impl Overlay {
             Overlay::StatusPopover => &super::status::StatusPopoverSlot,
             Overlay::MenuDrawer => &super::menu_drawer::MenuDrawerSlot,
             Overlay::ContextMenu => &ContextMenuSlot,
+            Overlay::DropdownList => &DropdownListSlot,
             Overlay::ChoiceMenu => &ChoiceMenuSlot,
             Overlay::Dialog => &DialogSlot,
             Overlay::ModalView => &ModalViewSlot,
@@ -276,6 +277,95 @@ impl OverlaySlot for ContextMenuSlot {
 
     fn animating(&self, wb: &Workbench) -> bool {
         wb.context_menu.is_animating()
+    }
+}
+
+/// A dropdown's list (a bar's): the shared picker under its field — ↑ ↓ move, ↵ takes,
+/// Esc or a click outside closes it; a row taken goes back to the bar as its command.
+struct DropdownListSlot;
+
+impl DropdownListSlot {
+    /// What the list answered: a row taken is its bar's command.
+    fn answered(
+        wb: &mut Workbench,
+        event: Option<ui_workbench::picker::PickerEvent>,
+    ) -> MouseResult {
+        match event {
+            Some(ui_workbench::picker::PickerEvent::Chosen(i)) => {
+                let ids = std::mem::take(&mut wb.dropdown_ids);
+                match ids.into_iter().nth(i) {
+                    Some(id) => MouseResult::MenuCommand(format!("{BAR_MENU}{id}")),
+                    None => MouseResult::Redraw,
+                }
+            }
+            Some(_) => MouseResult::Redraw,
+            None => MouseResult::None,
+        }
+    }
+}
+
+impl OverlaySlot for DropdownListSlot {
+    fn kind(&self, _wb: &Workbench) -> OverlayKind {
+        OverlayKind::Popover
+    }
+
+    fn is_open(&self, wb: &Workbench) -> bool {
+        wb.dropdown_list.is_open()
+    }
+
+    fn key(&self, wb: &mut Workbench, _text: &mut TextSystem, key: EditKey) -> bool {
+        let key = match key {
+            EditKey::Escape => ui_workbench::ViewerKey::Escape,
+            EditKey::Enter { .. } => ui_workbench::ViewerKey::Enter,
+            EditKey::Move { motion: Motion::Up, .. } => ui_workbench::ViewerKey::Up,
+            EditKey::Move { motion: Motion::Down, .. } => ui_workbench::ViewerKey::Down,
+            EditKey::Backspace { .. } => ui_workbench::ViewerKey::Backspace,
+            _ => return true,
+        };
+        let event = wb.dropdown_list.key(key, ui_workbench::KeyReach::default());
+        let result = Self::answered(wb, event);
+        if !matches!(result, MouseResult::None) {
+            wb.request = Some(result);
+        }
+        true
+    }
+
+    fn text(&self, wb: &mut Workbench, _text: &mut TextSystem, typed: &str) -> bool {
+        wb.dropdown_list.text_input(typed)
+    }
+
+    fn click(&self, wb: &mut Workbench, _: &mut TextSystem, p: Point, _: u32) -> MouseResult {
+        let event = wb.dropdown_list.press(p);
+        match Self::answered(wb, event) {
+            MouseResult::None => MouseResult::Redraw,
+            result => result,
+        }
+    }
+
+    fn hover(&self, wb: &mut Workbench, p: Point) -> (bool, CursorIcon) {
+        (wb.dropdown_list.hover(p), CursorIcon::Default)
+    }
+
+    fn scroll(&self, wb: &mut Workbench, _: f32, dy: f32) -> Option<bool> {
+        Some(wb.dropdown_list.scroll(dy))
+    }
+
+    fn paint(&self, wb: &mut Workbench, text: &mut TextSystem, scene: &mut Scene) {
+        if !wb.dropdown_list.is_open() {
+            return;
+        }
+        let ctx = ui_workbench::ds::Ctx::new(&wb.palette, wb.scale);
+        let bounds = kernel::Rect::new(0.0, 0.0, wb.size.width as f32, wb.size.height as f32);
+        let anchor = wb.dropdown_anchor;
+        wb.dropdown_list.paint(scene, text, &wb.icons, &ctx, (anchor, bounds), "");
+    }
+
+    fn animating(&self, wb: &Workbench) -> bool {
+        wb.dropdown_list.next_frame().is_some()
+    }
+
+    fn has_input(&self, wb: &Workbench) -> bool {
+        wb.dropdown_list.searches()
     }
 }
 

@@ -28,6 +28,8 @@ pub(crate) struct Labels {
     pub more: String,
     /// The columns' headers and what they measure, by [`COLUMNS`].
     pub columns: [String; COLUMNS.len()],
+    /// Under each header, muted: what it counts in (by [`COLUMNS`]).
+    pub subtitles: [String; COLUMNS.len()],
     pub tips: [String; COLUMNS.len()],
     /// The cards' labels, by [`Card`].
     pub cards: [String; 4],
@@ -76,6 +78,7 @@ impl Labels {
             ColumnId::Detail => t("tasks.col_detail"),
         };
         let tip = |c: ColumnId| t(&format!("tasks.tip_{}", c.id()));
+        let sub = |c: ColumnId| t(&format!("tasks.sub_{}", c.id()));
         Self {
             scope: [t("tasks.scope_this"), t("tasks.scope_all")],
             grouping: [
@@ -91,6 +94,7 @@ impl Labels {
             paused: t("tasks.paused"),
             more: t("tasks.more"),
             columns: COLUMNS.map(col),
+            subtitles: COLUMNS.map(sub),
             tips: COLUMNS.map(tip),
             cards: [t("tasks.cpu"), t("tasks.memory"), t("tasks.gpu"), t("tasks.card_io")],
             network: t("tasks.network"),
@@ -138,6 +142,10 @@ impl Labels {
     /// The header of column `column`.
     pub fn column(&self, column: ColumnId) -> &str {
         &self.columns[column.index()]
+    }
+
+    pub fn subtitle(&self, column: ColumnId) -> &str {
+        &self.subtitles[column.index()]
     }
 }
 

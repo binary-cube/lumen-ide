@@ -102,6 +102,11 @@ impl TaskManager {
                 (rows.size.height - band_h - px(4.0)).max(0.0),
             );
         }
+        // The table's surface: rounded as the cards around it, without an edge.
+        if let Some(table) = page.table {
+            let layer = scene.push_layer(Some(table));
+            layer.quad(Quad::filled(table, p.text.with_alpha(0.025)).rounded(px(radius::MD)));
+        }
         if let Some(header) = page.header {
             self.paint_header(scene, text, icons, ds, page, header);
         }
@@ -139,6 +144,15 @@ impl TaskManager {
                 RowArea { rect: Rect::new(rows.min_x(), top, row_w, row_h), clip: rows, item: i };
             if cursor == Some(i) {
                 self.cursor_rect = inset(area.rect, px(1.5)).intersect(&rows);
+            }
+            // Every second row tinted and the lines between its columns, as every table's
+            // (a group's header and an operation span the row: neither).
+            if matches!(items[i], Item::Part { .. } | Item::Process { .. }) {
+                ui_components::table::stripe(layer, ds, area.rect, i);
+                if page.header.is_some() {
+                    let edges = page.columns.edges().map(|(_, x)| x);
+                    ui_components::table::column_lines(layer, ds, edges, top, row_h, rows);
+                }
             }
             match &items[i] {
                 Item::Group { key, title, cpu_text, memory_text, running, open, .. } => {
@@ -317,75 +331,37 @@ impl TaskManager {
         page: &PageLayout,
         header: Rect,
     ) {
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
+        ui_components::table::header_band_rounded(scene, ds, header, px(radius::MD));
         let layer = scene.push_layer(Some(header));
-        let font = ds.ui_font(-1.5).with_weight(Font::SEMIBOLD);
-        let base = ds::optical_baseline(header.min_y(), header.size.height, &font);
         let (sorted, descending) = self.state.sort;
         let sorted = column_of(sorted);
+        let half = page.columns.gap / 2.0;
         for &(column, x, w) in &page.columns.shown {
-            let label = self.texts.labels.column(column);
-            let on = column == sorted;
-            let color = if on { p.text } else { p.text_muted };
             let hovered = self.hover == Some(Hit::Header(column));
-            let cell = Rect::new(
-                x - px(4.0),
-                header.min_y() + px(2.0),
-                w + px(8.0),
-                header.size.height - px(4.0),
-            );
-            if hovered && super::sort_column(column).is_some() {
-                layer.quad(Quad::filled(cell, p.text.with_alpha(0.05)).rounded(px(radius::SM)));
-            }
-            let arrow = if on { if descending { "↓" } else { "↑" } } else { "" };
-            let arrow_w = if on { text.shape_line(arrow, &font).width + px(3.0) } else { 0.0 };
-            let room = (w - arrow_w).max(0.0);
-            if column.numeric() {
-                let label_w = text.shape_line(label, &font).width.min(room);
-                let lx = x + w - arrow_w - label_w;
-                ds::draw_ellipsized(layer, text, label, &font, (lx, base), room, color);
-                if on {
-                    draw_text(
-                        layer,
-                        &text.shape_line(arrow, &font),
-                        x + w - arrow_w + px(3.0),
-                        base,
-                        p.accent,
-                    );
-                }
-            } else {
-                let (drawn, _) =
-                    ds::draw_ellipsized(layer, text, label, &font, (x, base), room, color);
-                if on {
-                    draw_text(
-                        layer,
-                        &text.shape_line(arrow, &font),
-                        x + drawn + px(3.0),
-                        base,
-                        p.accent,
-                    );
-                }
-            }
-            self.hits.push((cell, Hit::Header(column)));
+            let rect = Rect::new(x - half, header.min_y(), w + 2.0 * half, header.size.height);
+            let on = column == sorted;
+            let cell = ui_components::table::HeaderCell {
+                rect,
+                name: self.texts.labels.column(column),
+                subtitle: self.texts.labels.subtitle(column),
+                right: column.numeric(),
+                hovered: hovered && super::sort_column(column).is_some(),
+                sorted: on.then_some(descending),
+                strong: on,
+                pad: half,
+            };
+            ui_components::table::header_cell(layer, text, ds, &cell, 0.0);
+            self.hits.push((rect, Hit::Header(column)));
         }
-        // The edges between the columns, over the headers (dragged to resize, double-clicked
-        // to fit): each a faint short line (where one can be taken), the one held or under
-        // the mouse a taller line in the accent.
+        // The edges between the columns (dragged to resize, double-clicked to fit): the one
+        // held or under the mouse lit.
         let held = self.resizing.map(|(c, ..)| c);
-        let faint = p.text_muted.with_alpha(0.22);
         for (column, x) in page.columns.edges() {
             let grip = Rect::new(x - px(GRIP), header.min_y(), px(GRIP) * 2.0, header.size.height);
             let lit =
                 held == Some(column) || (held.is_none() && self.hover == Some(Hit::Edge(column)));
-            let (inset, color) = if lit { (px(5.0), p.accent) } else { (px(10.0), faint) };
-            let line = Rect::new(
-                (x - ds.line() / 2.0).round(),
-                header.min_y() + inset,
-                ds.line().max(1.0),
-                (header.size.height - 2.0 * inset).max(0.0),
-            );
-            layer.quad(Quad::filled(line, color));
+            ui_components::table::header_edge(layer, ds, x, header, lit);
             self.hits.push((grip, Hit::Edge(column)));
         }
         if let Some(chooser) = page.chooser {
@@ -403,9 +379,7 @@ impl TaskManager {
             self.hits.push((chooser, hit));
             self.stops.push((drawn, Focus::Chooser));
         }
-        let line =
-            Rect::new(header.min_x(), header.max_y() - ds.line(), header.size.width, ds.line());
-        layer.quad(Quad::filled(line, p.border));
+        ui_components::table::header_rule(layer, ds, header);
     }
 
     /// The width `column` needs for its content as the rows draw it (physical pixels;

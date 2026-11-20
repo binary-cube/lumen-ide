@@ -500,23 +500,16 @@ fn the_list_is_filtered_by_agent() {
     panel.filter();
     assert_eq!(panel.shown, [0, 1, 2]);
     assert!(panel.filters_agents());
-    let rows: Vec<(String, bool)> = panel
-        .agent_filter_menu()
-        .into_iter()
-        .filter_map(|e| match e {
-            ViewMenuEntry::Item { id, look, .. } => Some((id, look.checked)),
-            _ => None,
-        })
-        .collect();
-    let every = AGENT_FILTER.to_owned();
-    let fake = format!("{AGENT_FILTER}fake");
-    let other = format!("{AGENT_FILTER}other");
-    assert_eq!(rows, [(every.clone(), true), (fake, false), (other.clone(), false)]);
-    assert!(panel.menu_command(&other));
+    // Its list (the shared picker): every agent first, chosen; then each one's.
+    panel.open_agent_filter();
+    assert!(panel.filter_list.is_open());
+    assert_eq!(panel.filter_rows, [None, Some("fake"), Some("other")]);
+    assert!(panel.filter_list_event(Some(PickerEvent::Chosen(2))));
     panel.filter();
     assert_eq!(panel.shown, [2], "only the other agent's");
     assert_eq!(panel.agent_name("other"), "Other");
-    assert!(panel.menu_command(&every));
+    panel.open_agent_filter();
+    assert!(panel.filter_list_event(Some(PickerEvent::Chosen(0))));
     panel.filter();
     assert_eq!(panel.shown, [0, 1, 2], "every agent's again");
 }
