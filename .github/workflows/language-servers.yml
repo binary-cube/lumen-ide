@@ -36,13 +36,13 @@ jobs:
             title: "Language servers update (major versions)"
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99"
       - uses: Swatinem/rust-cache@v2
       # npm makes the Node servers' lockfiles again (never run by the app).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: lts/*
       - name: Look up and pin the new versions
@@ -86,7 +86,7 @@ jobs:
           } > "$RUNNER_TEMP/body.md"
       - name: Pull request
         if: steps.update.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: ${{ matrix.branch }}
           title: ${{ matrix.title }}

@@ -23,7 +23,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99"
@@ -63,7 +63,7 @@ jobs:
       # repository's variables (Settings › Secrets and variables › Actions › Variables).
       HAS_SIGNPATH: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.99"
@@ -185,7 +185,7 @@ jobs:
       - name: Build (Linux)
         if: matrix.os == 'ubuntu-latest'
         run: ./scripts/build.sh linux --full
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-${{ matrix.platform }}
           path: |
@@ -199,7 +199,7 @@ jobs:
     needs: [version, build]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
@@ -209,7 +209,7 @@ jobs:
         with:
           shared-key: xtask
           save-if: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: dist
           pattern: dist-*
@@ -246,7 +246,7 @@ jobs:
           cat notes.md
       # What the draft is made of, kept with the run: a draft that can't be made (a token
       # refused) is finished by hand from it, nothing built or signed again.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release
           path: |
