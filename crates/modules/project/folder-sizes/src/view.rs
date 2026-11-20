@@ -162,7 +162,7 @@ impl SizesView {
             if let (Some(measured), Some(storage), false) = (&measured, &data.storage, stopped)
                 && let Err(e) = report::save(storage, measured)
             {
-                tracing::warn!("a folder's sizes weren't kept: {e}");
+                tracing::warn!(error = %e, "a folder's sizes weren't kept");
             }
             let _ = tx.send(measured);
             if let Some(Wake(wake)) = waker {

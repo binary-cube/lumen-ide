@@ -165,7 +165,7 @@ impl ThemeOptionSettings {
             Ok(()) => {
                 VERSION.fetch_add(1, Ordering::Relaxed);
             }
-            Err(e) => tracing::warn!("can't save the theme's setting: {e}"),
+            Err(e) => tracing::warn!(error = %e, "can't save the theme's setting"),
         }
     }
 }
@@ -215,7 +215,7 @@ impl SettingsContribution for ThemeOptionSettings {
         let Some(option) = active.options.iter().find(|o| o.id == key) else { return };
         match option.parse_value(value) {
             Some(v) => Self::save(scope.settings, option, &active.id, &v),
-            None => tracing::warn!("`{value}` isn't a value of the theme's `{key}`"),
+            None => tracing::warn!(%value, %key, "not a value of the theme's option"),
         }
     }
 }

@@ -54,7 +54,7 @@ impl SettingsContribution for AutosaveSettings {
         if key == "autosave"
             && let Err(e) = scope.settings.set(&AUTOSAVE, value != 0)
         {
-            tracing::warn!("can't save the autosave option: {e}");
+            tracing::warn!(error = %e, "can't save the autosave option");
         }
     }
 }
@@ -101,7 +101,7 @@ impl SettingsContribution for FinalNewlineSettings {
         if key == "final_newline"
             && let Err(e) = scope.settings.set(&FINAL_NEWLINE, value != 0)
         {
-            tracing::warn!("can't save the final newline option: {e}");
+            tracing::warn!(error = %e, "can't save the final newline option");
         }
     }
 }
@@ -169,7 +169,7 @@ impl SettingsContribution for SessionSettings {
             _ => return,
         };
         if let Err(e) = scope.settings.set(setting, value.max(0)) {
-            tracing::warn!("can't save the sessions option: {e}");
+            tracing::warn!(error = %e, "can't save the sessions option");
         }
     }
 }

@@ -469,8 +469,8 @@ impl TextSystem {
         let (_, mut db) = std::mem::replace(&mut self.fonts, empty).into_locale_and_db();
         for &id in faces {
             tracing::warn!(
-                "font {:?} left out: its glyphs can't be sized",
-                db.face(id).map(|f| f.post_script_name.clone())
+                font = ?db.face(id).map(|f| f.post_script_name.clone()),
+                "a font left out: its glyphs can't be sized"
             );
             db.remove_face(id);
         }

@@ -84,7 +84,7 @@ pub fn install(dir: &Path) -> Vec<String> {
         let driver = match found {
             Ok(driver) => driver,
             Err((path, why)) => {
-                tracing::warn!(path = %path.display(), "a driver's manifest wasn't read: {why}");
+                tracing::warn!(path = %path.display(), error = %why, "a driver's manifest wasn't read");
                 continue;
             }
         };

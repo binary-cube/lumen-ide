@@ -159,13 +159,13 @@ pub fn save_preferences(settings: &SettingsService, preferences: &crate::Prefere
     if settings.get(&COLUMNS) != columns
         && let Err(e) = settings.set(&COLUMNS, columns)
     {
-        tracing::warn!("can't save the Task Manager's columns: {e}");
+        tracing::warn!(error = %e, "can't save the Task Manager's columns");
     }
     let widths = widths_text(&preferences.widths);
     if settings.get(&WIDTHS) != widths
         && let Err(e) = settings.set(&WIDTHS, widths)
     {
-        tracing::warn!("can't save the Task Manager's column widths: {e}");
+        tracing::warn!(error = %e, "can't save the Task Manager's column widths");
     }
     let ratio = ((preferences.ratio * 100.0).round() as i64).clamp(15, 60);
     if settings.get(&DETAIL_RATIO) != ratio {
@@ -185,7 +185,7 @@ fn save(settings: &SettingsService, setting: &Setting<i64>, value: i64) {
         return;
     }
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save a Task Manager setting: {e}");
+        tracing::warn!(error = %e, "can't save a Task Manager setting");
     }
 }
 

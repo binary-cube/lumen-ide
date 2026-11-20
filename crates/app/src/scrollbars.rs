@@ -117,7 +117,7 @@ impl SettingsContribution for ScrollbarSettings {
         };
         // Applied by the app after the change (`apply`), as every block's.
         if let Err(e) = saved_it {
-            tracing::warn!("can't save the scrollbars' setting: {e}");
+            tracing::warn!(error = %e, "can't save the scrollbars' setting");
         }
     }
 }

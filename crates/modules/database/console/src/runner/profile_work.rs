@@ -60,7 +60,7 @@ impl Inner {
         let mut session = match self.reuse() {
             Ok(session) => session,
             Err(e) => {
-                tracing::debug!("a profile's tables' statistics weren't read: {e}");
+                tracing::debug!(error = %e, "a profile's tables' statistics weren't read");
                 self.done();
                 return;
             }
@@ -93,7 +93,7 @@ impl Inner {
                 }
             }
             Ok(_) => {}
-            Err(e) => tracing::debug!("a profile's tables' statistics weren't read: {e}"),
+            Err(e) => tracing::debug!(error = %e, "a profile's tables' statistics weren't read"),
         }
         self.changed();
         self.done();

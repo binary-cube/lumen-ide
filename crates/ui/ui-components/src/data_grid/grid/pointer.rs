@@ -502,6 +502,12 @@ impl<S: GridSource> DataGrid<S> {
                 Hit::Corner => "grid.tip_select_all",
                 _ => return None,
             };
+            // The source's own example of a filter, when it has one (its columns' names).
+            if key == "grid.tip_where"
+                && let Some(example) = self.source.filter_hint()
+            {
+                return Some(Tip::new(r, i18n::tr!("grid.tip_where_for", example = example)));
+            }
             return Some(Tip::new(r, i18n::t(key)));
         }
         let &(r, mark) = self.marks.iter().rev().find(|(r, _)| r.contains(p))?;

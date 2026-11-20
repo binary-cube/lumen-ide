@@ -204,7 +204,7 @@ fn spawn(download: bool, wake: Option<Wake>) {
                 }
             }
             Err(e) => {
-                tracing::warn!("the semantic model isn't available: {e}");
+                tracing::warn!(error = %e, "the semantic model isn't available");
                 *s.error.lock().unwrap_or_else(|e| e.into_inner()) = Some(e.to_string());
             }
         }

@@ -80,7 +80,7 @@ pub(crate) fn show(window: &winit::window::Window, items: &[MenuItem], position:
     let menu = match build(items) {
         Ok(menu) => menu,
         Err(e) => {
-            tracing::warn!("can't create the context menu: {e}");
+            tracing::warn!(error = %e, "can't create the context menu");
             return false;
         }
     };

@@ -263,7 +263,7 @@ impl SchemaAccess for SourceSchema {
                 if source.relations != notes {
                     source.relations = notes;
                     if let Err(why) = catalog.update(source) {
-                        tracing::warn!("the relations decided weren't kept: {why}");
+                        tracing::warn!(error = %why, "the relations decided weren't kept");
                     }
                 }
             }
@@ -287,7 +287,7 @@ impl SchemaAccess for SourceSchema {
                 source.secrets = SecretPolicy::Never;
                 source.relations = notes;
                 if let Err(why) = catalog.add(source) {
-                    tracing::warn!("the file wasn't kept as a data source: {why}");
+                    tracing::warn!(error = %why, "the file wasn't kept as a data source");
                 }
             }
             None => {}

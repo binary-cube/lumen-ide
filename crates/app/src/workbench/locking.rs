@@ -98,7 +98,7 @@ impl Workbench {
             }
             None => self.tabs[i].set_locked(lock),
         }
-        tracing::info!(locked = lock, "tab lock toggled");
+        tracing::debug!(locked = lock, "tab lock toggled");
         true
     }
 

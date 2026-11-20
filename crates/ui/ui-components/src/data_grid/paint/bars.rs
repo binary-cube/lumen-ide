@@ -329,8 +329,12 @@ impl<S: GridSource> DataGrid<S> {
                 _ => self.order_error.clone(),
             };
             let input = if field == Field::Where { &self.where_input } else { &self.order_input };
-            let placeholder =
-                i18n::t(if field == Field::Where { "grid.where_hint" } else { "grid.order_hint" });
+            let placeholder = match field {
+                Field::Where => {
+                    self.source.filter_hint().unwrap_or_else(|| i18n::t("grid.where_hint"))
+                }
+                _ => i18n::t("grid.order_hint"),
+            };
             let focused = self.field == Some(field);
             // The field's frame drawn here; the text inside, clear of the × button.
             let style = field_style(ds, error.is_some());

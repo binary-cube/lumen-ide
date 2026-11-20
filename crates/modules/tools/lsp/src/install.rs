@@ -317,11 +317,11 @@ pub fn install(
         }
         Err(e) if stop.load(Ordering::Relaxed) => {
             ACTIVITIES.end(activity, Outcome::Stopped);
-            tracing::info!(server = %name, "language server install stopped: {e}");
+            tracing::info!(server = %name, error = %e, "language server install stopped");
         }
         Err(e) => {
             ACTIVITIES.end(activity, Outcome::Failed(e.clone()));
-            tracing::warn!(server = %name, "language server install failed: {e}");
+            tracing::warn!(server = %name, error = %e, "language server install failed");
         }
     }
     changed();
@@ -372,7 +372,7 @@ pub fn uninstall(spec: &ServerSpec) -> Result<(), String> {
     changed();
     match &outcome {
         Ok(()) => tracing::info!(server = %name, "language server uninstalled"),
-        Err(e) => tracing::warn!(server = %name, "language server uninstall failed: {e}"),
+        Err(e) => tracing::warn!(server = %name, error = %e, "language server uninstall failed"),
     }
     outcome
 }

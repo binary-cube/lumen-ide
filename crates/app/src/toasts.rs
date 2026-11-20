@@ -104,7 +104,7 @@ impl SettingsContribution for ToastSettings {
             return;
         };
         if let Err(e) = scope.settings.set(&TOAST_POSITION, *position) {
-            tracing::warn!("can't save where the notifications show: {e}");
+            tracing::warn!(error = %e, "can't save where the notifications show");
         }
     }
 }

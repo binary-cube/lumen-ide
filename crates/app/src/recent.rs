@@ -51,7 +51,7 @@ pub fn add(path: &Path) {
     let record = move || {
         let _writing = WRITING.lock().unwrap_or_else(PoisonError::into_inner);
         if let Err(e) = workspace::record_recent(store(), &path) {
-            tracing::warn!("cannot save the recent projects: {e}");
+            tracing::warn!(error = %e, "cannot save the recent projects");
         }
         GENERATION.fetch_add(1, Ordering::Relaxed);
         if let Some(wake) = WAKE.lock().unwrap_or_else(PoisonError::into_inner).clone() {
@@ -81,7 +81,7 @@ pub fn update(change: impl FnOnce(&mut RecentProjects) -> bool) -> bool {
             changed
         }
         Err(e) => {
-            tracing::warn!("cannot save the recent projects: {e}");
+            tracing::warn!(error = %e, "cannot save the recent projects");
             false
         }
     }

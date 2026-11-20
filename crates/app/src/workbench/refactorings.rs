@@ -108,7 +108,7 @@ impl Workbench {
         match self.rename_path(from, &name) {
             Ok(()) => true,
             Err(e) => {
-                tracing::warn!("the rename failed: {e}");
+                tracing::warn!(error = %e, "the rename failed");
                 let reason = match e.kind() {
                     std::io::ErrorKind::AlreadyExists => i18n::t("files.name_taken"),
                     _ => e.to_string(),
@@ -513,7 +513,7 @@ impl Workbench {
     fn apply_plan(&mut self, plan: &Plan) -> Result<usize, String> {
         let applied = refactor::applying::apply_plan(plan, &mut WorkbenchFiles(self));
         for problem in &applied.problems {
-            tracing::warn!("{problem}");
+            tracing::warn!(%problem, "a refactoring's change wasn't made");
         }
         if applied.changed_nothing() {
             return Err(i18n::t("refactor.stale"));
@@ -545,7 +545,7 @@ impl Workbench {
         let undo = self.data.refactoring_undo.take()?;
         let undone = refactor::applying::undo_plan(undo, &mut WorkbenchFiles(self));
         for problem in &undone.problems {
-            tracing::warn!("{problem}");
+            tracing::warn!(%problem, "a refactoring's change wasn't undone");
         }
         // What changed back (for the index): the files at their names again.
         self.reindex_changed(undone.files, &undone.renames);

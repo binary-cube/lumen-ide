@@ -124,7 +124,7 @@ pub fn manifest() -> Arc<Manifest> {
     static PARSED: OnceLock<Arc<Manifest>> = OnceLock::new();
     Arc::clone(PARSED.get_or_init(|| {
         Arc::new(Manifest::parse(EMBEDDED).unwrap_or_else(|e| {
-            tracing::warn!("the language servers' download manifest can't be read: {e}");
+            tracing::warn!(error = %e, "the language servers' download manifest can't be read");
             Manifest::default()
         }))
     }))
@@ -312,7 +312,7 @@ pub fn start(names: Vec<String>, wake: Option<Arc<dyn Fn() + Send + Sync>>) {
         let _ = ensure(&names, wake.as_deref());
     });
     if let Err(e) = spawned {
-        tracing::warn!("a download's thread didn't start: {e}");
+        tracing::warn!(error = %e, "a download's thread didn't start");
     }
 }
 
@@ -463,7 +463,7 @@ pub fn install(name: &str, wake: Option<&(dyn Fn() + Send + Sync)>) -> Result<Fo
         }
         Err(e) => {
             crate::install::ACTIVITIES.end(activity, Outcome::Failed(e.to_string()));
-            tracing::warn!(component = %c.name, "a language server's download failed: {e}");
+            tracing::warn!(component = %c.name, error = %e, "a language server's download failed");
         }
     }
     changed();
@@ -551,7 +551,7 @@ pub fn remove(name: &str) -> Result<(), String> {
     match &outcome {
         Ok(()) => tracing::info!(component = %name, "a language server's component removed"),
         Err(e) => {
-            tracing::warn!(component = %name, "a language server's component can't be removed: {e}")
+            tracing::warn!(component = %name, error = %e, "a language server's component can't be removed")
         }
     }
     outcome
@@ -599,7 +599,7 @@ fn used_folders() -> BTreeSet<String> {
 fn write_refs() {
     let Some(root) = root() else { return };
     if let Err(e) = store::write_refs(&root, &refs_key(), &used_folders()) {
-        tracing::warn!("the language servers' references can't be written: {e}");
+        tracing::warn!(error = %e, "the language servers' references can't be written");
     }
 }
 
@@ -674,7 +674,7 @@ pub fn migrate_from(old: &std::path::Path, root: &std::path::Path) {
                     tracing::info!(from = %entry.path().display(), to = %target.display(), "an installed language server moved")
                 }
                 Err(e) => {
-                    tracing::warn!(from = %entry.path().display(), "an installed language server can't be moved: {e}")
+                    tracing::warn!(from = %entry.path().display(), error = %e, "an installed language server can't be moved")
                 }
             }
         }

@@ -213,7 +213,7 @@ pub fn run_script(
     cancel: &Cancel,
 ) -> Result<Applied, DbError> {
     transaction::run(session, script, cancel, &mut |sql, e| {
-        tracing::warn!("around a transaction, `{sql}` failed: {e}");
+        tracing::warn!(%sql, error = %e, "a statement around a transaction failed");
     })
 }
 

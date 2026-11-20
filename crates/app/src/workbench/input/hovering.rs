@@ -31,6 +31,8 @@ impl Workbench {
 
     /// [`Self::hover`] but the emphasis.
     pub(super) fn hover_over(&mut self, p: Point) -> (bool, CursorIcon) {
+        // A wide item's tooltip shows by the mouse.
+        self.tooltips.pointer(p);
         // The notifications follow the mouse wherever it goes (it leaves them too); on a
         // card, nothing under it gets the mouse.
         let mut floating = false;

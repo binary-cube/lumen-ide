@@ -26,7 +26,7 @@ pub(crate) fn with_icon(attributes: WindowAttributes, _png: Option<&[u8]>) -> Wi
         #[allow(unsafe_code)]
         let side = u32::try_from(unsafe { GetSystemMetrics(metric) }).ok().filter(|&s| s > 0);
         Icon::from_resource(ICON_RESOURCE, side.map(|s| winit::dpi::PhysicalSize::new(s, s)))
-            .inspect_err(|e| tracing::debug!("no app icon in the executable: {e}"))
+            .inspect_err(|e| tracing::debug!(error = %e, "no app icon in the executable"))
             .ok()
     };
     match load(SM_CXSMICON) {
@@ -39,10 +39,11 @@ pub(crate) fn with_icon(attributes: WindowAttributes, _png: Option<&[u8]>) -> Wi
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) fn with_icon(attributes: WindowAttributes, png: Option<&[u8]>) -> WindowAttributes {
     let icon = png.and_then(|png| {
-        let (rgba, width, height) =
-            decode(png).inspect_err(|e| tracing::warn!("can't decode the app icon: {e}")).ok()?;
+        let (rgba, width, height) = decode(png)
+            .inspect_err(|e| tracing::warn!(error = %e, "can't decode the app icon"))
+            .ok()?;
         winit::window::Icon::from_rgba(rgba, width, height)
-            .inspect_err(|e| tracing::warn!("can't use the app icon: {e}"))
+            .inspect_err(|e| tracing::warn!(error = %e, "can't use the app icon"))
             .ok()
     });
     match icon {

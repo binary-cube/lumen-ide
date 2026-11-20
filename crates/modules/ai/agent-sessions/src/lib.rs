@@ -147,7 +147,7 @@ impl workbench_model::ProjectService for Renamer {
                             a.rename_session(&folder, &id, &title)
                         });
                     if let Err(e) = renamed {
-                        tracing::warn!("a session wasn't renamed in its agent: {e}");
+                        tracing::warn!(error = %e, "a session wasn't renamed in its agent");
                     }
                 });
             }

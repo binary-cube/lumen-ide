@@ -140,6 +140,6 @@ fn save(path: &std::path::Path, stored: &mut Stored) {
     let disk = storage::app_sessions::load(path);
     stored.sessions = stored.sessions.merged(stored.id, disk, stored.kept.max(1));
     if let Err(e) = storage::app_sessions::save(path, &stored.sessions) {
-        tracing::warn!("the session couldn't be written: {e}");
+        tracing::warn!(error = %e, "the session couldn't be written");
     }
 }

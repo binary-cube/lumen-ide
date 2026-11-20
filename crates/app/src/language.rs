@@ -33,7 +33,7 @@ pub fn choose(code: &str) -> bool {
     }
     i18n::set_locale(code);
     if let Err(e) = crate::config::settings().set(&crate::settings::LANGUAGE, code.to_owned()) {
-        tracing::warn!("can't save the language: {e}");
+        tracing::warn!(error = %e, "can't save the language");
     }
     true
 }

@@ -416,13 +416,13 @@ impl ProjectRuns {
         if choice.format_on_save && !choice.formatter.is_none() {
             let then_check = choice.check_on_save && !choice.checker.is_none();
             if let Err(e) = self.request(Kind::Formatter, target, &language, then_check) {
-                tracing::debug!("not formatted on save: {e:?}");
+                tracing::debug!(error = ?e, "not formatted on save");
             }
         } else if choice.check_on_save
             && !choice.checker.is_none()
             && let Err(e) = self.request(Kind::Checker, target, &language, false)
         {
-            tracing::debug!("not checked on save: {e:?}");
+            tracing::debug!(error = ?e, "not checked on save");
         }
     }
 }

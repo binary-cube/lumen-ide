@@ -50,7 +50,7 @@ fn restrict(path: &Path) {
         .creation_flags(CREATE_NO_WINDOW)
         .status();
     if !done.is_ok_and(|s| s.success()) {
-        tracing::warn!("can't make {} the user's alone", path.display());
+        tracing::warn!(path = %path.display(), "can't make a file the user's alone");
     }
 }
 

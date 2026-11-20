@@ -52,15 +52,45 @@ pub struct Tooltips {
     /// Where it was last drawn, as shapes (rect, corners' radius; physical): its pill and its
     /// arrow — what must show over a page of the system's web engine.
     drawn: Vec<(Rect, f32)>,
+    /// Where the mouse is (told by whoever follows it): a wide item's tooltip shows by it.
+    pointer: Option<kernel::Point>,
+    /// Where the shown one points: its item, or (a wide one) the place of it the mouse was
+    /// on when it appeared — kept while it shows (it doesn't chase the mouse).
+    pointing: Option<Rect>,
 }
 
+/// An item at least this wide (logical pixels): its tooltip shows by the mouse, not at its
+/// middle (a field across the window: where the eyes are).
+const WIDE: f32 = 280.0;
+
 impl Tooltips {
+    /// The mouse is at `p` (physical): a wide item's tooltip shows by it.
+    pub fn pointer(&mut self, p: kernel::Point) {
+        self.pointer = Some(p);
+    }
+
+    /// Where a tooltip of `anchor` points: `anchor`, or — wider than [`WIDE`] at `scale`,
+    /// the mouse over it — a sliver of it at the mouse.
+    fn pointing_at(&self, anchor: Rect, scale: f32) -> Rect {
+        match self.pointer {
+            Some(p)
+                if anchor.size.width > WIDE * scale
+                    && p.x >= anchor.min_x()
+                    && p.x <= anchor.max_x() =>
+            {
+                Rect::new(p.x - scale, anchor.min_y(), 2.0 * scale, anchor.size.height)
+            }
+            _ => anchor,
+        }
+    }
+
     /// The tooltip of the item under the mouse (or none). `true` if a redraw is needed.
     pub fn set(&mut self, tip: Option<Tip>) -> bool {
         let Some(tip) = tip else {
             let changed = self.shown.is_some();
             self.pending = None;
             self.shown = None;
+            self.pointing = None;
             self.drawn.clear();
             return changed;
         };
@@ -71,6 +101,7 @@ impl Tooltips {
         }
         if self.shown.is_some() {
             // Already visible: switching to another item is immediate.
+            self.pointing = None;
             self.shown = Some((tip, Tween::new(1.0, Duration::from_millis(1))));
             self.pending = None;
             return true;
@@ -84,6 +115,7 @@ impl Tooltips {
         let changed = self.shown.is_some();
         self.pending = None;
         self.shown = None;
+        self.pointing = None;
         self.drawn.clear();
         changed
     }
@@ -119,20 +151,28 @@ impl Tooltips {
         {
             let mut appear = Tween::new(0.0, Duration::from_millis(120));
             appear.retarget(1.0);
+            self.pointing = None;
             self.shown = Some((tip, appear));
         }
         self.drawn.clear();
+        // Where it points, worked out once as it shows (by the mouse, for a wide item).
+        if self.pointing.is_none()
+            && let Some((tip, _)) = &self.shown
+        {
+            self.pointing = Some(self.pointing_at(tip.anchor, scale));
+        }
         let Some((tip, appear)) = &self.shown else { return };
+        let anchor = self.pointing.unwrap_or(tip.anchor);
         let ctx = Ctx::new(palette, scale).with_opacity(appear.value());
         let layer = scene.push_layer(None);
         let pill =
-            ds::tooltip(layer, text, &ctx, tip.anchor, &tip.label, tip.shortcut.as_deref(), bounds);
+            ds::tooltip(layer, text, &ctx, anchor, &tip.label, tip.shortcut.as_deref(), bounds);
         // Its arrow: between the pill and the element, on the element's middle.
-        let (arrow, x) = (ctx.px(7.0), tip.anchor.min_x() + tip.anchor.size.width / 2.0);
-        let (top, bottom) = if pill.min_y() >= tip.anchor.max_y() {
-            (tip.anchor.max_y(), pill.min_y())
+        let (arrow, x) = (ctx.px(7.0), anchor.min_x() + anchor.size.width / 2.0);
+        let (top, bottom) = if pill.min_y() >= anchor.max_y() {
+            (anchor.max_y(), pill.min_y())
         } else {
-            (pill.max_y(), tip.anchor.min_y())
+            (pill.max_y(), anchor.min_y())
         };
         self.drawn.push((pill, ctx.px(ds::radius::SM + 1.0)));
         if bottom > top {

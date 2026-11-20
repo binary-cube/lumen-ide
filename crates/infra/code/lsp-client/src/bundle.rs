@@ -59,7 +59,7 @@ impl Bundle {
         match toml::from_str(&text) {
             Ok(manifest) => Some(Self { root: root.to_path_buf(), manifest }),
             Err(e) => {
-                tracing::warn!(root = %root.display(), "the language servers' manifest can't be read: {e}");
+                tracing::warn!(root = %root.display(), error = %e, "the language servers' manifest can't be read");
                 None
             }
         }

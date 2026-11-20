@@ -399,7 +399,7 @@ impl SettingsContribution for DecorationSettings {
                 };
                 match saved {
                     Ok(()) => self.apply(settings),
-                    Err(e) => tracing::warn!("can't save the decorations' pace: {e}"),
+                    Err(e) => tracing::warn!(error = %e, "can't save the decorations' pace"),
                 }
                 return;
             }
@@ -407,7 +407,7 @@ impl SettingsContribution for DecorationSettings {
         };
         match saved {
             Ok(()) => set_overlay(saved_overlay(settings)),
-            Err(e) => tracing::warn!("can't save the decorations' setting: {e}"),
+            Err(e) => tracing::warn!(error = %e, "can't save the decorations' setting"),
         }
     }
 
@@ -423,7 +423,9 @@ impl SettingsContribution for DecorationSettings {
             .map(str::trim)
             .filter(|l| !l.is_empty())
             .filter(|l| {
-                decode(l).inspect_err(|e| tracing::warn!("a decoration layer refused: {e}")).is_ok()
+                decode(l)
+                    .inspect_err(|e| tracing::warn!(error = %e, "a decoration layer refused"))
+                    .is_ok()
             })
             .take(MAX_LAYERS)
             .map(str::to_owned)
@@ -434,7 +436,7 @@ impl SettingsContribution for DecorationSettings {
             .and_then(|()| settings.set(&MY_DECORATIONS, mine.to_owned()));
         match saved {
             Ok(()) => set_overlay(saved_overlay(settings)),
-            Err(e) => tracing::warn!("can't save your decorations: {e}"),
+            Err(e) => tracing::warn!(error = %e, "can't save your decorations"),
         }
     }
 }

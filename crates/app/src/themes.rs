@@ -61,19 +61,21 @@ impl Themes {
         for path in user_theme_files() {
             match std::fs::read_to_string(&path) {
                 Ok(source) => user.push((path.display().to_string(), source)),
-                Err(e) => tracing::warn!("theme {} can't be loaded: {e}", path.display()),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "a theme can't be loaded")
+                }
             }
         }
         let bundled: Vec<&'static str> = providers.iter().flat_map(|p| p.bundled()).collect();
         let parse = |source: &str| parse_with(providers, source);
         let (catalog, problems) = ThemeCatalog::new(bundled, user, &parse, &preferences);
         for (place, why) in problems {
-            tracing::warn!("theme {place} can't be loaded: {why}");
+            tracing::warn!(%place, error = %why, "a theme can't be loaded");
         }
         // What was ignored while reading them (an option a theme can't have…).
         for theme in catalog.registry().themes() {
             for note in &theme.notes {
-                tracing::warn!("theme {}: {note}", theme.id);
+                tracing::warn!(id = %theme.id, %note, "theme");
             }
         }
         Self { catalog, providers: providers.to_vec() }
@@ -172,7 +174,7 @@ impl Themes {
     pub fn choose(&mut self, id: &str) -> bool {
         let (changed, saved) = self.catalog.choose(id, &AppearanceSettings);
         if let Err(e) = saved {
-            tracing::warn!("can't save the appearance settings: {e}");
+            tracing::warn!(error = %e, "can't save the appearance settings");
         }
         changed
     }
@@ -181,7 +183,7 @@ impl Themes {
     pub fn set_follow_system(&mut self, on: bool, system: Option<Appearance>) -> bool {
         let (changed, saved) = self.catalog.set_follow_system(on, system, &AppearanceSettings);
         if let Err(e) = saved {
-            tracing::warn!("can't save the appearance settings: {e}");
+            tracing::warn!(error = %e, "can't save the appearance settings");
         }
         changed
     }
@@ -212,7 +214,7 @@ impl Themes {
         match self.resolve(self.catalog.current()) {
             Ok(theme) => Palette::from_theme(&theme),
             Err(e) => {
-                tracing::error!("theme {} can't be used: {e}", self.catalog.current());
+                tracing::error!(theme = %self.catalog.current(), error = %e, "the theme can't be used");
                 Palette::dark()
             }
         }

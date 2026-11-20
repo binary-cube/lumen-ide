@@ -191,7 +191,7 @@ impl Catalog {
                 let listed = match store.load(scope) {
                     Ok(list) => Listed::Ready(list),
                     Err(why) => {
-                        tracing::warn!("the {scope:?} data sources can't be read: {why}");
+                        tracing::warn!(?scope, error = %why, "the data sources can't be read");
                         Listed::Unreadable(why)
                     }
                 };
@@ -489,7 +489,7 @@ fn write(store: &dyn DataSourceStore, shared: &Mutex<State>, events: &EventBus, 
         };
         let outcome = store.save(scope, &list);
         if let Err(why) = &outcome {
-            tracing::warn!("the {scope:?} data sources weren't written: {why}");
+            tracing::warn!(?scope, error = %why, "the data sources weren't written");
         }
         let (said, done) = {
             let mut state = shared.lock().unwrap_or_else(PoisonError::into_inner);

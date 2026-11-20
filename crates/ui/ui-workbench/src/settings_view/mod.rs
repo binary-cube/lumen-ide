@@ -317,6 +317,16 @@ struct SectionArea<'a, 'c> {
     width: f32,
 }
 
+/// A dropdown row, as painted: its field, its block and key, its choices and the current one.
+#[derive(Debug, Clone, PartialEq)]
+struct Dropdown {
+    field: Rect,
+    block: &'static str,
+    key: &'static str,
+    choices: Vec<(i64, String)>,
+    current: i64,
+}
+
 #[derive(Debug, Default)]
 pub struct SettingsView {
     modal: Modal,
@@ -360,6 +370,13 @@ pub struct SettingsView {
     module_hits: Vec<(Rect, SettingsAction)>,
     /// The modules' blocks: their choices and buttons, and where the last one ends.
     block_hits: Vec<(Rect, SettingsAction)>,
+    /// The dropdown rows painted: their fields and choices.
+    dropdowns: Vec<Dropdown>,
+    /// A dropdown's list, open: the shared picker, and the row it's for.
+    picker: ui_components::picker::Picker,
+    picker_for: Option<Dropdown>,
+    /// The window's area (a dropdown's list stays within it).
+    viewport: Rect,
     blocks_bottom: f32,
     /// Each row's area (its block, its key): what a search result leads to.
     row_anchors: Vec<(&'static str, &'static str, Rect)>,
@@ -529,6 +546,7 @@ impl SettingsView {
     }
 
     pub fn set_viewport(&mut self, viewport: Rect, scale: f32) {
+        self.viewport = viewport;
         self.modal.set_viewport(viewport, scale);
     }
 
@@ -718,6 +736,28 @@ impl SettingsView {
     /// The action at point `p` (a click outside the panel does nothing). Clicking
     /// a section activates it (no action for the app).
     pub fn hit(&mut self, p: Point) -> Option<SettingsAction> {
+        // A dropdown's list open: it takes the click (a choice, or closed by one outside).
+        if self.picker.is_open() {
+            let event = self.picker.press(p);
+            return self.picked(event);
+        }
+        // A dropdown's field (in the content): its list opens.
+        if self.modal.hit(p) == Some(ModalHit::Content)
+            && let Some(dropdown) = self.dropdowns.iter().find(|d| d.field.contains(p)).cloned()
+        {
+            let items = dropdown
+                .choices
+                .iter()
+                .map(|(_, name)| ui_components::picker::PickerItem {
+                    label: name.clone(),
+                    ..Default::default()
+                })
+                .collect();
+            let chosen = dropdown.choices.iter().position(|(v, _)| *v == dropdown.current);
+            self.picker.open(items, chosen);
+            self.picker_for = Some(dropdown);
+            return None;
+        }
         // The frame first: the content's rows scrolled under the header keep their rects
         // but are hidden there, so a click on esc closes instead of reaching a row.
         let at = self.modal.hit(p);
@@ -826,6 +866,7 @@ impl SettingsView {
         if let Some((_, action)) = self.block_hits.iter().find(|(r, _)| r.contains(p)) {
             return Some(action.clone());
         }
+
         if let Some((_, block, key, value)) = self.text_fields.iter().find(|(r, ..)| r.contains(p))
         {
             return Some(SettingsAction::SetText { block, key, value: value.clone() });
@@ -847,6 +888,9 @@ impl SettingsView {
 
     pub fn hover(&mut self, p: Point) -> bool {
         self.mouse = Some(p);
+        if self.picker.is_open() {
+            return self.picker.hover(p);
+        }
         let bar = self.bar.hover(p);
         // Rows scrolled under the header aren't lit there.
         let in_content = self.modal.hit(p) == Some(ModalHit::Content);
@@ -1014,6 +1058,52 @@ impl SettingsView {
         // The cards' pictures, over the content's layer (the modules push their own).
         self.paint_card_pictures(scene, text, palette, ctx.scale);
         self.paint_bar(scene, palette, ctx.px(1.0));
+        // A dropdown's list, over everything, from its field (where it is now).
+        if let Some(open) = &self.picker_for
+            && self.picker.is_open()
+        {
+            let field = self
+                .dropdowns
+                .iter()
+                .find(|d| d.block == open.block && d.key == open.key)
+                .map_or(open.field, |d| d.field);
+            self.picker.paint(scene, text, icons, &ctx, (field, self.viewport), "");
+        }
+    }
+
+    /// A dropdown's list is open (it has the keys: ↑ ↓ ↵, Esc closes it).
+    pub fn picker_open(&self) -> bool {
+        self.picker.is_open()
+    }
+
+    /// A key for an open dropdown's list: what it chose, when it did.
+    pub fn picker_key(&mut self, key: ui_components::ViewerKey) -> Option<SettingsAction> {
+        let event = self.picker.key(key, ui_components::KeyReach::default());
+        self.picked(event)
+    }
+
+    /// What the list's `event` means: a choice of its row's (saved like a pill's).
+    fn picked(
+        &mut self,
+        event: Option<ui_components::picker::PickerEvent>,
+    ) -> Option<SettingsAction> {
+        use ui_components::picker::PickerEvent;
+        match event {
+            Some(PickerEvent::Chosen(i)) => {
+                let dropdown = self.picker_for.take()?;
+                let (value, _) = dropdown.choices.get(i)?;
+                Some(SettingsAction::Choose {
+                    block: dropdown.block,
+                    key: dropdown.key,
+                    value: *value,
+                })
+            }
+            Some(PickerEvent::Closed) => {
+                self.picker_for = None;
+                None
+            }
+            _ => None,
+        }
     }
 
     /// The content's scrollbar along its right edge, in its margin (nothing when it fits).
@@ -1082,6 +1172,7 @@ impl SettingsView {
         self.module_rows.clear();
         self.module_hits.clear();
         self.block_hits.clear();
+        self.dropdowns.clear();
         self.sliders.clear();
         self.text_fields.clear();
         self.secret_fields.clear();
@@ -1159,6 +1250,10 @@ impl SettingsView {
     /// The mouse wheel: over the navigation it scrolls the navigation (when it's taller than
     /// its room; at its end nothing moves), anywhere else the content. `true` if it scrolled.
     pub fn scroll_by(&mut self, dy: f32) -> bool {
+        // A dropdown's list open: the wheel scrolls it (nothing behind it moves).
+        if self.picker.is_open() {
+            return self.picker.scroll(dy);
+        }
         if let Some(p) = self.mouse
             && self.modal.over_nav(p)
         {

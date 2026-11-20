@@ -117,7 +117,7 @@ impl Changes {
                 && version_control::Merged::parse(&text).is_resolved()
                 && let Err(e) = repo.mark_resolved(&[relative])
             {
-                tracing::warn!("can't mark the merged file resolved: {e:?}");
+                tracing::warn!(error = ?e, "can't mark the merged file resolved");
             }
             if let Some(changes) = weak.upgrade() {
                 changes.stale();
@@ -162,7 +162,7 @@ impl Changes {
                     Err(version_control::VcsError::Untrusted(lines)) => {
                         read.untrusted = Some(lines);
                     }
-                    Err(e) => tracing::warn!("can't read the working tree's status: {e:?}"),
+                    Err(e) => tracing::warn!(error = ?e, "can't read the working tree's status"),
                 }
             }
             // Asked again meanwhile: the next poll starts it.
@@ -333,7 +333,7 @@ fn ask_trust(changes: &Arc<Changes>, host: &mut dyn WorkbenchHost) -> bool {
         question,
         Box::new(move |_host| match git::trust::trust(&root) {
             Ok(()) => changes.stale(),
-            Err(e) => tracing::warn!("can't keep the trusted repository: {e}"),
+            Err(e) => tracing::warn!(error = %e, "can't keep the trusted repository"),
         }),
     )
 }

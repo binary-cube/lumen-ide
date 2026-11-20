@@ -301,7 +301,7 @@ impl ProjectFrameworks {
         self.choices =
             code_intelligence::choose_framework(frameworks, &self.detected, &self.choices, id, on);
         if let Err(e) = store.save(root, &self.choices) {
-            tracing::warn!("can't save the project's frameworks: {e}");
+            tracing::warn!(error = %e, "can't save the project's frameworks");
         }
         self.resolve(frameworks, project);
     }

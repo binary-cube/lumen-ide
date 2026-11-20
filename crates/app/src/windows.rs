@@ -103,7 +103,7 @@ impl Application for AppWindows {
         let mut app = match EditorApp::new(workbench, Rc::clone(&self.shared)) {
             Ok(app) => app,
             Err(e) => {
-                tracing::error!("the window couldn't start: {e}");
+                tracing::error!(error = %e, "the window couldn't start");
                 return;
             }
         };

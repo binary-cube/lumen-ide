@@ -31,6 +31,7 @@ mod keymaps;
 mod language;
 mod left_behind;
 mod levels;
+mod logs;
 mod module_manager;
 mod modules;
 mod over;
@@ -75,19 +76,15 @@ use crate::workbench::Workbench;
 const CODE_FONTS: &[&str] =
     &["JetBrains Mono", "SF Mono", "Menlo", "Cascadia Mono", "Consolas", "DejaVu Sans Mono"];
 
-/// The log file (in the config directory), cleared when it exceeds 5 MB.
-fn log_file() -> Option<std::fs::File> {
-    let dir = config::config_dir()?;
-    std::fs::create_dir_all(&dir).ok()?;
-    let path = dir.join(format!("{}.log", kernel::brand::ID));
-    let too_big = std::fs::metadata(&path).is_ok_and(|m| m.len() > 5 * 1024 * 1024);
-    std::fs::OpenOptions::new()
-        .create(true)
-        .append(!too_big)
-        .write(true)
-        .truncate(too_big)
-        .open(path)
-        .ok()
+/// The single file of before (`<config>/<id>.log`) moved into the log's default folder once,
+/// as `legacy.log`, so what it held isn't lost (let go with the oldest, plan 89).
+fn moved_legacy_log() {
+    let Some(config) = config::config_dir() else { return };
+    let legacy = config.join(format!("{}.log", kernel::brand::ID));
+    let Some(dir) = logs::default_dir() else { return };
+    if legacy.is_file() && std::fs::create_dir_all(&dir).is_ok() {
+        let _ = std::fs::rename(&legacy, dir.join(logging::files::LEGACY));
+    }
 }
 
 /// On Windows, mimalloc for every allocation: Windows' own heap returns freed memory poorly
@@ -145,21 +142,31 @@ fn main() -> anyhow::Result<()> {
         lsp_client::fake::serve_stdio();
         return Ok(());
     }
-    let filter = || {
-        tracing_subscriber::EnvFilter::try_from_default_env()
-            .unwrap_or_else(|_| "info,wgpu_core=warn,wgpu_hal=warn,naga=warn".into())
-    };
-    // Without a console (Windows, or the app launched from Finder / Dock), the log goes to a
-    // file: `~/.config/<app id>/<app id>.log` (on Windows, %APPDATA%\<app id>\<app id>.log).
-    use std::io::IsTerminal;
-    let to_file = cfg!(windows) || !std::io::stdout().is_terminal();
-    match log_file() {
-        Some(file) if to_file => tracing_subscriber::fmt()
-            .with_env_filter(filter())
-            .with_ansi(false)
-            .with_writer(std::sync::Mutex::new(file))
-            .init(),
-        _ => tracing_subscriber::fmt().with_env_filter(filter()).init(),
+    // The log (plan 89): every event a line of JSON, in a file a day in the folder the
+    // settings say (`<config>/logs/` by default), at their level, written on a thread of its
+    // own; the console gets the same lines when there is one.
+    {
+        use std::io::IsTerminal;
+        moved_legacy_log();
+        let settings = crate::config::settings();
+        let options = logging::Options {
+            dir: logs::dir(settings),
+            console: !cfg!(windows) && std::io::stderr().is_terminal(),
+            limits: logging::Limits::default(),
+        };
+        let installed = logging::install(&options, &logs::current_filter(settings));
+        logging::log_panics();
+        tracing::info!(
+            version = kernel::brand::version(),
+            os = std::env::consts::OS,
+            arch = std::env::consts::ARCH,
+            log = %options.dir.as_deref().map_or_else(String::new, |d| d.display().to_string()),
+            filter = %logs::current_filter(settings),
+            "the app starts"
+        );
+        if let Err(why) = installed {
+            tracing::warn!(%why, "the log's filter couldn't be read: info used");
+        }
     }
 
     startup::mark("logging ready");
@@ -305,6 +312,8 @@ fn main() -> anyhow::Result<()> {
     // A normal exit: nothing left behind to note.
     left_behind::finish();
     tracing::info!(after_the_loop = ?ended.elapsed(), "the app ends");
+    // What's logged is on disk before the process goes.
+    logging::flush();
     ran?;
     Ok(())
 }

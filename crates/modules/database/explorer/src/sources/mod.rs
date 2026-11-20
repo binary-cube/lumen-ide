@@ -359,7 +359,7 @@ pub fn apply(
             };
             if let Err(why) = outcome {
                 // Never the secret: only where it was going.
-                tracing::warn!("a data source's password wasn't kept: {why}");
+                tracing::warn!(error = %why, "a data source's password wasn't kept");
                 failed.get_or_insert(why);
             }
         }

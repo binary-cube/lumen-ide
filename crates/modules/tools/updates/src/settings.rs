@@ -58,7 +58,7 @@ pub fn apply(settings: &SettingsService) {
 /// `version` skipped from now on (saved, said in the log when it can't be).
 pub fn skip(settings: &SettingsService, version: &app_updates::Version) {
     if let Err(e) = settings.set(&SKIPPED, version.to_string()) {
-        tracing::warn!("the skipped version wasn't saved: {e}");
+        tracing::warn!(error = %e, "the skipped version wasn't saved");
     }
     apply(settings);
 }
@@ -129,7 +129,7 @@ impl SettingsContribution for UpdatesSettings {
             _ => return,
         };
         if let Err(e) = saved {
-            tracing::warn!("an updates setting wasn't saved: {e}");
+            tracing::warn!(error = %e, "an updates setting wasn't saved");
         }
         apply(s);
     }

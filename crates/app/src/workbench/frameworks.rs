@@ -4,6 +4,7 @@
 use code_intelligence::{FrameworkCompletion, FrameworkContext, FrameworkSupport, HoverInfo};
 
 use super::*;
+use command_model::CommandId;
 
 impl Workbench {
     /// The language at `offset` in the active document (in PHP: the HTML outside `<?php`).
@@ -426,6 +427,12 @@ impl Workbench {
         }
     }
 
+    /// The command a settings block's button runs (`None`: it asks its block instead,
+    /// [`Self::settings_press`]): run by the app, which has the app's own commands too.
+    pub fn settings_command(&self, block: &str, action: &'static str) -> Option<CommandId> {
+        self.support.settings.iter().find(|c| c.id() == block)?.command(action)
+    }
+
     /// A module block's button: what it asks first, then what it does on "yes" (the
     /// settings show the outcome).
     pub fn settings_press(&mut self, block: &str, action: &'static str) {
@@ -459,7 +466,7 @@ impl Workbench {
 
 /// A module's text translated from `[module]` in the locales (`<id>_name` for its name,
 /// `<id>` for its description; the manifest's English otherwise).
-pub(super) fn localized(id: &str, suffix: &str, fallback: &str) -> String {
+pub(crate) fn localized(id: &str, suffix: &str, fallback: &str) -> String {
     let key = format!("module.{}{suffix}", id.replace(['.', '-'], "_"));
     let found = i18n::t(&key);
     if found == key { fallback.to_owned() } else { found }

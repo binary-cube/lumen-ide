@@ -698,7 +698,7 @@ impl Sessions {
             }
             changed.file = Some(database::source::stored_path(&new, &self.root));
             if let Err(why) = self.catalog.update(changed) {
-                tracing::warn!("a data source's file didn't follow its rename: {why}");
+                tracing::warn!(error = %why, "a data source's file didn't follow its rename");
             }
         }
         // The layouts kept by the file's path.
@@ -896,7 +896,7 @@ fn write_layouts(shared: &Mutex<Layouts>, quiet: Duration) {
             (layouts.version, layouts.kept.clone(), store)
         };
         if let Err(e) = store.save(&kept) {
-            tracing::warn!("the grids' layouts weren't written: {e}");
+            tracing::warn!(error = %e, "the grids' layouts weren't written");
         }
         let mut layouts = shared.lock().unwrap_or_else(PoisonError::into_inner);
         if layouts.version == version {

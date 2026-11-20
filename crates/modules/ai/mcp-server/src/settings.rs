@@ -37,7 +37,7 @@ fn save<T: settings_model::SettingType>(
     value: T,
 ) {
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save an MCP setting: {e}");
+        tracing::warn!(error = %e, "can't save an MCP setting");
     }
 }
 
@@ -69,7 +69,7 @@ pub fn apply(settings: &SettingsService) {
                 LISTENED.store(u32::from(listening), Ordering::Release)
             }
             Ok(_) => {}
-            Err(why) => tracing::warn!("the MCP server didn't start: {why}"),
+            Err(why) => tracing::warn!(error = %why, "the MCP server didn't start"),
         }
         if moving && kept {
             MOVED_TOKEN.store(true, Ordering::Release);

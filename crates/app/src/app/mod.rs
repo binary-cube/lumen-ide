@@ -572,7 +572,7 @@ impl EditorApp {
             match floating.renderer.render(&floating.scene, &mut glyphs) {
                 Ok(stats) if stats.retry => window.request_redraw(),
                 Ok(_) => floating.layer.set_visible(true),
-                Err(e) => tracing::warn!("the floating layer's frame: {e}"),
+                Err(e) => tracing::warn!(error = %e, "the floating layer's frame"),
             }
         }
         // A long frame says which half took the time (the scene, the GPU).
@@ -615,11 +615,11 @@ impl EditorApp {
                     if std::env::var_os("EDITOR_DEBUG_EYEDROPPER").is_some() {
                         let started = window.sample_screen_color();
                         self.window_state.sampling = started;
-                        tracing::info!(started, "eyedropper (diagnostic)");
+                        tracing::debug!(started, "eyedropper (diagnostic)");
                     }
                 }
             }
-            Err(e) => tracing::error!("render error: {e}"),
+            Err(e) => tracing::error!(error = %e, "render error"),
         }
         // Now and then, how the decorations' frames went (`RUST_LOG=debug`).
         if only_decorations && self.frames.decoration_frames.is_multiple_of(75) {
@@ -798,7 +798,7 @@ impl ResizeTest {
                 .copied()
                 .unwrap_or_default()
         };
-        tracing::info!(
+        tracing::debug!(
             frames = sorted.len(),
             skipped = self.skipped,
             p50 = ?pick(0.5),
@@ -831,11 +831,11 @@ impl EditorApp {
         let reason = e.to_string();
         let message = match doing {
             Doing::Saving(name) => {
-                tracing::error!(name, "saving failed: {e}");
+                tracing::error!(name, error = %e, "saving failed");
                 i18n::tr!("files.save_failed", name = name.to_owned(), reason = reason)
             }
             Doing::Opening(path) => {
-                tracing::error!(path = %path.display(), "opening failed: {e}");
+                tracing::error!(path = %path.display(), error = %e, "opening failed");
                 let name = path.file_name().unwrap_or(path.as_os_str());
                 let name = name.to_string_lossy().into_owned();
                 i18n::tr!("files.open_failed", name = name, reason = reason)
@@ -949,7 +949,7 @@ impl EditorApp {
                     self.frames.floating_failed = true;
                 }
                 Err(e) => {
-                    tracing::warn!("the floating layer's renderer didn't start: {e}");
+                    tracing::warn!(error = %e, "the floating layer's renderer didn't start");
                     self.frames.floating_failed = true;
                 }
             }
@@ -978,7 +978,9 @@ impl EditorApp {
                     self.frames.renderer = Some(renderer);
                     break;
                 }
-                Err(e) => tracing::warn!(driver = factory.name(), "the driver didn't start: {e}"),
+                Err(e) => {
+                    tracing::warn!(driver = factory.name(), error = %e, "the driver didn't start")
+                }
             }
         }
         if self.frames.renderer.is_none() {
@@ -1017,12 +1019,12 @@ impl EditorApp {
         self.workbench.set_titlebar_inset(window.titlebar_inset());
         match SyntaxWorker::spawn(Arc::clone(&self.shared.syntax), window.waker()) {
             Ok(worker) => self.workbench.set_worker(worker),
-            Err(e) => tracing::error!("the parsing thread didn't start: {e}"),
+            Err(e) => tracing::error!(error = %e, "the parsing thread didn't start"),
         }
         if std::env::var_os("EDITOR_NO_RESOURCES").is_none() {
             match ResourceMonitor::shared(window.app_waker()) {
                 Ok(monitor) => self.resources = Some(monitor),
-                Err(e) => tracing::warn!("the resource monitor didn't start: {e}"),
+                Err(e) => tracing::warn!(error = %e, "the resource monitor didn't start"),
             }
         }
         self.window = Some(window);

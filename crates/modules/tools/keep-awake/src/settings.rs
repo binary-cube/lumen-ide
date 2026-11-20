@@ -165,7 +165,7 @@ fn save<T: settings_model::SettingType>(
         return;
     }
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save a Keep awake setting: {e}");
+        tracing::warn!(error = %e, "can't save a Keep awake setting");
     }
 }
 
@@ -195,7 +195,7 @@ impl SettingsContribution for KeepAwakeSettings {
 
     fn apply(&self, settings: &SettingsService) {
         if let Err(why) = apply(settings) {
-            tracing::warn!("the computer can't be kept awake: {why}");
+            tracing::warn!(error = %why, "the computer can't be kept awake");
         }
     }
 
@@ -304,7 +304,7 @@ impl SettingsContribution for KeepAwakeSettings {
             save_on(scope.settings, value != 0);
             // The system refusing: the switch goes back off (it shows what is).
             if let Err(why) = apply(scope.settings) {
-                tracing::warn!("the computer can't be kept awake: {why}");
+                tracing::warn!(error = %why, "the computer can't be kept awake");
                 save_on(scope.settings, false);
                 let _ = apply(scope.settings);
             }

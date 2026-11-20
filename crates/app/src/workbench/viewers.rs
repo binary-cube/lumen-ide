@@ -13,7 +13,7 @@ impl Workbench {
         column: Option<u32>,
     ) -> MouseResult {
         if let Err(e) = self.open_file(path) {
-            tracing::warn!("can't open {}: {e}", path.display());
+            tracing::warn!(path = %path.display(), error = %e, "can't open");
             return MouseResult::Redraw;
         }
         if let Some(line) = line {
@@ -58,7 +58,7 @@ impl Workbench {
         let mut viewer = match provider.open(&path) {
             Ok(viewer) => viewer,
             Err(e) => {
-                tracing::warn!(path = %path.display(), "the virtual tab didn't open: {e}");
+                tracing::warn!(path = %path.display(), error = %e, "the virtual tab didn't open");
                 return false;
             }
         };
@@ -370,7 +370,7 @@ impl Workbench {
             ViewerAction::OpenAt { path, line } => {
                 self.focus_code_group();
                 if let Err(e) = self.open_file(&path) {
-                    tracing::warn!("can't open {}: {e}", path.display());
+                    tracing::warn!(path = %path.display(), error = %e, "can't open");
                 } else {
                     self.reveal_line(text, line as usize);
                 }
@@ -492,7 +492,7 @@ impl Workbench {
     pub(super) fn set_file_text(&mut self, path: &Path, text: &str) {
         let open = all_tabs(&self.tabs, &self.editors.groups).any(|t| t.doc.path() == Some(path));
         if !open && let Err(e) = self.open_file(path) {
-            tracing::warn!("can't open {}: {e}", path.display());
+            tracing::warn!(path = %path.display(), error = %e, "can't open");
             return;
         }
         if let Some(tab) = all_tabs_mut(&mut self.tabs, &mut self.editors.groups)
@@ -540,7 +540,7 @@ impl Workbench {
         // The file isn't open: it gets opened (without leaving the tab that asked).
         let asking = self.tabs.get(self.active).map(|t| t.doc.id());
         if let Err(e) = self.open_file(path) {
-            tracing::warn!("can't open {}: {e}", path.display());
+            tracing::warn!(path = %path.display(), error = %e, "can't open");
             return;
         }
         if let Some(tab) = self.tabs.get_mut(self.active) {

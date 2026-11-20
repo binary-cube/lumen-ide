@@ -10,7 +10,7 @@ impl Steps<'_> {
         let (db, csv) = match data_fixtures::write(&dir) {
             Ok(paths) => paths,
             Err(e) => {
-                tracing::error!("the sample data files weren't made: {e}");
+                tracing::error!(error = %e, "the sample data files weren't made");
                 return;
             }
         };
@@ -19,14 +19,14 @@ impl Steps<'_> {
             "json" => match data_fixtures::events(&dir) {
                 Ok(path) => path,
                 Err(e) => {
-                    tracing::error!("the sample events weren't made: {e}");
+                    tracing::error!(error = %e, "the sample events weren't made");
                     return;
                 }
             },
             _ => db,
         };
         if let Err(e) = self.wb.open_file(&path) {
-            tracing::error!("the sample data file didn't open: {e}");
+            tracing::error!(error = %e, "the sample data file didn't open");
             return;
         }
         self.settle_data();
@@ -178,7 +178,7 @@ impl Steps<'_> {
         let (db, csv) = match data_fixtures::write(&dir) {
             Ok(paths) => paths,
             Err(e) => {
-                tracing::error!("the sample data files weren't made: {e}");
+                tracing::error!(error = %e, "the sample data files weren't made");
                 return;
             }
         };
@@ -220,7 +220,7 @@ impl Steps<'_> {
             people.folder = Some(dev_folder.id);
             for folder in [prod_folder.clone(), eu_folder.clone(), dev_folder] {
                 if let Err(e) = catalog.put_folder(folder) {
-                    tracing::error!("the sample folder wasn't added: {e}");
+                    tracing::error!(error = %e, "the sample folder wasn't added");
                 }
             }
         }
@@ -286,7 +286,7 @@ impl Steps<'_> {
         }
         for source in sources {
             if let Err(e) = catalog.add(source) {
-                tracing::error!("the sample source wasn't added: {e}");
+                tracing::error!(error = %e, "the sample source wasn't added");
             }
         }
         self.wb.toggle_side_panel(TOOL);
@@ -333,7 +333,7 @@ impl Steps<'_> {
                 if let Some(path) = &shop_path
                     && let Err(e) = self.wb.open_file(path)
                 {
-                    tracing::error!("the sample database didn't open: {e}");
+                    tracing::error!(error = %e, "the sample database didn't open");
                 }
                 self.settle_data();
                 if grid == "folder-grid-more" {
@@ -410,12 +410,12 @@ impl Steps<'_> {
         let path = match data_fixtures::store(&dir) {
             Ok(path) => path,
             Err(e) => {
-                tracing::error!("the sample store wasn't made: {e}");
+                tracing::error!(error = %e, "the sample store wasn't made");
                 return;
             }
         };
         if let Err(e) = self.wb.open_file(&path) {
-            tracing::error!("the sample store didn't open: {e}");
+            tracing::error!(error = %e, "the sample store didn't open");
             return;
         }
         self.settle_data();

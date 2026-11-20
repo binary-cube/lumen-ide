@@ -4,6 +4,16 @@
 
 use settings_model::Setting;
 
+/// How much the log writes (`[log] level`): `off`, `error`, `warn`, `info`, `debug`.
+pub const LOG_LEVEL: Setting<String> = Setting::new("log", "level", || "info".to_owned())
+    .valid(|v| crate::logs::LEVELS.iter().any(|(id, _)| id == v));
+
+/// The log's folder (`[log] dir`); empty: `<config>/logs/`.
+pub const LOG_DIR: Setting<String> = Setting::new("log", "dir", String::new);
+
+/// Other levels for some modules (`[log] modules`: `database_explorer=debug, vcs_git=warn`).
+pub const LOG_MODULES: Setting<String> = Setting::new("log", "modules", String::new);
+
 /// Saving automatically once typing pauses (`[editor] autosave`).
 pub const AUTOSAVE: Setting<bool> = Setting::new("editor", "autosave", || true);
 

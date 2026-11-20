@@ -107,7 +107,7 @@ impl GrammarEntry {
             }
             Query::new(&self.grammar.ts, source)
                 .inspect_err(|e| {
-                    tracing::error!(language = %self.grammar.language, "query {kind} invalid: {e}");
+                    tracing::error!(language = %self.grammar.language, %kind, error = %e, "a grammar's query is invalid");
                 })
                 .ok()
         };

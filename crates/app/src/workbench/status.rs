@@ -752,7 +752,7 @@ impl Workbench {
     pub(super) fn pin_resources(&mut self, pinned: bool) {
         self.resources_pinned = Some(pinned);
         if let Err(e) = crate::config::settings().set(&crate::settings::RESOURCES_PINNED, pinned) {
-            tracing::warn!("the resources window's pin wasn't saved: {e}");
+            tracing::warn!(error = %e, "the resources window's pin wasn't saved");
         }
     }
 

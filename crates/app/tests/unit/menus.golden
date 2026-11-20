@@ -220,6 +220,8 @@
   help.keyboard_shortcuts | Keyboard Shortcuts… | 
   ---
   view.debug_overlay | Diagnostic Overlay | F12
+  log.show_log | Show Log | 
+  help.reveal_log_folder | Reveal Log Folder | 
 = Windows =
 # File | folder
   file.new | New File | CmdOrCtrl+N
@@ -428,6 +430,8 @@
   help.keyboard_shortcuts | Keyboard Shortcuts… | 
   ---
   view.debug_overlay | Diagnostic Overlay | F12
+  log.show_log | Show Log | 
+  help.reveal_log_folder | Reveal Log Folder | 
   ---
   app.about | About Lumen | 
   updates.check | Check for Updates… | 
@@ -639,6 +643,8 @@
   help.keyboard_shortcuts | Keyboard Shortcuts… | 
   ---
   view.debug_overlay | Diagnostic Overlay | F12
+  log.show_log | Show Log | 
+  help.reveal_log_folder | Reveal Log Folder | 
   ---
   app.about | About Lumen | 
   updates.check | Check for Updates… | 

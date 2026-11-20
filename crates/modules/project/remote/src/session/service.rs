@@ -330,7 +330,7 @@ pub(super) fn run(
         let told = Arc::clone(&told);
         let said = Arc::new(std::sync::atomic::AtomicBool::new(false));
         Arc::new(move |path: &str, e: &remote::RemoteError| {
-            tracing::warn!("can't set who {path} belongs to: {e}");
+            tracing::warn!(%path, error = %e, "can't set who a file belongs to");
             if said.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 return;
             }
@@ -395,11 +395,11 @@ pub(super) fn run(
         }
     });
     if let Err(e) = crate::transfers::start(&state) {
-        tracing::error!("the remote transfers didn't start: {e}");
+        tracing::error!(error = %e, "the remote transfers didn't start");
         return Vec::new();
     }
     if let Err(e) = spawned {
-        tracing::error!("the remote session didn't start: {e}");
+        tracing::error!(error = %e, "the remote session didn't start");
         return Vec::new();
     }
     drop(tx);

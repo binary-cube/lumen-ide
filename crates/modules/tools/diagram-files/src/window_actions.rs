@@ -114,7 +114,9 @@ impl DiagramsPanel {
                         events.publish(&workspace::events::EntriesDeleted { paths: vec![path] });
                     }
                 }
-                Done::Failed(why) => tracing::warn!("a diagram's entry wasn't changed: {why}"),
+                Done::Failed(why) => {
+                    tracing::warn!(error = %why, "a diagram's entry wasn't changed")
+                }
             }
         }
         self.list();

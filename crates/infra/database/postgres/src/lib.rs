@@ -1301,7 +1301,7 @@ impl PgSession {
         let schema = match found {
             Ok(rows) => rows.into_iter().next().and_then(|r| r.get(1).cloned().flatten()),
             Err(e) => {
-                tracing::debug!("pg_stat_statements wasn't looked for: {e}");
+                tracing::debug!(error = %e, "pg_stat_statements wasn't looked for");
                 None
             }
         };
@@ -1326,7 +1326,7 @@ impl PgSession {
                 if text.contains("shared_preload_libraries") {
                     profile.note(ProfileNote::NoStatementStats);
                 }
-                tracing::debug!("the query's history wasn't read: {text}");
+                tracing::debug!(%text, "the query's history wasn't read");
                 None
             }
         }

@@ -111,10 +111,10 @@ impl Paths {
             let found =
                 workspace::search::index_marked(&root, &fs_local::LocalFileSystem, LIMIT, &marks);
             let index = found.unwrap_or_else(|e| {
-                tracing::warn!("can't index {}: {e}", root.display());
+                tracing::warn!(root = %root.display(), error = %e, "can't index");
                 PathIndex::default()
             });
-            tracing::info!(
+            tracing::debug!(
                 files = index.files.len(),
                 folders = index.folders.len(),
                 elapsed = ?started.elapsed(),

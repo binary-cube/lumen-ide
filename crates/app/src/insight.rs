@@ -118,7 +118,7 @@ impl SettingsContribution for InsightSettings {
             _ => return,
         };
         if let Err(e) = saved {
-            tracing::warn!("can't save the code insight option: {e}");
+            tracing::warn!(error = %e, "can't save the code insight option");
         }
         self.apply(scope.settings);
     }

@@ -46,7 +46,7 @@ pub fn gather(
     let stats_allowed = auxiliary && !limited && caps.is_some_and(|c| c.profile.table_stats);
     let stats = if stats_allowed && !tables.is_empty() && !cancel.is_cancelled() {
         session.table_stats(&tables, cancel).unwrap_or_else(|e| {
-            tracing::debug!("a profile's tables' statistics weren't read: {e}");
+            tracing::debug!(error = %e, "a profile's tables' statistics weren't read");
             Vec::new()
         })
     } else {
@@ -60,7 +60,7 @@ pub fn gather(
         let structure = match session.structure(&table) {
             Ok(s) => Some(s),
             Err(e) => {
-                tracing::debug!("a profiled table's structure wasn't read: {e}");
+                tracing::debug!(error = %e, "a profiled table's structure wasn't read");
                 None
             }
         };

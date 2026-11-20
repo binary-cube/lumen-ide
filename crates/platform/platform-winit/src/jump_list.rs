@@ -18,7 +18,7 @@ use windows::core::{HSTRING, Interface};
 /// Replaces the jump list's projects.
 pub(crate) fn set(menu: &IconMenu) {
     if let Err(e) = build(menu) {
-        tracing::warn!("can't update the jump list: {e}");
+        tracing::warn!(error = %e, "can't update the jump list");
     }
 }
 

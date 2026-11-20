@@ -132,96 +132,105 @@ pub struct LanguageSupport {
     pub manager: Arc<crate::module_manager::ModuleManager>,
 }
 
+/// Module `module` registered, the target its log is written under (its crate's name, as
+/// `tracing` writes it) noted for the log's settings (each module's own level).
+fn add(registry: &mut ModuleRegistry, module: Box<dyn extensions::Module>, target: &'static str) {
+    let manifest = module.manifest();
+    crate::logs::note_module(manifest.id.as_str(), manifest.name, target);
+    registry.register(module);
+}
+
 pub fn builtin() -> ModuleRegistry {
     let mut registry = ModuleRegistry::default();
     registry.set_clock(std::time::Instant::now);
-    registry.register(Box::new(lang_html::HtmlModule));
-    registry.register(Box::new(lang_javascript::JavaScriptModule));
-    registry.register(Box::new(lang_css::CssModule));
-    registry.register(Box::new(lang_scss::ScssModule));
-    registry.register(Box::new(lang_json::JsonModule));
-    registry.register(Box::new(lang_yaml::YamlModule));
-    registry.register(Box::new(lang_sql::SqlModule));
-    registry.register(Box::new(lang_cpp::CppModule));
-    registry.register(Box::new(lang_lua::LuaModule));
-    registry.register(Box::new(lang_zig::ZigModule));
-    registry.register(Box::new(lang_bash::BashModule));
-    registry.register(Box::new(lang_toml::TomlModule));
-    registry.register(Box::new(lang_markdown::MarkdownModule));
-    registry.register(Box::new(lang_dockerfile::DockerfileModule));
-    registry.register(Box::new(lang_dotenv::DotenvModule));
-    registry.register(Box::new(lang_http::HttpModule));
-    registry.register(Box::new(http_client::HttpClientModule));
-    registry.register(Box::new(lang_php::PhpModule));
-    registry.register(Box::new(lang_twig::TwigModule));
-    registry.register(Box::new(lang_blade::BladeModule));
-    registry.register(Box::new(file_icons::FileIconsModule));
+    add(&mut registry, Box::new(lang_html::HtmlModule), "lang_html");
+    add(&mut registry, Box::new(lang_javascript::JavaScriptModule), "lang_javascript");
+    add(&mut registry, Box::new(lang_css::CssModule), "lang_css");
+    add(&mut registry, Box::new(lang_scss::ScssModule), "lang_scss");
+    add(&mut registry, Box::new(lang_json::JsonModule), "lang_json");
+    add(&mut registry, Box::new(lang_yaml::YamlModule), "lang_yaml");
+    add(&mut registry, Box::new(lang_sql::SqlModule), "lang_sql");
+    add(&mut registry, Box::new(lang_cpp::CppModule), "lang_cpp");
+    add(&mut registry, Box::new(lang_lua::LuaModule), "lang_lua");
+    add(&mut registry, Box::new(lang_zig::ZigModule), "lang_zig");
+    add(&mut registry, Box::new(lang_bash::BashModule), "lang_bash");
+    add(&mut registry, Box::new(lang_toml::TomlModule), "lang_toml");
+    add(&mut registry, Box::new(lang_markdown::MarkdownModule), "lang_markdown");
+    add(&mut registry, Box::new(lang_dockerfile::DockerfileModule), "lang_dockerfile");
+    add(&mut registry, Box::new(lang_dotenv::DotenvModule), "lang_dotenv");
+    add(&mut registry, Box::new(lang_http::HttpModule), "lang_http");
+    add(&mut registry, Box::new(http_client::HttpClientModule), "http_client");
+    add(&mut registry, Box::new(lang_php::PhpModule), "lang_php");
+    add(&mut registry, Box::new(lang_twig::TwigModule), "lang_twig");
+    add(&mut registry, Box::new(lang_blade::BladeModule), "lang_blade");
+    add(&mut registry, Box::new(file_icons::FileIconsModule), "file_icons");
     for pack in icon_packs::modules() {
-        registry.register(Box::new(pack));
+        add(&mut registry, Box::new(pack), "icon_packs");
     }
     for set in icon_packs::file_set_modules() {
-        registry.register(Box::new(set));
+        add(&mut registry, Box::new(set), "icon_packs");
     }
-    registry.register(Box::new(themes_builtin::ThemesModule));
-    registry.register(Box::new(theme_decorations::DecorationsModule));
+    add(&mut registry, Box::new(themes_builtin::ThemesModule), "themes_builtin");
+    add(&mut registry, Box::new(theme_decorations::DecorationsModule), "theme_decorations");
     // Before the code quality's: its blocks lead their shared settings page.
-    registry.register(Box::new(language_servers::LanguageServersModule));
-    registry.register(Box::new(quality::QualityModule));
-    registry.register(Box::new(viewer_image::ImageViewerModule));
-    registry.register(Box::new(viewer_markdown::MarkdownViewerModule));
-    registry.register(Box::new(emmet::EmmetModule));
-    registry.register(Box::new(structure::StructureModule));
-    registry.register(Box::new(colors::ColorsModule));
-    registry.register(Box::new(language_levels::LanguageLevelsModule));
-    registry.register(Box::new(canvas::CanvasModule));
-    registry.register(Box::new(diagrams::DiagramsModule));
-    registry.register(Box::new(compare::CompareModule));
-    registry.register(Box::new(vcs_git::GitModule));
-    registry.register(Box::new(local_history::LocalHistoryModule));
-    registry.register(Box::new(folder_sizes::FolderSizesModule));
-    registry.register(Box::new(remote_projects::RemoteModule));
-    registry.register(Box::new(database_explorer::DatabaseExplorerModule));
-    registry.register(Box::new(database_console::DatabaseConsoleModule));
-    registry.register(Box::new(data_extractors::DataExtractorsModule));
-    registry.register(Box::new(database_sqlite::DatabaseSqliteModule));
-    registry.register(Box::new(database_csv::DatabaseCsvModule));
-    registry.register(Box::new(database_postgres::DatabasePostgresModule));
-    registry.register(Box::new(database_mysql::DatabaseMySqlModule));
-    registry.register(Box::new(database_external::DatabaseExternalModule));
-    registry.register(Box::new(database_diagram::DatabaseDiagramModule));
-    registry.register(Box::new(diagram_editor::DiagramEditorModule));
-    registry.register(Box::new(diagram_files::DiagramFilesModule));
-    registry.register(Box::new(diagram_web::DiagramWebModule));
-    registry.register(Box::new(task_manager::TaskManagerModule));
-    registry.register(Box::new(relax::RelaxModule));
-    registry.register(Box::new(path_marks::PathMarksModule));
-    registry.register(Box::new(keep_awake::KeepAwakeModule));
-    registry.register(Box::new(updates::UpdatesModule));
-    registry.register(Box::new(project_switcher::SwitcherModule));
-    registry.register(Box::new(focus_mode::FocusModule));
-    registry.register(Box::new(running_work::RunningWorkModule));
-    registry.register(Box::new(terminal_panel::TerminalModule));
-    registry.register(Box::new(agent_claude::ClaudeModule));
-    registry.register(Box::new(agent_cline::ClineModule));
-    registry.register(Box::new(agent_planned::PlannedModule));
-    registry.register(Box::new(agent_sessions::SessionsModule));
-    registry.register(Box::new(mcp_server::McpModule));
+    add(&mut registry, Box::new(language_servers::LanguageServersModule), "language_servers");
+    add(&mut registry, Box::new(quality::QualityModule), "quality");
+    add(&mut registry, Box::new(viewer_image::ImageViewerModule), "viewer_image");
+    add(&mut registry, Box::new(viewer_markdown::MarkdownViewerModule), "viewer_markdown");
+    add(&mut registry, Box::new(emmet::EmmetModule), "emmet");
+    add(&mut registry, Box::new(structure::StructureModule), "structure");
+    add(&mut registry, Box::new(colors::ColorsModule), "colors");
+    add(&mut registry, Box::new(language_levels::LanguageLevelsModule), "language_levels");
+    add(&mut registry, Box::new(canvas::CanvasModule), "canvas");
+    add(&mut registry, Box::new(diagrams::DiagramsModule), "diagrams");
+    add(&mut registry, Box::new(compare::CompareModule), "compare");
+    add(&mut registry, Box::new(vcs_git::GitModule), "vcs_git");
+    add(&mut registry, Box::new(local_history::LocalHistoryModule), "local_history");
+    add(&mut registry, Box::new(folder_sizes::FolderSizesModule), "folder_sizes");
+    add(&mut registry, Box::new(remote_projects::RemoteModule), "remote_projects");
+    add(&mut registry, Box::new(database_explorer::DatabaseExplorerModule), "database_explorer");
+    add(&mut registry, Box::new(database_console::DatabaseConsoleModule), "database_console");
+    add(&mut registry, Box::new(data_extractors::DataExtractorsModule), "data_extractors");
+    add(&mut registry, Box::new(database_sqlite::DatabaseSqliteModule), "database_sqlite");
+    add(&mut registry, Box::new(database_csv::DatabaseCsvModule), "database_csv");
+    add(&mut registry, Box::new(database_postgres::DatabasePostgresModule), "database_postgres");
+    add(&mut registry, Box::new(database_mysql::DatabaseMySqlModule), "database_mysql");
+    add(&mut registry, Box::new(database_external::DatabaseExternalModule), "database_external");
+    add(&mut registry, Box::new(database_diagram::DatabaseDiagramModule), "database_diagram");
+    add(&mut registry, Box::new(diagram_editor::DiagramEditorModule), "diagram_editor");
+    add(&mut registry, Box::new(diagram_files::DiagramFilesModule), "diagram_files");
+    add(&mut registry, Box::new(diagram_web::DiagramWebModule), "diagram_web");
+    add(&mut registry, Box::new(task_manager::TaskManagerModule), "task_manager");
+    add(&mut registry, Box::new(relax::RelaxModule), "relax");
+    add(&mut registry, Box::new(path_marks::PathMarksModule), "path_marks");
+    add(&mut registry, Box::new(keep_awake::KeepAwakeModule), "keep_awake");
+    add(&mut registry, Box::new(updates::UpdatesModule), "updates");
+    add(&mut registry, Box::new(log_viewer::LogViewerModule), "log_viewer");
+    add(&mut registry, Box::new(project_switcher::SwitcherModule), "project_switcher");
+    add(&mut registry, Box::new(focus_mode::FocusModule), "focus_mode");
+    add(&mut registry, Box::new(running_work::RunningWorkModule), "running_work");
+    add(&mut registry, Box::new(terminal_panel::TerminalModule), "terminal_panel");
+    add(&mut registry, Box::new(agent_claude::ClaudeModule), "agent_claude");
+    add(&mut registry, Box::new(agent_cline::ClineModule), "agent_cline");
+    add(&mut registry, Box::new(agent_planned::PlannedModule), "agent_planned");
+    add(&mut registry, Box::new(agent_sessions::SessionsModule), "agent_sessions");
+    add(&mut registry, Box::new(mcp_server::McpModule), "mcp_server");
     // The agents' graphical conversation (ACP, `agent-chat`) stays in the code, tested, but
     // isn't offered for now (docs/plan/TODO.md): the sessions open in terminals.
-    registry.register(Box::new(services_panel::ServicesModule));
-    registry.register(Box::new(project_tree::ProjectTreeModule));
-    registry.register(Box::new(indexing::IndexingModule));
-    registry.register(Box::new(refactoring::RefactoringModule));
-    registry.register(Box::new(theme_studio::ThemeStudioModule));
+    add(&mut registry, Box::new(services_panel::ServicesModule), "services_panel");
+    add(&mut registry, Box::new(project_tree::ProjectTreeModule), "project_tree");
+    add(&mut registry, Box::new(indexing::IndexingModule), "indexing");
+    add(&mut registry, Box::new(refactoring::RefactoringModule), "refactoring");
+    add(&mut registry, Box::new(theme_studio::ThemeStudioModule), "theme_studio");
     // Asked last: only files no other viewer shows (and only their start is read).
-    registry.register(Box::new(binary_files::BinaryFilesModule));
+    add(&mut registry, Box::new(binary_files::BinaryFilesModule), "binary_files");
     // Frameworks: only detectors here; their help is created per project, when used.
-    registry.register(Box::new(fw_symfony::SymfonyModule));
-    registry.register(Box::new(fw_laravel::LaravelModule));
-    registry.register(Box::new(fw_yii::YiiModule));
-    registry.register(Box::new(fw_htmx::HtmxModule));
-    registry.register(Box::new(fw_react::ReactModule));
-    registry.register(Box::new(fw_vue::VueModule));
+    add(&mut registry, Box::new(fw_symfony::SymfonyModule), "fw_symfony");
+    add(&mut registry, Box::new(fw_laravel::LaravelModule), "fw_laravel");
+    add(&mut registry, Box::new(fw_yii::YiiModule), "fw_yii");
+    add(&mut registry, Box::new(fw_htmx::HtmxModule), "fw_htmx");
+    add(&mut registry, Box::new(fw_react::ReactModule), "fw_react");
+    add(&mut registry, Box::new(fw_vue::VueModule), "fw_vue");
     registry
 }
 
@@ -280,6 +289,9 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
     code_quality::runtime::use_node(Some(Arc::new(language_servers::node_program)));
     let registry = builtin();
     let (mut contributions, reports) = registry.activate(selection);
+    crate::logs::set_active(
+        reports.iter().filter(|r| r.state == ModuleState::Active).map(|r| r.id.as_str()),
+    );
     for report in &reports {
         match &report.state {
             ModuleState::Active => tracing::debug!(module = %report.id, "module active"),
@@ -287,7 +299,7 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
                 tracing::info!(module = %report.id, "module disabled in the settings")
             }
             ModuleState::Failed(e) => {
-                tracing::error!(module = %report.id, "the module didn't start: {e}")
+                tracing::error!(module = %report.id, error = %e, "the module didn't start")
             }
         }
     }
@@ -444,6 +456,7 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
     settings.push(Arc::new(crate::floating::FloatingSettings));
     settings.push(Arc::new(crate::scrollbars::ScrollbarSettings));
     settings.push(Arc::new(crate::toasts::ToastSettings));
+    settings.push(Arc::new(crate::logs::LogSettings));
     // Whether the window's bar has the menu drawer's button: a choice on macOS only (it
     // has its own menu bar); elsewhere it's the only menu.
     if cfg!(target_os = "macos") {

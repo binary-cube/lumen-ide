@@ -35,7 +35,7 @@ impl Workbench {
         let listed = listing::ListedFs::new(&*self.ports.disk, &self.support.project_services);
         match workspace::refresh_paths(tree, &paths, false, &listed) {
             Ok(c) => changed |= c,
-            Err(e) => tracing::debug!("can't reread a changed folder: {e}"),
+            Err(e) => tracing::debug!(error = %e, "can't reread a changed folder"),
         }
         // Files written (by others: a download, another program; our saves too): announced
         // (the index reads them again), and their tabs follow.

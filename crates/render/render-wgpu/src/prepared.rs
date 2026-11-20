@@ -45,7 +45,7 @@ pub fn prepare(options: &RenderOptions) {
         .spawn(move || pollster::block_on(make(backends, transparent)));
     match started {
         Ok(handle) => *slot = Some(handle),
-        Err(e) => tracing::debug!("the GPU isn't made ahead: {e}"),
+        Err(e) => tracing::debug!(error = %e, "the GPU isn't made ahead"),
     }
 }
 
@@ -74,12 +74,12 @@ async fn make(backends: wgpu::Backends, transparent: bool) -> Option<Prepared> {
             apply_limit_buckets: false,
         })
         .await
-        .inspect_err(|e| tracing::debug!("no GPU made ahead: {e}"))
+        .inspect_err(|e| tracing::debug!(error = %e, "no GPU made ahead"))
         .ok()?;
     let ctx = Arc::new(
         GpuContext::new(instance, adapter)
             .await
-            .inspect_err(|e| tracing::debug!("no GPU made ahead: {e}"))
+            .inspect_err(|e| tracing::debug!(error = %e, "no GPU made ahead"))
             .ok()?,
     );
     let drawer = Some(Drawer::new(&ctx, LIKELY_FORMAT, transparent));

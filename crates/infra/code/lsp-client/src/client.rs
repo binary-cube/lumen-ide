@@ -1005,7 +1005,7 @@ fn spawn_writer(name: &str, mut input: Box<dyn Write + Send>) -> Sender<Vec<u8>>
         }
     });
     if let Err(e) = spawned {
-        tracing::warn!("a language server's writer didn't start: {e}");
+        tracing::warn!(error = %e, "a language server's writer didn't start");
     }
     tx
 }
@@ -1031,7 +1031,7 @@ fn spawn_reader(name: &str, output: Box<dyn Read + Send>, tx: Sender<Input>, gen
         let _ = tx.send(Input::Exited(generation));
     });
     if let Err(e) = spawned {
-        tracing::warn!("a language server's reader didn't start: {e}");
+        tracing::warn!(error = %e, "a language server's reader didn't start");
     }
 }
 
@@ -1047,7 +1047,7 @@ fn spawn_errors(name: &str, errors: Box<dyn Read + Send>, tx: Sender<Input>, gen
         }
     });
     if let Err(e) = spawned {
-        tracing::warn!("a language server's stderr reader didn't start: {e}");
+        tracing::warn!(error = %e, "a language server's stderr reader didn't start");
     }
 }
 

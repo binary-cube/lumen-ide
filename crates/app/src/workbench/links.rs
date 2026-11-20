@@ -463,7 +463,7 @@ impl Workbench {
             }
             LinkTarget::File { path, line } => {
                 if let Err(e) = self.open_file(&path) {
-                    tracing::warn!("can't open {}: {e}", path.display());
+                    tracing::warn!(path = %path.display(), error = %e, "can't open");
                     return false;
                 }
                 match line {

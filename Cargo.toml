@@ -12,6 +12,8 @@ members = [
     "crates/domain/tools/terminal",
     "crates/domain/tools/app-updates",
     "crates/infra/system/self-update",
+    "crates/infra/system/logging",
+    "crates/modules/tools/log-viewer",
     "crates/domain/ai/agents",
     "crates/domain/ai/acp",
     "crates/domain/ai/mcp",
@@ -284,6 +286,8 @@ remote-ftp = { path = "crates/infra/remote/remote-ftp" }
 secrets = { path = "crates/infra/system/secrets" }
 process-stats = { path = "crates/infra/system/process-stats" }
 process-registry = { path = "crates/infra/system/process-registry" }
+logging = { path = "crates/infra/system/logging" }
+log-viewer = { path = "crates/modules/tools/log-viewer" }
 db-postgres = { path = "crates/infra/database/postgres" }
 database-postgres = { path = "crates/modules/database/postgres" }
 db-mysql = { path = "crates/infra/database/mysql" }

@@ -52,7 +52,7 @@ pub(crate) fn token(older: Option<String>) -> (String, bool) {
             let token = older.filter(|t| t.len() >= 32).unwrap_or_else(made);
             let saved = store.set(ID, &token);
             if let Err(e) = &saved {
-                tracing::warn!("the MCP server's token wasn't kept in the keychain: {e}");
+                tracing::warn!(error = %e, "the MCP server's token wasn't kept in the keychain");
             }
             (token, saved.is_ok())
         }

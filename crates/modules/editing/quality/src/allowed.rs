@@ -64,7 +64,7 @@ impl Allowed {
         });
         let (Some(Some(text)), Some(file)) = (text, &self.file) else { return };
         if let Err(e) = files::write_private(file, text.as_bytes()) {
-            tracing::warn!("can't keep the allowed code quality tools: {e}");
+            tracing::warn!(error = %e, "can't keep the allowed code quality tools");
         }
     }
 }

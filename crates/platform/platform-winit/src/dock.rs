@@ -23,7 +23,7 @@ pub(crate) fn set(menu: &IconMenu) {
     let built = (!menu.projects.is_empty()).then(|| build(menu)).transpose();
     match built {
         Ok(built) => DOCK.with(|d| *d.borrow_mut() = built),
-        Err(e) => tracing::warn!("can't make the Dock's menu: {e}"),
+        Err(e) => tracing::warn!(error = %e, "can't make the Dock's menu"),
     }
     if !INSTALLED.with(std::cell::Cell::get) && install() {
         INSTALLED.with(|i| i.set(true));

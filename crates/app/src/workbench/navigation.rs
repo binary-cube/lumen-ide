@@ -438,7 +438,7 @@ impl Workbench {
         if here.as_deref() != Some(path)
             && let Err(e) = self.open_file(path)
         {
-            tracing::warn!("can't open {}: {e}", path.display());
+            tracing::warn!(path = %path.display(), error = %e, "can't open");
             return false;
         }
         self.focus = Focus::Editor;

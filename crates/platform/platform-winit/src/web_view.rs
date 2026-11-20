@@ -115,7 +115,7 @@ impl WryWebView {
                 })
             }
             Err(e) => {
-                tracing::warn!("the system's web engine didn't start: {e}");
+                tracing::warn!(error = %e, "the system's web engine didn't start");
                 None
             }
         }
@@ -180,7 +180,7 @@ fn app_page<'a>(
             }
         })
         .with_download_started_handler(|url, _| {
-            tracing::debug!("an app's download refused: {url}");
+            tracing::debug!(%url, "an app's download refused");
             false
         })
         .with_ipc_handler({
@@ -188,12 +188,12 @@ fn app_page<'a>(
             move |request: wry::http::Request<String>| {
                 let from = request.uri().to_string();
                 if !web_app::allows_navigation(&from) {
-                    tracing::warn!("a message from outside the app dropped: {from}");
+                    tracing::warn!(%from, "a message from outside the app dropped");
                     return;
                 }
                 let message = request.into_body();
                 if message.len() > platform_api::MAX_WEB_MESSAGE {
-                    tracing::warn!("an app's message too long, dropped: {} bytes", message.len());
+                    tracing::warn!(size = message.len(), "an app's message too long: dropped");
                     return;
                 }
                 inbox(WebEvent::Message(message));
@@ -220,7 +220,7 @@ fn response_of(served: web_app::Served) -> wry::http::Response<Vec<u8>> {
         response = response.header("Content-Security-Policy", web_app::CSP);
     }
     response.body(served.body).unwrap_or_else(|e| {
-        tracing::warn!("an app's answer wasn't made: {e}");
+        tracing::warn!(error = %e, "an app's answer wasn't made");
         let mut empty = wry::http::Response::new(Vec::new());
         *empty.status_mut() = wry::http::StatusCode::INTERNAL_SERVER_ERROR;
         empty
@@ -230,7 +230,7 @@ fn response_of(served: web_app::Served) -> wry::http::Response<Vec<u8>> {
 impl platform_api::WebView for WryWebView {
     fn set_bounds(&self, bounds: Rect) {
         if let Err(e) = self.view.set_bounds(bounds_of(bounds)) {
-            tracing::debug!("the page wasn't moved: {e}");
+            tracing::debug!(error = %e, "the page wasn't moved");
         }
         self.area.set(bounds);
         if let Some(holes) = &self.holes {
@@ -290,7 +290,7 @@ impl platform_api::WebView for WryWebView {
 
     fn set_visible(&self, visible: bool) {
         if let Err(e) = self.view.set_visible(visible) {
-            tracing::debug!("the page wasn't shown or hidden: {e}");
+            tracing::debug!(error = %e, "the page wasn't shown or hidden");
         }
         if !visible {
             self.release_focus();
@@ -299,7 +299,7 @@ impl platform_api::WebView for WryWebView {
 
     fn release_focus(&self) {
         if let Err(e) = self.view.focus_parent() {
-            tracing::debug!("the keyboard wasn't given back: {e}");
+            tracing::debug!(error = %e, "the keyboard wasn't given back");
         }
     }
 
@@ -309,7 +309,7 @@ impl platform_api::WebView for WryWebView {
             return;
         }
         if let Err(e) = self.view.load_html(html) {
-            tracing::warn!("the page wasn't loaded: {e}");
+            tracing::warn!(error = %e, "the page wasn't loaded");
         }
     }
 
@@ -318,7 +318,7 @@ impl platform_api::WebView for WryWebView {
             return;
         }
         if let Err(e) = self.view.evaluate_script(&web_app::receive_script(message)) {
-            tracing::warn!("a message wasn't given to the app's page: {e}");
+            tracing::warn!(error = %e, "a message wasn't given to the app's page");
         }
     }
 

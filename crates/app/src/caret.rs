@@ -181,7 +181,7 @@ impl SettingsContribution for CaretSettings {
             _ => return,
         };
         if let Err(e) = saved {
-            tracing::warn!("can't save the caret's setting: {e}");
+            tracing::warn!(error = %e, "can't save the caret's setting");
         }
     }
 }

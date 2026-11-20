@@ -171,11 +171,11 @@ pub(crate) fn serve(root: &Path, method: &str, host: Option<&str>, path: &str) -
     let Some(file) = resolve(root, path) else { return Served::status(404) };
     // Links followed: what they reach must still be inside the folder.
     let (Ok(root), Ok(real)) = (root.canonicalize(), file.canonicalize()) else {
-        tracing::debug!("an app's file isn't there: {path}");
+        tracing::debug!(%path, "an app's file isn't there");
         return Served::status(404);
     };
     if !real.starts_with(&root) {
-        tracing::warn!("an app's request left its folder: {}", file.display());
+        tracing::warn!(file = %file.display(), "an app's request left its folder");
         return Served::status(404);
     }
     let Ok(meta) = std::fs::metadata(&real) else { return Served::status(404) };
@@ -194,7 +194,7 @@ pub(crate) fn serve(root: &Path, method: &str, host: Option<&str>, path: &str) -
         Ok(n) if n as u64 <= MAX_FILE => Served { status: 200, mime, body, policy },
         Ok(_) => Served::status(404),
         Err(e) => {
-            tracing::debug!("an app's file wasn't read: {e}");
+            tracing::debug!(error = %e, "an app's file wasn't read");
             Served::status(404)
         }
     }

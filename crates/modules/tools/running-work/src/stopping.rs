@@ -23,6 +23,10 @@ const ROW_H: f32 = 28.0;
 pub const VISIBLE_ROWS: usize = 8;
 /// Inside the box, above the first row and under the last.
 const INSET: f32 = 4.0;
+/// The scrollbar off the box's edges (logical pixels).
+const BAR_INSET: f32 = 4.0;
+/// Between the rows' text and the scrollbar's lane (logical pixels).
+const BAR_GAP: f32 = 10.0;
 
 /// The progress bar's thickness (logical pixels).
 const BAR: f32 = 6.0;
@@ -96,9 +100,10 @@ pub fn paint(ctx: ViewerPaint<'_>, stopping: &Stopping, scroll: f32, bar: &mut E
         .map(|key| text.shape_line(&t(key), &small).width)
         .fold(0.0, f32::max);
     let top = inner.min_y() + px(INSET) - px(scroll);
-    // A list that scrolls keeps its scrollbar's lane free on the right.
+    // A list that scrolls keeps its scrollbar's lane free on the right, with room between
+    // (the bar widens under the mouse: it never touches the text).
     let lane = if max_scroll(stopping) > 0.0 {
-        ui_components::Scrollbar::track_thickness(scale)
+        ui_components::Scrollbar::track_thickness(scale) + px(BAR_INSET + BAR_GAP)
     } else {
         0.0
     };
@@ -146,11 +151,12 @@ pub fn paint(ctx: ViewerPaint<'_>, stopping: &Stopping, scroll: f32, bar: &mut E
     }
     // More than fits: the app's scrollbar along the box's right edge (nothing when it fits).
     let content = px(ROW_H) * count as f32 + px(INSET) * 2.0;
+    // Off the box's edges a little (its border, its rounded corners), as a field's is.
     let area = Rect::new(
         inner.min_x(),
-        inner.min_y() + px(2.0),
-        inner.size.width - px(2.0),
-        inner.size.height - px(4.0),
+        inner.min_y() + px(BAR_INSET),
+        inner.size.width - px(BAR_INSET),
+        inner.size.height - px(BAR_INSET) * 2.0,
     );
     bar.paint(scene, p, scale, area, content, px(scroll));
 }

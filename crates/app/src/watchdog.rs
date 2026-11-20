@@ -57,6 +57,7 @@ pub fn exiting() {
         std::thread::sleep(EXIT_DEADLINE);
         tracing::error!(after = ?EXIT_DEADLINE, "the app was still ending: ended now");
         storage::settings::flush();
+        logging::flush();
         std::process::exit(0);
     });
 }

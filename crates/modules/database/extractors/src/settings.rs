@@ -60,7 +60,7 @@ pub fn save<T: settings_model::SettingType + PartialEq>(
         return;
     }
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save an extractors' setting: {e}");
+        tracing::warn!(error = %e, "can't save an extractors' setting");
     }
 }
 

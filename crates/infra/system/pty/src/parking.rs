@@ -486,7 +486,7 @@ fn spawn_parker() -> bool {
     match started {
         Ok(_) => true,
         Err(e) => {
-            tracing::warn!("can't start the terminals' parking thread: {e}");
+            tracing::warn!(error = %e, "can't start the terminals' parking thread");
             false
         }
     }

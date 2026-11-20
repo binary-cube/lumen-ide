@@ -65,7 +65,7 @@ impl Mark {
             kernel::work::run("screen-mark", move || {
                 let logo = image_decode::decode_fitting(kernel::brand::ICON_PNG, side)
                     .map(|d| ImageData::new(d.width, d.height, d.pixels))
-                    .map_err(|e| tracing::warn!("the logo couldn't be decoded: {e}"))
+                    .map_err(|e| tracing::warn!(error = %e, "the logo couldn't be decoded"))
                     .ok();
                 let _ = tx.send(logo);
             });

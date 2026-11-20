@@ -688,3 +688,42 @@ fn a_started_program_s_first_output_is_let_run_unseen() {
     view.text_input("y");
     assert!(view.settling.is_none(), "typed into: shown at once");
 }
+
+/// Selecting with the mouse held past the grid's top: the history scrolls up a step at a
+/// time (the farther, the more), the selection growing with it; back inside, it stops; the
+/// button let go, nothing more scrolls.
+#[test]
+fn a_selection_held_past_an_edge_scrolls_the_history() {
+    let mut view =
+        with_config(FakeSession::new(200, 80, 24), crate::config::TerminalConfig::default());
+    let mut text = TextSystem::new();
+    paint(&mut view, &mut text);
+    let (w, h) = view.cell;
+    let area = view.grid_area;
+    let inside = Point::new(area.min_x() + 2.0 * w, area.min_y() + 5.0 * h + 1.0);
+    assert!(view.begin_selection(inside, 1));
+    let before = view.selected_text().map_or(0, |t| t.lines().count());
+    // Held a line and a half above the top: a step of two lines, then another once due.
+    let above = Point::new(inside.x, area.min_y() - 1.5 * h);
+    assert_eq!(view.edge_lines(above), 2);
+    assert!(view.drag_selection(above));
+    let now = std::time::Instant::now();
+    assert!(!view.auto_scroll(now), "not before its step is due");
+    assert!(view.frame_deadline().is_some(), "a frame asked for the next step");
+    assert!(view.auto_scroll(now + AUTO_EVERY));
+    view.show_scrolled();
+    assert!(view.grid.display_offset >= 4, "scrolled up: {}", view.grid.display_offset);
+    let after = view.selected_text().map_or(0, |t| t.lines().count());
+    assert!(after > before, "the selection grew with it: {before} → {after}");
+    // Far below the bottom: down, by at most AUTO_MOST.
+    let far_below = Point::new(inside.x, area.max_y() + 100.0 * h);
+    assert_eq!(view.edge_lines(far_below), -AUTO_MOST);
+    // Back inside: no more steps.
+    view.drag_selection(inside);
+    assert!(!view.auto_scroll(now + AUTO_EVERY * 10));
+    assert_eq!(view.frame_deadline(), None);
+    // Let go past the edge: nothing scrolls after.
+    view.drag_selection(above);
+    view.end_selection();
+    assert!(!view.auto_scroll(now + AUTO_EVERY * 20));
+}

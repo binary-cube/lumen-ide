@@ -150,7 +150,7 @@ impl LayoutStore for TomlGridLayouts {
         let table: toml::Table = match text.parse() {
             Ok(table) => table,
             Err(e) => {
-                tracing::warn!("{} is invalid: {e}", self.file.display());
+                tracing::warn!(file = %self.file.display(), error = %e, "the grids' layouts are invalid");
                 return Vec::new();
             }
         };

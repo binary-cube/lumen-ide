@@ -13,7 +13,7 @@ impl Steps<'_> {
         let db = match data_fixtures::write(&dir) {
             Ok((db, _)) => db,
             Err(e) => {
-                tracing::error!("the sample data files weren't made: {e}");
+                tracing::error!(error = %e, "the sample data files weren't made");
                 return;
             }
         };
@@ -46,7 +46,7 @@ impl Steps<'_> {
         shop.id = database::DataSourceId::from_u128(0x5b6f_2c7e_6a4e_4c1f_9d55_3e1f_0c2b_7a10);
         let source = shop.id;
         if let Err(e) = catalog.add(shop) {
-            tracing::error!("the sample source wasn't added: {e}");
+            tracing::error!(error = %e, "the sample source wasn't added");
             return;
         }
         consoles.set_store(Arc::new(database::console::NoConsoles));
@@ -100,10 +100,10 @@ impl Steps<'_> {
                             if let Some(name) = name
                                 && let Err(e) = consoles.rename(spec.id, name)
                             {
-                                tracing::error!("the sample console wasn't renamed: {e:?}");
+                                tracing::error!(error = ?e, "the sample console wasn't renamed");
                             }
                         }
-                        Err(e) => tracing::error!("the sample console wasn't made: {e}"),
+                        Err(e) => tracing::error!(error = %e, "the sample console wasn't made"),
                     }
                 }
                 database::console::ask_jump(database::console::JumpRequest {
@@ -128,7 +128,7 @@ impl Steps<'_> {
                 let spec = match consoles.create(source, sql) {
                     Ok(spec) => spec,
                     Err(e) => {
-                        tracing::error!("the sample console wasn't made: {e}");
+                        tracing::error!(error = %e, "the sample console wasn't made");
                         return;
                     }
                 };
@@ -151,7 +151,7 @@ impl Steps<'_> {
                     history.record(entry);
                 }
                 if let Err(e) = self.wb.open_file(&spec.path(&root)) {
-                    tracing::error!("the sample console didn't open: {e}");
+                    tracing::error!(error = %e, "the sample console didn't open");
                     return;
                 }
                 self.frame();
@@ -168,12 +168,12 @@ impl Steps<'_> {
                 let spec = match consoles.create(source, text) {
                     Ok(spec) => spec,
                     Err(e) => {
-                        tracing::error!("the sample console wasn't made: {e}");
+                        tracing::error!(error = %e, "the sample console wasn't made");
                         return;
                     }
                 };
                 if let Err(e) = self.wb.open_file(&spec.path(&root)) {
-                    tracing::error!("the sample console didn't open: {e}");
+                    tracing::error!(error = %e, "the sample console didn't open");
                     return;
                 }
                 self.frame();
@@ -195,12 +195,12 @@ impl Steps<'_> {
                 let spec = match consoles.create(source, CONSOLE_SIGNATURE) {
                     Ok(spec) => spec,
                     Err(e) => {
-                        tracing::error!("the sample console wasn't made: {e}");
+                        tracing::error!(error = %e, "the sample console wasn't made");
                         return;
                     }
                 };
                 if let Err(e) = self.wb.open_file(&spec.path(&root)) {
-                    tracing::error!("the sample console didn't open: {e}");
+                    tracing::error!(error = %e, "the sample console didn't open");
                     return;
                 }
                 self.frame();
@@ -226,12 +226,12 @@ impl Steps<'_> {
                 let spec = match consoles.create(source, text) {
                     Ok(spec) => spec,
                     Err(e) => {
-                        tracing::error!("the sample console wasn't made: {e}");
+                        tracing::error!(error = %e, "the sample console wasn't made");
                         return;
                     }
                 };
                 if let Err(e) = self.wb.open_file(&spec.path(&root)) {
-                    tracing::error!("the sample console didn't open: {e}");
+                    tracing::error!(error = %e, "the sample console didn't open");
                     return;
                 }
                 self.frame();
@@ -262,7 +262,7 @@ impl Steps<'_> {
                 let path = root.join(SNAPSHOT_SQL_FILE);
                 consoles.detach(&path);
                 if let Err(e) = std::fs::write(&path, sql) {
-                    tracing::error!("the sample SQL file wasn't written: {e}");
+                    tracing::error!(error = %e, "the sample SQL file wasn't written");
                     return;
                 }
                 if kind == "file-attached" && consoles.attach(&path, source).is_none() {
@@ -270,7 +270,7 @@ impl Steps<'_> {
                     return;
                 }
                 if let Err(e) = self.wb.open_file(&path) {
-                    tracing::error!("the sample SQL file didn't open: {e}");
+                    tracing::error!(error = %e, "the sample SQL file didn't open");
                     return;
                 }
                 self.wb.set_bottom_height(400.0);
@@ -292,7 +292,7 @@ impl Steps<'_> {
                         Ok(spec) => {
                             consoles.update(spec.id, |s| s.last_run_ms = ms);
                         }
-                        Err(e) => tracing::error!("the sample console wasn't made: {e}"),
+                        Err(e) => tracing::error!(error = %e, "the sample console wasn't made"),
                     }
                 }
                 database::console::ask_jump(database::console::JumpRequest {
@@ -334,7 +334,7 @@ impl Steps<'_> {
                 let spec = match consoles.create(source, text) {
                     Ok(spec) => spec,
                     Err(e) => {
-                        tracing::error!("the sample console wasn't made: {e}");
+                        tracing::error!(error = %e, "the sample console wasn't made");
                         return;
                     }
                 };
@@ -349,7 +349,7 @@ impl Steps<'_> {
                     _ => {}
                 }
                 if let Err(e) = self.wb.open_file(&spec.path(&root)) {
-                    tracing::error!("the sample console didn't open: {e}");
+                    tracing::error!(error = %e, "the sample console didn't open");
                     return;
                 }
                 // The Services window tall enough for its results' rows to be seen.

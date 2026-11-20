@@ -76,7 +76,9 @@ pub(crate) fn set<'a>(
             // The taskbar buttons' overlay: the sign's mark (the same icon, on its disc).
             let mark = self::icon(&sign.badge);
             let menu = crate::context_menu::build(&sign.menu)
-                .inspect_err(|e| tracing::warn!("can't make the notification icon's menu: {e}"))
+                .inspect_err(
+                    |e| tracing::warn!(error = %e, "can't make the notification icon's menu"),
+                )
                 .ok();
             STATE.with(|s| {
                 let mut s = s.borrow_mut();
@@ -289,6 +291,6 @@ fn overlay(window: HWND, icon: HICON, tooltip: &str) {
         )
     };
     if let Err(e) = done {
-        tracing::debug!("the taskbar didn't take the overlay: {e}");
+        tracing::debug!(error = %e, "the taskbar didn't take the overlay");
     }
 }

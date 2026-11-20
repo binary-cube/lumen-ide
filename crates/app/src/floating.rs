@@ -180,7 +180,7 @@ impl SettingsContribution for FloatingSettings {
             _ => return,
         };
         if let Err(e) = saved {
-            tracing::warn!("can't save the menu panel's setting: {e}");
+            tracing::warn!(error = %e, "can't save the menu panel's setting");
         }
     }
 }

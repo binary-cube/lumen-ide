@@ -85,7 +85,7 @@ fn save<T: SettingType>(settings: &SettingsService, setting: &Setting<T>, value:
         return;
     }
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save a Focus mode setting: {e}");
+        tracing::warn!(error = %e, "can't save a Focus mode setting");
     }
 }
 

@@ -58,6 +58,17 @@ pub enum SettingsRow {
         current: i64,
         default: Option<i64>,
     },
+    /// The same as a list to choose from (a field showing the choice, its list opened by a
+    /// click: many choices, or rows of them one under the other); a choice is
+    /// [`SettingsContribution::choose`] with `key` and its value.
+    Dropdown {
+        key: &'static str,
+        label: String,
+        detail: String,
+        choices: Vec<(i64, String)>,
+        current: i64,
+        default: Option<i64>,
+    },
     /// A card with a status line (what it holds now) and maybe a destructive button; a
     /// click on it is [`SettingsContribution::press`] with its action.
     Status { text: String, button: Option<(&'static str, String)> },
@@ -118,6 +129,7 @@ impl SettingsRow {
         match self {
             Self::Choices { key, label, detail, .. }
             | Self::Segmented { key, label, detail, .. }
+            | Self::Dropdown { key, label, detail, .. }
             | Self::Slider { key, label, detail, .. }
             | Self::Toggle { key, label, detail, .. }
             | Self::Text { key, label, detail, .. }

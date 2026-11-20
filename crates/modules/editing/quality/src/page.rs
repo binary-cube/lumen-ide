@@ -286,7 +286,7 @@ pub(crate) fn use_found(runs: &ProjectRuns, language: &str, kind: Kind, found: &
     runs.allow(&Choice::Tool(found.id.to_owned()));
     let saved = Saved { what: "tool".into(), value: found.id.into(), reads: String::new() };
     if let Some(Err(e)) = runs.settings().map(|s| settings::save(&s, language, kind, &saved)) {
-        tracing::warn!("can't save a code quality choice: {e}");
+        tracing::warn!(error = %e, "can't save a code quality choice");
     }
 }
 
@@ -431,7 +431,7 @@ impl SettingsContribution for QualitySettings {
             settings::save(project, language, kind, &saved)
         };
         if let Err(e) = result {
-            tracing::warn!("can't save a code quality choice: {e}");
+            tracing::warn!(error = %e, "can't save a code quality choice");
         }
     }
 
@@ -449,7 +449,7 @@ impl SettingsContribution for QualitySettings {
         let mut saved = settings::saved(project, language, kind);
         saved.value = value.trim().to_owned();
         if let Err(e) = settings::save(project, language, kind, &saved) {
-            tracing::warn!("can't save a code quality choice: {e}");
+            tracing::warn!(error = %e, "can't save a code quality choice");
             return;
         }
         // Written here: the user's choice.

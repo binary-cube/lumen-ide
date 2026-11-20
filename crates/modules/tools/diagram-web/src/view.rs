@@ -425,7 +425,7 @@ impl DiagramWebView {
                     match result {
                         Ok(()) => self.page_dir = Some(dir),
                         Err(reason) => {
-                            tracing::warn!("draw.io's page wasn't written: {reason}");
+                            tracing::warn!(%reason, "draw.io's page wasn't written");
                             self.notifications.push(Notification::error(tr!(
                                 "diagram_web.page_failed",
                                 reason = reason
@@ -694,7 +694,7 @@ impl Viewer for DiagramWebView {
         match event {
             WebEvent::Message(text) => {
                 let effects = self.session.page_message(&text);
-                tracing::debug!("draw.io said {} bytes: {} answers", text.len(), effects.len());
+                tracing::debug!(bytes = text.len(), answers = effects.len(), "draw.io said");
                 self.apply(effects);
             }
             WebEvent::OpenLink(url) if crate::protocol::web_link(&url) => {
@@ -833,7 +833,7 @@ impl Drop for DiagramWebView {
         let expected = self.session.on_disk();
         kernel::work::run(FILE_THREAD, move || {
             if let Err(e) = file::write_over(&path, &xml, expected.as_deref()) {
-                tracing::warn!("a closed draw.io tab's diagram wasn't written: {e}");
+                tracing::warn!(error = %e, "a closed draw.io tab's diagram wasn't written");
             }
         });
     }

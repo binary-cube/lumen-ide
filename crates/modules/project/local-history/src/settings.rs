@@ -114,7 +114,7 @@ impl SettingsContribution for HistorySettings {
             _ => return,
         };
         if let Err(e) = settings.set(setting, value) {
-            tracing::warn!("can't save a local history setting: {e}");
+            tracing::warn!(error = %e, "can't save a local history setting");
         }
     }
 
@@ -138,7 +138,7 @@ impl SettingsContribution for HistorySettings {
             kernel::work::run("local-history", move || {
                 match std::fs::remove_dir_all(&dir) {
                     Ok(()) => tracing::info!(dir = %dir.display(), "local history deleted"),
-                    Err(e) => tracing::warn!("the local history can't be deleted: {e}"),
+                    Err(e) => tracing::warn!(error = %e, "the local history can't be deleted"),
                 }
                 // Counted again next time.
                 if let Ok(mut all) = USAGE.lock() {

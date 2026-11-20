@@ -329,7 +329,7 @@ impl SettingsContribution for IndexedPage {
             (scan.suggestions.get(at(&EXCLUDE)?)?.0.clone(), Some(PathMark::Excluded))
         };
         apply(&entry.root, &entry.marks, &entry.events, &[target], mark, |e| {
-            tracing::warn!("the path marks weren't saved: {e}");
+            tracing::warn!(error = %e, "the path marks weren't saved");
         });
         None
     }

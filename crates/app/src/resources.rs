@@ -274,7 +274,7 @@ fn decode_splash_art() -> Option<render_api::ImageData> {
         // (`splash-city.jpg`, `splash-classic.jpg`, `splash-glass.jpg`): naming one here
         // brings it back. The full-size originals are in `assets/originals/` (not built in).
         let decoded = image_decode::decode(include_bytes!("../assets/splash-samurai.jpg"))
-            .map_err(|e| tracing::warn!("the splash art couldn't be decoded: {e}"))
+            .map_err(|e| tracing::warn!(error = %e, "the splash art couldn't be decoded"))
             .ok()?;
         // Cropped in the middle, to the card's aspect ratio, with its corners (radius in its
         // pixels).

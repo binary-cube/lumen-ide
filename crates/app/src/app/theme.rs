@@ -98,7 +98,11 @@ impl EditorApp {
                 false
             }
             SettingsAction::Press { block, action } => {
-                self.workbench.settings_press(block, action);
+                match self.workbench.settings_command(block, action) {
+                    // A button running a command: the app's own too (the settings stay open).
+                    Some(id) => self.settings_command(id),
+                    None => self.workbench.settings_press(block, action),
+                }
                 false
             }
             SettingsAction::SetText { block, key, value } => {
@@ -156,7 +160,7 @@ impl EditorApp {
             AppRequest::SampleScreen => {
                 let started = self.window.as_ref().is_some_and(|w| w.sample_screen_color());
                 self.window_state.sampling = started;
-                tracing::info!(started, "eyedropper requested");
+                tracing::debug!(started, "eyedropper requested");
                 return;
             }
             // The work-in-progress theme, only in this window (not saved).
@@ -170,7 +174,7 @@ impl EditorApp {
                             self.workbench.set_theme(theme);
                         }
                     }
-                    Err(e) => tracing::warn!("the theme from the studio is invalid: {e}"),
+                    Err(e) => tracing::warn!(error = %e, "the theme from the studio is invalid"),
                 }
             }
             AppRequest::OpenProject(path) => {
@@ -308,7 +312,7 @@ impl EditorApp {
                         self.shared.theme_version.set(self.shared.theme_version.get() + 1);
                         self.applied.theme_version = self.shared.theme_version.get();
                     }
-                    Err(e) => tracing::error!("the theme wasn't saved: {e}"),
+                    Err(e) => tracing::error!(error = %e, "the theme wasn't saved"),
                 }
                 self.workbench.close_asking_view();
             }
@@ -428,7 +432,7 @@ impl EditorApp {
     pub(super) fn apply_keymap(&mut self) {
         match crate::keymaps::keymap(MAC) {
             Ok(keymap) => self.keymap = keymap,
-            Err(e) => tracing::warn!("invalid keymap preset: {e}"),
+            Err(e) => tracing::warn!(error = %e, "invalid keymap preset"),
         }
         if let Some(window) = &self.window {
             window.set_menus(cmd::menus());

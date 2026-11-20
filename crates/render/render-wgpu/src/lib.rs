@@ -743,7 +743,7 @@ impl WgpuRenderer {
         match self.replace_surface() {
             Ok(()) => true,
             Err(e) => {
-                tracing::debug!("the hidden window's surface stays: {e}");
+                tracing::debug!(error = %e, "the hidden window's surface stays");
                 false
             }
         }
@@ -1205,7 +1205,7 @@ fn with_mapped<R>(
         let _ = sent.send(r.is_ok());
     });
     if let Err(e) = ctx.device.poll(wgpu::PollType::wait_indefinitely()) {
-        tracing::warn!("the frame wasn't read back: {e}");
+        tracing::warn!(error = %e, "the frame wasn't read back");
         return None;
     }
     if !mapped.recv().unwrap_or(false) {

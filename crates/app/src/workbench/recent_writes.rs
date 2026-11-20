@@ -28,7 +28,7 @@ impl Queue {
             std::mem::take(&mut *self.pending.lock().unwrap_or_else(PoisonError::into_inner));
         for (root, files) in batch {
             if let Err(e) = self.store.save(&root, &files) {
-                tracing::debug!("can't keep the recent files: {e}");
+                tracing::debug!(error = %e, "can't keep the recent files");
             }
         }
     }

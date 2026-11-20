@@ -81,7 +81,7 @@ impl Workbench {
     pub(super) fn save_in_background(&mut self, i: usize) -> bool {
         let Some(waker) = self.waker.as_ref().map(|w| Arc::clone(&w.0)) else {
             if let Err(e) = self.save_tab(i, None) {
-                tracing::warn!(path = ?self.tabs[i].doc.path(), "autosave failed: {e}");
+                tracing::warn!(path = ?self.tabs[i].doc.path(), error = %e, "autosave failed");
             }
             return true;
         };
@@ -98,7 +98,7 @@ impl Workbench {
         let PreparedSave { path, bytes, version, format } = match prepared {
             Ok(prepared) => prepared,
             Err(e) => {
-                tracing::warn!(path = ?tab.doc.path(), "autosave failed: {e}");
+                tracing::warn!(path = ?tab.doc.path(), error = %e, "autosave failed");
                 return false;
             }
         };
@@ -154,7 +154,7 @@ impl Workbench {
         let stamp = match result {
             Ok(stamp) => stamp,
             Err(e) => {
-                tracing::warn!(?path, "autosave failed: {e}");
+                tracing::warn!(?path, error = %e, "autosave failed");
                 return;
             }
         };

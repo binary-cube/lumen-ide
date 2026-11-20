@@ -569,6 +569,20 @@ impl OverlaySlot for SettingsSlot {
     /// While a module's text field is written, Enter saves it and Esc gives it up. While
     /// searching, Esc clears the search and ↑↓ walk the results; else ↑↓ change the section.
     fn key(&self, wb: &mut Workbench, _text: &mut TextSystem, key: EditKey) -> bool {
+        // A dropdown's list open: its keys (↑ ↓ choose, ↵ takes, Esc closes it only).
+        if wb.settings.picker_open() {
+            let key = match key {
+                EditKey::Escape => ui_workbench::ViewerKey::Escape,
+                EditKey::Enter { .. } => ui_workbench::ViewerKey::Enter,
+                EditKey::Move { motion: Motion::Up, .. } => ui_workbench::ViewerKey::Up,
+                EditKey::Move { motion: Motion::Down, .. } => ui_workbench::ViewerKey::Down,
+                _ => return true,
+            };
+            if let Some(action) = wb.settings.picker_key(key) {
+                wb.request = Some(MouseResult::Settings(action));
+            }
+            return true;
+        }
         if wb.settings.editing_text() || wb.settings.shortcuts_have_keys() {
             match key {
                 EditKey::Escape => {

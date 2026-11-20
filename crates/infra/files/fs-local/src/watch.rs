@@ -143,11 +143,11 @@ impl TreeWatcher {
             let _turn = REGISTERING.lock().unwrap_or_else(PoisonError::into_inner);
             let slot = weak.upgrade()?;
             let mut system = notify::recommended_watcher(handler)
-                .inspect_err(|e| tracing::warn!("can't watch the tree: {e}"))
+                .inspect_err(|e| tracing::warn!(error = %e, "can't watch the tree"))
                 .ok()?;
             system
                 .watch(&root, RecursiveMode::Recursive)
-                .inspect_err(|e| tracing::warn!("can't watch {}: {e}", root.display()))
+                .inspect_err(|e| tracing::warn!(root = %root.display(), error = %e, "can't watch"))
                 .ok()?;
             #[cfg(test)]
             REGISTERED.fetch_add(1, Ordering::SeqCst);

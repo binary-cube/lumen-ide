@@ -233,7 +233,7 @@ fn user_file(name: &str) -> Option<PathBuf> {
 fn read(file: &Path, saved_in: SavedIn) -> Vec<Saved> {
     let Ok(text) = std::fs::read_to_string(file) else { return Vec::new() };
     let parsed: File = toml::from_str(&text).unwrap_or_else(|e| {
-        tracing::warn!("{} is invalid: {e}", file.display());
+        tracing::warn!(file = %file.display(), error = %e, "the remote connections' file is invalid");
         File::default()
     });
     parsed.connections.into_iter().filter_map(|e| e.into_saved(saved_in)).collect()
@@ -271,7 +271,7 @@ pub fn save(saved: &Saved) -> std::io::Result<()> {
     approve(saved);
     for old in replaced.iter().filter(|s| s.connection.id != saved.connection.id) {
         if let Err(e) = secret_store(old).remove(&old.connection.id) {
-            tracing::warn!("can't remove the replaced connection's secret: {e}");
+            tracing::warn!(error = %e, "can't remove the replaced connection's secret");
         }
     }
     Ok(())
@@ -320,13 +320,13 @@ pub fn update(
     if original.connection.saved_in != edited.connection.saved_in
         && let Err(e) = forget(original)
     {
-        tracing::warn!("the connection's old entry stays where it was: {e}");
+        tracing::warn!(error = %e, "the connection's old entry stays where it was");
     }
     // Where it was, the secret goes (never left behind); not needed, it goes too.
     if (moved || !needs_secret)
         && let Err(e) = before.remove(id)
     {
-        tracing::warn!("can't remove the connection's old secret: {e}");
+        tracing::warn!(error = %e, "can't remove the connection's old secret");
     }
     Ok(())
 }
@@ -399,7 +399,7 @@ pub fn approve(saved: &Saved) {
     lines.push(&line);
     let text = lines.join("\n") + "\n";
     if let Err(e) = files::write_private(&file, text.as_bytes()) {
-        tracing::warn!("can't keep the allowed remote connection: {e}");
+        tracing::warn!(error = %e, "can't keep the allowed remote connection");
     }
 }
 

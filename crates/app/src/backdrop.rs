@@ -212,7 +212,7 @@ impl SettingsContribution for BackdropSettings {
             _ => return,
         };
         if let Err(e) = saved {
-            tracing::warn!("can't save the overlay backdrop's setting: {e}");
+            tracing::warn!(error = %e, "can't save the overlay backdrop's setting");
         }
     }
 }

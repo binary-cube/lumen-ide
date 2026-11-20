@@ -2,6 +2,14 @@
 
 use super::*;
 
+/// An icon before a cell's text (`GridSource::cell_icon`), and the room after it (logical
+/// pixels).
+const CELL_ICON: f32 = 14.0;
+const CELL_ICON_GAP: f32 = 6.0;
+/// What a measured cell with an icon is given beyond it (the icon's pixel rounding, so its
+/// widest text isn't cut by a hair).
+const CELL_ICON_SLACK: f32 = 6.0;
+
 impl<S: GridSource> DataGrid<S> {
     /// The row numbers' width for the page's last row.
     pub(super) fn gutter_width(&self, text: &mut TextSystem, ds: &Ctx<'_>, rows: u64) -> f32 {
@@ -52,7 +60,13 @@ impl<S: GridSource> DataGrid<S> {
                     continue;
                 }
                 cell_line(&mut buffer, &grid.source.cell(row, col));
-                let w = text.shape_line(&buffer, &cell_font).width + 2.0 * ds.px(CELL_PAD);
+                // An icon before the text (a level's): its room too.
+                let icon = if grid.source.cell_icon(row, col).is_some() {
+                    ds.px(CELL_ICON + CELL_ICON_GAP + CELL_ICON_SLACK)
+                } else {
+                    0.0
+                };
+                let w = text.shape_line(&buffer, &cell_font).width + 2.0 * ds.px(CELL_PAD) + icon;
                 widest = widest.max(w);
             }
             widest / scale
@@ -205,12 +219,30 @@ impl<S: GridSource> DataGrid<S> {
                                 CellRef::Bytes(_) => p.text_muted,
                                 _ => p.text,
                             };
+                            // An icon of the source's before the text (a level's), the text
+                            // after it.
+                            let mut start = left + pad;
+                            let mut room = room;
+                            if let Some((name, tone)) = self.source.cell_icon(row, col)
+                                && let Some(id) = icons.id(name)
+                            {
+                                let size = px(CELL_ICON);
+                                let at = Rect::new(
+                                    start,
+                                    (top + (row_h - size) / 2.0).round(),
+                                    size,
+                                    size,
+                                );
+                                ui_kit::draw_icon(layer, icons, id, at, tone.color(p));
+                                start += size + px(CELL_ICON_GAP);
+                                room = (room - size - px(CELL_ICON_GAP)).max(0.0);
+                            }
                             draw_fitted(
                                 layer,
                                 text,
                                 &buffer,
                                 &cell_font,
-                                (left + pad, room, baseline),
+                                (start, room, baseline),
                                 color,
                                 columns[col].align(),
                             );

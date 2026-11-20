@@ -443,7 +443,7 @@ fn read_errors(shared: &Shared, errors: Box<dyn Read + Send>) {
         }
         let text = shared.scrub(String::from_utf8_lossy(&line).trim_end());
         line.zeroize();
-        tracing::debug!(target: "driver", driver = %shared.driver, "{text}");
+        tracing::debug!(target: "driver", driver = %shared.driver, line = %text, "the driver said");
         let mut log = lock(&shared.log);
         if log.len() == LOG_LINES {
             log.pop_front();

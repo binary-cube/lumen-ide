@@ -70,7 +70,7 @@ fn run(queue: &SharedQueue<String>, state: &Weak<State>, workers: usize, name: &
                     }
                 });
                 if let Err(e) = spawned {
-                    tracing::warn!("can't start a transfer: {e}");
+                    tracing::warn!(error = %e, "can't start a transfer");
                 }
             }
         });
@@ -128,7 +128,7 @@ fn retry_later(state: &Arc<State>) {
         queue.push_many(state.to_upload().into_keys());
     });
     if let Err(e) = spawned {
-        tracing::warn!("can't schedule a retry: {e}");
+        tracing::warn!(error = %e, "can't schedule a retry");
         state.retrying.store(false, Ordering::Relaxed);
     }
 }

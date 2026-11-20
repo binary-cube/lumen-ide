@@ -75,7 +75,9 @@ fn fill(
             MenuItem::Command { id, label, shortcut, .. } => {
                 let accelerator = shortcut.as_deref().and_then(|s| {
                     s.parse::<Accelerator>()
-                        .inspect_err(|e| tracing::warn!("invalid shortcut `{s}`: {e}"))
+                        .inspect_err(
+                            |e| tracing::warn!(shortcut = %s, error = %e, "an invalid shortcut"),
+                        )
                         .ok()
                 });
                 let item = muda::MenuItem::with_id(id.as_str(), label, true, accelerator);

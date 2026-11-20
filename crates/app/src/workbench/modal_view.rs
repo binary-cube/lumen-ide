@@ -70,7 +70,7 @@ impl Workbench {
         let mut viewer = match provider.open(&path) {
             Ok(viewer) => viewer,
             Err(e) => {
-                tracing::warn!("the modal view didn't open: {e}");
+                tracing::warn!(error = %e, "the modal view didn't open");
                 return false;
             }
         };

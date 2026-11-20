@@ -45,11 +45,11 @@ impl EditorApp {
         let spawned = std::thread::Builder::new().name("trash-project".into()).spawn(move || {
             match fs_local::move_to_trash(&paths) {
                 Ok(()) => tracing::info!(path = %paths[0].display(), "project folder moved to the trash"),
-                Err(e) => tracing::warn!(path = %paths[0].display(), "cannot move the project folder to the trash: {e}"),
+                Err(e) => tracing::warn!(path = %paths[0].display(), error = %e, "cannot move the project folder to the trash"),
             }
         });
         if let Err(e) = spawned {
-            tracing::warn!("cannot start moving the project folder to the trash: {e}");
+            tracing::warn!(error = %e, "cannot start moving the project folder to the trash");
         }
     }
 
@@ -94,7 +94,7 @@ impl EditorApp {
         {
             let mut glyphs = WithIcons { text: &mut **text, icons: self.workbench.icons() };
             if let Err(e) = renderer.render(&self.frames.scene, &mut glyphs) {
-                tracing::debug!("the window's picture wasn't drawn: {e}");
+                tracing::debug!(error = %e, "the window's picture wasn't drawn");
             }
         }
     }

@@ -67,7 +67,7 @@ pub fn apply(settings: &SettingsService) {
 
 fn save<T: SettingType>(settings: &SettingsService, setting: &Setting<T>, value: T) {
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save a Markdown setting: {e}");
+        tracing::warn!(error = %e, "can't save a Markdown setting");
     }
 }
 

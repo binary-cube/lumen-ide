@@ -362,7 +362,7 @@ impl EditorApp {
     }
 
     fn on_screen_color(&mut self, color: Option<kernel::Rgba>) {
-        tracing::info!(?color, "eyedropper result");
+        tracing::debug!(?color, "eyedropper result");
         self.window_state.sampling = false;
         self.redraw();
         if self.workbench.screen_color(color) {
@@ -491,14 +491,14 @@ impl EditorApp {
                         self.redraw();
                     }
                 }
-                None => tracing::warn!("unknown menu command: {id}"),
+                None => tracing::warn!(%id, "unknown menu command"),
             }
             return Control::Continue;
         }
         match cmd::by_id(&id) {
             Some(id) => self.command(id),
             None => {
-                tracing::warn!("unknown menu command: {id}");
+                tracing::warn!(%id, "unknown menu command");
                 Control::Continue
             }
         }

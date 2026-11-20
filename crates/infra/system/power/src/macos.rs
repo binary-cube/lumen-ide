@@ -76,7 +76,7 @@ impl Drop for Assertion {
         // SAFETY: an id `IOPMAssertionCreateWithName` gave, released once.
         let code = unsafe { IOPMAssertionRelease(self.0) };
         if code != K_IO_RETURN_SUCCESS {
-            tracing::warn!("the keep-awake assertion wasn't released (IOKit {code:#x})");
+            tracing::warn!(code = %format_args!("{code:#x}"), "the keep-awake assertion wasn't released");
         }
     }
 }

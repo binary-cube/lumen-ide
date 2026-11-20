@@ -60,7 +60,7 @@ impl Workbench {
         };
         let current = self.current_session();
         if let Err(e) = self.session.save_if_changed(&self.sessions, &root, current) {
-            tracing::warn!("cannot save the session: {e}");
+            tracing::warn!(error = %e, "cannot save the session");
         }
     }
 
@@ -107,7 +107,7 @@ impl Workbench {
             let mut active = None;
             for tab in group {
                 if let Err(e) = self.open_file(&tab.path) {
-                    tracing::warn!("can't reopen {}: {e}", tab.path.display());
+                    tracing::warn!(path = %tab.path.display(), error = %e, "can't reopen");
                     continue;
                 }
                 if tab.pinned
@@ -214,7 +214,7 @@ impl QueuedSessions {
                 }
                 for (root, session) in saves {
                     if let Err(e) = store.save(&root, &session) {
-                        tracing::warn!("cannot save the session: {e}");
+                        tracing::warn!(error = %e, "cannot save the session");
                     }
                 }
                 for done in flushes {
@@ -223,7 +223,7 @@ impl QueuedSessions {
             }
         });
         if let Err(e) = started {
-            tracing::warn!("the session's writer can't start: {e}");
+            tracing::warn!(error = %e, "the session's writer can't start");
             return None;
         }
         let _ = self.queue.set(tx);

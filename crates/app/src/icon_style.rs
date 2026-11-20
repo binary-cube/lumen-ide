@@ -14,7 +14,7 @@ pub fn current(icons: &Icons) -> IconLook {
 pub fn save(icons: &Icons, look: IconLook) {
     let id = icons.look_id(look);
     if let Err(e) = crate::config::settings().set(&crate::settings::ICON_STYLE, id) {
-        tracing::warn!("can't save the icon set: {e}");
+        tracing::warn!(error = %e, "can't save the icon set");
     }
 }
 
@@ -29,6 +29,6 @@ pub fn save_file_set(icons: &Icons, set: Option<u8>) {
         .and_then(|s| icons.file_sets().get(usize::from(s)))
         .map_or_else(|| "ours".to_owned(), |s| s.id().to_owned());
     if let Err(e) = crate::config::settings().set(&crate::settings::FILE_ICONS, id) {
-        tracing::warn!("can't save the file icons: {e}");
+        tracing::warn!(error = %e, "can't save the file icons");
     }
 }

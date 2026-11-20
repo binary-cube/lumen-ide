@@ -99,7 +99,9 @@ pub fn builtin_themes() -> Vec<Theme> {
     BUILTIN
         .iter()
         .filter_map(|(name, src)| {
-            parse(src).inspect_err(|e| tracing::error!("bundled theme {name} is invalid: {e}")).ok()
+            parse(src)
+                .inspect_err(|e| tracing::error!(%name, error = %e, "a bundled theme is invalid"))
+                .ok()
         })
         .collect()
 }

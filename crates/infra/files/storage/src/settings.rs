@@ -140,7 +140,7 @@ impl TomlSettingsStore {
                     }
                     Ok(()) => {}
                     Err(e) => {
-                        tracing::warn!("can't write {}: {e}", target.display());
+                        tracing::warn!(target = %target.display(), error = %e, "can't write");
                         // Read again next time: what's on disk is what holds.
                         state.known = None;
                     }
@@ -152,7 +152,7 @@ impl TomlSettingsStore {
             let mut state = self.file.state.lock().unwrap_or_else(PoisonError::into_inner);
             if let Some(text) = state.pending.take() {
                 if let Err(e) = write_atomic(path, &text) {
-                    tracing::warn!("can't write {}: {e}", path.display());
+                    tracing::warn!(path = %path.display(), error = %e, "can't write");
                 }
                 if let Some((_, at)) = &mut state.known {
                     *at = stamp(path);
@@ -177,7 +177,7 @@ impl SettingsStore for TomlSettingsStore {
             Ok(table) => table?,
             Err(e) => {
                 let path = self.path.as_deref().unwrap_or(std::path::Path::new("settings"));
-                tracing::warn!("{} is invalid, using defaults: {e}", path.display());
+                tracing::warn!(path = %path.display(), error = %e, "the settings are invalid: the defaults used");
                 return None;
             }
         };

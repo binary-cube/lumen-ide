@@ -68,9 +68,7 @@ impl Inbox {
             || self.events.len() >= INBOX_EVENTS
             || self.bytes.saturating_add(size) > INBOX_BYTES
         {
-            tracing::warn!(
-                "a page's message dropped: too many waiting, or too long ({size} bytes)"
-            );
+            tracing::warn!(size, "a page's message dropped: too many waiting, or too long");
             return;
         }
         self.bytes += size;

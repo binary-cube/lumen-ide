@@ -207,7 +207,7 @@ impl Keeper {
         };
         let retention = HistoryService::retention(self.fixed);
         if let Err(e) = keep(&self.store, &retention, &path, &text, kind, now_ms()) {
-            tracing::warn!("local history: can't keep {path}: {e}");
+            tracing::warn!(%path, error = %e, "local history: can't keep");
         }
     }
 

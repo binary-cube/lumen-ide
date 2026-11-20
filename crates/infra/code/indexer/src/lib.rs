@@ -882,7 +882,7 @@ impl Worker {
         if let Ok(mut shared) = self.index.write() {
             shared.replace_symbols(index);
         }
-        tracing::info!(reused, parsed, elapsed = ?started.elapsed(), "symbol index");
+        tracing::debug!(reused, parsed, elapsed = ?started.elapsed(), "symbol index");
         // The symbols first (navigation, completion), then the search index (slower: the
         // vectors), published to the app as soon as they're ready.
         (self.waker)();
@@ -1015,12 +1015,12 @@ impl Worker {
                 if self.residency.is_cold() {
                     // On disk already; nothing in memory to write.
                 } else if let Err(e) = self.search.save() {
-                    tracing::warn!("can't save the search index: {e}");
+                    tracing::warn!(error = %e, "can't save the search index");
                 }
                 self.dirty = false;
                 self.last_save = Instant::now();
             }
-            Err(e) => tracing::warn!("can't save the index in {}: {e}", path.display()),
+            Err(e) => tracing::warn!(path = %path.display(), error = %e, "can't save the index"),
         }
     }
 }

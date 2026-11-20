@@ -233,7 +233,7 @@ impl Indexes {
                     return;
                 }
                 Err(e) => {
-                    tracing::info!("a source's schema wasn't read for completion: {e}");
+                    tracing::info!(error = %e, "a source's schema wasn't read for completion");
                     entry.error = Some(e.to_string());
                 }
             }
@@ -481,7 +481,7 @@ fn read_schema(
     let (columns, keys) = if complete {
         let columns = session.catalog_columns(None, &cancel)?;
         let keys = session.catalog_keys(None, &cancel).unwrap_or_else(|e| {
-            tracing::debug!("the source's keys weren't read: {e}");
+            tracing::debug!(error = %e, "the source's keys weren't read");
             Vec::new()
         });
         (columns, keys)
@@ -490,7 +490,7 @@ fn read_schema(
     };
     let routines = session.routines(None, &cancel).unwrap_or_default();
     let readable = session.catalog_relations(&cancel).unwrap_or_else(|e| {
-        tracing::debug!("the source's other relations weren't read: {e}");
+        tracing::debug!(error = %e, "the source's other relations weren't read");
         Vec::new()
     });
     let mut schemas: Vec<String> = Vec::new();

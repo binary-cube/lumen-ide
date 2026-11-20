@@ -419,7 +419,7 @@ impl EditorHost for Workbench {
                 true
             }
             Err(e) => {
-                tracing::warn!("can't open {}: {e}", path.display());
+                tracing::warn!(path = %path.display(), error = %e, "can't open");
                 false
             }
         }
@@ -603,7 +603,7 @@ impl Workbench {
     pub fn save_preferred_number(&mut self, number: u8) {
         let Some(settings) = self.data.settings.as_deref() else { return };
         if let Err(e) = settings.set(&crate::settings::PROJECT_NUMBER, i64::from(number)) {
-            tracing::warn!("the project's number wasn't saved: {e}");
+            tracing::warn!(error = %e, "the project's number wasn't saved");
         }
     }
 

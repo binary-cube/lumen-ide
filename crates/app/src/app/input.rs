@@ -343,7 +343,7 @@ impl EditorApp {
                 Some(id) => {
                     self.command(id);
                 }
-                None => tracing::warn!("unknown command: {id}"),
+                None => tracing::warn!(%id, "unknown command"),
             },
         }
     }

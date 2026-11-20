@@ -168,7 +168,7 @@ pub fn catalog() -> Arc<Catalog> {
     let loaded =
         Arc::new(Catalog::load(&code_intelligence::servers::data(), user_file().as_deref()));
     for error in &loaded.errors {
-        tracing::warn!("a language server's description can't be read: {error}");
+        tracing::warn!(%error, "a language server's description can't be read");
     }
     if let Ok(mut c) = CATALOG.write() {
         *c = Some(Arc::clone(&loaded));

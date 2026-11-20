@@ -204,7 +204,9 @@ impl ProjectPanel {
             self.tree = queries.as_deref().and_then(|q| {
                 let root = root.clone()?;
                 workspace::open_project(root.clone(), &Listed(q))
-                    .inspect_err(|e| tracing::warn!("can't list {}: {e}", root.display()))
+                    .inspect_err(
+                        |e| tracing::warn!(root = %root.display(), error = %e, "can't list"),
+                    )
                     .ok()
             });
             self.view =
@@ -335,7 +337,7 @@ impl ProjectPanel {
                     tree.set_children(node, entries);
                     changed = true;
                 }
-                Err(e) => tracing::debug!("can't read a changed folder again: {e}"),
+                Err(e) => tracing::debug!(error = %e, "can't read a changed folder again"),
             }
         }
         if dirs.is_empty() {
@@ -345,7 +347,7 @@ impl ProjectPanel {
             for dir in dirs {
                 match workspace::refresh_dir(tree, &dir, &fs) {
                     Ok(c) => changed |= c,
-                    Err(e) => tracing::debug!("can't read a changed folder again: {e}"),
+                    Err(e) => tracing::debug!(error = %e, "can't read a changed folder again"),
                 }
             }
         } else {
@@ -449,7 +451,7 @@ impl ProjectPanel {
         if !tree.is_expanded(parent)
             && let Err(e) = workspace::toggle_directory(tree, parent, &Listed(queries.as_ref()))
         {
-            tracing::warn!("can't open {}: {e}", tree.path(parent).display());
+            tracing::warn!(path = %tree.path(parent).display(), error = %e, "can't open");
         }
         self.search.clear();
         self.view.begin_new(parent, is_dir, tree);
@@ -517,7 +519,7 @@ impl ProjectPanel {
         let path = match workspace::entries::create(&store, &parent, name, is_dir) {
             Ok(path) => path,
             Err(e) => {
-                tracing::warn!("can't create {} in {}: {e}", name.trim(), parent.display());
+                tracing::warn!(name = %name.trim(), parent = %parent.display(), error = %e, "can't create");
                 if let Some(pending) = self.view.pending_mut() {
                     pending.error = true;
                 }
@@ -813,7 +815,7 @@ impl ToolPanel for ProjectPanel {
                 if let (Some(tree), Some(queries)) = (&mut self.tree, &self.queries)
                     && let Err(e) = workspace::expand_more(tree, &Listed(queries.as_ref()))
                 {
-                    tracing::warn!("the folders can't be read: {e}");
+                    tracing::warn!(error = %e, "the folders can't be read");
                 }
             }
             "collapse" => {
@@ -893,7 +895,7 @@ impl ToolPanel for ProjectPanel {
         match action {
             TreeAction::Toggle(dir) => {
                 if let Err(e) = workspace::toggle_directory(tree, dir, &Listed(queries.as_ref())) {
-                    tracing::warn!("can't read {}: {e}", tree.path(dir).display());
+                    tracing::warn!(path = %tree.path(dir).display(), error = %e, "can't read");
                 }
                 None
             }

@@ -1010,7 +1010,7 @@ impl SessionsPanel {
             let renamed = agents::provider(agent)
                 .map_or(Err("no such agent".into()), |a| a.rename_session(&folder, &id, &title));
             if let Err(e) = renamed {
-                tracing::warn!("a session wasn't renamed in its agent: {e}");
+                tracing::warn!(error = %e, "a session wasn't renamed in its agent");
             }
         });
     }

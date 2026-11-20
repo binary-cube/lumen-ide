@@ -139,7 +139,7 @@ impl Histories {
                 QueryHistory::from_blocks(loaded.entries, limit)
             }
             Err(why) => {
-                tracing::warn!("a query history wasn't read: {why}");
+                tracing::warn!(error = %why, "a query history wasn't read");
                 QueryHistory::default()
             }
         }
@@ -182,7 +182,7 @@ impl Histories {
             Write::Compact(all) => store.rewrite(source, &all),
         };
         if let Err(why) = done {
-            tracing::warn!("a query history wasn't written: {why}");
+            tracing::warn!(error = %why, "a query history wasn't written");
         }
     }
 
@@ -255,7 +255,7 @@ impl Histories {
                 _ => return,
             };
             if let Err(why) = this.store().rewrite(source, &entries) {
-                tracing::warn!("a query history wasn't written: {why}");
+                tracing::warn!(error = %why, "a query history wasn't written");
             }
         });
     }

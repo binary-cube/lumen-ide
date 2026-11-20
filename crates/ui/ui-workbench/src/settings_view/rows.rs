@@ -200,6 +200,11 @@ impl SettingsView {
                     *current,
                 );
             }
+            SettingsRow::Dropdown { key, label, detail, choices, current, default } => {
+                let reset = default.filter(|d| d != current);
+                let row = Labelled { key, label, detail, reset };
+                self.paint_dropdown_row(rows, row, choices, *current);
+            }
             SettingsRow::Segmented { key, label, detail, choices, current, default } => {
                 let reset = default.filter(|d| d != current);
                 let row = Labelled { key, label, detail, reset };
@@ -279,6 +284,40 @@ impl SettingsView {
         self.row_anchors.push((rows.block, row.key, area.rect));
         rows.y = area.rect.max_y();
         area
+    }
+
+    /// A row with a list to choose from: the field showing the choice on the right; a click
+    /// opens its list ([`SettingsView::hit`]).
+    pub(super) fn paint_dropdown_row(
+        &mut self,
+        rows: &mut BlockRows<'_, '_>,
+        row: Labelled<'_>,
+        choices: &[(i64, String)],
+        current: i64,
+    ) {
+        let ctx = rows.ctx;
+        let width = ctx.px(DROPDOWN_W).min(rows.room());
+        let area = self.setting_row(rows, &row, width, 32.0);
+        let field = area.control;
+        let value = choices.iter().find(|(v, _)| *v == current).map_or("", |(_, n)| n.as_str());
+        let open =
+            self.picker_for.as_ref().is_some_and(|d| d.block == rows.block && d.key == row.key);
+        let hovered = self.mouse.is_some_and(|p| field.contains(p));
+        ds::dropdown(
+            rows.layer,
+            rows.text,
+            rows.icons,
+            ctx,
+            field,
+            ds::DropdownSpec { value, open, hovered, enabled: true, note: None, placeholder: None },
+        );
+        self.dropdowns.push(Dropdown {
+            field,
+            block: rows.block,
+            key: row.key,
+            choices: choices.to_vec(),
+            current,
+        });
     }
 
     /// A row of choices: the pills side by side on the right, or under the label on as many
@@ -639,6 +678,9 @@ fn pill_lines(widths: &[f32], gap: f32, room: f32) -> usize {
     }
     lines
 }
+
+/// A dropdown row's field (logical pixels wide).
+const DROPDOWN_W: f32 = 200.0;
 
 /// Where a block's rows are painted: the layer, the text, the drawing context, the icons,
 /// the card's column (its left edge and width), the next row's top (each row moves it

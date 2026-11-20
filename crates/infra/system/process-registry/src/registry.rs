@@ -276,14 +276,14 @@ impl Keeper {
             match std::fs::remove_file(&self.file) {
                 Ok(()) => {}
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => tracing::debug!("the processes' file wasn't removed: {e}"),
+                Err(e) => tracing::debug!(error = %e, "the processes' file wasn't removed"),
             }
             return;
         }
         let mut file = self.header.clone();
         file.programs = self.kept.iter().map(|k| k.record.clone()).collect();
         if let Err(e) = files::write_atomic(&self.file, file.to_text().as_bytes()) {
-            tracing::debug!("the processes' file wasn't written: {e}");
+            tracing::debug!(error = %e, "the processes' file wasn't written");
         }
     }
 }

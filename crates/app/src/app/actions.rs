@@ -100,6 +100,42 @@ impl EditorApp {
 
     // ─── Commands ───
 
+    /// A settings block's button that runs a command (the settings stay open): the log's
+    /// folder shown or picked here (a modal's open, so not through [`Self::command`]), a
+    /// module's through its handler.
+    pub(super) fn settings_command(&mut self, id: CommandId) {
+        let Some(window) = self.window.clone() else { return };
+        match id {
+            cmd::LOG_REVEAL_FOLDER => self.reveal_log_folder(&window),
+            cmd::LOG_CHOOSE_FOLDER => self.choose_log_folder(&window),
+            other => {
+                self.workbench.run_command(other);
+            }
+        }
+        self.redraw();
+    }
+
+    /// The log's folder shown in the file manager (made first: nothing logged there yet).
+    fn reveal_log_folder(&self, window: &Arc<dyn Window>) {
+        let Some(dir) = crate::logs::folder(crate::config::settings()) else { return };
+        let _ = std::fs::create_dir_all(&dir);
+        window.reveal_in_file_manager(&dir);
+    }
+
+    /// Another folder for the log, picked: saved and used from now, the settings shown again.
+    fn choose_log_folder(&mut self, window: &Arc<dyn Window>) {
+        let settings = crate::config::settings();
+        let start = crate::logs::folder(settings);
+        let picked = crate::watchdog::waiting_for_user(|| window.pick_folder(start.as_deref()));
+        let Some(dir) = picked else { return };
+        match settings.set(&crate::settings::LOG_DIR, dir.display().to_string()) {
+            Ok(_) => crate::logs::apply(settings),
+            Err(e) => tracing::warn!(error = %e, "can't save the log's folder"),
+        }
+        let model = self.settings_model();
+        self.workbench.set_settings_model(model);
+    }
+
     pub(super) fn command(&mut self, id: CommandId) -> Control {
         let Some(window) = self.window.clone() else { return Control::Continue };
         // A modal (settings, a dialog, About…) has the keyboard: only window-level commands,
@@ -407,6 +443,14 @@ impl EditorApp {
                 self.workbench.open_about();
                 true
             }
+            cmd::LOG_REVEAL_FOLDER => {
+                self.reveal_log_folder(window);
+                false
+            }
+            cmd::LOG_CHOOSE_FOLDER => {
+                self.choose_log_folder(window);
+                true
+            }
             cmd::LANGUAGE_LEVEL => self.workbench.open_level_picker(),
             cmd::SWITCH_THEME => {
                 self.shared.themes.borrow_mut().next();
@@ -460,7 +504,7 @@ impl EditorApp {
             None => match self.workbench.run_command(id) {
                 Some(changed) => changed,
                 None => {
-                    tracing::warn!("unhandled command: {id}");
+                    tracing::warn!(%id, "unhandled command");
                     false
                 }
             },

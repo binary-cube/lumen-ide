@@ -414,7 +414,7 @@ impl Repository for GitRepository {
         let outcome = match repo.blame_file(BStr::new(path), head.detach(), Default::default()) {
             Ok(outcome) => outcome,
             Err(e) => {
-                tracing::debug!("blame failed for {path}: {e}");
+                tracing::debug!(%path, error = %e, "blame failed");
                 return Vec::new();
             }
         };

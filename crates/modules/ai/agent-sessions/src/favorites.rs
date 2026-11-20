@@ -349,13 +349,13 @@ pub(crate) fn save(project: kernel::ProjectId) {
                 return;
             };
             if let Err(e) = write_whole(&file, &text) {
-                tracing::warn!("the favorite sessions weren't saved: {e}");
+                tracing::warn!(error = %e, "the favorite sessions weren't saved");
             }
             if let Err(e) = write_whole(&marks.0, &marks.1) {
-                tracing::warn!("the sessions' marks weren't saved: {e}");
+                tracing::warn!(error = %e, "the sessions' marks weren't saved");
             }
             if let Err(e) = write_whole(&folders.0, &folders.1) {
-                tracing::warn!("the sessions' folders weren't saved: {e}");
+                tracing::warn!(error = %e, "the sessions' folders weren't saved");
             }
         }
     });

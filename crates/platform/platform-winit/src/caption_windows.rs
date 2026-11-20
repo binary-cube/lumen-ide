@@ -124,7 +124,7 @@ fn round_corners(hwnd: HWND, round: bool) {
     if result == 0 {
         tracing::debug!(round, "window corners set");
     } else {
-        tracing::info!("window corners refused by the system (0x{result:08x}): square corners");
+        tracing::info!(result = %format_args!("0x{result:08x}"), "rounded corners refused by the system: square ones");
     }
 }
 

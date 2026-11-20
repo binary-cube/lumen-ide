@@ -111,6 +111,7 @@ task-manager.workspace = true
 relax.workspace = true
 keep-awake.workspace = true
 updates.workspace = true
+log-viewer.workspace = true
 agent-claude.workspace = true
 agent-cline.workspace = true
 agent-planned.workspace = true
@@ -150,6 +151,7 @@ dirs.workspace = true
 sysinfo.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+logging.workspace = true
 
 
 # `build.rs`: the icon and the version information inside the Windows executable.

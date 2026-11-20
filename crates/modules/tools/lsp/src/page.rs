@@ -369,7 +369,7 @@ impl SettingsContribution for ServerLimits {
             "idle" => save(s, &settings::IDLE_MINUTES, value),
             "trace" => {
                 if let Err(e) = s.set(&settings::TRACE, value != 0) {
-                    tracing::warn!("can't save a language server setting: {e}");
+                    tracing::warn!(error = %e, "can't save a language server setting");
                 }
                 settings::apply(s);
             }
@@ -510,7 +510,7 @@ fn press_install(
             let file = crate::licence::licence_file()?;
             kernel::work::run("lsp-secrets", move || {
                 if let Err(e) = crate::licence::import(&id, &file) {
-                    tracing::warn!("a licence file can't be used: {e}");
+                    tracing::warn!(error = %e, "a licence file can't be used");
                 }
                 crate::install::bump();
                 if let Some(wake) = wake {
@@ -614,7 +614,7 @@ fn save(settings: &SettingsService, setting: &settings_model::Setting<i64>, valu
         return;
     }
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save a language server setting: {e}");
+        tracing::warn!(error = %e, "can't save a language server setting");
     }
     settings::apply(settings);
 }

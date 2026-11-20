@@ -441,7 +441,7 @@ impl ProjectServers {
         // app's.
         for dir in launch.cache.iter().chain(&launch.data) {
             if let Err(e) = std::fs::create_dir_all(dir) {
-                tracing::warn!(server = %spec.name, "its folder {} can't be made: {e}", dir.display());
+                tracing::warn!(server = %spec.name, dir = %dir.display(), error = %e, "its folder can't be made");
             }
         }
         let client_config = Config {
@@ -549,7 +549,7 @@ impl ProjectServers {
                 })
             }
             Err(e) => {
-                tracing::warn!(server = %spec.name, "a language server's thread didn't start: {e}");
+                tracing::warn!(server = %spec.name, error = %e, "a language server's thread didn't start");
                 None
             }
         }
@@ -751,8 +751,9 @@ impl ProjectServers {
                 && let Err(e) = std::fs::remove_dir_all(&folder)
             {
                 tracing::warn!(
-                    "the language servers' folder {} can't be removed: {e}",
-                    folder.display()
+                    folder = %folder.display(),
+                    error = %e,
+                    "the language servers' folder can't be removed"
                 );
             }
             if let Some(me) = me.upgrade() {

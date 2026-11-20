@@ -219,7 +219,7 @@ impl ModuleManager {
             None => disabled.push(id.to_owned()),
         }
         if let Err(e) = settings.set(&MODULES_DISABLED, disabled) {
-            tracing::warn!("can't save the modules: {e}");
+            tracing::warn!(error = %e, "can't save the modules");
         }
     }
 
@@ -249,7 +249,7 @@ impl ModuleManager {
             }
         };
         if let Err(e) = settings.set(&MODULES_PRELOAD, chosen) {
-            tracing::warn!("can't save the modules: {e}");
+            tracing::warn!(error = %e, "can't save the modules");
         }
         if added && self.active.iter().any(|a| a.as_str() == id) {
             self.preload_in_background(vec![id.to_owned()]);
@@ -260,7 +260,7 @@ impl ModuleManager {
     pub fn set_at_startup(self: &Arc<Self>, startup: bool) {
         let mode = if startup { STARTUP } else { ON_DEMAND };
         if let Err(e) = crate::config::settings().set(&MODULE_LOADING, mode.to_owned()) {
-            tracing::warn!("can't save the modules: {e}");
+            tracing::warn!(error = %e, "can't save the modules");
         }
         if startup {
             self.preload_in_background(self.at_startup());
@@ -283,7 +283,7 @@ pub(crate) fn set_hidden(settings: &settings_model::SettingsService, id: &str, h
         if settings.get(setting) != value
             && let Err(e) = settings.set(setting, value)
         {
-            tracing::warn!("can't save the modules: {e}");
+            tracing::warn!(error = %e, "can't save the modules");
         }
     }
 }

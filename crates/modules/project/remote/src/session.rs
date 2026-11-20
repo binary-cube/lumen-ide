@@ -143,7 +143,7 @@ pub fn save_outbox(root: &Path, outbox: &Outbox) {
         files::write_atomic(&file, outbox.to_text().as_bytes())
     };
     if let Err(e) = written {
-        tracing::warn!("can't keep the remote moves and deletions waiting: {e}");
+        tracing::warn!(error = %e, "can't keep the remote moves and deletions waiting");
     }
 }
 
@@ -154,7 +154,7 @@ pub fn load_manifest(root: &Path) -> Manifest {
 pub fn save_manifest(root: &Path, manifest: &Manifest) {
     // Atomic: a manifest cut short would make every file look new or in conflict.
     if let Err(e) = files::write_atomic(&manifest_file(root), manifest.to_text().as_bytes()) {
-        tracing::warn!("can't keep the remote manifest: {e}");
+        tracing::warn!(error = %e, "can't keep the remote manifest");
     }
 }
 

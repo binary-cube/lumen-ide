@@ -332,7 +332,7 @@ pub fn themed_prompt(profile: &ShellProfile) -> ShellProfile {
     match written {
         Ok(()) => themed.profile,
         Err(e) => {
-            tracing::warn!("the prompt's files can't be written: {e}");
+            tracing::warn!(error = %e, "the prompt's files can't be written");
             profile.clone()
         }
     }
@@ -352,7 +352,7 @@ pub fn project_history(profile: &ShellProfile, root: &std::path::Path) -> ShellP
             let dir = data.join("terminal-history").join(&key);
             let file = dir.join(name);
             if let Err(e) = private_file(&dir, &file) {
-                tracing::warn!("the project's shell history can't be made: {e}");
+                tracing::warn!(error = %e, "the project's shell history can't be made");
                 return profile.clone();
             }
             file.to_string_lossy().into_owned()
@@ -383,7 +383,7 @@ pub fn project_history(profile: &ShellProfile, root: &std::path::Path) -> ShellP
     match written {
         Ok(()) => wrapped.profile,
         Err(e) => {
-            tracing::warn!("zsh's startup files for the project's history can't be written: {e}");
+            tracing::warn!(error = %e, "zsh's startup files for the project's history can't be written");
             moved
         }
     }
@@ -570,7 +570,7 @@ fn resize_thread(sender: EventLoopSender) -> std::sync::mpsc::Sender<WindowSize>
         }
     });
     if let Err(e) = spawned {
-        tracing::warn!("can't start the terminal's resize thread: {e}");
+        tracing::warn!(error = %e, "can't start the terminal's resize thread");
     }
     tx
 }

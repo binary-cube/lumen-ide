@@ -40,7 +40,7 @@ pub fn claim(paths: &[PathBuf]) -> Start {
         return Start::Handed;
     }
     if let Err(e) = listen(&tag) {
-        tracing::warn!("can't listen for later starts: {e}");
+        tracing::warn!(error = %e, "can't listen for later starts");
     }
     Start::Run
 }

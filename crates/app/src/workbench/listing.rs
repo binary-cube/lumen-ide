@@ -143,7 +143,7 @@ impl Workbench {
         match fs.read_dir(dir) {
             Ok(entries) => tree.set_children(node, entries),
             Err(e) => {
-                tracing::debug!(dir = %dir.display(), "the folder can't be listed again: {e}")
+                tracing::debug!(dir = %dir.display(), error = %e, "the folder can't be listed again")
             }
         }
     }

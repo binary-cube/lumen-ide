@@ -214,13 +214,7 @@ Issues and ideas are welcome. Before a pull request, run the same gate the proje
 
 ## Roadmap
 
-Next up ([plan 84](docs/plan/84-lansari-si-actualizari.md)):
-
-- ~~**Releases from GitHub**~~: done — a tag builds the macOS, Windows and Linux files and
-  drafts a release with checksums and a signed manifest.
-- **Updates from the app**: it tells you when a new version is out and shows what's in
-  it; if you choose to update, it downloads in the background, closes, replaces itself and
-  reopens your windows. Nothing is installed without your click.
+What's planned next is in [ROADMAP.md](ROADMAP.md).
 
 ## Code signing policy
 

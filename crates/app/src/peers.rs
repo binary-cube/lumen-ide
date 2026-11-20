@@ -61,7 +61,7 @@ pub fn join() {
                 *slot = Some(me);
             }
         }
-        Err(e) => tracing::debug!("can't listen to the app's other instances: {e}"),
+        Err(e) => tracing::debug!(error = %e, "can't listen to the app's other instances"),
     }
 }
 

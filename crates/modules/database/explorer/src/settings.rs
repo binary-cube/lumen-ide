@@ -127,7 +127,7 @@ fn save<T: settings_model::SettingType>(
     value: T,
 ) {
     if let Err(e) = settings.set(setting, value) {
-        tracing::warn!("can't save a database setting: {e}");
+        tracing::warn!(error = %e, "can't save a database setting");
     }
 }
 

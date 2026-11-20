@@ -65,7 +65,9 @@ impl SettingsContribution for WindowMenuSettings {
         }
         match scope.settings.set(&WINDOW_MENU, value != 0) {
             Ok(()) => set_asked(value != 0),
-            Err(e) => tracing::warn!("can't save whether the window's bar shows the menu: {e}"),
+            Err(e) => {
+                tracing::warn!(error = %e, "can't save whether the window's bar shows the menu")
+            }
         }
     }
 }

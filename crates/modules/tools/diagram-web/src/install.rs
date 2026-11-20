@@ -187,7 +187,7 @@ pub fn start() {
             Ok(dir) => Status::Installed(Arc::from(dir)),
             Err(e) if e.stopped() => Status::Missing,
             Err(e) => {
-                tracing::info!("draw.io wasn't installed: {e}");
+                tracing::info!(error = %e, "draw.io wasn't installed");
                 Status::Failed { reason: e.to_string(), offline: e.offline() }
             }
         });

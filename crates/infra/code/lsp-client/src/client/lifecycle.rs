@@ -273,7 +273,7 @@ impl Driver {
         self.crashes.push(now);
         let what = if was_ready { "crashed" } else { "it ended before it was ready" };
         self.status.log(what);
-        tracing::warn!(server = %self.config.name, "{what}");
+        tracing::warn!(server = %self.config.name, %what, "the language server stopped");
         if self.crashes.len() >= self.config.restart.crashes {
             // Rests, then tried again (never given up for good); restarted by hand at once.
             let rest = self
@@ -291,7 +291,7 @@ impl Driver {
                 window.as_secs(),
                 rest.as_secs()
             ));
-            tracing::warn!(server = %self.config.name, "crashed too often: tried again in {rest:?}");
+            tracing::warn!(server = %self.config.name, ?rest, "crashed too often: tried again after a rest");
             self.status.set_state(State::Stopped { crashed: true });
         } else {
             let pause =

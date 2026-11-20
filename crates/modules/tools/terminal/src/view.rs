@@ -117,6 +117,11 @@ pub enum TerminalLink {
 
 /// How long after the wheel's last step a part of a line at the bottom stays (the
 /// gesture's momentum still coming).
+/// A selection held past the grid's edge scrolls a step this often…
+const AUTO_EVERY: std::time::Duration = std::time::Duration::from_millis(50);
+/// …by at most this many lines (the farther past the edge, the more).
+const AUTO_MOST: i32 = 8;
+
 const SNAP_AFTER: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// How long the screen may stay behind the program's output (its reader busy at every
@@ -169,6 +174,11 @@ pub struct TerminalView {
     selection: Option<TermSelection>,
     /// The mouse button is down, extending the selection.
     selecting: bool,
+    /// Where the mouse is while it extends the selection: held past the grid's top or
+    /// bottom, the history scrolls (the selection with it).
+    drag_at: Option<Point>,
+    /// When the history scrolls by the next step while the mouse is held past an edge.
+    auto_next: Option<std::time::Instant>,
     /// The link under the mouse while ⌘ / Ctrl is held: its line and columns.
     link: Option<(i32, std::ops::Range<u16>)>,
     action: Option<ViewerAction>,
@@ -424,7 +434,7 @@ impl TerminalView {
                 }
             }
             Err(e) => {
-                tracing::error!("the terminal didn't start: {e}");
+                tracing::error!(error = %e, "the terminal didn't start");
                 self.failed = Some(e.to_string());
             }
         }
@@ -445,6 +455,45 @@ impl TerminalView {
         Some((row as u16, col as u16))
     }
 
+    /// How many lines a step scrolls with the mouse at `p` while selecting: up (positive)
+    /// above the grid, down below it, more the farther it is (at most [`AUTO_MOST`]); 0 inside.
+    fn edge_lines(&self, p: Point) -> i32 {
+        let a = self.grid_area;
+        let line = self.cell.1.max(1.0);
+        let (past, up) = if p.y < a.min_y() {
+            (a.min_y() - p.y, true)
+        } else if p.y > a.max_y() {
+            (p.y - a.max_y(), false)
+        } else {
+            return 0;
+        };
+        let lines = ((past / line).floor() as i32 + 1).min(AUTO_MOST);
+        if up { lines } else { -lines }
+    }
+
+    /// The history scrolled a step, at `now`, while the mouse is held past an edge of the
+    /// grid selecting (one step every [`AUTO_EVERY`]), the selection's end following. `true`
+    /// if it scrolled.
+    fn auto_scroll(&mut self, now: std::time::Instant) -> bool {
+        let Some(p) = self.drag_at.filter(|_| self.selecting) else {
+            self.auto_next = None;
+            return false;
+        };
+        let lines = self.edge_lines(p);
+        if lines == 0 {
+            self.auto_next = None;
+            return false;
+        }
+        if self.auto_next.is_some_and(|due| now < due) {
+            return false;
+        }
+        self.scroll_lines(lines);
+        self.show_scrolled();
+        self.auto_next = Some(now + AUTO_EVERY);
+        self.follow_drag(p);
+        true
+    }
+
     /// The mouse pressed on the grid: starts a selection (a double click selects the word).
     pub fn begin_selection(&mut self, p: Point, clicks: u32) -> bool {
         let Some((row, col)) = self.cell_at(p, false) else { return false };
@@ -463,11 +512,19 @@ impl TerminalView {
         true
     }
 
-    /// The mouse moved with the button down: the selection follows it.
+    /// The mouse moved with the button down: the selection follows it; past the grid's top
+    /// or bottom, the history scrolls that way too (and goes on while it's held there).
     pub fn drag_selection(&mut self, p: Point) -> bool {
         if !self.selecting {
             return false;
         }
+        self.drag_at = Some(p);
+        let scrolled = self.auto_scroll(std::time::Instant::now());
+        scrolled | self.follow_drag(p)
+    }
+
+    /// The selection's moving end where the mouse is (clamped to the grid's edges).
+    fn follow_drag(&mut self, p: Point) -> bool {
         let Some((row, col)) = self.cell_at(p, true) else { return false };
         let head = self.grid.point(row, col);
         match &mut self.selection {
@@ -483,6 +540,8 @@ impl TerminalView {
     /// copied at once when the settings say so.
     pub fn end_selection(&mut self) -> bool {
         let was = std::mem::take(&mut self.selecting);
+        self.drag_at = None;
+        self.auto_next = None;
         if self.selection.is_some_and(|s| s.is_empty()) {
             self.selection = None;
         }
@@ -676,6 +735,8 @@ impl Viewer for TerminalView {
     }
 
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
+        // Selecting with the mouse held past an edge: the history goes on scrolling.
+        self.auto_scroll(std::time::Instant::now());
         let b = ctx.bounds;
         if b.size.width <= 0.0 || b.size.height <= 0.0 {
             return;
@@ -899,7 +960,12 @@ impl Viewer for TerminalView {
 
     /// Its first output let run: woken when it should be quiet by then.
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.settling.map(Settling::ends)
+        let settling = self.settling.map(Settling::ends);
+        // The next step of a selection scrolling past an edge.
+        match (settling, self.auto_next) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     /// A part of a line at the bottom waiting for its gesture to end: frames until it snaps;

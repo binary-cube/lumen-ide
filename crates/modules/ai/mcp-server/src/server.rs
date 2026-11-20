@@ -91,7 +91,7 @@ pub fn start(port: u16, token: &str) -> Result<u16, String> {
         Ok(server) => server,
         // Taken (by another program, another instance): one the system picks.
         Err(e) if port != 0 => {
-            tracing::warn!("the MCP server's port {port} is taken ({e}): it listens on another");
+            tracing::warn!(port, error = %e, "the MCP server's port is taken: it listens on another");
             let server = mcp_transport::Server::start(0, token.to_owned(), handler)
                 .map_err(|e| e.to_string())?;
             MOVED.store(true, Ordering::Release);

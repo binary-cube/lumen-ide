@@ -268,7 +268,7 @@ impl DiagramView {
                 self.drawing = None;
             }
             Err(why) => {
-                tracing::warn!(path = %self.path.display(), "a diagram can't be read: {why}");
+                tracing::warn!(path = %self.path.display(), error = %why, "a diagram can't be read");
                 self.error = Some(why);
             }
         }

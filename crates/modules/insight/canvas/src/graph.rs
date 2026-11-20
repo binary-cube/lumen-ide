@@ -121,7 +121,7 @@ impl Builder {
             if let Some(mut graph) = graph.filter(|_| current()) {
                 graph.cursor_line = line;
                 graph.catalog = catalog;
-                tracing::info!(files = graph.files.len(), edges = graph.edges.len(), elapsed = ?started.elapsed(), "dependency graph");
+                tracing::debug!(files = graph.files.len(), edges = graph.edges.len(), elapsed = ?started.elapsed(), "dependency graph");
                 if tx.send(graph).is_ok()
                     && let Some(wake) = waker.lock().ok().and_then(|w| w.clone())
                 {

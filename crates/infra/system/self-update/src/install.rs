@@ -84,7 +84,7 @@ pub fn put_in_place(dir: &Path) -> Result<String, String> {
     if let Some(root) = dir.parent()
         && let Err(e) = note(root, &Outcome { version: version.clone(), error: None })
     {
-        tracing::warn!("how the update went couldn't be noted: {e}");
+        tracing::warn!(error = %e, "how the update went couldn't be noted");
     }
     tracing::info!(%version, target = %target.display(), "the update is in place");
     Ok(version)
@@ -107,7 +107,7 @@ pub fn restart(dir: &Path, reopen: Option<u128>) -> bool {
     match command.spawn() {
         Ok(_) => true,
         Err(e) => {
-            tracing::warn!(target = %target.display(), "the app couldn't be started again: {e}");
+            tracing::warn!(target = %target.display(), error = %e, "the app couldn't be started again");
             false
         }
     }

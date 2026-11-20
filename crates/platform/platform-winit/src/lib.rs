@@ -165,7 +165,7 @@ impl WinitWindow {
         let mut guard = self.clipboard.lock().ok()?;
         if guard.is_none() {
             *guard = arboard::Clipboard::new()
-                .inspect_err(|e| tracing::warn!("the clipboard isn't available: {e}"))
+                .inspect_err(|e| tracing::warn!(error = %e, "the clipboard isn't available"))
                 .ok();
         }
         guard.as_mut().map(f)
@@ -302,7 +302,7 @@ impl Window for WinitWindow {
     fn set_clipboard_files(&self, paths: &[PathBuf]) {
         self.with_clipboard(|c| {
             if let Err(e) = c.set().file_list(paths) {
-                tracing::warn!("can't put the files on the clipboard: {e}");
+                tracing::warn!(error = %e, "can't put the files on the clipboard");
             }
         });
     }
@@ -314,7 +314,7 @@ impl Window for WinitWindow {
     fn set_clipboard_text(&self, text: &str) {
         self.with_clipboard(|c| {
             if let Err(e) = c.set_text(text) {
-                tracing::warn!("can't write to the clipboard: {e}");
+                tracing::warn!(error = %e, "can't write to the clipboard");
             }
         });
     }
@@ -323,7 +323,7 @@ impl Window for WinitWindow {
         self.with_clipboard(|c| {
             let image = arboard::ImageData { width, height, bytes: rgba.into() };
             if let Err(e) = c.set_image(image) {
-                tracing::warn!("can't put the image on the clipboard: {e}");
+                tracing::warn!(error = %e, "can't put the image on the clipboard");
             }
         });
     }
@@ -400,7 +400,7 @@ impl Window for WinitWindow {
         titlebar::start_drag(&self.window);
         #[cfg(not(target_os = "macos"))]
         if let Err(e) = self.window.drag_window() {
-            tracing::debug!("the window move didn't start: {e}");
+            tracing::debug!(error = %e, "the window move didn't start");
         }
     }
 
@@ -471,7 +471,7 @@ impl Window for WinitWindow {
             || url.starts_with("http://")
             || url.starts_with("mailto:"))
         {
-            tracing::warn!("URL ignored (unknown scheme): {url}");
+            tracing::warn!(%url, "URL ignored (unknown scheme)");
             return;
         }
         let result = if cfg!(target_os = "macos") {
@@ -484,7 +484,7 @@ impl Window for WinitWindow {
             std::process::Command::new("xdg-open").arg(url).spawn()
         };
         if let Err(e) = result {
-            tracing::warn!("can't open {url}: {e}");
+            tracing::warn!(%url, error = %e, "can't open");
         }
     }
 
@@ -522,7 +522,7 @@ impl Window for WinitWindow {
             .and_then(|e| e.to_str())
             .is_some_and(|e| e.eq_ignore_ascii_case("html") || e.eq_ignore_ascii_case("htm"));
         if !page || !path.is_absolute() {
-            tracing::warn!("not a page, not opened: {}", path.display());
+            tracing::warn!(path = %path.display(), "not a page, not opened");
             return;
         }
         let result = if cfg!(target_os = "macos") {
@@ -536,7 +536,7 @@ impl Window for WinitWindow {
             std::process::Command::new("xdg-open").arg(path).spawn()
         };
         if let Err(e) = result {
-            tracing::warn!("can't open {}: {e}", path.display());
+            tracing::warn!(path = %path.display(), error = %e, "can't open");
         }
     }
 
@@ -550,7 +550,7 @@ impl Window for WinitWindow {
             std::process::Command::new("xdg-open").arg(dir).spawn()
         };
         if let Err(e) = result {
-            tracing::warn!("can't open the file manager: {e}");
+            tracing::warn!(error = %e, "can't open the file manager");
         }
     }
 
@@ -744,7 +744,7 @@ impl Handler {
                 }));
             }
             Err(e) => {
-                tracing::error!("can't create the window: {e}");
+                tracing::error!(error = %e, "can't create the window");
                 if self.windows.is_empty() {
                     self.error = Some(PlatformError::Window(e.to_string()));
                     event_loop.exit();
@@ -763,7 +763,7 @@ impl Handler {
                 m.set_disabled(&self.menu_disabled);
                 self.native_menu = Some(m);
             }
-            Err(e) => tracing::warn!("can't create the native menu: {e}"),
+            Err(e) => tracing::warn!(error = %e, "can't create the native menu"),
         }
         // A new window list starts empty: the open windows go in it (and in the Dock's menu).
         for w in &self.windows {

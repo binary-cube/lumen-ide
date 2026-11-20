@@ -201,7 +201,7 @@ impl Workbench {
         let ruler = apply_editorconfig(&mut doc, &path, &*self.ports.disk);
         let head = doc.buffer().snapshot().slice(0..SNIFF_BYTES.min(doc.buffer().len()));
         let language = self.support.languages.detect(&path, &head);
-        tracing::info!(%language, path = %path.display(), "language detected");
+        tracing::debug!(%language, path = %path.display(), "language detected");
         // A module's bar above its text (a query console's, a server to download).
         let toolbar = self.toolbar_for(&path, Some(language.as_str()));
         let mut tab = Tab::new(doc, self.code_font.clone(), None, language);
@@ -221,7 +221,7 @@ impl Workbench {
                     v.split = self.new_preview_split(provider.id());
                     tab.viewer = Some(v);
                 }
-                Err(e) => tracing::warn!("no preview for {}: {e}", path.display()),
+                Err(e) => tracing::warn!(path = %path.display(), error = %e, "no preview"),
             }
         }
         self.push_tab(tab);

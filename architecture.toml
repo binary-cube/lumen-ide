@@ -166,3 +166,5 @@ http-scripts = ["http-client"]
 # The app's own updates, checked, downloaded and put in place: the updates' module (and
 # the app, which starts the helper as it quits).
 self-update = ["updates"]
+# The app's log, read back: its viewer's.
+logging = ["log-viewer"]

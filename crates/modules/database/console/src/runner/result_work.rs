@@ -296,7 +296,7 @@ impl Inner {
         let session = self.session.lock().unwrap_or_else(PoisonError::into_inner).take();
         if let Some(mut session) = session {
             if let Err(e) = session.close_cursor(token) {
-                tracing::debug!("a console's cursor wasn't closed: {e}");
+                tracing::debug!(error = %e, "a console's cursor wasn't closed");
             }
             self.put_back(session);
         }

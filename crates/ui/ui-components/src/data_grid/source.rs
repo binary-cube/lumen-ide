@@ -349,6 +349,17 @@ pub trait GridSource: Send {
         let _ = (row, column);
         CellMark::None
     }
+    /// An icon before a cell's text, in its tone (a log line's level): its name in the
+    /// app's set. `None`: none.
+    fn cell_icon(&self, row: u64, column: usize) -> Option<(&'static str, crate::ds::Tone)> {
+        let _ = (row, column);
+        None
+    }
+    /// What the WHERE field shows while it's empty, when the source has an example of its
+    /// own (its columns' names); `None`: the grid's.
+    fn filter_hint(&self) -> Option<String> {
+        None
+    }
     /// A new row's cell left to the engine (its default), drawn as such.
     fn is_default(&self, row: u64, column: usize) -> bool {
         let _ = (row, column);

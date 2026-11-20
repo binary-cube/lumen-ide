@@ -115,7 +115,7 @@ impl Workbench {
             wake,
         };
         let bar = self.support.toolbars.iter().find_map(|p| p.open(&context))?;
-        tracing::info!(path = %path.display(), "file opened with a bar");
+        tracing::debug!(path = %path.display(), "file opened with a bar");
         Some(TabToolbar::new(bar))
     }
 

@@ -131,6 +131,10 @@ pub const RECENT_NOTIFICATIONS: CommandId = CommandId("notifications.recent");
 pub const CLEAR_RECENT: CommandId = CommandId("file.clear_recent");
 /// Help › Keyboard Shortcuts…: Settings on the Keymap page.
 pub const KEYBOARD_SHORTCUTS: CommandId = CommandId("help.keyboard_shortcuts");
+/// The log's folder shown in the file manager (made first if it isn't there yet).
+pub const LOG_REVEAL_FOLDER: CommandId = CommandId("help.reveal_log_folder");
+/// Another folder for the log, picked (the log's settings).
+pub const LOG_CHOOSE_FOLDER: CommandId = CommandId("log.choose_folder");
 /// The prefix of File › Open Recent's project rows (and the app icon's menu):
 /// `project.open_recent:<path>`.
 pub const OPEN_RECENT_PROJECT: &str = "project.open_recent:";
@@ -311,6 +315,8 @@ pub const SPECS: &[CommandSpec] = &[
     spec(RECENT_NOTIFICATIONS, "Show Recent Notifications", at(s::VIEW_NOTIFICATIONS, 10), &[]),
     spec(KEYBOARD_SHORTCUTS, "Keyboard Shortcuts…", at(s::HELP_KEYS, 10), &[]),
     spec(TOGGLE_DEBUG, "Diagnostic Overlay", at(s::HELP_TOOLS, 10), &["F12"]),
+    spec(LOG_REVEAL_FOLDER, "Reveal Log Folder", at(s::HELP_TOOLS, 20), &[]),
+    spec(LOG_CHOOSE_FOLDER, "Choose Log Folder…", None, &[]),
     // Not in a menu: it opens them (and Alt alone, on Windows and Linux).
     spec(MENU, "Menu", None, &["F10"]),
 ];
@@ -1317,6 +1323,7 @@ pub fn menu_icon(id: &str) -> Option<&'static str> {
         QUIT => "log-out",
         CLEAR_RECENT => "trash",
         KEYBOARD_SHORTCUTS => "keyboard",
+        LOG_REVEAL_FOLDER | LOG_CHOOSE_FOLDER => "folder-open",
         DUPLICATE => "copy-plus",
         DELETE_LINE => "trash",
         MOVE_LINE_UP => "arrow-up",

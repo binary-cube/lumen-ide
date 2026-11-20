@@ -168,7 +168,7 @@ impl ProjectService for QualityService {
             if run.then_check
                 && let Err(e) = runs.request(Kind::Checker, run.target, &run.language, false)
             {
-                tracing::debug!("not checked after formatting: {e:?}");
+                tracing::debug!(error = ?e, "not checked after formatting");
             }
         }
         any

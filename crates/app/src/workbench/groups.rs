@@ -189,7 +189,7 @@ impl Workbench {
             None => {
                 let Some(path) = path else { return false };
                 if let Err(e) = self.open_file(&path) {
-                    tracing::warn!("can't open {}: {e}", path.display());
+                    tracing::warn!(path = %path.display(), error = %e, "can't open");
                 }
                 // The text (possibly unsaved) comes from the original tab.
                 if let Some(original) =
@@ -506,7 +506,7 @@ impl Workbench {
         self.layout();
         let widths: Vec<f32> =
             self.editors.groups.iter().map(|g| g.bounds.size.width / self.scale).collect();
-        tracing::info!(?widths, "the first separator placed");
+        tracing::debug!(?widths, "the first separator placed");
     }
 
     /// The snapshot's: the left side panel (the project's tree) closed, the editor as wide as

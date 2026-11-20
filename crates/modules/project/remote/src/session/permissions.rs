@@ -66,7 +66,7 @@ impl State {
                 .collect(),
             // Not readable now: asked again the next time the tree shows it.
             Err(e) => {
-                tracing::info!("the permissions of /{dir} weren't read: {e}");
+                tracing::debug!(dir = %format_args!("/{dir}"), error = %e, "the permissions weren't read");
                 if let Ok(mut asked) = self.permissions_asked.lock() {
                     asked.remove(dir);
                 }

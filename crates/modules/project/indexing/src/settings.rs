@@ -22,7 +22,7 @@ const ON: &str = "on";
 /// Saves the choice (from the project search's button).
 pub(crate) fn save_semantic(settings: &SettingsService, on: bool) {
     if let Err(e) = settings.set(&SEMANTIC_SEARCH, on) {
-        tracing::warn!("can't save the semantic search option: {e}");
+        tracing::warn!(error = %e, "can't save the semantic search option");
     }
 }
 

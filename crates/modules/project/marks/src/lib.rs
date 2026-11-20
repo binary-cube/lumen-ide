@@ -165,7 +165,7 @@ impl CommandHandler for MarkAs {
             let saved = save(&root, &text);
             Box::new(move |host: &mut dyn WorkbenchHost| {
                 if let Err(e) = saved {
-                    tracing::warn!("the path marks weren't saved: {e}");
+                    tracing::warn!(error = %e, "the path marks weren't saved");
                     host.notify(Notification::error(i18n::t("marks.not_saved")));
                 }
             }) as Completion

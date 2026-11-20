@@ -278,7 +278,7 @@ impl Workbench {
                     tab.symbols_version = None;
                 }
             }
-            Err(e) => tracing::warn!("the index didn't open: {e}"),
+            Err(e) => tracing::warn!(error = %e, "the index didn't open"),
         }
     }
 
@@ -839,7 +839,7 @@ impl Workbench {
     pub(super) fn goto_built_in_definition(&mut self, text: &mut TextSystem, head: usize) -> bool {
         self.refresh_symbols_now();
         let Some(target) = self.definition_at(head) else {
-            tracing::info!("no declaration found");
+            tracing::debug!("no declaration found");
             return false;
         };
         let path = Self::index_path(&self.tabs[self.active]);
@@ -847,7 +847,7 @@ impl Workbench {
         if target.path != path
             && let Err(e) = self.open_file(&target.path)
         {
-            tracing::warn!("can't open {}: {e}", target.path.display());
+            tracing::warn!(path = %target.path.display(), error = %e, "can't open");
             return false;
         }
         let offset = target.offset;

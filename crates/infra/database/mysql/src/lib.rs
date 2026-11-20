@@ -352,7 +352,7 @@ impl Killer {
             return;
         };
         if let Err(e) = conn.query_drop(format!("KILL QUERY {}", self.id)).await {
-            tracing::debug!("the statement wasn't stopped: {e}");
+            tracing::debug!(error = %e, "the statement wasn't stopped");
         }
         let _ = conn.disconnect().await;
     }
@@ -876,7 +876,7 @@ impl MySession {
                 })
                 .collect(),
             Err(e) => {
-                tracing::debug!("the warnings weren't read: {e}");
+                tracing::debug!(error = %e, "the warnings weren't read");
                 Vec::new()
             }
         }
@@ -1109,7 +1109,7 @@ impl Session for MySession {
         let io = match self.catalog(&stats::io_sql(tables)) {
             Ok(rows) => rows,
             Err(e) => {
-                tracing::debug!("performance_schema's table I/O wasn't read: {e}");
+                tracing::debug!(error = %e, "performance_schema's table I/O wasn't read");
                 Vec::new()
             }
         };
@@ -1434,7 +1434,7 @@ impl MySession {
                     p.statement.extra.extend(extra);
                 }
             }
-            Err(e) => tracing::debug!("performance_schema's history wasn't read: {e}"),
+            Err(e) => tracing::debug!(error = %e, "performance_schema's history wasn't read"),
         }
         Ok((p, raw, format))
     }
@@ -1493,7 +1493,7 @@ impl MySession {
         match self.catalog(&profile::status_sql()) {
             Ok(rows) => profile::status_values(&rows),
             Err(e) => {
-                tracing::debug!("the session's counters weren't read: {e}");
+                tracing::debug!(error = %e, "the session's counters weren't read");
                 Vec::new()
             }
         }

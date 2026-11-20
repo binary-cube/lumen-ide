@@ -88,7 +88,7 @@ mod file_drop;
 mod file_format;
 mod files;
 mod find_search;
-mod frameworks;
+pub(crate) mod frameworks;
 mod groups;
 mod home;
 mod host;

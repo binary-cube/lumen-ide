@@ -191,7 +191,7 @@ pub fn choose(id: &str) -> bool {
         return false;
     }
     if let Err(e) = crate::config::settings().set(&crate::settings::KEYMAP, id.to_owned()) {
-        tracing::warn!("cannot save the keymap: {e}");
+        tracing::warn!(error = %e, "cannot save the keymap");
     }
     true
 }
@@ -233,7 +233,7 @@ pub fn load_user() {
 /// Saves a command's own shortcuts (`None`: back to the preset's) and uses them.
 pub fn set_user(command: CommandId, shortcuts: Option<Vec<String>>) {
     if let Err(e) = crate::settings::set_user_shortcuts(command.0, shortcuts) {
-        tracing::warn!("cannot save the shortcuts: {e}");
+        tracing::warn!(error = %e, "cannot save the shortcuts");
     }
     load_user();
 }

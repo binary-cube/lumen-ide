@@ -50,8 +50,8 @@ pub(super) fn apply_editorconfig(doc: &mut Document, path: &Path, fs: &dyn Disk)
         Some(EndOfLine::CrLf) => doc.set_line_ending(LineEnding::CrLf),
         Some(EndOfLine::Cr) => {
             tracing::warn!(
-                "end_of_line = cr isn't supported; keeping {}",
-                doc.line_ending().label()
+                kept = %doc.line_ending().label(),
+                "end_of_line = cr isn't supported: the file's line endings kept"
             )
         }
         None => {}

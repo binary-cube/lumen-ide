@@ -125,7 +125,7 @@ impl Steps<'_> {
         let written = std::fs::create_dir_all(&data)
             .and_then(|()| std::fs::write(data.join("remote.toml"), toml));
         if let Err(e) = written {
-            tracing::warn!("the remote connection for the snapshot wasn't written: {e}");
+            tracing::warn!(error = %e, "the remote connection for the snapshot wasn't written");
             return;
         }
         remote_projects::edit_connection(self.wb, &dir);
@@ -696,7 +696,7 @@ impl Steps<'_> {
         let Some(root) = self.wb.project_root() else { return };
         let path = data_extractors::templates::own_dir(&root).join("Python-DataFrame.extractor");
         if let Err(e) = self.wb.open_file(&path) {
-            tracing::error!("the sample template didn't open: {e}");
+            tracing::error!(error = %e, "the sample template didn't open");
             return;
         }
         self.wb.sync_syntax();

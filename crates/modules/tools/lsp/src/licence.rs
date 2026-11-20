@@ -82,7 +82,7 @@ pub fn save(id: &str, value: &str) -> Result<(), String> {
             with(|k| k.insert(id.to_owned(), Some(!value.is_empty())));
             crate::projects::restart_using_secret(id);
         }
-        Err(e) => tracing::warn!("a language server's secret can't be saved: {e}"),
+        Err(e) => tracing::warn!(error = %e, "a language server's secret can't be saved"),
     }
     outcome
 }

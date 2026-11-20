@@ -489,7 +489,7 @@ fn pasted(
 /// A deletion's end: announced (saved tabs close), the folders listed again; or why not.
 fn deleted(host: &mut dyn WorkbenchHost, paths: &[PathBuf], result: Result<(), String>) {
     if let Err(why) = result {
-        tracing::warn!("delete failed: {why}");
+        tracing::warn!(error = %why, "delete failed");
         host.notify(Notification::error(i18n::tr!("files.delete_failed", reason = why.as_str())));
         return;
     }

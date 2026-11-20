@@ -131,7 +131,7 @@ impl DatabaseWindow {
                 let gone = source.clone();
                 sessions.runtime().spawn(move || {
                     if let Err(why) = credentials.remove(&gone) {
-                        tracing::warn!("a removed data source's password wasn't removed: {why}");
+                        tracing::warn!(error = %why, "a removed data source's password wasn't removed");
                     }
                 });
                 self.notify(workbench_model::Notification::success(i18n::tr!(

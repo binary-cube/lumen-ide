@@ -1045,7 +1045,7 @@ impl Workbench {
             FindHit::ReplaceAll => {
                 tab.find.replacement = tab.find_bar.replace.text().to_owned();
                 let n = tab.find.replace_all(&mut tab.doc);
-                tracing::info!(count = n, "replacements");
+                tracing::debug!(count = n, "replacements");
             }
         }
         if query != tab.find.query {

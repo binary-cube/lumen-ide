@@ -100,7 +100,7 @@ fn timer(pace: Arc<Mutex<Pace>>, waker: Waker) -> Sender<Instant> {
     let spawned =
         std::thread::Builder::new().name("pty-wake".into()).spawn(move || run(&rx, &pace, &waker));
     if let Err(e) = spawned {
-        tracing::warn!("can't start the terminal's wake thread: {e}");
+        tracing::warn!(error = %e, "can't start the terminal's wake thread");
     }
     tx
 }

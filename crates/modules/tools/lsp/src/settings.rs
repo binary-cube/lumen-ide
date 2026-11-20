@@ -236,7 +236,7 @@ pub fn save_choice(settings: &SettingsService, language: &str, choice: &Choice) 
         entries.push(engine_entry(language, choice));
     }
     if let Err(e) = settings.set(&ENGINES, entries) {
-        tracing::warn!("can't save a language's engine: {e}");
+        tracing::warn!(error = %e, "can't save a language's engine");
     }
     apply(settings);
 }

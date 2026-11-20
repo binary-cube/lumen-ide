@@ -32,7 +32,7 @@ pub(crate) fn start_drag(window: &winit::window::Window) {
         DRAGGING.store(true, Ordering::Relaxed);
     }
     if let Err(e) = window.drag_window() {
-        tracing::debug!("the window move didn't start: {e}");
+        tracing::debug!(error = %e, "the window move didn't start");
     }
 }
 

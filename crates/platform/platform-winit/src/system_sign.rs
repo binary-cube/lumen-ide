@@ -42,7 +42,7 @@ pub(crate) fn set(sign: Option<&SystemSign>) {
     let menu = match crate::context_menu::build(&sign.menu) {
         Ok(menu) => menu,
         Err(e) => {
-            tracing::warn!("can't make the menu bar item's menu: {e}");
+            tracing::warn!(error = %e, "can't make the menu bar item's menu");
             return;
         }
     };

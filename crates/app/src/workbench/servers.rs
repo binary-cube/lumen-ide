@@ -827,7 +827,7 @@ impl Workbench {
         if here.as_deref() != Some(target.path.as_path())
             && let Err(e) = self.open_file(&target.path)
         {
-            tracing::warn!("can't open {}: {e}", target.path.display());
+            tracing::warn!(path = %target.path.display(), error = %e, "can't open");
             return;
         }
         let offset = target.range.start;

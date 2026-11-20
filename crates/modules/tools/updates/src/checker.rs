@@ -73,7 +73,7 @@ pub fn check(manual: bool) {
             }
             Ok(None) => Looked::UpToDate,
             Err(why) => {
-                tracing::info!("updates couldn't be looked for: {why}");
+                tracing::info!(error = %why, "updates couldn't be looked for");
                 let text = i18n::tr!("updates.check_failed", why = why.to_string());
                 match why {
                     CheckError::Offline(_) => Looked::Offline(text),
@@ -117,7 +117,7 @@ pub fn download() {
         let name = self_update::stage::app_name();
         let ended = self_update::stage::stage(&fetch, &available, &root, &name, &progress, &stop)
             .map_err(|why| {
-                tracing::warn!(%version, "the update couldn't be downloaded: {why}");
+                tracing::warn!(%version, error = %why, "the update couldn't be downloaded");
                 i18n::tr!("updates.download_failed", why = why.as_str())
             });
         if let Ok(staged) = &ended {

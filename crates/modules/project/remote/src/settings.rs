@@ -122,7 +122,7 @@ impl SettingsContribution for RemoteSettings {
         };
         if let Some(toggle) = toggle {
             if let Err(e) = settings.set(toggle, value != 0) {
-                tracing::warn!("can't save a remote setting: {e}");
+                tracing::warn!(error = %e, "can't save a remote setting");
             }
             return;
         }
@@ -133,7 +133,7 @@ impl SettingsContribution for RemoteSettings {
             _ => return,
         };
         if let Err(e) = settings.set(setting, value) {
-            tracing::warn!("can't save a remote setting: {e}");
+            tracing::warn!(error = %e, "can't save a remote setting");
         }
     }
 }

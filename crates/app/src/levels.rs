@@ -53,6 +53,6 @@ pub fn save(store: &dyn ProjectLevelsStore, root: &Path, levels: &LanguageLevels
     let kept = levels.kept();
     let saved = settings_model::SavedLevels { levels: kept.levels, files: kept.files };
     if let Err(e) = store.save(root, &saved) {
-        tracing::warn!("cannot save the language levels: {e}");
+        tracing::warn!(error = %e, "cannot save the language levels");
     }
 }

@@ -188,7 +188,9 @@ impl LogFile {
             let _ = std::fs::rename(&self.path, aside);
             match Self::open(&self.path) {
                 Ok(fresh) => *self = fresh,
-                Err(e) => tracing::warn!("a language server's log {}: {e}", self.path.display()),
+                Err(e) => {
+                    tracing::warn!(path = %self.path.display(), error = %e, "a language server's log")
+                }
             }
         }
         let Some(file) = self.file.as_mut() else { return };
@@ -196,7 +198,7 @@ impl LogFile {
         match file.write_all(entry.as_bytes()) {
             Ok(()) => self.size += entry.len() as u64,
             Err(e) => {
-                tracing::warn!("a language server's log {}: {e}", self.path.display());
+                tracing::warn!(path = %self.path.display(), error = %e, "a language server's log");
                 self.file = None;
             }
         }
@@ -339,7 +341,7 @@ impl Status {
         let mut file = match LogFile::open(path) {
             Ok(file) => file,
             Err(e) => {
-                tracing::warn!("a language server's log {}: {e}", path.display());
+                tracing::warn!(path = %path.display(), error = %e, "a language server's log");
                 return;
             }
         };

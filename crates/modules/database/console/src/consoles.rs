@@ -96,7 +96,7 @@ impl List {
             let list = match store.load() {
                 Ok(list) => list,
                 Err(why) => {
-                    tracing::warn!("the {what} list wasn't read (kept as it is): {why}");
+                    tracing::warn!(list = %what, error = %why, "a list wasn't read: kept as it is");
                     *self.broken.lock().unwrap_or_else(PoisonError::into_inner) = Some(why);
                     Vec::new()
                 }
@@ -123,7 +123,7 @@ impl List {
                 return;
             }
             if let Err(why) = store.save(&list) {
-                tracing::warn!("the {what} list wasn't written: {why}");
+                tracing::warn!(list = %what, error = %why, "a list wasn't written");
             }
         });
     }

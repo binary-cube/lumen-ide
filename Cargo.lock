@@ -353,6 +353,8 @@ dependencies = [
  "languages",
  "libmimalloc-sys",
  "local-history",
+ "log-viewer",
+ "logging",
  "lsp-client",
  "mcp",
  "mcp-server",
@@ -5401,6 +5403,38 @@ name = "log"
 version = "0.4.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
+
+[[package]]
+name = "log-viewer"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "command-model",
+ "extensions",
+ "i18n",
+ "icons",
+ "kernel",
+ "logging",
+ "render-api",
+ "serde_json",
+ "text-layout",
+ "tracing",
+ "ui-components",
+ "ui-kit",
+ "uuid",
+ "workbench-model",
+]
+
+[[package]]
+name = "logging"
+version = "0.0.0"
+dependencies = [
+ "regex",
+ "serde_json",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
 
 [[package]]
 name = "lru"

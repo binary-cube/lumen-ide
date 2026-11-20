@@ -148,7 +148,7 @@ impl EditorApp {
 
     /// The dialog's answer: continues the action that requested it.
     pub(super) fn on_dialog(&mut self, answer: &'static str) {
-        tracing::info!(answer, asking = ?self.pending.asking, "dialog answer");
+        tracing::debug!(answer, asking = ?self.pending.asking, "dialog answer");
         match self.pending.asking.take() {
             Some(Ask::Save(id)) => {
                 let index = self.workbench.tab_index(id);
@@ -188,7 +188,7 @@ impl EditorApp {
                     && !self.workbench.rename_file(i, &name)
                     && let Err(e) = self.workbench.rename_tab(i, &name)
                 {
-                    tracing::warn!("the rename failed: {e}");
+                    tracing::warn!(error = %e, "the rename failed");
                 }
                 self.relayout();
             }
