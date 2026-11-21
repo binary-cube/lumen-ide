@@ -249,10 +249,7 @@ impl CompletionPopup {
 
         let layer = scene.push_layer(Some(r));
         let foot = Rect::new(r.min_x(), r.max_y() - footer_h, r.size.width, footer_h);
-        layer.quad(Quad::filled(
-            Rect::new(foot.min_x(), foot.min_y(), foot.size.width, line),
-            palette.border,
-        ));
+        crate::ds::divider(layer, &ctx, foot.min_x(), foot.max_x(), foot.min_y());
         let (choose, insert, close) =
             (i18n::t("keys.choose"), i18n::t("keys.insert"), i18n::t("keys.close"));
         let hints: &[KeyHint<'_>] =

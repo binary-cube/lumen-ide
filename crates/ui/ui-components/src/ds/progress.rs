@@ -9,9 +9,16 @@
 //! ```ignore
 //! ProgressBar::of(0.4).label("Downloading").percent().paint(layer, text, ctx, rect);
 //! ProgressBar::unknown().tone(Tone::Neutral).paint_bar(layer, ctx, track);
+//! ProgressBar::of(0.3).color(ink).track_alpha(0.07).min_fill(2.0).snapped().paint_bar(…);
+//! ProgressBar::split(&parts).snapped().paint_bar(layer, ctx, track);
+//! ProgressBar::unknown().on_dark().sweep_at(t).glide(0.22).paint_bar(layer, ctx, track);
 //! ```
+//!
+//! Its defaults are the app's usual bar; every option only changes what a place asks for.
+//! [`Meter`] is the small vertical sibling: a row of bars standing on a line (the status
+//! bar's).
 
-use kernel::Rect;
+use kernel::{Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::TextSystem;
 use ui_kit::draw_text;
@@ -29,6 +36,76 @@ pub enum ProgressValue<'a> {
     Text(&'a str),
 }
 
+/// What runs under the fill.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ProgressTrack {
+    /// The text's color at this alpha (the usual: [`TRACK_ALPHA`]).
+    Faint(f32),
+    /// A color of the caller's (a bar over a picture or a dark card).
+    Color(Rgba),
+    /// No track: the fill alone.
+    None,
+}
+
+/// How the piece of a bar not known yet moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SweepMotion {
+    /// At an even pace (the usual).
+    Linear,
+    /// Easing in and out of each pass, its piece on whole pixels (the splash's).
+    Glide,
+}
+
+/// The sweep of a bar not known yet: its piece's share of the track, how it moves, and
+/// where it is (0..1 of a pass; `None`: by the clock, one pass every [`SWEEP_MS`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Sweep {
+    pub share: f32,
+    pub motion: SweepMotion,
+    pub at: Option<f32>,
+}
+
+impl Default for Sweep {
+    fn default() -> Self {
+        Self { share: SWEEP_SHARE, motion: SweepMotion::Linear, at: None }
+    }
+}
+
+impl Sweep {
+    /// Its piece in `track` at `t` (0..1 of a pass): where it starts and how wide.
+    fn piece_at(&self, track: Rect, t: f32) -> (f32, f32) {
+        let (w, t) = match self.motion {
+            SweepMotion::Linear => (track.size.width * self.share, t),
+            SweepMotion::Glide => {
+                ((track.size.width * self.share).round(), t * t * (3.0 - 2.0 * t))
+            }
+        };
+        let x = track.min_x() - w + (track.size.width + w) * t;
+        let x0 = x.max(track.min_x());
+        (x0, ((x + w).min(track.max_x()) - x0).max(0.0))
+    }
+
+    /// Its piece in `track` now (or where it was set).
+    fn piece(&self, track: Rect) -> (f32, f32) {
+        let t = self.at.unwrap_or_else(|| (now_ms() % SWEEP_MS) as f32 / SWEEP_MS as f32);
+        self.piece_at(track, t.clamp(0.0, 1.0))
+    }
+}
+
+/// One part of a bar split in parts (what's used by one thing, then another): its share of
+/// the whole track (0..=1) and its color.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProgressSegment {
+    pub fraction: f32,
+    pub color: Rgba,
+}
+
+impl ProgressSegment {
+    pub const fn new(fraction: f32, color: Rgba) -> Self {
+        Self { fraction, color }
+    }
+}
+
 /// A progress bar, as configured (see the module).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProgressBar<'a> {
@@ -43,6 +120,23 @@ pub struct ProgressBar<'a> {
     pub label: Option<&'a str>,
     /// How far, on its right.
     pub value: ProgressValue<'a>,
+    /// The fill's own color, over the tone's.
+    pub fill: Option<Rgba>,
+    /// The fill's opacity (1: as its color is).
+    pub fill_alpha: f32,
+    /// What runs under the fill.
+    pub track: ProgressTrack,
+    /// The narrowest a fill shows once it isn't empty (logical pixels); `None`: the bar's
+    /// height (a round dot at the start).
+    pub min_fill: Option<f32>,
+    /// The corners' radius (logical pixels); `None`: half the height (a pill).
+    pub radius: Option<f32>,
+    /// The fills on whole pixels.
+    pub snapped: bool,
+    /// The bar split in parts, one after another (the fraction then unused).
+    pub segments: &'a [ProgressSegment],
+    /// How the piece of a bar not known yet moves.
+    pub sweep: Sweep,
 }
 
 impl Default for ProgressBar<'_> {
@@ -53,16 +147,29 @@ impl Default for ProgressBar<'_> {
             thickness: 4.0,
             label: None,
             value: ProgressValue::None,
+            fill: None,
+            fill_alpha: 1.0,
+            track: ProgressTrack::Faint(TRACK_ALPHA),
+            min_fill: None,
+            radius: None,
+            snapped: false,
+            segments: &[],
+            sweep: Sweep::default(),
         }
     }
 }
+
+/// The usual track: the text's color at this alpha.
+pub const TRACK_ALPHA: f32 = 0.08;
+/// The track on a dark surface (a picture, the splash's card): white at this alpha.
+pub const DARK_TRACK_ALPHA: f32 = 0.08;
 
 /// The text row over the bar and the space between them (logical pixels).
 const ROW: f32 = 18.0;
 const ROW_GAP: f32 = 6.0;
 /// The sweep: its piece's share of the track and one pass (ms).
-const SWEEP_SHARE: f32 = 0.3;
-const SWEEP_MS: u128 = 1400;
+pub const SWEEP_SHARE: f32 = 0.3;
+pub const SWEEP_MS: u128 = 1400;
 
 impl<'a> ProgressBar<'a> {
     /// `fraction` done (clamped to 0..=1).
@@ -80,6 +187,11 @@ impl<'a> ProgressBar<'a> {
         fraction.map_or_else(Self::unknown, Self::of)
     }
 
+    /// The bar split in `segments`, one after another from the start.
+    pub fn split(segments: &'a [ProgressSegment]) -> Self {
+        Self { fraction: Some(0.0), segments, ..Self::default() }
+    }
+
     /// `done` of `total` (a total of 0: not known).
     pub fn counted(done: u64, total: u64) -> Self {
         Self::from((total > 0).then(|| done as f32 / total as f32))
@@ -93,6 +205,70 @@ impl<'a> ProgressBar<'a> {
     /// The bar's thickness (logical pixels).
     pub fn thickness(mut self, thickness: f32) -> Self {
         self.thickness = thickness;
+        self
+    }
+
+    /// The fill in `color` (over the tone's).
+    pub fn color(mut self, color: Rgba) -> Self {
+        self.fill = Some(color);
+        self
+    }
+
+    /// The fill's opacity (0..=1).
+    pub fn fill_alpha(mut self, alpha: f32) -> Self {
+        self.fill_alpha = alpha.clamp(0.0, 1.0);
+        self
+    }
+
+    /// What runs under the fill.
+    pub fn track(mut self, track: ProgressTrack) -> Self {
+        self.track = track;
+        self
+    }
+
+    /// The usual track, at `alpha`.
+    pub fn track_alpha(self, alpha: f32) -> Self {
+        self.track(ProgressTrack::Faint(alpha))
+    }
+
+    /// No track: the fill alone.
+    pub fn fill_only(self) -> Self {
+        self.track(ProgressTrack::None)
+    }
+
+    /// Drawn on a dark surface (a picture, a dark card): a faint white track.
+    pub fn on_dark(self) -> Self {
+        self.track(ProgressTrack::Color(Rgba::WHITE.with_alpha(DARK_TRACK_ALPHA)))
+    }
+
+    /// The narrowest a fill shows once it isn't empty (logical pixels).
+    pub fn min_fill(mut self, width: f32) -> Self {
+        self.min_fill = Some(width.max(0.0));
+        self
+    }
+
+    /// The corners' radius (logical pixels).
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = Some(radius.max(0.0));
+        self
+    }
+
+    /// The fills on whole pixels.
+    pub fn snapped(mut self) -> Self {
+        self.snapped = true;
+        self
+    }
+
+    /// The piece of a bar not known yet at `t` of its pass (0..1: the caller's clock).
+    pub fn sweep_at(mut self, t: f32) -> Self {
+        self.sweep.at = Some(t);
+        self
+    }
+
+    /// The piece glides (easing in and out of each pass), `share` of the track wide.
+    pub fn glide(mut self, share: f32) -> Self {
+        self.sweep.share = share.clamp(0.0, 1.0);
+        self.sweep.motion = SweepMotion::Glide;
         self
     }
 
@@ -113,9 +289,10 @@ impl<'a> ProgressBar<'a> {
         self
     }
 
-    /// It sweeps (not known): frames are needed while it shows.
+    /// It sweeps by the clock (not known, no position given): frames are needed while it
+    /// shows.
     pub fn animating(&self) -> bool {
-        self.fraction.is_none()
+        self.fraction.is_none() && self.sweep.at.is_none()
     }
 
     /// The text row is drawn (a label or a value).
@@ -167,27 +344,121 @@ impl<'a> ProgressBar<'a> {
     /// Only the bar, in `track` (its height the bar's: [`Self::thickness`] not used).
     pub fn paint_bar(&self, layer: &mut Layer, ctx: &Ctx<'_>, track: Rect) {
         let p = ctx.palette;
-        let r = track.size.height / 2.0;
-        layer.quad(Quad::filled(track, ctx.fade(p.text.with_alpha(0.08))).rounded(r));
+        let h = track.size.height;
+        let r = self.radius.map_or(h / 2.0, |v| ctx.px(v));
+        let under = match self.track {
+            ProgressTrack::Faint(alpha) => Some(p.text.with_alpha(alpha)),
+            ProgressTrack::Color(color) => Some(color),
+            ProgressTrack::None => None,
+        };
+        if let Some(under) = under {
+            layer.quad(Quad::filled(track, ctx.fade(under)).rounded(r));
+        }
+        if !self.segments.is_empty() {
+            self.paint_segments(layer, ctx, track, r);
+            return;
+        }
         let (x, w) = match self.fraction {
             Some(f) => (track.min_x(), track.size.width * f),
-            None => sweep(track, now_ms()),
+            None => self.sweep.piece(track),
         };
         if w > 0.0 {
-            let fill = Rect::new(x, track.min_y(), w.max(track.size.height), track.size.height);
-            layer.quad(Quad::filled(fill, ctx.fade(self.tone.color(p))).rounded(r));
+            let w = w.max(self.min_fill.map_or(h, |v| ctx.px(v)));
+            let w = if self.snapped { w.round() } else { w };
+            let fill = Rect::new(x, track.min_y(), w, h);
+            layer.quad(Quad::filled(fill, ctx.fade(self.ink(self.tone.color(p)))).rounded(r));
+        }
+    }
+
+    /// The fill's color from `base`, at its opacity.
+    fn ink(&self, base: Rgba) -> Rgba {
+        let color = self.fill.unwrap_or(base);
+        color.with_alpha(color.a * self.fill_alpha)
+    }
+
+    /// The parts one after another from the track's start, never past its end.
+    fn paint_segments(&self, layer: &mut Layer, ctx: &Ctx<'_>, track: Rect, r: f32) {
+        let width = track.size.width;
+        let mut used = 0.0;
+        for part in self.segments {
+            let w = (width * part.fraction.clamp(0.0, 1.0)).min(width - used);
+            let w = if self.snapped { w.round() } else { w };
+            if w > 0.0 {
+                let at = Rect::new(track.min_x() + used, track.min_y(), w, track.size.height);
+                layer.quad(Quad::filled(at, ctx.fade(self.ink(part.color))).rounded(r));
+                used += w;
+            }
+        }
+    }
+}
+
+/// A meter: a row of small vertical bars standing on a line, each filled from the bottom
+/// as high as its level, over its own color faint (the status bar's). Sizes in logical
+/// pixels.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Meter {
+    pub bar_width: f32,
+    pub gap: f32,
+    pub height: f32,
+    pub radius: f32,
+    /// The least a bar shows, even empty (it still reads as a bar).
+    pub min_fill: f32,
+    /// Its track: its color at this alpha.
+    pub track_alpha: f32,
+}
+
+impl Default for Meter {
+    fn default() -> Self {
+        Self {
+            bar_width: 5.0,
+            gap: 3.0,
+            height: 13.0,
+            radius: 1.5,
+            min_fill: 2.0,
+            track_alpha: 0.16,
+        }
+    }
+}
+
+impl Meter {
+    /// The width of `bars` bars (physical pixels).
+    pub fn width(&self, ctx: &Ctx<'_>, bars: usize) -> f32 {
+        let n = bars as f32;
+        n * ctx.px(self.bar_width) + (n - 1.0).max(0.0) * ctx.px(self.gap)
+    }
+
+    /// Its height (physical pixels).
+    pub fn bar_height(&self, ctx: &Ctx<'_>) -> f32 {
+        ctx.px(self.height)
+    }
+
+    /// `bars` (a level 0..=1 and a color each) from `x`, standing on `bottom`.
+    pub fn paint(
+        &self,
+        layer: &mut Layer,
+        ctx: &Ctx<'_>,
+        (x, bottom): (f32, f32),
+        bars: impl IntoIterator<Item = (f32, Rgba)>,
+    ) {
+        let (w, gap, h) = (ctx.px(self.bar_width), ctx.px(self.gap), ctx.px(self.height));
+        let r = ctx.px(self.radius);
+        for (i, (level, color)) in bars.into_iter().enumerate() {
+            let left = x + i as f32 * (w + gap);
+            let track = Rect::new(left, bottom - h, w, h);
+            layer
+                .quad(Quad::filled(track, ctx.fade(color.with_alpha(self.track_alpha))).rounded(r));
+            let filled = (level.clamp(0.0, 1.0) * h).max(ctx.px(self.min_fill)).round();
+            let bar = Rect::new(left, bottom - filled, w, filled);
+            layer.quad(Quad::filled(bar, ctx.fade(color)).rounded(r));
         }
     }
 }
 
 /// The sweeping piece at `ms` (since the epoch): where it starts and how wide, within
 /// `track`.
+#[cfg(test)]
 fn sweep(track: Rect, ms: u128) -> (f32, f32) {
-    let t = (ms % SWEEP_MS) as f32 / SWEEP_MS as f32;
-    let w = track.size.width * SWEEP_SHARE;
-    let x = track.min_x() - w + (track.size.width + w) * t;
-    let x0 = x.max(track.min_x());
-    (x0, ((x + w).min(track.max_x()) - x0).max(0.0))
+    Sweep::default().piece_at(track, (ms % SWEEP_MS) as f32 / SWEEP_MS as f32)
 }
 
 fn now_ms() -> u128 {

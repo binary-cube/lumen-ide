@@ -216,10 +216,8 @@ enum Hit {
     },
     /// Code of the selected declaration: editing on the canvas.
     Edit,
-    /// The "Jump to file or function" field (⌘K).
+    /// The "Jump to file or function" field (⌘K; its × is the field's own).
     SearchField,
-    /// The search × button: clears the text.
-    SearchClear,
     /// A search result (index in the list).
     SearchResult(usize),
 }
@@ -261,6 +259,8 @@ struct Canvas {
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     press: Option<Point>,
+    /// How many clicks in a row the last press was (two select a word in the search).
+    clicks: u32,
     /// The card being dragged: last point and whether it moved (else, on release, a click).
     moving: Option<(CardKind, Point, bool)>,
     /// Each edge's dots and bounding box, kept under its shape (its ends, width and dashes
@@ -301,6 +301,7 @@ impl Default for Canvas {
             hits: Vec::new(),
             hover: None,
             press: None,
+            clicks: 1,
             moving: None,
             edge_dots: Vec::new(),
             offsets: HashMap::new(),

@@ -216,7 +216,7 @@ impl Viewer for CommitView {
                 return Some(cursor);
             }
             Some(match hit? {
-                Hit::Message | Hit::PlacesFilter => ViewerCursor::Text,
+                Hit::Message => ViewerCursor::Text,
                 Hit::Commit if !self.can_commit() => ViewerCursor::Arrow,
                 _ => ViewerCursor::Pointer,
             })
@@ -397,7 +397,7 @@ impl Viewer for CommitView {
     /// Read from `&self`: the lane with the keys' own.
     fn selected_text(&self) -> Option<String> {
         if self.keys() == Keys::Places {
-            let selected = self.places_filter.selected_text();
+            let selected = self.places_filter.input.selected_text();
             return (!selected.is_empty()).then(|| selected.to_owned());
         }
         if let Some(code) = self.selected_code() {
@@ -521,10 +521,10 @@ impl Viewer for CommitView {
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
         let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)?;
         // A file or a list clicked: the keyboard goes through the lists; the places' filter
-        // keeps it only while it's clicked.
+        // (a control: its presses are its own) keeps it only until something else is clicked.
         if matches!(hit, Hit::Check(..) | Hit::Row(..) | Hit::All(_)) {
             self.set_keys(Keys::Lists);
-        } else if self.keys() == Keys::Places && hit != Hit::PlacesFilter {
+        } else if self.keys() == Keys::Places {
             self.set_keys(Keys::Message);
         }
         match hit {
@@ -551,11 +551,6 @@ impl Viewer for CommitView {
                 self.message.press(p, 1, false);
             }
             Hit::Place(i) => return self.pick_place(i),
-            Hit::PlacesFilter => {
-                self.set_keys(Keys::Places);
-                self.places_filter.click(p.x);
-            }
-            Hit::ClearPlacesFilter => self.edit_places_filter(|input| input.set_text("")),
         }
         None
     }

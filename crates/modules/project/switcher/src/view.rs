@@ -10,13 +10,15 @@ use std::path::Path;
 use kernel::{Point, Rect};
 use render_api::{ImageData, Quad};
 use text_layout::Font;
-use ui_components::control::{Control, Controls};
+
+use ui_components::control::{Control, Controls, Press};
 use ui_components::ds::{self, Ctx, radius};
+use ui_components::search_field::SearchField;
 use ui_components::{
     AppRequest, KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
     ViewerProvider,
 };
-use ui_kit::{TextInput, draw_text};
+use ui_kit::draw_text;
 use workbench_model::ProjectWindow;
 
 /// The extension its view is opened by.
@@ -56,12 +58,16 @@ const PICTURE: f32 = 0.56;
 const CAPTION_H: f32 = 58.0;
 /// The rows shown at once (more scroll).
 const ROWS: usize = 2;
+/// The "this window" badge's fill: its alpha of the accent.
+const CURRENT_FILL: f32 = 0.18;
 
 #[derive(Debug, Default)]
 pub struct SwitcherView {
     projects: Vec<ProjectWindow>,
-    filter: TextInput,
-    /// Its controls' state of use (see [`SwitcherView::with_controls`]).
+    /// The filter: the app's search field, with the keys from the start.
+    filter: SearchField,
+    /// Its controls' state of use (see [`SwitcherView::with_controls`]): sticky, so a press
+    /// on a card leaves the keys in the filter.
     controls: Controls,
     /// The projects the filter keeps (their places), and the one chosen among them.
     shown: Vec<usize>,
@@ -84,16 +90,47 @@ impl Drop for SwitcherView {
     }
 }
 
-/// The filter as the list's control: by the keyboard only (no caret is put with the
-/// mouse), it takes what's typed (control characters left out) and erases a character at a
-/// time (⌫, Delete), ⌘A selecting it; the other keys (Tab among them) choose the cards, so
-/// it keeps Tab and leaves them. `edited`: its text changed (the list is filtered again).
+/// The filter as the list's control: the app's search field (a press puts the caret, a
+/// drag selects, × empties it; what's typed, ⌘A / ⌘X / ⌘Z), of whose keys it keeps only the
+/// erasing ones (⌫, Delete): the others (the arrows, Tab among them) choose the cards, so it
+/// keeps Tab and leaves them. `edited`: its text changed (the list is filtered again).
 struct FilterPart<'a> {
-    filter: &'a mut TextInput,
+    filter: &'a mut SearchField,
     edited: &'a mut bool,
 }
 
+impl FilterPart<'_> {
+    /// `edit` done, `edited` told when it changed the text.
+    fn editing(&mut self, edit: impl FnOnce(&mut SearchField) -> bool) -> bool {
+        let done = edit(self.filter);
+        *self.edited |= self.filter.take_edited();
+        done
+    }
+}
+
 impl Control for FilterPart<'_> {
+    fn area(&self) -> Option<Rect> {
+        Control::area(self.filter)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let pressed = Control::press(self.filter, p, clicks);
+        *self.edited |= self.filter.take_cleared() | self.filter.take_edited();
+        pressed
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(self.filter, p)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        Control::hover(self.filter, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(self.filter, p)
+    }
+
     fn focusable(&self) -> bool {
         true
     }
@@ -102,37 +139,26 @@ impl Control for FilterPart<'_> {
         true
     }
 
-    fn key(&mut self, key: ViewerKey, _reach: KeyReach) -> bool {
-        match key {
-            ViewerKey::Backspace => self.filter.backspace(false),
-            ViewerKey::Delete => self.filter.delete(),
-            _ => return false,
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        if !matches!(key, ViewerKey::Backspace | ViewerKey::Delete) {
+            return false;
         }
-        *self.edited = true;
-        true
+        self.editing(|filter| Control::key(filter, key, reach))
     }
 
     fn text(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        if typed.is_empty() {
+        if !typed.chars().any(|c| !c.is_control()) {
             return false;
         }
-        self.filter.insert(&typed);
-        *self.edited = true;
-        true
+        self.editing(|filter| Control::text(filter, typed))
     }
 
     fn selected_text(&self) -> Option<String> {
-        let selected = self.filter.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        Control::selected_text(self.filter)
     }
 
     fn command(&mut self, id: &str) -> bool {
-        if id != "select_all" {
-            return false;
-        }
-        self.filter.select_all();
-        true
+        self.editing(|filter| Control::command(filter, id))
     }
 }
 
@@ -293,17 +319,12 @@ impl SwitcherView {
         }
         if project.current {
             let label = i18n::t("projects.this_window");
-            let small = ds.ui_font(-1.5);
-            let shaped = text.shape_line(&label, &small);
-            let pill =
-                Rect::new(pic.min_x() + px(8.0), mid - px(10.0), shaped.width + px(14.0), px(20.0));
-            layer.quad(Quad::filled(pill, p.accent.with_alpha(0.18)).rounded(px(10.0)));
-            draw_text(
+            ds::Badge::new(&label).color(p.accent).fill_alpha(CURRENT_FILL).paint(
                 layer,
-                &shaped,
-                pill.min_x() + px(7.0),
-                ds::optical_baseline(pill.min_y(), pill.size.height, &small),
-                p.accent,
+                text,
+                ds,
+                pic.min_x() + px(8.0),
+                mid,
             );
         }
         // Its name and where it is.
@@ -357,7 +378,8 @@ impl Viewer for SwitcherView {
             self.projects = data.projects.clone();
             self.refilter();
             self.sync_pictures();
-            // The keyboard in the filter from the start.
+            // The keyboard in the filter from the start, kept there by a press on a card.
+            self.controls = Controls::sticky();
             self.with_controls(|c, parts| c.focus(parts, Some(FILTER)));
         }
     }
@@ -405,13 +427,8 @@ impl Viewer for SwitcherView {
             px(FIELD_H),
         );
         let placeholder = i18n::t("projects.filter");
-        ds::search_input(
-            &mut ui_components::LayerPainter::new(layer, text, icons, ds),
-            field,
-            &self.filter,
-            true,
-            &placeholder,
-        );
+        let focused = self.controls.focused() == Some(FILTER);
+        self.filter.paint(layer, text, icons, &ds, (field, focused), &placeholder);
         let top = field.max_y() + px(GAP);
         if self.shown.is_empty() {
             let area = Rect::new(b.min_x(), top, b.size.width, b.max_y() - top);
@@ -483,20 +500,40 @@ impl Viewer for SwitcherView {
     }
 
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
+        self.press(p, 1)
+    }
+
+    /// The filter first (its caret, its ×), then a card.
+    fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
+        if self.with_controls(|c, parts| c.press(parts, p, clicks)).is_some() {
+            return None;
+        }
         let (_, at) = *self.cards.iter().find(|(r, _)| r.contains(p))?;
         self.selected = at;
         self.take_chosen();
         self.action.take()
     }
 
+    fn drag(&mut self, p: Point) -> bool {
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
+    }
+
     fn hover(&mut self, p: Point) -> bool {
+        let field = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         let hover = self.cards.iter().find(|(r, _)| r.contains(p)).map(|(_, at)| *at);
-        let changed = hover != self.hover;
+        let changed = field || hover != self.hover;
         self.hover = hover;
         changed
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        if let Some(cursor) = self.controls.cursor_at(p) {
+            return Some(cursor);
+        }
         self.cards.iter().any(|(r, _)| r.contains(p)).then_some(ViewerCursor::Pointer)
     }
 

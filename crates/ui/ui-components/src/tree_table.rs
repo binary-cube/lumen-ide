@@ -33,6 +33,20 @@ pub const ROW_H: f32 = 26.0;
 pub const INDENT: f32 = 16.0;
 /// The gutter of signs, when a row has one (logical pixels).
 pub const GUTTER: f32 = 20.0;
+/// A pill among a cell's words: its height, the room on each side of its label, and its
+/// fill's alpha (of its ink; of the text when neutral).
+const PILL_H: f32 = 17.0;
+const PILL_PAD: f32 = 6.0;
+const PILL_FILL: f32 = 0.16;
+const PILL_NEUTRAL_FILL: f32 = 0.07;
+/// A cell's bar: its thickness, its widest, the least room it shows in, the gap before its
+/// label, its track's alpha and the least a fill shows (logical pixels).
+const BAR_H: f32 = 6.0;
+const BAR_MAX: f32 = 90.0;
+const BAR_MIN_ROOM: f32 = 16.0;
+const BAR_GAP: f32 = 8.0;
+const BAR_TRACK: f32 = 0.07;
+const BAR_MIN_FILL: f32 = 2.0;
 
 /// Where a column's cells sit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -644,7 +658,11 @@ impl TreeTable {
                             SpanStyle::Code => &code,
                             SpanStyle::Pill(_) => &small,
                         };
-                        let pad = if matches!(span.style, SpanStyle::Pill(_)) { 12.0 } else { 0.0 };
+                        let pad = if matches!(span.style, SpanStyle::Pill(_)) {
+                            2.0 * PILL_PAD
+                        } else {
+                            0.0
+                        };
                         w += text.shape_line(&span.text, f).width
                             + pad
                             + if i > 0 { 6.0 } else { 0.0 };
@@ -1164,6 +1182,18 @@ fn pill_color(ink: Ink, p: &Palette) -> Rgba {
     }
 }
 
+/// A cell's bar's track before its label (starting at `label_x`): as wide as there's room,
+/// at most [`BAR_MAX`]; none in too little room.
+fn bar_track(ds: &ds::Ctx<'_>, at: &CellPlace, label_x: f32) -> Option<Rect> {
+    let px = |v: f32| ds.px(v);
+    let bar_w = (label_x - px(BAR_GAP) - at.left).min(px(BAR_MAX));
+    if bar_w <= px(BAR_MIN_ROOM) {
+        return None;
+    }
+    let h = px(BAR_H);
+    Some(Rect::new(at.left.round(), (at.mid - h / 2.0).round(), bar_w.round(), h))
+}
+
 fn paint_cell(
     pen: &mut crate::LayerPainter<'_>,
     at: CellPlace,
@@ -1213,20 +1243,19 @@ fn paint_cell(
                 }
                 let shaped = text.shape_line(shown, font);
                 if let SpanStyle::Pill(ink) = style {
-                    let h = px(17.0).round();
-                    let r = Rect::new(
-                        x.round(),
-                        (at.mid - h / 2.0).round(),
-                        (shaped.width + px(12.0)).round(),
-                        h,
-                    );
                     let fill = match ink {
-                        Ink::Tone(Tone::Neutral) => p.text.with_alpha(0.07),
-                        ink => ink.color(p).with_alpha(0.16),
+                        Ink::Tone(Tone::Neutral) => p.text.with_alpha(PILL_NEUTRAL_FILL),
+                        ink => ink.color(p).with_alpha(PILL_FILL),
                     };
-                    layer.quad(Quad::filled(r, fill).rounded(h / 2.0));
-                    draw_text(layer, &shaped, (x + px(6.0)).round(), base_of(font), *color);
-                    x += shaped.width + px(12.0);
+                    ds::Badge::new(shown)
+                        .font(font)
+                        .color(*color)
+                        .fill(fill)
+                        .size(ds::BadgeSize::Custom(PILL_H))
+                        .pad(PILL_PAD)
+                        .baseline(ds::BadgeBaseline::At(base_of(font)))
+                        .paint(layer, text, ds, x, at.mid);
+                    x += shaped.width + px(2.0 * PILL_PAD);
                     continue;
                 }
                 draw_text(layer, &shaped, x.round(), base_of(font), *color);
@@ -1253,48 +1282,28 @@ fn paint_cell(
             let shaped = text.shape_line(label, fonts.normal);
             let label_x = at.left + at.room - shaped.width;
             draw_text(layer, &shaped, label_x.round(), base_of(fonts.normal), p.text);
-            let bar_w = (label_x - px(8.0) - at.left).min(px(90.0));
-            if bar_w > px(16.0) {
-                let h = px(6.0).round();
-                let track =
-                    Rect::new(at.left.round(), (at.mid - h / 2.0).round(), bar_w.round(), h);
-                layer.quad(Quad::filled(track, p.text.with_alpha(0.07)).rounded(h / 2.0));
-                let f = fraction.clamp(0.0, 1.0);
-                if f > 0.0 {
-                    let fill_w = (bar_w * f).max(px(2.0)).round();
-                    let fill = Rect::new(track.min_x(), track.min_y(), fill_w, h);
-                    layer.quad(Quad::filled(fill, ink.color(p)).rounded(h / 2.0));
-                }
+            if let Some(track) = bar_track(ds, &at, label_x) {
+                ds::ProgressBar::of(*fraction)
+                    .color(ink.color(p))
+                    .track_alpha(BAR_TRACK)
+                    .min_fill(BAR_MIN_FILL)
+                    .snapped()
+                    .paint_bar(layer, ds, track);
             }
         }
         CellValue::Split { a, b, label } => {
             let shaped = text.shape_line(label, fonts.normal);
             let label_x = at.left + at.room - shaped.width;
             draw_text(layer, &shaped, label_x.round(), base_of(fonts.normal), p.text);
-            let bar_w = (label_x - px(8.0) - at.left).min(px(90.0));
-            if bar_w > px(16.0) {
-                let h = px(6.0).round();
-                let track =
-                    Rect::new(at.left.round(), (at.mid - h / 2.0).round(), bar_w.round(), h);
-                layer.quad(Quad::filled(track, p.text.with_alpha(0.07)).rounded(h / 2.0));
-                let (a, b) = (a.clamp(0.0, 1.0), b.clamp(0.0, 1.0));
-                let aw = (bar_w * a).round();
-                let bw = (bar_w * b).min(bar_w - aw).round();
-                if aw > 0.0 {
-                    layer.quad(
-                        Quad::filled(Rect::new(track.min_x(), track.min_y(), aw, h), p.accent)
-                            .rounded(h / 2.0),
-                    );
-                }
-                if bw > 0.0 {
-                    layer.quad(
-                        Quad::filled(
-                            Rect::new(track.min_x() + aw, track.min_y(), bw, h),
-                            p.warning,
-                        )
-                        .rounded(h / 2.0),
-                    );
-                }
+            if let Some(track) = bar_track(ds, &at, label_x) {
+                let parts = [
+                    ds::ProgressSegment::new(*a, p.accent),
+                    ds::ProgressSegment::new(*b, p.warning),
+                ];
+                ds::ProgressBar::split(&parts)
+                    .track_alpha(BAR_TRACK)
+                    .snapped()
+                    .paint_bar(layer, ds, track);
             }
         }
         CellValue::Badge { label, tone } => {

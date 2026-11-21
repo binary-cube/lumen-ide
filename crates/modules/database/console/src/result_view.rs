@@ -27,7 +27,7 @@ use ui_components::data_grid::export::{
 use ui_components::data_grid::{
     DataGrid, GridAction, GridColumn, GridPaint, GridSource, MENU_PREFIX,
 };
-use ui_components::ds::{self, Ctx};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size};
 use ui_components::{
     AppRequest, KeyReach, PressMods, Tip, ViewMemory, ViewMenuEntry, Viewer, ViewerAction,
     ViewerCursor, ViewerKey, ViewerPaint,
@@ -451,23 +451,20 @@ impl ResultView {
         let mid = (bar.min_y() + bar.size.height / 2.0).round();
         let font = ds.ui_font(-1.0);
         let mut x = bar.min_x() + px(8.0);
-        let side = px(26.0);
+        let side = px(button_size::MEDIUM);
         let button = |x: f32| Rect::new(x, (mid - side / 2.0).round(), side, side);
         // Commit and Rollback while the console's transaction is open.
         if self.runner.in_transaction() {
-            for (hit, icon, tint) in
-                [(Hit::Commit, "check", Some(p.vcs_added)), (Hit::Rollback, "undo", None)]
+            for (hit, icon, tone) in
+                [(Hit::Commit, "check", Some(Tone::Success)), (Hit::Rollback, "undo", None)]
             {
                 let r = button(x);
-                crate::bar::icon_button(
-                    layer,
-                    ctx.icons,
-                    &ds,
-                    r,
-                    icon,
-                    tint,
-                    ui_components::ds::Press::new(true, self.hover == Some(hit)),
-                );
+                let mut spec =
+                    ButtonSpec::new(ButtonKind::Ghost).icon(icon).hovered(self.hover == Some(hit));
+                if let Some(tone) = tone {
+                    spec = spec.tone(tone);
+                }
+                ds::button(layer, ctx.text, ctx.icons, &ds, r, spec);
                 self.hits.push((r, hit));
                 x += side + px(2.0);
             }
@@ -492,47 +489,44 @@ impl ResultView {
         }
         // The export, at the right.
         let export = button(bar.max_x() - px(8.0) - side);
-        crate::bar::icon_button(
-            layer,
-            ctx.icons,
-            &ds,
-            export,
-            "download",
-            None,
-            ui_components::ds::Press::new(self.export.is_none(), self.hover == Some(Hit::Export)),
-        );
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("download")
+            .enabled(self.export.is_none())
+            .hovered(self.hover == Some(Hit::Export));
+        ds::button(layer, ctx.text, ctx.icons, &ds, export, spec);
         if self.export.is_none() {
             self.hits.push((export, Hit::Export));
         }
         // What to know of the rows, between.
         if let Some((note, _)) = self.note() {
             let room = (export.min_x() - px(12.0) - x).max(0.0);
-            let small = ds.ui_font(-1.5);
-            let line = ds::ellipsize(ctx.text, &note, &small, (room - px(26.0)).max(0.0));
-            let shaped = ctx.text.shape_line(&line, &small);
-            if room > px(60.0) {
-                let w = shaped.width + px(26.0);
-                let r = Rect::new(x, (mid - px(11.0)).round(), w, px(22.0));
-                let color = p.text_muted;
-                layer.quad(
-                    Quad::filled(r, color.with_alpha(0.08))
-                        .rounded(px(11.0))
-                        .bordered(ds.line(), color.with_alpha(0.25)),
-                );
-                if let Some(id) = ctx.icons.id("info") {
-                    let s = px(12.0);
-                    let ir =
-                        Rect::new((r.min_x() + px(8.0)).round(), (mid - s / 2.0).round(), s, s);
-                    draw_icon(layer, ctx.icons, id, ir, color);
-                }
-                let base = ds::optical_baseline(r.min_y(), r.size.height, &small);
-                draw_text(layer, &shaped, (r.min_x() + px(23.0)).round(), base, color);
+            let h = px(button_size::SMALL);
+            let note_spec = |label| {
+                ButtonSpec::new(ButtonKind::Soft)
+                    .round()
+                    .icon("info")
+                    .label(label)
+                    .tone(Tone::Neutral)
+                    .hovered(self.hover == Some(Hit::Note))
+            };
+            // What the pill takes besides its label: its icon, the gap, the padding.
+            let chrome = ds::button_width(ctx.text, &ds, &note_spec(""), h);
+            let font = ds::button_label_font(&ds);
+            let line = ds::ellipsize(ctx.text, &note, &font, (room - chrome).max(0.0));
+            if room > px(NOTE_MIN_ROOM) {
+                let w = ds::button_width(ctx.text, &ds, &note_spec(&line), h);
+                let r = Rect::new(x, (mid - h / 2.0).round(), w, h);
+                ds::button(layer, ctx.text, ctx.icons, &ds, r, note_spec(&line));
                 self.hits.push((r, Hit::Note));
             }
         }
         let _ = Font::SEMIBOLD;
     }
 }
+
+/// The room under which the rows' note isn't shown at all (logical pixels): less would
+/// leave only its icon and an ellipsis.
+const NOTE_MIN_ROOM: f32 = 60.0;
 
 /// The runner's pool (an export of rows here is written there too).
 fn runner_runtime(runner: &Runner) -> Runtime {

@@ -78,20 +78,28 @@ impl ProfileView {
         )));
     }
 
-    pub(super) fn set_filter(&mut self, text: String) {
-        self.filter = text;
-        self.table.set_filter(&self.filter);
+    pub(super) fn set_filter(&mut self, text: &str) {
+        self.filter.set_text(text);
+        self.filtered();
     }
 
-    pub(super) fn open_dropdown(
-        &mut self,
-        anchor: Rect,
-        items: Vec<(String, String, &'static str, bool)>,
-    ) {
-        self.dropdown = Some(Dropdown { anchor, items, rect: Rect::default() });
+    /// The filter's text changed: the steps it matches shown.
+    pub(super) fn filtered(&mut self) {
+        self.table.set_filter(self.filter.text());
     }
 
-    pub(super) fn export_items(&self) -> Vec<(String, String, &'static str, bool)> {
+    /// The app's menu asked for under `anchor` (a button of the view), with `items`.
+    pub(super) fn open_dropdown(&mut self, anchor: Rect, items: Vec<MenuRow>) {
+        let entries = items
+            .into_iter()
+            .map(|(id, label, icon, enabled)| {
+                ViewMenuEntry::item(id, label).with_icon(icon).disabled_if(!enabled)
+            })
+            .collect();
+        self.asked_menu = Some((anchor, entries));
+    }
+
+    pub(super) fn export_items(&self) -> Vec<MenuRow> {
         let report = self.report();
         ExportKind::ALL
             .into_iter()
@@ -110,14 +118,14 @@ impl ProfileView {
             .collect()
     }
 
-    pub(super) fn mode_items(&self) -> Vec<(String, String, &'static str, bool)> {
+    pub(super) fn mode_items(&self) -> Vec<MenuRow> {
         ProfileMode::ALL
             .into_iter()
             .map(|m| (format!("profile.mode:{}", m.id()), m.label(), m.icon(), m.available()))
             .collect()
     }
 
-    pub(super) fn more_items(&self) -> Vec<(String, String, &'static str, bool)> {
+    pub(super) fn more_items(&self) -> Vec<MenuRow> {
         let mut items = vec![
             (
                 "profile.expand_all".to_owned(),
@@ -166,10 +174,6 @@ impl ProfileView {
                 self.open_dropdown(anchor, items);
             }
             Hit::Filter => self.typing = true,
-            Hit::FilterClear => {
-                self.set_filter(String::new());
-                self.typing = false;
-            }
             Hit::ExpandAll => self.table.set_all_open(true),
             Hit::CollapseAll => self.table.set_all_open(false),
             Hit::OpenInTab => self.open_in_tab(),
@@ -183,15 +187,6 @@ impl ProfileView {
                 }
             }
             Hit::Compact(i) => self.choose_finding(i),
-            Hit::MenuItem(i) => {
-                if let Some(id) = self
-                    .dropdown
-                    .take()
-                    .and_then(|d| d.items.get(i).filter(|it| it.3).map(|it| it.0.clone()))
-                {
-                    self.command(&id);
-                }
-            }
             Hit::Statement
             | Hit::Depth
             | Hit::RolledBack

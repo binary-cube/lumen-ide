@@ -17,6 +17,8 @@ const SPLIT: usize = 1;
 const TREE: usize = 2;
 const SEPARATORS: std::ops::Range<usize> = 6..8;
 const FIELD: usize = 8;
+/// The open filter list's scrollbar.
+const LIST_BAR: usize = 9;
 
 impl LogView {
     /// Its parts used as controls, the topmost first, with their state of use (see the
@@ -83,16 +85,24 @@ impl LogView {
             let mut left = Shown { part: &mut left, shown: free && listless };
             let mut right = Divider { splitter: second, at: at_second };
             let mut right = Shown { part: &mut right, shown: free && listless };
+            // The open list's search (the field's) and its scrollbar (a part of its own).
+            let (query, list_bar) = match self.bar.popup.as_mut() {
+                Some(super::filters::Popup { query, bar, scroll, .. }) => {
+                    (Some(query), Some(Thumb { bar, offset: scroll }))
+                }
+                None => (None, None),
+            };
+            let mut list_bar = list_bar;
             let mut field = BarField {
                 focus: &mut self.bar.focus,
                 text: &mut self.bar.text,
                 branches: &mut self.bar.branch_query,
-                popup: &mut self.bar.popup,
+                query,
                 picker_open: open,
                 text_elsewhere,
                 answer: &mut self.field_answer,
             };
-            let mut parts: [&mut dyn Control; 9] = [
+            let mut parts: [&mut dyn Control; 10] = [
                 &mut date,
                 &mut split,
                 &mut tree,
@@ -102,6 +112,7 @@ impl LogView {
                 &mut left,
                 &mut right,
                 &mut field,
+                &mut list_bar,
             ];
             if let Some(to) = refocus {
                 self.controls.focus(&mut parts, to);
@@ -585,6 +596,8 @@ impl Viewer for LogView {
             pressed
         });
         match pressed {
+            // The open list's thumb: its search keeps the keys.
+            Some((LIST_BAR, _)) => return None,
             Some((DATE, _)) => {
                 self.take_date_answer(p);
                 return None;
@@ -614,10 +627,7 @@ impl Viewer for LogView {
         }
         // Outside the open list: it closes (and the press does nothing else).
         if self.bar.popup.is_some()
-            && !matches!(
-                hit,
-                Some(Hit::Popup | Hit::PopupQuery | Hit::ClearPopupQuery | Hit::PopupRow(_))
-            )
+            && !matches!(hit, Some(Hit::Popup | Hit::PopupQuery | Hit::PopupRow(_)))
         {
             let open = self.bar.popup.as_ref().and_then(|p| p.kind);
             self.close_popup();
@@ -630,10 +640,7 @@ impl Viewer for LogView {
             return None;
         }
         // A field keeps the keys only while it's pressed into.
-        if !matches!(
-            hit,
-            Some(Hit::TextField | Hit::PopupQuery | Hit::ClearPopupQuery | Hit::BranchSearch)
-        ) {
+        if !matches!(hit, Some(Hit::TextField | Hit::PopupQuery | Hit::BranchSearch)) {
             self.bar.focus = None;
         }
         if let Some(hit) = hit
@@ -717,10 +724,14 @@ impl Viewer for LogView {
             return Some(cursor);
         }
         let hit = self.hit(p);
-        hit.map(|hit| match hit {
-            Hit::TextField | Hit::PopupQuery | Hit::BranchSearch => ViewerCursor::Text,
-            _ => ViewerCursor::Pointer,
-        })
+        // The search fields: the text's cursor, a hand on their ×.
+        let field = match hit? {
+            Hit::TextField => Some(&self.bar.text),
+            Hit::BranchSearch => Some(&self.bar.branch_query),
+            Hit::PopupQuery => self.bar.popup.as_ref().map(|popup| &popup.query),
+            _ => None,
+        };
+        Some(field.and_then(|f| Control::cursor(f, p)).unwrap_or(ViewerCursor::Pointer))
     }
 
     fn hover(&mut self, p: Point) -> bool {
@@ -732,7 +743,8 @@ impl Viewer for LogView {
         if self.controls.hovered() == Some(DATE) {
             return parts;
         }
-        let changed = (hover != self.hover) | parts;
+        let fields = self.hover_search_fields(p);
+        let changed = (hover != self.hover) | parts | fields;
         self.hover = hover;
         changed
     }
@@ -836,8 +848,7 @@ impl Viewer for LogView {
             // its head is in their row).
             let end =
                 if details_w > 0.0 && self.tree.head_in_row() { b.max_x() } else { right_edge };
-            let under = Rect::new(b.min_x(), head.max_y(), end - b.min_x(), ds.line());
-            layer.quad(Quad::filled(under, p.card_border));
+            ds::divider_card(layer, &ds, b.min_x(), end, head.max_y());
         }
         if lines > 0 {
             let bar_h = head_h - ds.line();

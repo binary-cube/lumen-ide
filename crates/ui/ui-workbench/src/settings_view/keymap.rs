@@ -71,7 +71,15 @@ impl SettingsView {
         }
         // Every command and its keys: searched, changed, its conflicts answered.
         let area = (x0, chips_bottom + px(24.0), width);
-        let bottom = self.shortcuts.paint(layer, text, (ctx, icons), area, &model.bindings);
+        let focused = self.controls.focused() == Some(super::FILTER);
+        let (x, top, width) = area;
+        let bottom = self.shortcuts.paint(
+            layer,
+            text,
+            (ctx, icons),
+            (x, top, width, focused),
+            &model.bindings,
+        );
         self.binding_rows.push(Rect::new(x0, chips_bottom, width, bottom - chips_bottom));
     }
 

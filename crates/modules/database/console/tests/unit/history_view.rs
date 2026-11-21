@@ -305,7 +305,7 @@ fn the_search_has_the_keys_through_its_controls() {
     let (_, mut view) = window(&mut s, "");
     let mut text = text_layout::TextSystem::new();
     paint(&mut view, &mut text);
-    let f = view.field;
+    let f = view.query.area();
     let on = Point::new(f.min_x() + 80.0, f.min_y() + f.size.height / 2.0);
     view.hover(on);
     assert_eq!(view.cursor_at(on), Some(ViewerCursor::Text));
@@ -315,6 +315,17 @@ fn the_search_has_the_keys_through_its_controls() {
     assert!(view.shown().is_empty());
     assert!(view.edit_key(ViewerKey::Backspace));
     assert_eq!(view.shown().iter().map(|e| e.text.as_str()).collect::<Vec<_>>(), ["SELECT 2"]);
+    // ⌘A selects it all; its × empties it and searches again.
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("2"));
+    paint(&mut view, &mut text);
+    let x = Point::new(f.max_x() - 17.0, on.y);
+    view.hover(x);
+    assert_eq!(view.cursor_at(x), Some(ViewerCursor::Pointer), "a hand on ×");
+    assert_eq!(view.click(x), None);
+    assert_eq!(view.query(), "");
+    assert_eq!(view.shown().len(), 2, "× searched again");
+    assert_eq!(view.controls.focused(), Some(SEARCH), "the keys still the search's");
     // While Clear History asks: no text cursor over it.
     view.command("clear");
     assert_ne!(view.cursor_at(on), Some(ViewerCursor::Text));

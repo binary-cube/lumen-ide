@@ -172,3 +172,29 @@ fn its_scrollbar_thumb_is_dragged() {
     assert!(p.scroll > 0.0, "dragged down: the rows follow");
     assert!(p.release());
 }
+
+/// Its search is the app's search field: typed into, ⌘A selects it, × (a hand over it)
+/// empties it and every row comes back; its one field is the one with the caret.
+#[test]
+fn its_search_is_the_shared_field_with_its_clear_button() {
+    let palette = crate::palette::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut p = picker(None);
+    assert!(p.text_input("www"));
+    assert_eq!(p.shown().len(), 1);
+    assert!(p.command("select_all"));
+    assert_eq!(p.selected_text().as_deref(), Some("www"));
+    let (anchor, bounds) = (Rect::new(10.0, 10.0, 300.0, 30.0), Rect::new(0.0, 0.0, 800.0, 900.0));
+    p.paint(&mut Scene::default(), &mut text, &icons, &ctx, (anchor, bounds), "");
+    assert!(p.query.shows_caret(), "the list open: its field has the caret");
+    assert_eq!(p.query.area(), p.search);
+    let clear = p.query.clear_area().expect("× shown with text");
+    let at = Point::new(clear.min_x() + 2.0, clear.min_y() + 2.0);
+    assert_eq!(p.cursor_at(at), Some(crate::ViewerCursor::Pointer));
+    assert_eq!(p.press(at), None);
+    assert_eq!(p.query.text(), "");
+    assert_eq!(p.shown().len(), 8, "emptied: every item back");
+    assert!(p.is_open());
+}

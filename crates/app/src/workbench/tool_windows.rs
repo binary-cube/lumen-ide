@@ -1010,6 +1010,8 @@ impl Workbench {
                 request => self.request = Some(request),
             }
         }
+        // A row that opens another menu under the view's button.
+        self.open_asked_tool_view_menu();
         used
     }
 }

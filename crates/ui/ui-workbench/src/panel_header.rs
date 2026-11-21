@@ -5,16 +5,17 @@
 
 use icons::IconId;
 use kernel::{Point, Rect};
-use render_api::Quad;
 use text_layout::Font;
 use ui_kit::{centered_baseline, draw_icon, draw_text};
 
-use crate::Painter;
+use crate::{Painter, ds};
 
 /// Header height, in logical pixels.
 const HEIGHT: f32 = 44.0;
 /// A bottom panel's header height (the bottom windows').
 const BOTTOM_HEIGHT: f32 = 34.0;
+/// A bottom window's header buttons (logical pixels): smaller, as its header is.
+const BOTTOM_BUTTON: f32 = 24.0;
 /// What a title keeps at least (logical pixels): shorter, it's cut with `…`; the panel
 /// isn't dragged narrower than its buttons and this.
 const TITLE_MIN: f32 = 56.0;
@@ -117,8 +118,8 @@ impl PanelHeader {
             let metrics = text.metrics(&font);
             centered_baseline(b.min_y(), b.size.height, &metrics)
         };
-        let button = px(if self.bottom { 24.0 } else { 26.0 });
-        let glyph = px(if self.bottom { 14.0 } else { 16.0 });
+        let button = px(if self.bottom { BOTTOM_BUTTON } else { ds::button_size::MEDIUM });
+        let ctx = ds::Ctx::new(palette, self.scale);
         let gap = px(2.0);
         let top = (b.min_y() + (b.size.height - button) / 2.0).round();
         let mut x = b.max_x() - px(10.0);
@@ -126,20 +127,12 @@ impl PanelHeader {
             for action in group.iter().rev() {
                 x -= button;
                 let rect = Rect::new(x, top, button, button);
-                if action.lit {
-                    let lit = palette.accent.with_alpha(0.14);
-                    layer.quad(Quad::filled(rect, lit).rounded(px(6.0)));
-                } else if self.hover == Some(action.id) {
-                    layer.quad(Quad::filled(rect, palette.tab_hover).rounded(px(6.0)));
-                }
-                let r = Rect::new(
-                    x + (button - glyph) / 2.0,
-                    top + (button - glyph) / 2.0,
-                    glyph,
-                    glyph,
-                );
-                let color = if action.lit { palette.accent } else { palette.text_muted };
-                draw_icon(layer, icons, action.icon, r, color);
+                let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                    .icon(icons.name(action.icon).unwrap_or_default())
+                    .rest_tone(ds::Tone::Neutral)
+                    .on(action.lit)
+                    .hovered(self.hover == Some(action.id));
+                ds::button(layer, text, icons, &ctx, rect, spec);
                 self.rects.push((rect, action.id));
                 x -= gap;
             }
@@ -147,7 +140,7 @@ impl PanelHeader {
                 x -= px(5.0);
                 let h = px(16.0);
                 let y = (b.min_y() + (b.size.height - h) / 2.0).round();
-                layer.quad(Quad::filled(Rect::new(x, y, line, h), palette.border));
+                ds::divider_vertical(layer, &ctx, x, y, y + h);
                 x -= px(5.0);
             }
         }
@@ -179,10 +172,7 @@ impl PanelHeader {
         let title_w = text.shape_line(title, &font).width.min(px(TITLE_MIN));
         self.needs = ((icon_w + title_w + px(4.0) + buttons_w) / self.scale.max(0.1)).ceil();
         if self.bottom {
-            layer.quad(Quad::filled(
-                Rect::new(b.min_x(), b.max_y() - line, b.size.width, line),
-                palette.card_border,
-            ));
+            ds::divider_card(layer, &ctx, b.min_x(), b.max_x(), b.max_y() - line);
         }
     }
 }

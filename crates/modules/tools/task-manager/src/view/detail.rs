@@ -11,16 +11,19 @@ use render_api::{Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_components::LayerPainter;
 use ui_components::chart::{ChartSeries, Samples, TimeChart, time_chart};
-use ui_components::ds::{self, BadgeSpec, Ctx, Tone, radius};
+use ui_components::ds::{self, BadgeSpec, ButtonKind, ButtonSpec, Ctx, Tone, radius};
 use ui_kit::draw_text;
 
 use super::actions::{kind_icon, kind_index};
-use super::table::{group_icon, icon_button, right_text};
+use super::table::{group_icon, quiet_icon, right_text};
 use super::{Focus, Hit, TaskManager, summary};
 use crate::collector::Line;
 use crate::collector::Metric;
 use crate::layout::{DetailLayout, DetailPlace, PageLayout};
 use workbench_model::ActionTarget;
+
+/// A stat's dot in its metric's color (logical pixels).
+const STAT_DOT: f32 = 6.0;
 
 impl TaskManager {
     pub(super) fn paint_detail(
@@ -68,33 +71,12 @@ impl TaskManager {
             let font = ds.ui_font(-0.5);
             let w = text.shape_line(&self.texts.labels.back, &font).width + px(30.0);
             let back = Rect::new(x0 - px(6.0), y, w, px(28.0));
-            let hovered = self.hover == Some(Hit::Back);
-            if hovered {
-                layer.quad(Quad::filled(back, p.text.with_alpha(0.06)).rounded(px(radius::SM)));
-            }
-            if let Some(id) = icons.id("chevron-left") {
-                let s = px(14.0);
-                ui_kit::draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(
-                        back.min_x() + px(6.0),
-                        back.min_y() + (back.size.height - s) / 2.0,
-                        s,
-                        s,
-                    ),
-                    p.accent,
-                );
-            }
-            let base = ds::optical_baseline(back.min_y(), back.size.height, &font);
-            draw_text(
-                layer,
-                &text.shape_line(&self.texts.labels.back, &font),
-                back.min_x() + px(24.0),
-                base,
-                p.accent,
-            );
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon("chevron-left")
+                .label(&self.texts.labels.back)
+                .tone(Tone::Accent)
+                .hovered(self.hover == Some(Hit::Back));
+            ds::button(layer, text, icons, ds, back, spec);
             self.hits.push((back, Hit::Back));
             y = back.max_y() + px(8.0);
         }
@@ -109,8 +91,8 @@ impl TaskManager {
                 p.text_muted,
             );
         }
-        let close =
-            Rect::new(rect.max_x() - pad - px(28.0) + px(6.0), y - px(2.0), px(28.0), px(28.0));
+        let size = px(ds::button_size::LARGE);
+        let close = Rect::new(rect.max_x() - pad - size + px(6.0), y - px(2.0), size, size);
         let title_font = ds.ui_font(1.5).with_weight(Font::SEMIBOLD);
         let name_x = x0 + icon + px(10.0);
         let name_room =
@@ -126,15 +108,8 @@ impl TaskManager {
             p.text,
         );
         if !as_page {
-            let _ = icon_button(
-                layer,
-                icons,
-                ds,
-                close,
-                "x",
-                self.hover == Some(Hit::CloseDetail),
-                false,
-            );
+            let spec = quiet_icon("x").hovered(self.hover == Some(Hit::CloseDetail));
+            ds::button(layer, text, icons, ds, close, spec);
             self.hits.push((close, Hit::CloseDetail));
         }
         y += px(28.0);
@@ -291,14 +266,9 @@ impl TaskManager {
             let ix = r.min_x() + px(10.0);
             let room = r.size.width - px(20.0);
             if let Some(metric) = stat.metric {
-                let dot = px(6.0);
-                pen.layer.quad(
-                    Quad::filled(
-                        Rect::new(ix, r.min_y() + px(12.0), dot, dot),
-                        summary::color(p, metric),
-                    )
-                    .rounded(dot / 2.0),
-                );
+                let half = px(STAT_DOT) / 2.0;
+                let center = kernel::Point::new(ix + half, r.min_y() + px(12.0) + half);
+                ds::dot(pen.layer, ds, center, STAT_DOT, summary::color(p, metric));
             }
             ds::draw_ellipsized(
                 pen.layer,
@@ -579,15 +549,8 @@ impl TaskManager {
             if let Some(action) = line.actions_on(ActionTarget::Process(process.pid)).next() {
                 let r = Rect::new(x0 + inner - px(28.0), y, px(28.0), row);
                 let hit = Hit::Action(*action);
-                let _ = icon_button(
-                    pen.layer,
-                    pen.icons,
-                    ds,
-                    r,
-                    kind_icon(action.kind),
-                    self.hover == Some(hit),
-                    false,
-                );
+                let spec = quiet_icon(kind_icon(action.kind)).hovered(self.hover == Some(hit));
+                ds::button(pen.layer, pen.text, pen.icons, ds, r, spec);
                 if let Some(visible) = r.intersect(&clip) {
                     self.hits.push((visible, hit));
                 }
@@ -646,17 +609,11 @@ impl TaskManager {
             let stop = line.actions_on(ActionTarget::Activity(a.id)).next().filter(|_| a.running());
             let inner = match stop {
                 Some(action) => {
-                    let r = Rect::new(x0 + inner - px(28.0), y - px(4.0), px(28.0), px(28.0));
+                    let size = px(ds::button_size::LARGE);
+                    let r = Rect::new(x0 + inner - size, y - px(4.0), size, size);
                     let hit = Hit::Action(*action);
-                    let _ = icon_button(
-                        pen.layer,
-                        pen.icons,
-                        ds,
-                        r,
-                        kind_icon(action.kind),
-                        self.hover == Some(hit),
-                        false,
-                    );
+                    let spec = quiet_icon(kind_icon(action.kind)).hovered(self.hover == Some(hit));
+                    ds::button(pen.layer, pen.text, pen.icons, ds, r, spec);
                     if let Some(visible) = r.intersect(&clip) {
                         self.hits.push((visible, hit));
                     }

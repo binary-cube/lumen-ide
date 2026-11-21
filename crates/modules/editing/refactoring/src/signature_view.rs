@@ -14,7 +14,7 @@ use refactor::{NameStyle, Plan, valid_name};
 use render_api::Quad;
 use text_layout::Font;
 use ui_components::control::{Control, Controls};
-use ui_components::ds::{self, Ctx, Tone, radius, space};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size, radius, space};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{Viewer, ViewerAction, ViewerKey, ViewerPaint};
 use ui_kit::{TextInput, TextInputStyle, draw_text};
@@ -35,6 +35,9 @@ pub struct SignatureData {
 
 /// The fields' place among the controls (see [`SignatureView::with_controls`]).
 const FIELDS: usize = 2;
+
+/// How far apart a parameter's ↑ ↓ ✕ start (logical pixels): a button and a gap.
+const ROW_BUTTON_STEP: f32 = 32.0;
 
 /// What a click hit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,13 +399,8 @@ impl Viewer for SignatureView {
         let width = px(920.0).min(b.size.width - px(48.0));
         let x0 = (b.min_x() + (b.size.width - width) / 2.0).round();
         let mut y = y0;
-        let page = Page {
-            x0,
-            width,
-            small: ds.ui_font(-1.0),
-            font: ds.ui_font(0.0),
-            code: ds.code_font(0.0),
-        };
+        let page =
+            Page { x0, width, small: ds.ui_font(-1.0), code: ds.code_font(0.0), icons: ctx.icons };
         self.paint_header(Pen { layer, text: ctx.text, ds: &ds }, &page, y);
         y += px(48.0);
         self.paint_signature(Pen { layer, text: ctx.text, ds: &ds }, &page, y);
@@ -438,7 +436,7 @@ impl Viewer for SignatureView {
 
 impl SignatureView {
     /// The header at `y`: the title, the function, `esc`.
-    fn paint_header(&mut self, pen: Pen<'_, '_>, page: &Page, y: f32) {
+    fn paint_header(&mut self, pen: Pen<'_, '_>, page: &Page<'_>, y: f32) {
         let Pen { layer, text, ds } = pen;
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
@@ -466,7 +464,7 @@ impl SignatureView {
     }
 
     /// The new signature at `y`, and the button that applies it.
-    fn paint_signature(&mut self, pen: Pen<'_, '_>, page: &Page, y: f32) {
+    fn paint_signature(&mut self, pen: Pen<'_, '_>, page: &Page<'_>, y: f32) {
         let Pen { layer, text, ds } = pen;
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
@@ -504,7 +502,7 @@ impl SignatureView {
 
     /// The table from `y`: the columns' titles, then a row per parameter, then "+ Add
     /// parameter". Returns where it ends.
-    fn paint_params(&mut self, pen: Pen<'_, '_>, page: &Page, mut y: f32) -> f32 {
+    fn paint_params(&mut self, pen: Pen<'_, '_>, page: &Page<'_>, mut y: f32) -> f32 {
         let Pen { layer, text, ds } = pen;
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
@@ -533,12 +531,16 @@ impl SignatureView {
         }
         y += self.rows.len() as f32 * table.row_h + px(6.0);
         // + Add parameter
-        let add = text.shape_line(&format!("+ {}", t("refactor.param_add")), small);
-        let add_rect = Rect::new(x0, y, add.width + px(16.0), px(26.0));
-        if self.hover == Some(Hit::Add) {
-            layer.quad(Quad::filled(add_rect, p.accent.with_alpha(0.08)).rounded(px(radius::SM)));
-        }
-        draw_text(layer, &add, x0 + px(8.0), ds::optical_baseline(y, px(26.0), small), p.accent);
+        let add_label = t("refactor.param_add");
+        let add = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("plus")
+            .label(&add_label)
+            .tone(Tone::Accent)
+            .hovered(self.hover == Some(Hit::Add));
+        let add_h = px(button_size::MEDIUM);
+        let add_w = ds::button_width(text, ds, &add, add_h);
+        let add_rect = Rect::new(x0, y, add_w, add_h);
+        ds::button(layer, text, page.icons, ds, add_rect, add);
         self.hits.push((add_rect, Hit::Add));
         y + px(36.0)
     }
@@ -548,7 +550,7 @@ impl SignatureView {
     fn paint_param_row(
         &mut self,
         pen: Pen<'_, '_>,
-        page: &Page,
+        page: &Page<'_>,
         table: &Table,
         names: &[String],
         i: usize,
@@ -605,40 +607,37 @@ impl SignatureView {
     fn paint_row_buttons(
         &mut self,
         pen: Pen<'_, '_>,
-        page: &Page,
+        page: &Page<'_>,
         table: &Table,
         i: usize,
         fy: f32,
     ) {
         let Pen { layer, text, ds } = pen;
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
-        let (font, field_h) = (&page.font, table.field_h);
         let bx0 = table.x0 + table.cols_w;
-        for (k, (glyph, hit)) in
-            [("↑", Hit::Up(i)), ("↓", Hit::Down(i)), ("✕", Hit::Remove(i))].into_iter().enumerate()
+        for (k, (icon, hit)) in
+            [("arrow-up", Hit::Up(i)), ("arrow-down", Hit::Down(i)), ("x", Hit::Remove(i))]
+                .into_iter()
+                .enumerate()
         {
-            let r = Rect::new(bx0 + k as f32 * px(32.0), fy, px(28.0), field_h);
+            let r = Rect::new(
+                bx0 + k as f32 * px(ROW_BUTTON_STEP),
+                fy,
+                px(button_size::LARGE),
+                table.field_h,
+            );
             let disabled = matches!(hit, Hit::Up(0))
                 || matches!(hit, Hit::Down(d) if d + 1 == self.rows.len());
-            if self.hover == Some(hit) && !disabled {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.06)).rounded(px(radius::SM)));
+            let hovered = self.hover == Some(hit);
+            let mut spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon(icon)
+                .rest_tone(Tone::Neutral)
+                .enabled(!disabled)
+                .hovered(hovered);
+            if matches!(hit, Hit::Remove(_)) {
+                spec = spec.hover_content_tone(Tone::Danger);
             }
-            let shaped = text.shape_line(glyph, font);
-            let color = if disabled {
-                p.text_muted.with_alpha(0.35)
-            } else if matches!(hit, Hit::Remove(_)) && self.hover == Some(hit) {
-                p.danger
-            } else {
-                p.text_muted
-            };
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                ds::optical_baseline(fy, field_h, font),
-                color,
-            );
+            ds::button(layer, text, page.icons, ds, r, spec);
             if !disabled {
                 self.hits.push((r, hit));
             }
@@ -646,13 +645,13 @@ impl SignatureView {
     }
 }
 
-/// The page's column and the fonts its parts share.
-struct Page {
+/// The page's column, the fonts and the icons its parts share.
+struct Page<'a> {
     x0: f32,
     width: f32,
     small: Font,
-    font: Font,
     code: Font,
+    icons: &'a icons::Icons,
 }
 
 /// The parameters' table: its columns (left edge, the fields' width, their widths and the

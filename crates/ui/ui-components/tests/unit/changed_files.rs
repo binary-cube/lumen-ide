@@ -185,3 +185,40 @@ fn several_files_are_chosen() {
     tree.set_files(files);
     assert_eq!(tree.chosen().len(), 3);
 }
+
+/// Its search is the app's search field: pressed it has the keys (typed into, ⌘A), its
+/// caret only while the tree has the focus, × (a hand over it) empties it and every file
+/// comes back.
+#[test]
+fn its_search_is_the_shared_field_with_its_clear_button() {
+    let mut tree = sample();
+    let all = shown(&tree).len();
+    let mut text = text_layout::TextSystem::new();
+    let palette = crate::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let ds = crate::ds::Ctx::new(&palette, 1.0);
+    let area = Rect::new(0.0, 0.0, 400.0, 300.0);
+    let mut paint = |tree: &mut FilesTree, focused: bool| {
+        let mut scene = render_api::Scene::default();
+        tree.paint(&mut scene, &mut text, &icons, &ds, (area, focused), None);
+    };
+    paint(&mut tree, true);
+    let field = tree.query.area();
+    let inside = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
+    assert_eq!(tree.cursor_at(inside), Some(crate::ViewerCursor::Text));
+    assert!(tree.press(inside, 1).is_some());
+    assert!(tree.searching, "pressed: it has the keys");
+    assert!(tree.text_input("reply"));
+    assert!(tree.command("select_all"));
+    assert_eq!(tree.selected_text().as_deref(), Some("reply"));
+    paint(&mut tree, true);
+    assert!(tree.query.shows_caret());
+    paint(&mut tree, false);
+    assert!(!tree.query.shows_caret(), "the view without the focus: no caret");
+    let clear = tree.query.clear_area().expect("× shown with text");
+    let at = Point::new(clear.min_x() + 2.0, clear.min_y() + 2.0);
+    assert_eq!(tree.cursor_at(at), Some(crate::ViewerCursor::Pointer));
+    tree.press(at, 1);
+    assert_eq!(tree.query.text(), "");
+    assert_eq!(shown(&tree).len(), all, "emptied: every file back");
+}

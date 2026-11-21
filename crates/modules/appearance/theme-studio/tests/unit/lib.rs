@@ -144,6 +144,17 @@ fn preview_of(action: Option<ViewerAction>) -> String {
     }
 }
 
+/// The ids of a menu's rows (its separators left out).
+fn menu_ids(entries: &[ViewMenuEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|e| match e {
+            ViewMenuEntry::Item { id, .. } => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn has(studio: &Studio, hit: &Hit) -> bool {
     studio.hits.iter().any(|(_, h)| h == hit)
 }
@@ -311,14 +322,25 @@ fn layers_are_edited_and_previewed_live() {
     assert!(!studio.gallery_open && studio.layer_open(3));
     paint(&mut studio, &mut text, &mut scene);
     assert!(click_on(&mut studio, Hit::Menu(0)).is_none());
-    paint(&mut studio, &mut text, &mut scene);
-    for item in [effects::MenuItem::Duplicate, effects::MenuItem::Reset, effects::MenuItem::Remove]
-    {
-        assert!(has(&studio, &Hit::MenuItem(0, item)), "{item:?}");
-    }
-    let src = preview_of(click_on(&mut studio, Hit::MenuItem(0, effects::MenuItem::Remove)));
+    let (anchor, entries) = studio.take_menu().expect("the app's menu, under the button");
+    assert!(anchor.size.width > 0.0);
+    assert_eq!(
+        menu_ids(&entries),
+        ["effect:duplicate:0", "effect:reset:0", "effect:remove:0"],
+        "duplicate, reset, remove"
+    );
+    let dangerous: Vec<bool> = entries
+        .iter()
+        .filter_map(|e| match e {
+            ViewMenuEntry::Item { look, .. } => Some(look.danger),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(dangerous, [false, false, true], "only the removal in the danger color");
+    assert!(studio.take_menu().is_none(), "taken once");
+    assert!(studio.command("effect:remove:0"));
+    let src = previewed(&mut studio);
     assert!(!src.contains("kind = \"garland\""), "{src}");
-    assert_eq!(studio.menu_for, None);
     // A color picked for the snow (now the second layer): written in hex.
     studio.command("open-all");
     paint(&mut studio, &mut text, &mut scene);
@@ -783,17 +805,27 @@ fn the_name_takes_the_keys_until_enter() {
     assert!(!studio.command("select_all"));
 }
 
-/// An open effect's menu: a press elsewhere only closes it (the search keeps the keys).
+/// An effect's card offers its menu on a right-click too; a row of it is a command (an
+/// unknown effect's row does nothing).
 #[test]
-fn a_press_beside_an_open_menu_only_closes_it() {
+fn an_effect_s_card_offers_its_menu_on_a_right_click() {
+    let (mut studio, mut text, mut scene) = opened();
+    show(&mut studio, &mut text, &mut scene, Category::Effects);
+    let (header, _) = studio.hits.iter().find(|(_, h)| *h == Hit::Fold(1)).cloned().unwrap();
+    let at = Point::new(header.min_x() + 40.0, header.min_y() + header.size.height / 2.0);
+    let entries = studio.context_menu(at).expect("the card's menu");
+    assert_eq!(menu_ids(&entries), ["effect:duplicate:1", "effect:reset:1", "effect:remove:1"]);
+    assert!(studio.context_menu(Point::new(1.0, 1.0)).is_none(), "nothing elsewhere");
+    assert!(studio.command("effect:duplicate:1"));
+    assert_eq!(studio.draft.as_ref().unwrap().decorations.layers.len(), 4);
+    assert!(!studio.command("effect:shrink:1"));
+}
+
+/// The search keeps the keys until Esc.
+#[test]
+fn the_search_lets_go_on_escape() {
     let (mut studio, _text, _scene) = opened();
     assert!(studio.command("find"));
-    studio.menu_for = Some(0);
-    let before = studio.category;
-    let _ = click_on(&mut studio, Hit::Category(Category::Caret));
-    assert_eq!(studio.menu_for, None);
-    assert_eq!(studio.category, before, "the press did nothing more");
-    assert!(studio.editing_query(), "the search kept the keys");
     // Esc: the search emptied and let go.
     assert!(studio.text_input("x"));
     assert!(studio.edit_key(ViewerKey::Escape));
@@ -821,4 +853,29 @@ fn the_picker_has_the_keys_while_open() {
     assert!(studio.edit_key(ViewerKey::Escape), "the picker gives up");
     assert!(!studio.picker.is_open());
     assert!(studio.editing_query());
+}
+
+/// The search is the app's search field: pressed, it has the keys (the name's field hasn't:
+/// one caret); typed into, ⌘A selects it (⌘C copies it), × empties it and lists the
+/// category again; the name pressed takes the focus from it.
+#[test]
+fn the_search_is_the_app_s_field_with_one_focus() {
+    let (mut studio, mut text, mut scene) = opened();
+    let _ = click_on(&mut studio, Hit::Search);
+    assert!(studio.editing_query() && !studio.editing_name());
+    assert!(studio.text_input("caret"));
+    assert!(studio.command("select_all"));
+    assert_eq!(studio.selected_text().as_deref(), Some("caret"), "⌘A: all of it");
+    paint(&mut studio, &mut text, &mut scene);
+    assert!(has(&studio, &Hit::Found(0)), "it found something");
+    let field = studio.query.area();
+    // × sits at the field's right end (the shared field's room for it).
+    let clear = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    let _ = studio.click(clear);
+    assert!(studio.query.text().is_empty(), "× empties it");
+    paint(&mut studio, &mut text, &mut scene);
+    assert!(!has(&studio, &Hit::Found(0)), "the category listed again");
+    // The name pressed: the focus is its, the search's caret gone.
+    let _ = click_on(&mut studio, Hit::Name);
+    assert!(studio.editing_name() && !studio.editing_query());
 }

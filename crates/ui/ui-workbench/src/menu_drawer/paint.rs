@@ -118,10 +118,13 @@ impl MenuDrawer {
                 palette.text.with_alpha(0.06),
             ));
         }
-        layer.quad(Quad::filled(
-            Rect::new(panel.max_x() - line, panel.min_y(), line, panel.size.height),
-            palette.border,
-        ));
+        crate::ds::divider_vertical(
+            layer,
+            &ctx,
+            panel.max_x() - line,
+            panel.min_y(),
+            panel.max_y(),
+        );
         // Under the header row (the bar's height: its menu button, macOS' window buttons).
         let body_top = panel.min_y() + self.bar_h;
         let first = Rect::new(
@@ -176,35 +179,31 @@ impl MenuDrawer {
             }
             _ => self.sub_room = Rect::default(),
         }
-        self.paint_button(icons, scene, &ctx);
+        self.paint_button(icons, text, scene, &ctx);
         self.reveal = false;
     }
 
     /// The menu button where the bar has it, lit (the drawer is its menu): it stays put
     /// while the drawer slides in and out under it.
-    pub(super) fn paint_button(&self, icons: &Icons, scene: &mut Scene, ctx: &Ctx<'_>) {
+    pub(super) fn paint_button(
+        &self,
+        icons: &Icons,
+        text: &mut TextSystem,
+        scene: &mut Scene,
+        ctx: &Ctx<'_>,
+    ) {
         let b = self.button;
         if b.size.width <= 0.0 {
             return;
         }
-        let p = ctx.palette;
         let layer = scene.push_layer(Some(self.area));
-        let fill = if self.open {
-            p.tab_hover
-        } else {
-            p.tab_hover.with_alpha(p.tab_hover.a * self.shown.value())
-        };
-        layer.quad(Quad::filled(b, fill).rounded(ctx.px(7.0)));
-        if let Some(id) = icons.id("menu") {
-            let icon = ctx.px(16.0);
-            let at = Rect::new(
-                (b.min_x() + (b.size.width - icon) / 2.0).round(),
-                (b.min_y() + (b.size.height - icon) / 2.0).round(),
-                icon,
-                icon,
-            );
-            draw_icon(layer, icons, id, at, p.text);
-        }
+        // The bar's own menu button, lit as far as the drawer is out.
+        let lit = if self.open { 1.0 } else { self.shown.value() };
+        let spec = ui_components::ds::ButtonSpec::new(ui_components::ds::ButtonKind::Ghost)
+            .icon("menu")
+            .rest_tone(ui_components::ds::Tone::Neutral)
+            .hover_amount(lit);
+        ui_components::ds::button(layer, text, icons, ctx, b, spec);
     }
 
     /// The keys that work now: on the categories, in a submenu, on the filter's results.
@@ -266,17 +265,9 @@ impl MenuDrawer {
         );
         self.field = field;
         let layer = scene.push_layer(Some(first));
-        let input = ds::search_field(layer, icons, ctx, field, true);
-        let style = field_style(ctx);
-        let input_layer = scene.push_layer(Some(input));
-        self.query.paint(
-            input_layer,
-            text,
-            input,
-            self.open,
-            &i18n::t("menu_drawer.filter"),
-            &style,
-        );
+        // The drawer's one field: its caret while the drawer is open.
+        let placeholder = i18n::t("menu_drawer.filter");
+        self.query.paint(layer, text, icons, ctx, (field, self.open), &placeholder);
 
         // The list's room, under the field.
         let room = Rect::new(
@@ -784,26 +775,6 @@ fn paint_entry(
     let shaped = text.shape_line(&label, &font);
     draw_text(layer, &shaped, x, ds::optical_baseline(top, row_h, &font), ctx.fade(p.text));
     true
-}
-
-/// The filter field's text style (the search field draws its frame and icon).
-fn field_style(ctx: &Ctx<'_>) -> TextInputStyle {
-    let p = ctx.palette;
-    TextInputStyle {
-        font: ctx.ui_font(-0.5),
-        background: Rgba::TRANSPARENT,
-        border: Rgba::TRANSPARENT,
-        border_focused: Rgba::TRANSPARENT,
-        text: p.text,
-        placeholder: p.text_muted,
-        selection: p.selection,
-        caret: p.caret,
-        radius: 0.0,
-        border_width: 0.0,
-        padding: 0.0,
-        caret_width: ctx.px(1.5).max(1.0),
-        lead: 0.0,
-    }
 }
 
 /// A row's background as the list modals light theirs: the keyboard's (or the open

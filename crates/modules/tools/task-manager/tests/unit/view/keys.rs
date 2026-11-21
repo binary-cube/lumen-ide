@@ -6,8 +6,9 @@
 use super::*;
 use crate::model::{Column, Grouping};
 use crate::view::tests::{Pen, area, center, demo, manager};
+use kernel::Point;
 use std::sync::PoisonError;
-use ui_components::{Viewer, ViewerKey};
+use ui_components::{Viewer, ViewerCursor, ViewerKey};
 
 /// Every class: its width (logical pixels) and a tall page.
 const CLASSES: [f32; 5] = [1300.0, 900.0, 600.0, 400.0, 280.0];
@@ -184,7 +185,7 @@ fn typing_goes_into_the_filter_its_caret_moves_there_only() {
     press(&mut view, ViewerKey::Backspace);
     assert_eq!(view.filter.text(), "intr", "← moved the caret in the filter");
     press(&mut view, ViewerKey::Home);
-    assert_eq!(view.filter.cursor(), 0, "Home: the filter's start");
+    assert_eq!(view.filter.input.cursor(), 0, "Home: the filter's start");
     // ↓ from the filter: through what it finds (the filter keeps the keys, as a search's
     // list).
     view.clear_filter();
@@ -194,9 +195,9 @@ fn typing_goes_into_the_filter_its_caret_moves_there_only() {
     assert_eq!(view.selected(), Some("app/Interface"));
     // ← / → in the table don't touch the filter.
     view.focus_on(Focus::Table);
-    let before = view.filter.cursor();
+    let before = view.filter.input.cursor();
     press(&mut view, ViewerKey::Right);
-    assert_eq!(view.filter.cursor(), before);
+    assert_eq!(view.filter.input.cursor(), before);
     // A narrow page: typing opens the filter over the bar.
     let mut narrow = manager();
     pen.paint(&mut narrow, 340.0, 900.0, 1.0);
@@ -316,7 +317,7 @@ fn the_app_s_editing_commands_reach_the_filter() {
     pen.paint(&mut view, 1300.0, 900.0, 1.0);
     view.text_input("inter");
     assert!(view.command("select_all"));
-    assert_eq!(view.filter.selected_text(), "inter", "⌘A: all of it");
+    assert_eq!(view.filter.input.selected_text(), "inter", "⌘A: all of it");
     assert!(view.command("cut"));
     assert!(view.filter.text().is_empty(), "⌘X: gone");
     assert!(view.shown_names().len() > 1, "the rows filtered again");
@@ -380,7 +381,7 @@ fn the_filter_s_editing_keys_go_through_its_part() {
     assert_eq!(view.filter.text(), "app ", "⌥⌫: the word");
     press(&mut view, ViewerKey::Home);
     assert!(view.edit_key_with(ViewerKey::End, extend));
-    assert_eq!(view.filter.selected_text(), "app ", "⇧End: selected");
+    assert_eq!(view.filter.input.selected_text(), "app ", "⇧End: selected");
     view.text_input("inter");
     assert_eq!(view.filter.text(), "inter", "typed over the selection");
     press(&mut view, ViewerKey::Home);
@@ -397,7 +398,8 @@ fn the_filter_s_editing_keys_go_through_its_part() {
 }
 
 /// ⌘A selects the filter, ⌘C copies its selection (else the keys' row), what's pasted goes
-/// in on one line — only while it has the keys.
+/// in on one line (its breaks as spaces, the shared field's way) — only while it has the
+/// keys.
 #[test]
 fn select_all_copy_and_paste_in_the_filter() {
     let mut pen = Pen::new();
@@ -408,7 +410,9 @@ fn select_all_copy_and_paste_in_the_filter() {
     assert!(view.command("select_all"));
     assert_eq!(view.selected_text().as_deref(), Some("inter"), "⌘C: the filter's");
     assert!(view.paste("Inter\nface"));
-    assert_eq!(view.filter.text(), "Interface", "pasted over it, on one line");
+    assert_eq!(view.filter.text(), "Inter face", "pasted over it, on one line: a space");
+    assert!(view.command("select_all"));
+    assert!(view.paste("Interface"));
     assert_eq!(view.shown_names(), ["Interface"]);
     // The table with the keys: nothing pasted, the row copied.
     press(&mut view, ViewerKey::Down);
@@ -418,4 +422,33 @@ fn select_all_copy_and_paste_in_the_filter() {
     assert!(!view.command("select_all"));
     let row = view.selected_text().expect("the keys' row");
     assert!(row.contains("Interface"), "{row}");
+}
+
+/// The filter is the app's search field: pressed, it has the keys and a drag selects; its ×
+/// (shown with text, a hand under the mouse) empties it and the rows are filtered again; the
+/// keys elsewhere, it draws no caret (its focus is the view's one).
+#[test]
+fn the_filter_s_clear_button_empties_it_and_filters_again() {
+    let mut pen = Pen::new();
+    let mut view = manager();
+    pen.paint(&mut view, 1300.0, 900.0, 1.0);
+    let field = area(&view, |h| *h == Hit::Filter).expect("the field");
+    // A press puts the caret there, a drag selects what it went over.
+    view.click(center(field));
+    assert!(view.filter_has_keys(), "pressed: the filter's");
+    view.text_input("inter");
+    pen.paint(&mut view, 1300.0, 900.0, 1.0);
+    let all = view.model().items.len();
+    // × sits at the field's right end (the shared field's room for it).
+    let clear = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    assert!(view.hover(clear), "a hand on ×");
+    assert_eq!(view.cursor_at(clear), Some(ViewerCursor::Pointer));
+    assert!(view.tooltip_at(clear).is_some(), "× says what it does");
+    view.click(clear);
+    assert!(view.filter.text().is_empty(), "× empties it");
+    assert!(view.model().items.len() >= all, "the rows filtered again");
+    assert!(view.shown_names().len() > 1);
+    // The keys on the table: the filter no longer has them (its caret goes).
+    view.focus_on(Focus::Table);
+    assert!(!view.filter_has_keys() && !view.wants_text());
 }

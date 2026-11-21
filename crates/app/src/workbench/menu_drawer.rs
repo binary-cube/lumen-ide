@@ -133,11 +133,11 @@ impl OverlaySlot for MenuDrawerSlot {
     }
 
     fn input<'a>(&self, wb: &'a Workbench) -> Option<&'a ui_kit::TextInput> {
-        Some(&wb.menu_drawer.as_ref()?.query)
+        Some(&wb.menu_drawer.as_ref()?.query.input)
     }
 
     fn input_mut<'a>(&self, wb: &'a mut Workbench) -> Option<&'a mut ui_kit::TextInput> {
-        Some(&mut wb.menu_drawer.as_mut()?.query)
+        Some(&mut wb.menu_drawer.as_mut()?.query.input)
     }
 
     fn held(&self, wb: &mut Workbench) -> bool {
@@ -232,7 +232,7 @@ impl OverlaySlot for MenuDrawerSlot {
             };
         }
         let Some(drawer) = &mut wb.menu_drawer else { return MouseResult::None };
-        match drawer.hit(p) {
+        match drawer.hit_with(p, clicks) {
             DrawerAction::Run(id) => {
                 wb.close_menu_drawer();
                 MouseResult::MenuCommand(id)

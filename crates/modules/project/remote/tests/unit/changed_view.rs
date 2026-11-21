@@ -1,5 +1,14 @@
 use super::*;
 
+/// Its search drawn where `view.field` says (its area and its × taken from there).
+fn paint_search(view: &mut ChangedFiles) {
+    let palette = ui_components::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut layer = render_api::Layer::default();
+    let mut text = text_layout::TextSystem::new();
+    view.paint_search(&mut layer, &mut text, &icons::Icons::builtin(), &ctx);
+}
+
 fn file(path: &str, modified: i64) -> RecentFile {
     RecentFile { path: path.into(), modified, size: 1, sent: true }
 }
@@ -75,6 +84,7 @@ fn the_search_narrows_the_files_by_their_paths() {
         field: Rect::new(0.0, 0.0, 200.0, 28.0),
         ..ChangedFiles::default()
     };
+    paint_search(&mut view);
     // Every stamp on one day (whatever the zone): one heading.
     for s in &mut view.stamps {
         s.day = day;
@@ -167,16 +177,19 @@ fn the_calendar_has_the_keys_while_open() {
     assert_eq!(view.controls.focused(), None);
 }
 
-/// The search is a part: its × empties it (the keys kept), Tab isn't its, the edit commands
-/// are, a press elsewhere takes the keys.
+/// The search is the app's field: typed into, ⌘A selects it, its × empties it (the keys
+/// kept, the list from its top), Tab isn't its, a press elsewhere takes the keys; the caret
+/// is the focus's, one for the view (the open calendar takes it).
 #[test]
 fn the_search_takes_its_keys_through_its_controls() {
     let mut view = ChangedFiles {
         field: Rect::new(0.0, 0.0, 200.0, 28.0),
-        clear: Some(Rect::new(180.0, 4.0, 16.0, 16.0)),
+        chips: vec![(Rect::new(300.0, 0.0, 10.0, 10.0), Chip::Pick)],
         ..ChangedFiles::default()
     };
+    paint_search(&mut view);
     view.click(Point::new(10.0, 10.0));
+    view.release();
     assert!(view.typing());
     view.text_input("admin");
     assert!(view.command("select_all"));
@@ -184,10 +197,35 @@ fn the_search_takes_its_keys_through_its_controls() {
     assert!(!view.edit_key_with(ViewerKey::Tab, KeyReach::default()), "Tab isn't its");
     assert!(view.typing());
     view.scroll = 40.0;
-    view.click(Point::new(185.0, 10.0));
+    paint_search(&mut view);
+    let clear = view.query.area().max_x() - 17.0;
+    view.click(Point::new(clear, 14.0));
     assert_eq!(view.query.text(), "", "the × empties it");
     assert_eq!(view.scroll, 0.0, "the list from its top");
     assert!(view.typing(), "the keys kept");
+    // The calendar opened: it's the one focus, the search has no caret.
+    view.click(Point::new(305.0, 5.0));
+    assert_eq!(view.controls.focused(), Some(CALENDAR));
+    assert!(!view.typing());
+    view.picker = None;
     view.click(Point::new(300.0, 100.0));
     assert!(!view.typing(), "a press elsewhere takes them");
+}
+
+/// Only a change of the search's text is an edit (the field's own `take_edited`): a caret
+/// moved isn't; typing and Esc emptying it are.
+#[test]
+fn the_search_tells_only_its_text_changed() {
+    use ui_components::control::Control;
+    let mut field = ui_components::search_field::SearchField::new();
+    field.set_text("ab");
+    let (mut edited, mut left) = (false, false);
+    let mut part = search::SearchPart { field: &mut field, edited: &mut edited, left: &mut left };
+    assert!(part.key(ViewerKey::Left, ui_components::KeyReach::default()));
+    assert!(!*part.edited, "nothing changed");
+    assert!(part.text("x"));
+    assert!(*part.edited);
+    *part.edited = false;
+    assert!(part.key(ViewerKey::Escape, ui_components::KeyReach::default()));
+    assert!(*part.edited && !*part.left, "emptied: an edit, the keys kept");
 }

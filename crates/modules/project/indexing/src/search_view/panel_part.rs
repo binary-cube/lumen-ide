@@ -150,8 +150,12 @@ impl Control for PanelPart<'_> {
         self.panel.hover(p) | bar
     }
 
-    /// A hand over what's clicked (a row, a button, the `esc` key).
+    /// A hand over what's clicked (a row, a button, the `esc` key, the search's ×); the
+    /// text's over the search.
     fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        if self.panel.hit(p) == Some(ProjectSearchAction::FocusQuery) {
+            return Control::cursor(&self.panel.input, p);
+        }
         let clickable = matches!(
             self.panel.hit(p),
             Some(
@@ -195,15 +199,17 @@ impl Control for PanelPart<'_> {
         true
     }
 
+    /// Into the field with the keyboard, on one line (the search field's own way: its
+    /// breaks as spaces).
     fn text(&mut self, typed: &str) -> bool {
-        self.panel.typing().insert(typed);
+        Control::text(self.panel.typing(), typed);
         *self.ask = Some(Ask::Typed);
         true
     }
 
     /// The search's own selection (what's copied is what's searched).
     fn selected_text(&self) -> Option<String> {
-        Some(self.panel.input.selected_text().to_owned()).filter(|t| !t.is_empty())
+        Control::selected_text(&self.panel.input)
     }
 
     /// ⌘A in the field with the keyboard.

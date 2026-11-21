@@ -1017,8 +1017,8 @@ impl EditorView {
         let (b, text_area) = (f.bounds, f.text_area);
         let x = (f.x0 + column as f32 * f.layout.advance).round();
         if x > text_area.min_x() && x < text_area.max_x() {
-            let line = self.scale.round().max(1.0);
-            layer.quad(Quad::filled(Rect::new(x, b.min_y(), line, b.size.height), palette.border));
+            let ctx = crate::ds::Ctx::new(palette, self.scale);
+            crate::ds::divider_vertical(layer, &ctx, x, b.min_y(), b.max_y());
         }
     }
 

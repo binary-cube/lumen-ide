@@ -5,7 +5,8 @@
 use super::filters::{Choice, Field, FilterKind};
 use super::parts::FieldAnswer;
 use super::*;
-use ui_kit::TextInput;
+use ui_components::control::{Control, Press};
+use ui_components::search_field::{SearchExtras, SearchField};
 
 /// A line of the bar (logical pixels): it takes one, or two when narrow.
 pub(super) const BAR_H: f32 = 44.0;
@@ -15,11 +16,19 @@ const PAD: f32 = 12.0;
 const PILL_GAP: f32 = 6.0;
 const FIELD_MIN: f32 = 220.0;
 const FIELD_MAX: f32 = 280.0;
+/// The room between an open list's rows and its scrollbar (logical pixels).
+const LIST_BAR_GAP: f32 = 4.0;
 /// A list's row height and how many show at most (logical pixels).
 const ROW_H: f32 = 28.0;
 const VISIBLE_ROWS: usize = 10;
 /// A list's keys at its bottom (logical pixels).
 const KEYS_H: f32 = 34.0;
+/// The text's `.*` and `Cc`: each one's size and the gap between them (logical pixels);
+/// the room they take in its field, on the right.
+const TOGGLE_W: f32 = button_size::COMPACT;
+const TOGGLE_H: f32 = 20.0;
+const TOGGLE_GAP: f32 = 2.0;
+const TOGGLES_W: f32 = TOGGLE_W * 2.0 + TOGGLE_GAP;
 
 impl LogView {
     /// The pills as they show now: each kind, its label, whether it's set.
@@ -97,10 +106,10 @@ impl LogView {
         }
     }
 
-    /// One of the log's search fields in `field` — "Text or hash" ([`Field::Text`]) or the
-    /// branches' filter ([`Field::Branches`]), drawn alike: the pill, its magnifier, the text,
-    /// its × when there's text; the text's own `.*` and `Cc` on the right, red when the
-    /// regular expression isn't one.
+    /// One of the log's search fields in `field`, both the app's search field: the branches'
+    /// filter ([`Field::Branches`]) and "Text or hash" ([`Field::Text`]), the latter with its
+    /// own `.*` and `Cc` in the room it keeps on the right (× left of them), its border red
+    /// when the regular expression isn't one.
     pub(super) fn paint_search_field(
         &mut self,
         pen: &mut ui_components::LayerPainter<'_>,
@@ -108,85 +117,47 @@ impl LogView {
         which: Field,
     ) {
         let (layer, text, icons, ds) = (&mut *pen.layer, &mut *pen.text, pen.icons, &pen.ds);
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
         let focused = self.bar.focus == Some(which);
-        let is_text = which == Field::Text;
-        let border = if is_text && self.bar.invalid {
-            p.danger
-        } else if focused {
-            p.search_field_border_focused
-        } else {
-            p.search_field_border
-        };
-        layer.quad(
-            Quad::filled(field, p.search_field_background)
-                .rounded(field.size.height / 2.0)
-                .bordered(ds.line(), border),
+        if which == Field::Branches {
+            self.hits.push((field, Hit::BranchSearch));
+            let placeholder = t("git.branches_filter");
+            self.bar.branch_query.paint(layer, text, icons, ds, (field, focused), &placeholder);
+            return;
+        }
+        self.hits.push((field, Hit::TextField));
+        let placeholder = t("git.filter_text");
+        let extras = SearchExtras { trailing: TOGGLES_W, invalid: self.bar.invalid };
+        let room = self.bar.text.paint_with(
+            layer,
+            text,
+            icons,
+            ds,
+            (field, focused),
+            &placeholder,
+            extras,
         );
-        let (field_hit, clear_hit) = if is_text {
-            (Hit::TextField, Hit::ClearText)
-        } else {
-            (Hit::BranchSearch, Hit::ClearBranches)
-        };
-        self.hits.push((field, field_hit));
-        let mid = field.min_y() + field.size.height / 2.0;
-        // From the right: Cc, .* (the text's), ×.
-        let toggle = px(24.0);
-        let mut right = field.max_x() - px(4.0);
-        if is_text {
-            let toggles =
-                [(Hit::MatchCase, "Cc", self.bar.match_case), (Hit::Regex, ".*", self.bar.regex)];
-            let small = ds.code_font(-1.5);
-            for (hit, label, on) in toggles {
-                let r = Rect::new(right - toggle, mid - px(10.0), toggle, px(20.0));
-                let fill = if on {
-                    p.accent.with_alpha(0.18)
-                } else if self.hover == Some(hit) {
-                    p.text.with_alpha(0.08)
-                } else {
-                    Rgba::TRANSPARENT
-                };
-                layer.quad(Quad::filled(r, fill).rounded(px(radius::SM)));
-                let shaped = text.shape_line(label, &small);
-                draw_text(
-                    layer,
-                    &shaped,
-                    (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                    ds::optical_baseline(r.min_y(), r.size.height, &small),
-                    if on { p.accent } else { p.text_muted },
-                );
-                self.hits.push((r, hit));
-                right = r.min_x() - px(2.0);
-            }
-        } else {
-            right -= px(4.0);
+        let px = |v: f32| ds.px(v);
+        let mid = room.min_y() + room.size.height / 2.0;
+        // From the right: Cc, .* (the text's).
+        let toggles =
+            [(Hit::MatchCase, "Cc", self.bar.match_case), (Hit::Regex, ".*", self.bar.regex)];
+        let mut right = room.max_x();
+        for (hit, label, on) in toggles {
+            let (w, h) = (px(TOGGLE_W), px(TOGGLE_H));
+            let r = Rect::new(right - w, mid - h / 2.0, w, h);
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .label(label)
+                .rest_tone(Tone::Neutral)
+                .on(on)
+                .hovered(self.hover == Some(hit));
+            ds::button(layer, text, icons, ds, r, spec);
+            self.hits.push((r, hit));
+            right = r.min_x() - px(TOGGLE_GAP);
         }
-        let input = if is_text { &self.bar.text } else { &self.bar.branch_query };
-        if !input.text().is_empty() {
-            let hovered = self.hover == Some(clear_hit);
-            let close = ds::clear_button(layer, icons, ds, right - px(10.0), mid, hovered);
-            self.hits.push((close, clear_hit));
-            right = close.min_x() - px(4.0);
-        }
-        if let Some(id) = icons.id("search") {
-            let s = px(14.0);
-            let r = Rect::new(field.min_x() + px(11.0), (mid - s / 2.0).round(), s, s);
-            ui_kit::draw_icon(layer, icons, id, r, p.text_muted);
-        }
-        let left = field.min_x() + px(30.0);
-        let area = Rect::new(left, field.min_y(), (right - left).max(0.0), field.size.height);
-        let (input, placeholder) = if is_text {
-            (&self.bar.text, t("git.filter_text"))
-        } else {
-            (&self.bar.branch_query, t("git.branches_filter"))
-        };
-        let style = bare_style(ds, input, area.size.height);
-        input.paint(layer, text, area, focused, &placeholder, &style);
     }
 
-    /// A pill from `x` (its middle at `mid`): its label and ▾, lit with its × when `set`.
-    /// Returns where it is.
+    /// A pill from `x` (its middle at `mid`): the shared chip, its label and ▾, in the accent
+    /// with its × when `set`. Returns where it is.
     fn paint_pill(
         &mut self,
         pen: &mut ui_components::LayerPainter<'_>,
@@ -196,56 +167,20 @@ impl LogView {
         open: bool,
     ) -> Rect {
         let (layer, text, icons, ds) = (&mut *pen.layer, &mut *pen.text, pen.icons, &pen.ds);
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-0.5);
-        let shaped = text.shape_line(label, &font);
-        let icon = px(12.0);
-        let w = pill_width(text, ds, label, set);
-        let pill = Rect::new(x.round(), (mid - px(13.0)).round(), w.round(), px(26.0));
-        let hovered = matches!(self.hover, Some(Hit::Pill(k) | Hit::ClearPill(k)) if k == kind);
-        let fill = if set {
-            p.accent.with_alpha(if open || hovered { 0.22 } else { 0.14 })
-        } else if open || hovered {
-            p.text.with_alpha(0.08)
-        } else {
-            Rgba::TRANSPARENT
-        };
-        layer.quad(Quad::filled(pill, fill).rounded(px(radius::MD)));
-        let color = if set { p.accent } else { p.text };
-        let tx = pill.min_x() + px(12.0);
-        draw_text(
-            layer,
-            &shaped,
-            tx,
-            ds::optical_baseline(pill.min_y(), pill.size.height, &font),
-            color,
-        );
-        self.hits.push((pill, Hit::Pill(kind)));
-        let chevron_x = tx + shaped.width + px(6.0);
-        if let Some(id) = icons.id("chevron-down") {
-            let r = Rect::new(chevron_x, (mid - icon / 2.0).round(), icon, icon);
-            ui_kit::draw_icon(layer, icons, id, r, if set { p.accent } else { p.text_muted });
+        let body = open || self.hover == Some(Hit::Pill(kind));
+        let clear = self.hover == Some(Hit::ClearPill(kind));
+        let spec = pill_spec(label, set, body, clear);
+        let h = ds.px(button_size::MEDIUM);
+        let w = ds::button_width(text, ds, &spec, h);
+        let pill = Rect::new(x.round(), (mid - h / 2.0).round(), w, h);
+        if !set {
+            ds::button(layer, text, icons, ds, pill, spec);
+            self.hits.push((pill, Hit::Pill(kind)));
+            return pill;
         }
-        if set {
-            let size = px(16.0);
-            let close =
-                Rect::new(chevron_x + icon + px(6.0), (mid - size / 2.0).round(), size, size);
-            let lit = self.hover == Some(Hit::ClearPill(kind));
-            if lit {
-                layer.quad(Quad::filled(close, p.accent.with_alpha(0.2)).rounded(size / 2.0));
-            }
-            if let Some(id) = icons.id("x") {
-                let inner = Rect::new(
-                    close.min_x() + px(3.5),
-                    close.min_y() + px(3.5),
-                    size - px(7.0),
-                    size - px(7.0),
-                );
-                ui_kit::draw_icon(layer, icons, id, inner, p.accent);
-            }
-            self.hits.push((close, Hit::ClearPill(kind)));
-        }
+        let parts = ds::chip(layer, text, icons, ds, pill, spec);
+        self.hits.push((parts.body, Hit::Pill(kind)));
+        self.hits.push((parts.clear, Hit::ClearPill(kind)));
         pill
     }
 
@@ -301,29 +236,24 @@ impl LogView {
         if kind.searched() {
             let field = Rect::new(inner_x, y, inner_w, px(30.0));
             let placeholder = t("git.filter_search");
-            ds::search_input(
-                &mut ui_components::LayerPainter::new(layer, text, icons, *ds),
-                field,
-                &popup.query,
-                focus == Some(Field::Query),
-                &placeholder,
-            );
+            let focused = focus == Some(Field::Query);
+            popup.query.paint(layer, text, icons, ds, (field, focused), &placeholder);
             self.hits.push((field, Hit::PopupQuery));
-            // Its × once something is typed (as the other search fields have).
-            if !popup.query.text().is_empty() {
-                let mid = field.min_y() + field.size.height / 2.0;
-                let hovered = self.hover == Some(Hit::ClearPopupQuery);
-                let clear =
-                    ds::clear_button(layer, icons, ds, field.max_x() - px(16.0), mid, hovered);
-                self.hits.push((clear, Hit::ClearPopupQuery));
-            }
             y = field.max_y() + pad;
         }
         let list = Rect::new(rect.min_x(), y, rect.size.width, list_h);
         popup.list = list;
         let row_h = px(ROW_H);
-        let max = (popup.rows.len() as f32 * row_h - list.size.height).max(0.0);
+        let content = popup.rows.len() as f32 * row_h;
+        let max = (content - list.size.height).max(0.0);
         popup.scroll = popup.scroll.clamp(0.0, max);
+        // While they scroll, the rows leave the scrollbar a lane of its own.
+        let row_w = if max > 0.0 {
+            let lane = ui_components::Scrollbar::track_thickness(ds.scale) + px(LIST_BAR_GAP);
+            (list.max_x() - lane - inner_x).clamp(0.0, inner_w)
+        } else {
+            inner_w
+        };
         let rows_layer = scene.push_layer(Some(list));
         if loading {
             let reading = t("git.filter_reading");
@@ -356,7 +286,7 @@ impl LogView {
         for i in first..(first + count).min(popup.rows.len()) {
             let row = &popup.rows[i];
             let top = (list.min_y() + i as f32 * row_h - popup.scroll).round();
-            let r = Rect::new(inner_x, top, inner_w, row_h);
+            let r = Rect::new(inner_x, top, row_w, row_h);
             if row.choice == Choice::Header {
                 let shaped = text.shape_line(
                     &row.label.to_uppercase(),
@@ -371,22 +301,14 @@ impl LogView {
                 );
                 continue;
             }
-            if popup.active == Some(i) || hover == Some(Hit::PopupRow(i)) {
-                rows_layer.quad(Quad::filled(r, p.text.with_alpha(0.06)).rounded(px(radius::MD)));
-            }
+            // The shared check row draws the highlight and the ✓; its label, icon and detail
+            // are this list's own (a path ellipsized from its start, a count on the right).
+            let spec = ds::CheckRowSpec::new("", row.checked, hover == Some(Hit::PopupRow(i)))
+                .active(popup.active == Some(i))
+                .untinted();
+            ds::check_row(rows_layer, text, icons, ds, r, spec);
             let mid = top + row_h / 2.0;
             let s = px(14.0);
-            if row.checked
-                && let Some(id) = icons.id("check")
-            {
-                ui_kit::draw_icon(
-                    rows_layer,
-                    icons,
-                    id,
-                    Rect::new(r.min_x() + px(8.0), (mid - s / 2.0).round(), s, s),
-                    p.accent,
-                );
-            }
             let mut tx = r.min_x() + px(30.0);
             if !row.icon.is_empty()
                 && let Some(id) = icons.id(row.icon)
@@ -438,6 +360,7 @@ impl LogView {
                 hits.push((visible, Hit::PopupRow(i)));
             }
         }
+        popup.bar.paint(scene, p, ds.scale, list, content, popup.scroll);
         let layer = scene.push_layer(Some(rect));
         let y = list.max_y();
         if more > 0 {
@@ -460,7 +383,7 @@ impl LogView {
     }
 
     /// The field with the keys, to read (`None`: none).
-    fn focused_field(&self) -> Option<&TextInput> {
+    fn focused_field(&self) -> Option<&SearchField> {
         Some(match self.bar.focus? {
             Field::Text => &self.bar.text,
             Field::Branches => &self.bar.branch_query,
@@ -470,7 +393,7 @@ impl LogView {
 
     /// What's selected in the field with the keys (Copy takes it).
     pub(super) fn field_selection(&self) -> Option<String> {
-        let selected = self.focused_field()?.selected_text();
+        let selected = self.focused_field()?.input.selected_text();
         (!selected.is_empty()).then(|| selected.to_owned())
     }
 
@@ -481,16 +404,13 @@ impl LogView {
             return false;
         }
         match self.focused_input() {
-            Some(input) => {
-                input.extend_to(p.x);
-                true
-            }
+            Some(field) => Control::drag(field, p),
             None => false,
         }
     }
 
     /// The field with the keys (`None`: none).
-    fn focused_input(&mut self) -> Option<&mut TextInput> {
+    fn focused_input(&mut self) -> Option<&mut SearchField> {
         Some(match self.bar.focus? {
             Field::Text => &mut self.bar.text,
             Field::Branches => &mut self.bar.branch_query,
@@ -583,14 +503,23 @@ impl LogView {
     /// A press on one of the bar's parts (or the list's). `true` if it was one of theirs.
     pub(super) fn press_filter(&mut self, hit: Hit, p: Point, clicks: u32) -> bool {
         // The caret placed in the field pressed (two clicks: a word, three: all); a drag
-        // from there selects.
-        self.field_drag = matches!(hit, Hit::TextField | Hit::PopupQuery | Hit::BranchSearch);
-        let place = |input: &mut TextInput| input.press(p.x, clicks);
+        // from there selects. A search field's × empties it (what it filters follows).
+        self.field_drag = false;
+        let place = |field: &mut SearchField| {
+            let held = Control::press(field, p, clicks) == Press::Held;
+            // A press changes the text only by ×: the change is told here, once.
+            field.take_edited();
+            (held, field.take_cleared())
+        };
         match hit {
             Hit::TextField => {
                 self.close_popup();
                 self.bar.focus = Some(Field::Text);
-                place(&mut self.bar.text);
+                let cleared;
+                (self.field_drag, cleared) = place(&mut self.bar.text);
+                if cleared {
+                    self.apply_text();
+                }
             }
             Hit::Regex => {
                 self.bar.regex = !self.bar.regex;
@@ -600,40 +529,50 @@ impl LogView {
                 self.bar.match_case = !self.bar.match_case;
                 self.apply_text();
             }
-            Hit::ClearText => self.clear_text(),
-            Hit::ClearBranches => {
-                self.bar.branch_query.set_text("");
-                self.typed_into(Field::Branches);
-            }
             Hit::Pill(kind) => self.toggle_popup(kind),
             Hit::ClearPill(kind) => {
                 self.close_popup();
                 self.clear_filter(kind);
             }
             Hit::PopupRow(i) => self.choose_row(i),
-            Hit::ClearPopupQuery => {
-                if let Some(popup) = &mut self.bar.popup {
-                    popup.query.set_text("");
-                    popup.scroll = 0.0;
-                    popup.active = None;
-                }
-                self.bar.focus = Some(Field::Query);
-                self.refresh_rows();
-            }
             Hit::PopupQuery => {
                 self.bar.focus = Some(Field::Query);
-                if let Some(popup) = &mut self.bar.popup {
-                    place(&mut popup.query);
+                let Some(popup) = &mut self.bar.popup else { return true };
+                let cleared;
+                (self.field_drag, cleared) = place(&mut popup.query);
+                if cleared {
+                    self.typed_into(Field::Query);
                 }
             }
             Hit::Popup => {}
             Hit::BranchSearch => {
                 self.bar.focus = Some(Field::Branches);
-                place(&mut self.bar.branch_query);
+                let cleared;
+                (self.field_drag, cleared) = place(&mut self.bar.branch_query);
+                if cleared {
+                    self.typed_into(Field::Branches);
+                }
             }
             _ => return false,
         }
         true
+    }
+}
+
+impl LogView {
+    /// The mouse at `p` over the bar's text, the branches' filter and the open list's search
+    /// (their × lit under it): `true` if one changed.
+    pub(super) fn hover_search_fields(&mut self, p: Point) -> bool {
+        let over = |field: &SearchField| Some(p).filter(|p| field.area().contains(*p));
+        let at = over(&self.bar.text);
+        let mut changed = Control::hover(&mut self.bar.text, at);
+        let at = over(&self.bar.branch_query);
+        changed |= Control::hover(&mut self.bar.branch_query, at);
+        if let Some(popup) = &mut self.bar.popup {
+            let at = over(&popup.query);
+            changed |= Control::hover(&mut popup.query, at);
+        }
+        changed
     }
 }
 
@@ -643,24 +582,17 @@ pub(super) fn panel_tint(p: &ui_components::Palette) -> Rgba {
     p.text.with_alpha(0.02)
 }
 
-/// A pill's width for `label` (with its × when `set`), as [`LogView::paint_pill`] draws it.
-fn pill_width(text: &mut TextSystem, ds: &Ctx<'_>, label: &str, set: bool) -> f32 {
-    let px = |v: f32| ds.px(v);
-    let shaped = text.shape_line(label, &ds.ui_font(-0.5));
-    (px(12.0) + shaped.width + px(6.0) + px(12.0) + px(10.0) + if set { px(18.0) } else { 0.0 })
-        .round()
+/// A pill's look: the shared chip when `set` (in the accent, with its ×), else a round soft
+/// button with its ▾.
+fn pill_spec(label: &str, set: bool, hovered: bool, clear_hovered: bool) -> ButtonSpec<'_> {
+    if set {
+        return ds::chip_spec(label, true, hovered, clear_hovered);
+    }
+    ButtonSpec::new(ButtonKind::Soft).label(label).round().menu(true).hovered(hovered)
 }
 
-/// A field drawn bare (its pill drawn around it): the search field's text, no background.
-fn bare_style(ds: &Ctx<'_>, _input: &TextInput, height: f32) -> ui_kit::TextInputStyle {
-    ui_kit::TextInputStyle {
-        background: Rgba::TRANSPARENT,
-        border: Rgba::TRANSPARENT,
-        border_focused: Rgba::TRANSPARENT,
-        border_width: 0.0,
-        lead: 0.0,
-        padding: 0.0,
-        font: ds.ui_font(-0.5),
-        ..ds::search_input_style(ds, height)
-    }
+/// A pill's width for `label` (with its × when `set`), as [`LogView::paint_pill`] draws it.
+fn pill_width(text: &mut TextSystem, ds: &Ctx<'_>, label: &str, set: bool) -> f32 {
+    let spec = pill_spec(label, set, false, false);
+    ds::button_width(text, ds, &spec, ds.px(button_size::MEDIUM))
 }

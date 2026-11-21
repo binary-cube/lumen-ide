@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 
 use i18n::{t, tr};
-use kernel::{Point, Rect, Rgba};
+use kernel::{Point, Rect};
 use remote::application::{
     Action, Change, Direction, LocalFiles, RemoteFs, Run, apply, in_scope, list_remote_under, plan,
 };
@@ -23,7 +23,7 @@ use remote::{RemoteError, content_hash};
 use render_api::Quad;
 use text_layout::Font;
 use ui_components::control::{Control, Controls, Thumb};
-use ui_components::ds::{self, Check, Ctx, Tone, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Check, Ctx, Tone, button_size, radius};
 use ui_components::{
     Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint, ViewerProvider,
 };
@@ -38,6 +38,8 @@ pub const EXTENSION: &str = "view-remote-review";
 /// Conflicts whose two copies are read for comparing (the first ones), and their size limit.
 const COMPARED: usize = 50;
 const COMPARED_BYTES: u64 = 2 * 1024 * 1024;
+/// A row under the mouse: the text's alpha over it.
+const ROW_HOVER: f32 = 0.05;
 
 /// What the review is opened with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -689,7 +691,8 @@ impl Viewer for TransferReview {
             }
             _ => self.paint_rows(ctx.scene, ctx.text, ctx.icons, &ds, Column { x0, width }, list),
         }
-        self.paint_footer(ctx.scene, ctx.text, &ds, Column { x0, width }, b, footer_h);
+        let foot = Rect::new(b.min_x(), b.max_y() - footer_h, b.size.width, footer_h);
+        self.paint_footer(ctx.scene, ctx.text, ctx.icons, &ds, Column { x0, width }, foot);
     }
 }
 
@@ -716,11 +719,14 @@ impl TransferReview {
             let shaped = text.shape_line(&label, &font);
             let w = px(8.0) + px(16.0) + px(10.0) + shaped.width + px(12.0);
             let r = Rect::new(x, top, w.round(), line_h);
-            if enabled && self.hover == Some(hit) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(radius::MD)));
-            }
-            let check =
-                ds::checkbox(layer, text, ds, x + px(8.0), mid, Check::of(on, all), enabled);
+            let hovered = enabled && self.hover == Some(hit);
+            ds::RowHighlight::new(false, hovered)
+                .hover(ds::HoverFill::Faint(ROW_HOVER))
+                .paint(layer, ds, r);
+            let check = ds::Checkbox::new(Check::of(on, all))
+                .enabled(enabled)
+                .hovered(hovered)
+                .paint(layer, text, ds, x + px(8.0), mid);
             let color = if enabled { p.text } else { p.text_muted };
             draw_text(
                 layer,
@@ -860,13 +866,13 @@ impl TransferReview {
         // The whole line: selected in the accent, under the mouse in a light tint.
         let lit =
             matches!(self.hover, Some(Hit::Check(h) | Hit::Take(h, _) | Hit::Compare(h)) if h == i);
-        if self.highlight == Some(i) {
-            layer.quad(Quad::filled(r, p.accent.with_alpha(0.10)).rounded(px(radius::MD)));
-        } else if lit {
-            layer.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(radius::MD)));
-        }
+        ds::RowHighlight::new(self.highlight == Some(i), lit)
+            .hover(ds::HoverFill::Faint(ROW_HOVER))
+            .paint(layer, ds, r);
         let state = if row.change.chosen { Check::On } else { Check::Off };
-        let check = ds::checkbox(layer, text, ds, x0 + px(8.0), mid, state, true);
+        let on_check = matches!(self.hover, Some(Hit::Check(h)) if h == i);
+        let check =
+            ds::Checkbox::new(state).hovered(on_check).paint(layer, text, ds, x0 + px(8.0), mid);
         let area = Rect::new(
             check.min_x() - px(4.0),
             check.min_y() - px(4.0),
@@ -927,8 +933,7 @@ impl TransferReview {
         mut x: f32,
         mid: f32,
     ) {
-        let Pen { layer, text, ds, .. } = pen;
-        let p = ds.palette;
+        let Pen { layer, text, icons, ds } = pen;
         let px = |v: f32| ds.px(v);
         let row = &self.rows[i];
         let server = row.change.chosen
@@ -948,20 +953,13 @@ impl TransferReview {
             x = pill.max_x() + px(6.0);
         }
         if row.texts.is_some() && workbench_model::presence::compare() {
-            let font = &rows.font;
-            let shaped = text.shape_line(&rows.compare_label, font);
-            let link_h = px(28.0);
+            let link_h = px(button_size::LARGE);
             let link = Rect::new(x + px(6.0), mid - link_h / 2.0, rows.compare_w, link_h);
-            if self.hover == Some(Hit::Compare(i)) {
-                layer.quad(Quad::filled(link, p.accent.with_alpha(0.10)).rounded(px(radius::MD)));
-            }
-            draw_text(
-                layer,
-                &shaped,
-                link.min_x() + px(8.0),
-                ds::optical_baseline(link.min_y(), link_h, font),
-                p.accent,
-            );
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .label(&rows.compare_label)
+                .tone(Tone::Accent)
+                .hovered(self.hover == Some(Hit::Compare(i)));
+            ds::button(layer, text, icons, ds, link, spec);
             push_row_hit(&mut self.hits, link, rows.list, Hit::Compare(i));
         }
     }
@@ -970,20 +968,17 @@ impl TransferReview {
         &mut self,
         scene: &mut render_api::Scene,
         text: &mut text_layout::TextSystem,
+        icons: &icons::Icons,
         ds: &Ctx<'_>,
         column: Column,
-        b: Rect,
-        footer_h: f32,
+        foot: Rect,
     ) {
         let Column { x0, width } = column;
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
-        let foot = Rect::new(b.min_x(), b.max_y() - footer_h, b.size.width, footer_h);
+        let footer_h = foot.size.height;
         let layer = scene.push_layer(Some(foot));
-        layer.quad(Quad::filled(
-            Rect::new(foot.min_x(), foot.min_y(), foot.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, ds, foot.min_x(), foot.max_x(), foot.min_y());
         let mid = foot.min_y() + footer_h / 2.0;
         // As the wizard's: as wide as their label, not wider.
         let button_h = px(ds::BUTTON_H);
@@ -1007,24 +1002,12 @@ impl TransferReview {
             _ => None,
         };
         if let Some((label, hit)) = second {
-            let font = ds::button_font(ds);
-            let w = (text.shape_line(&label, &font).width + px(36.0)).round();
+            // Stopping a transfer can't be undone: in the danger color.
+            let kind = if hit == Hit::Stop { ButtonKind::Danger } else { ButtonKind::Secondary };
+            let spec = ButtonSpec::new(kind).label(&label).hovered(self.hover == Some(hit));
+            let w = ds::button_width(text, ds, &spec, button_h);
             let button = Rect::new(right - w, main.min_y(), w, button_h);
-            let fill =
-                if self.hover == Some(hit) { p.text.with_alpha(0.08) } else { Rgba::TRANSPARENT };
-            layer.quad(
-                Quad::filled(button, fill)
-                    .rounded(px(radius::MD))
-                    .bordered(ds.line(), p.card_border),
-            );
-            let shaped = text.shape_line(&label, &font);
-            draw_text(
-                layer,
-                &shaped,
-                button.min_x() + (button.size.width - shaped.width) / 2.0,
-                ds::optical_baseline(button.min_y(), button_h, &font),
-                if hit == Hit::Stop { p.danger } else { p.text },
-            );
+            ds::button(layer, text, icons, ds, button, spec);
             self.hits.push((button, hit));
             right = button.min_x() - px(12.0);
         }

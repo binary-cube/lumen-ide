@@ -19,13 +19,16 @@ use kernel::{FuzzyStyle, Point, ProjectId, Rect};
 use render_api::Quad;
 use ui_components::control::{Control, Controls, Thumb};
 
-use crate::field::KeyField;
-use ui_components::ds::{self, Ctx, Elevation, radius, space};
+use crate::field::SearchPart;
+use ui_components::ds::{
+    self, ButtonKind, ButtonSpec, Ctx, Elevation, Tone, button_size, radius, space,
+};
+use ui_components::search_field::SearchField;
 use ui_components::{
     KeyReach, Tip, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind,
     ViewerPaint, ViewerProvider,
 };
-use ui_kit::{KeyHint, TextInput, draw_icon, draw_text};
+use ui_kit::{KeyHint, draw_icon, draw_text};
 
 /// The popover's virtual extension (its view's kind).
 pub const EXTENSION: &str = "view-console-jump";
@@ -229,6 +232,9 @@ const HEADER_H: f32 = 56.0;
 const FIELD_H: f32 = 34.0;
 const FOOTER_H: f32 = 38.0;
 const WIDTH: f32 = 520.0;
+/// A row: the chosen one's accent alpha, the hovered one's text alpha.
+const ROW_CHOSEN: f32 = 0.12;
+const ROW_HOVER: f32 = 0.04;
 
 /// The texts read in the background (by index), shared with their job.
 type Texts = Arc<Mutex<Vec<Option<String>>>>;
@@ -241,7 +247,8 @@ pub struct JumpView {
     texts: Texts,
     /// Changes as texts come in (what's found is worked out again).
     texts_seen: usize,
-    filter: TextInput,
+    /// The filter (the app's search field: ×, ⌘A; it has the keys the whole time).
+    filter: SearchField,
     found: Vec<Found>,
     found_for: Option<(String, usize)>,
     /// The row chosen (0: "New Query Console").
@@ -249,8 +256,6 @@ pub struct JumpView {
     /// The first row shown.
     first: usize,
     panel: Rect,
-    /// Where the filter was drawn last.
-    field: Rect,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
     action: Option<ViewerAction>,
@@ -420,12 +425,7 @@ impl JumpView {
         let mut offset = before;
         let mut edited = false;
         let mut list = Thumb { bar: &mut self.bar, offset: &mut offset };
-        let mut filter = KeyField {
-            input: &mut self.filter,
-            area: self.field,
-            selects: false,
-            edited: &mut edited,
-        };
+        let mut filter = SearchPart { field: &mut self.filter, edited: &mut edited };
         let mut parts: [&mut dyn Control; 2] = [&mut list, &mut filter];
         self.controls.focus(&mut parts, Some(FILTER));
         let answer = f(&mut self.controls, &mut parts);
@@ -610,14 +610,8 @@ impl Viewer for JumpView {
             panel.size.width - px(space::LG) * 2.0,
             px(FIELD_H),
         );
-        ui_components::ds::search_input(
-            &mut ui_components::LayerPainter::new(layer, text, icons, ds),
-            field,
-            &self.filter,
-            true,
-            &t("console.jump_filter"),
-        );
-        self.field = field;
+        let placeholder = t("console.jump_filter");
+        self.filter.paint(layer, text, icons, &ds, (field, true), &placeholder);
         // The rows shown.
         let list_top = field.max_y() + px(space::SM) + pad;
         let list = Rect::new(panel.min_x(), list_top, panel.size.width, shown as f32 * px(ROW_H));
@@ -632,13 +626,10 @@ impl Viewer for JumpView {
             let top = list.min_y() + (row - self.first) as f32 * row_h;
             let rect = Rect::new(panel.min_x() + pad, top, panel.size.width - pad * 2.0, row_h);
             let chosen = row == self.selected;
-            if chosen {
-                rows_layer
-                    .quad(Quad::filled(rect, p.accent.with_alpha(0.12)).rounded(px(radius::MD)));
-            } else if self.hover == Some(Hit::Row(row)) {
-                rows_layer
-                    .quad(Quad::filled(rect, p.text.with_alpha(0.04)).rounded(px(radius::MD)));
-            }
+            ds::RowHighlight::new(chosen, self.hover == Some(Hit::Row(row)))
+                .selected_alpha(ROW_CHOSEN)
+                .hover(ds::HoverFill::Faint(ROW_HOVER))
+                .paint(rows_layer, &ds, rect);
             let inner = rect.min_x() + px(space::MD);
             let (icon, name, detail, name_lit, line) = if row == 0 {
                 ("plus", t("console.new_console"), data.source_name.clone(), Vec::new(), None)
@@ -670,23 +661,17 @@ impl Viewer for JumpView {
             let hovered = matches!(self.hover, Some(Hit::Row(r) | Hit::Rename(r) | Hit::Delete(r)) if r == row);
             if row > 0 && (chosen || hovered) {
                 for (icon, hit) in [("trash", Hit::Delete(row)), ("file-pen", Hit::Rename(row))] {
-                    let s = px(26.0);
-                    let b = Rect::new((right - s).round(), (top + (row_h - s) / 2.0).round(), s, s);
-                    if self.hover == Some(hit) {
-                        rows_layer
-                            .quad(Quad::filled(b, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-                    }
-                    if let Some(id) = icons.id(icon) {
-                        let i = px(14.0);
-                        let color = if self.hover == Some(hit) { p.text } else { p.text_muted };
-                        draw_icon(
-                            rows_layer,
-                            icons,
-                            id,
-                            Rect::new(b.min_x() + (s - i) / 2.0, b.min_y() + (s - i) / 2.0, i, i),
-                            color,
-                        );
-                    }
+                    let b = ds::square_button(
+                        &ds,
+                        (right - px(button_size::MEDIUM), top + row_h / 2.0),
+                        button_size::MEDIUM,
+                    );
+                    // Muted at rest, lit under the mouse.
+                    let spec = ButtonSpec::new(ButtonKind::Ghost)
+                        .icon(icon)
+                        .rest_tone(Tone::Neutral)
+                        .hovered(self.hover == Some(hit));
+                    ds::button(rows_layer, text, icons, &ds, b, spec);
                     self.hits.push((b, hit));
                     right = b.min_x() - px(space::XS);
                 }

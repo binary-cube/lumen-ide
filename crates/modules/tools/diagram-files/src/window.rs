@@ -11,9 +11,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use i18n::t;
 use kernel::{Point, Rect};
-use render_api::Quad;
 use ui_components::tree::{EntryIcon, EntryLayout, entry_icon};
-use ui_components::{PanelButton, PanelContext, ToolPanel, ToolPanelAction, ViewerPaint, ds};
+use ui_components::{
+    EdgeScrollbar, PanelButton, PanelContext, ToolPanel, ToolPanelAction, ViewerPaint, ds,
+};
 use ui_kit::draw_text;
 use workbench_model::ProjectView;
 
@@ -29,6 +30,9 @@ const MAX_ENTRIES: usize = 5000;
 /// A row's height and a level's indentation (logical pixels).
 const ROW_H: f32 = 28.0;
 const INDENT: f32 = 16.0;
+/// The folder a dragged entry would go into: its accent fill and edge (alphas).
+const TARGET_FILL: f32 = 0.12;
+const TARGET_EDGE: f32 = 0.6;
 
 /// An entry listed: a folder or a diagram, at its depth.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +121,8 @@ pub struct DiagramsPanel {
     dragging: Option<Dragging>,
     scroll: f32,
     content_h: f32,
+    /// The list's scrollbar, along its right edge.
+    bar: EdgeScrollbar,
     bounds: Rect,
     content_scale: f32,
 }
@@ -345,6 +351,9 @@ impl ToolPanel for DiagramsPanel {
                     y += font.size * 1.6;
                 }
             }
+            // Nothing to scroll: its bar takes no press.
+            self.content_h = 0.0;
+            self.bar.paint(ctx.scene, p, ctx.scale, ctx.bounds, 0.0, 0.0);
             return;
         }
         let layout = EntryLayout::new(ctx.scale, ROW_H, INDENT);
@@ -363,18 +372,13 @@ impl ToolPanel for DiagramsPanel {
             let e = &self.entries[i];
             // Where what's dragged would go: lit (the hover would mislead meanwhile).
             let target = self.dragging.as_ref().and_then(|d| d.into.as_ref()) == Some(&e.path);
-            if target {
-                layer.quad(
-                    Quad::filled(layout.pill(ctx.bounds, top), p.accent.with_alpha(0.12))
-                        .rounded(layout.pill_radius())
-                        .bordered(ds.line(), p.accent.with_alpha(0.6)),
-                );
-            } else if self.hovered == Some(i) && self.dragging.is_none() {
-                layer.quad(
-                    Quad::filled(layout.pill(ctx.bounds, top), p.tree_hover)
-                        .rounded(layout.pill_radius()),
-                );
-            }
+            let hovered = self.hovered == Some(i) && self.dragging.is_none();
+            let lit = ds::RowHighlight::new(target, hovered)
+                .radius(layout.pill_radius() / ctx.scale)
+                .selected_alpha(TARGET_FILL)
+                .hover(ds::HoverFill::Tree);
+            let lit = if target { lit.outline(p.accent.with_alpha(TARGET_EDGE)) } else { lit };
+            lit.paint(layer, &ds, layout.pill(ctx.bounds, top));
             let x = layout.x(ctx.bounds.min_x(), e.depth);
             let entry = if e.is_dir {
                 EntryIcon::Folder {
@@ -414,6 +418,7 @@ impl ToolPanel for DiagramsPanel {
                 p.text,
             );
         }
+        self.bar.paint(ctx.scene, p, ctx.scale, ctx.bounds, self.content_h, self.scroll);
         // What's dragged follows the mouse, over the rows.
         if let Some(drag) = &self.dragging
             && let Some(e) = self.entries.iter().find(|e| e.path == drag.path)
@@ -451,6 +456,10 @@ impl ToolPanel for DiagramsPanel {
 
     /// A row: a click once released (a drag if it moves first).
     fn press(&mut self, p: Point, _clicks: u32) -> Option<ToolPanelAction> {
+        if let Some(offset) = self.bar.press(p) {
+            self.scroll = offset;
+            return None;
+        }
         match self.entry_at(p).and_then(|i| self.entries.get(i)) {
             Some(e) => {
                 self.pressed = Some((e.path.clone(), p));
@@ -461,10 +470,17 @@ impl ToolPanel for DiagramsPanel {
     }
 
     fn drag(&mut self, p: Point) -> bool {
+        if self.bar.is_dragging() {
+            let Some(offset) = self.bar.drag(p) else { return false };
+            return std::mem::replace(&mut self.scroll, offset) != offset;
+        }
         self.drag_to(p)
     }
 
     fn release(&mut self) -> bool {
+        if self.bar.release() {
+            return true;
+        }
         let pressed = self.pressed.take();
         if let Some(drag) = self.dragging.take() {
             if let Some(into) = drag.into {
@@ -480,8 +496,9 @@ impl ToolPanel for DiagramsPanel {
     }
 
     fn hover(&mut self, p: Point) -> bool {
-        let at = self.entry_at(p);
-        std::mem::replace(&mut self.hovered, at) != at
+        let bar = self.bar.hover(p);
+        let at = self.entry_at(p).filter(|_| !self.bar.contains(p));
+        (std::mem::replace(&mut self.hovered, at) != at) | bar
     }
 
     fn clickable(&self, p: Point) -> bool {

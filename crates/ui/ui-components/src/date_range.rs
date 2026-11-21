@@ -653,9 +653,7 @@ impl DateRangePicker {
         ds: &Ctx<'_>,
         rect: Rect,
     ) {
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-0.5);
         let row_h = px(30.0);
         let x = rect.min_x() + px(PAD) - px(6.0);
         for (i, preset) in self.presets.iter().enumerate() {
@@ -665,30 +663,12 @@ impl DateRangePicker {
                 px(PRESETS_W) + px(6.0),
                 row_h,
             );
-            let on = self.preset == Some(i);
-            if on {
-                layer.quad(Quad::filled(r, p.accent.with_alpha(0.14)).rounded(px(radius::MD)));
-            } else if self.hover == Some(Part::Preset(i)) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.06)).rounded(px(radius::MD)));
-            }
-            let s = px(14.0);
-            if on && let Some(id) = icons.id("check") {
-                ui_kit::draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(r.min_x() + px(8.0), (r.min_y() + (row_h - s) / 2.0).round(), s, s),
-                    p.accent,
-                );
-            }
-            let shaped = text.shape_line(&preset.label, &font);
-            draw_text(
-                layer,
-                &shaped,
-                r.min_x() + px(30.0),
-                ds::optical_baseline(r.min_y(), row_h, &font),
-                if on { p.accent } else { p.text },
+            let row = ds::CheckRowSpec::new(
+                &preset.label,
+                self.preset == Some(i),
+                self.hover == Some(Part::Preset(i)),
             );
+            ds::check_row(layer, text, icons, ds, r, row);
             self.hits.push((r, Part::Preset(i)));
         }
     }
@@ -759,7 +739,7 @@ impl DateRangePicker {
             ds::optical_baseline(y, px(HEADER_H), &strong),
             p.text,
         );
-        let s = px(24.0);
+        let s = px(ds::button_size::COMPACT);
         for (show, part, icon, ax) in [
             (first, Part::Prev, "chevron-left", x),
             (last, Part::Next, "chevron-right", x + width - s),
@@ -768,14 +748,11 @@ impl DateRangePicker {
                 continue;
             }
             let r = Rect::new(ax, y + (px(HEADER_H) - s) / 2.0, s, s);
-            if self.hover == Some(part) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(radius::MD)));
-            }
-            if let Some(id) = icons.id(icon) {
-                let inner =
-                    Rect::new(r.min_x() + px(5.0), r.min_y() + px(5.0), s - px(10.0), s - px(10.0));
-                ui_kit::draw_icon(layer, icons, id, inner, p.text_muted);
-            }
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon(icon)
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(self.hover == Some(part));
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, part));
         }
         // The weekdays' initials, from the locale's first one.

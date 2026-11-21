@@ -413,10 +413,7 @@ pub fn time_chart(
     for s in chart.series {
         steps(layer, ds, area, s.plot, s.color, chart.max);
     }
-    layer.quad(Quad::filled(
-        Rect::new(area.min_x(), area.max_y() - line, area.size.width, line),
-        ds.fade(p.border),
-    ));
+    crate::ds::divider(layer, ds, area.min_x(), area.max_x(), area.max_y() - line);
     if let Some(x) = chart.hover
         && let Some(first) = chart.series.first()
         && let Some(reading) = first.plot.reading(area, x)

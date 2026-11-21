@@ -127,3 +127,14 @@ fn the_page_scrolls_by_its_thumb() {
     crate::page::tests::drag_thumb(&mut view, w, 30.0);
     assert!(view.page.offset() > 0.0, "the page scrolled");
 }
+
+/// The ↑ ↓ ✕ are the shared buttons: the moves a row can't make (the first one up, the
+/// last one down) are greyed out and take no click; the others do.
+#[test]
+fn the_moves_a_row_cannot_make_take_no_click() {
+    let mut view = view("<?php function send($to, $body) {}\nsend('a', 'b');");
+    crate::page::tests::paint(&mut view, 900.0, 900.0);
+    let hit = |h: Hit| view.hits.iter().any(|(_, x)| *x == h);
+    assert!(!hit(Hit::Up(0)) && !hit(Hit::Down(1)), "the moves it can't make");
+    assert!(hit(Hit::Down(0)) && hit(Hit::Up(1)) && hit(Hit::Remove(0)) && hit(Hit::Add));
+}

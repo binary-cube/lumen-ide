@@ -8,7 +8,7 @@ impl DiagramView {
     pub(crate) fn paint_toolbar(
         &mut self,
         ds: &Ctx<'_>,
-        text: &mut text_layout::TextSystem,
+        (text, icons): (&mut text_layout::TextSystem, &icons::Icons),
         scene: &mut render_api::Scene,
         b: Rect,
     ) {
@@ -19,8 +19,8 @@ impl DiagramView {
         let mid = bar.min_y() + bar.size.height / 2.0;
         let mut x = bar.min_x() + px(20.0);
         if !self.history.is_empty() {
-            let r = Rect::new(x - px(6.0), mid - px(14.0), px(28.0), px(28.0));
-            diagram::back_button(Pen { layer, text, ds }, r, self.hover == Some(Hit::Back));
+            let r = ds::square_button(ds, (x - px(6.0), mid), ds::button_size::LARGE);
+            diagram::back_button(Pen { layer, text, ds }, icons, r, self.hover == Some(Hit::Back));
             self.hits.push((r, Hit::Back));
             x = r.max_x() + px(10.0);
         }

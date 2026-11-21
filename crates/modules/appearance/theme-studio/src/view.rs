@@ -131,8 +131,10 @@ impl Viewer for Studio {
             }
             Hit::Fold(i) => self.toggle_layer(i),
             Hit::Toggle(i) => self.toggle_effect(i),
-            Hit::Menu(i) => self.menu_for = if self.menu_for == Some(i) { None } else { Some(i) },
-            Hit::MenuItem(i, item) => self.menu_item(i, item),
+            Hit::Menu(i) => {
+                let anchor = self.hits.iter().find(|(_, h)| *h == Hit::Menu(i)).map(|(r, _)| *r);
+                self.asked_menu = anchor.map(|r| (r, effects::MenuItem::entries(i)));
+            }
             Hit::Section(i, sec) => self.toggle_section(i, sec),
             Hit::Gallery(open) => {
                 if open {
@@ -166,10 +168,6 @@ impl Viewer for Studio {
             Hit::Overlay => self.use_everywhere(),
             // The fields' and the handles' presses are their parts'.
             Hit::Name | Hit::Search | Hit::Handle(_) => {}
-            Hit::ClearSearch => {
-                self.query.set_text("");
-                self.focus_part(Some(QUERY));
-            }
             Hit::Found(n) => self.jump_to(n),
             Hit::PreviewMoving(moving) => self.preview_still = !moving,
             Hit::PreviewLight(light) => {
@@ -233,6 +231,12 @@ impl Viewer for Studio {
         changed || self.hover.as_ref().is_some_and(|h| !matches!(h, Hit::Name | Hit::Search))
     }
 
+    /// ⌘C: what's selected in the search while it has the keys.
+    fn selected_text(&self) -> Option<String> {
+        let query: &dyn Control = &self.query;
+        self.controls.selected_text_with(|i| (i == QUERY).then_some(query))
+    }
+
     fn wants_text(&self) -> bool {
         self.editing_name() || self.editing_query() || self.picker.is_open()
     }
@@ -263,9 +267,6 @@ impl Viewer for Studio {
         if key != ViewerKey::Escape {
             return false;
         }
-        if self.menu_for.take().is_some() {
-            return true;
-        }
         if self.gallery_open {
             self.close_gallery();
             return true;
@@ -278,7 +279,28 @@ impl Viewer for Studio {
         false
     }
 
+    fn take_menu(&mut self) -> Option<(Rect, Vec<ViewMenuEntry>)> {
+        self.asked_menu.take()
+    }
+
+    /// An effect's card (its header, its handle, its button): its menu.
+    fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
+        if self.gallery_open || self.picker.is_open() {
+            return None;
+        }
+        let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| h.clone());
+        match hit? {
+            Hit::Fold(i) | Hit::Handle(i) | Hit::Menu(i) => Some(effects::MenuItem::entries(i)),
+            _ => None,
+        }
+    }
+
     fn command(&mut self, id: &str) -> bool {
+        // A row of an effect's menu (`effect:<row>:<effect>`).
+        if let Some((i, item)) = effects::MenuItem::parse(id) {
+            self.menu_item(i, item);
+            return true;
+        }
         // The decorations from a preset (`preset:<id>`, `preset:none`); a category shown
         // (`category:<id>`, or `scroll-to:<id>`: a category or a section); a setting found
         // (`search:<text>`, the first result shown with `search:<text>!`); the backdrop's
@@ -332,7 +354,7 @@ impl Viewer for Studio {
         }
         if id == "search" || id == "find" {
             self.focus_part(Some(QUERY));
-            self.query.select_all();
+            self.query.input.select_all();
             return true;
         }
         let picking = self.picker.is_open();

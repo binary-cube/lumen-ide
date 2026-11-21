@@ -72,6 +72,8 @@ pub struct ProjectPanel {
     /// The row pressed (it may be dragged) and where.
     press: Option<(PathBuf, Point)>,
     drag: Option<Drag>,
+    /// A press on the search field holds the pointer: a drag selects its text.
+    selecting: bool,
     /// The entries changed meanwhile (heard on the project's events), and who to wake for
     /// them; the subscription lives as long as the panel.
     changes: Arc<Mutex<Vec<PathBuf>>>,
@@ -150,6 +152,7 @@ impl ProjectPanel {
             action: None,
             press: None,
             drag: None,
+            selecting: false,
             changes: Arc::default(),
             rescan_all: Arc::default(),
             listed: Arc::default(),
@@ -409,7 +412,7 @@ impl ProjectPanel {
             EntriesRequest::FocusSearch => {
                 self.view.cancel_new();
                 self.keys = Keys::Search;
-                self.search.input.select_all();
+                self.search.field.input.select_all();
             }
             EntriesRequest::NewEntry { is_dir } => {
                 self.new_entry(*is_dir);
@@ -592,6 +595,22 @@ impl ProjectPanel {
         }
     }
 
+    /// A press on the search field: the keys to it (a name being typed in the tree kept as
+    /// ↵ would first); its caret put and held for a drag, or its × emptying it (no results).
+    fn press_search(&mut self, p: Point, clicks: u32) -> Option<ToolPanelAction> {
+        self.settle_entry();
+        if let Some(action) = self.action.take() {
+            return Some(action);
+        }
+        self.keys = Keys::Search;
+        if self.search.press(p, clicks) == Some(true) {
+            self.refresh_search();
+            return None;
+        }
+        self.selecting = true;
+        Some(ToolPanelAction::RefreshProject)
+    }
+
     /// A key for the search field.
     fn search_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         match key {
@@ -611,10 +630,11 @@ impl ProjectPanel {
             ViewerKey::PageDown => self.search.move_selection(10),
             ViewerKey::Tab => return false,
             _ => {
-                if !reach.edit(&mut self.search.input, key) {
-                    return false;
+                let (used, edited) = self.search.key(key, reach);
+                if edited {
+                    self.refresh_search();
                 }
-                self.refresh_search();
+                return used;
             }
         }
         true
@@ -774,9 +794,9 @@ impl ToolPanel for ProjectPanel {
         };
         self.view.set_path_marks(queries.as_ref().and_then(|q| q.path_marks()));
         let search_focused = ctx.focused && self.keys == Keys::Search;
-        self.search.paint_field(search_focused, icons, ctx.text, ctx.scene);
+        self.search.paint_field(search_focused, icons, ctx.text, ctx.scene, palette);
         if self.search.is_active() {
-            self.search.paint_results(icons, &file_icon, ctx.text, ctx.scene);
+            self.search.paint_results(icons, &file_icon, ctx.text, ctx.scene, palette);
         } else {
             self.view.paint(tree, ctx.text, ctx.scene, icons, &file_icon, &folder_color);
         }
@@ -831,12 +851,15 @@ impl ToolPanel for ProjectPanel {
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ToolPanelAction> {
+        if self.search.field_contains(p) {
+            return self.press_search(p, clicks);
+        }
         let action = self.click(p);
-        // In a text field: the cursor where it was clicked; a double click selects it all.
+        // In the new entry's name: the cursor where it was clicked; a double click selects
+        // it all.
         let input = match self.keys {
-            Keys::Search => Some(&mut self.search.input),
             Keys::NewEntry => self.view.pending_mut().map(|p| &mut p.input),
-            Keys::Tree => None,
+            Keys::Search | Keys::Tree => None,
         };
         if let Some(input) = input.filter(|i| i.contains(p)) {
             if clicks >= 2 { input.select_all() } else { input.click(p.x) }
@@ -862,18 +885,8 @@ impl ToolPanel for ProjectPanel {
         if !self.search.is_active() && self.view.bar_press(p) {
             return None;
         }
-        if self.search.clear_button().is_some_and(|r| r.contains(p)) {
-            self.search.clear();
-            self.keys = Keys::Search;
-            return None;
-        }
         if self.search.field_contains(p) {
-            self.settle_entry();
-            if let Some(action) = self.action.take() {
-                return Some(action);
-            }
-            self.keys = Keys::Search;
-            return Some(ToolPanelAction::RefreshProject);
+            return self.press_search(p, 1);
         }
         if self.search.list_contains(p) {
             if let Some(index) = self.search.result_at(p) {
@@ -916,8 +929,7 @@ impl ToolPanel for ProjectPanel {
 
     fn clickable(&self, p: Point) -> bool {
         let row = !self.search.is_active() && self.view.bounds().contains(p);
-        row || self.search.clear_button().is_some_and(|r| r.contains(p))
-            || self.search.list_contains(p)
+        row || self.search.on_clear(p) || self.search.list_contains(p)
     }
 
     fn focus_lost(&mut self) {
@@ -927,7 +939,7 @@ impl ToolPanel for ProjectPanel {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        (self.search.field_contains(p) && !self.clickable(p)).then_some(ViewerCursor::Text)
+        self.search.cursor(p)
     }
 
     fn tooltip_at(&self, p: Point) -> Option<Tip> {
@@ -979,8 +991,9 @@ impl ToolPanel for ProjectPanel {
     fn text_input(&mut self, text: &str) -> bool {
         match self.keys {
             Keys::Search => {
-                self.search.input.insert(text);
-                self.refresh_search();
+                if self.search.text(text).1 {
+                    self.refresh_search();
+                }
             }
             Keys::NewEntry => {
                 let Some(pending) = self.view.pending_mut() else { return false };
@@ -1000,13 +1013,13 @@ impl ToolPanel for ProjectPanel {
         }
         self.view.cancel_new();
         self.keys = Keys::Search;
-        self.search.input.set_text("");
+        self.search.field.set_text("");
         self.text_input(text)
     }
 
     fn selected_text(&self) -> Option<String> {
         let input = match self.keys {
-            Keys::Search => &self.search.input,
+            Keys::Search => return self.search.selected_text(),
             Keys::NewEntry => &self.view.pending()?.input,
             Keys::Tree => return None,
         };
@@ -1032,7 +1045,13 @@ impl ToolPanel for ProjectPanel {
 
     fn command(&mut self, id: &str) -> bool {
         let input = match self.keys {
-            Keys::Search => &mut self.search.input,
+            Keys::Search => {
+                let (used, edited) = self.search.command(id);
+                if edited {
+                    self.refresh_search();
+                }
+                return used;
+            }
             Keys::NewEntry => match self.view.pending_mut() {
                 Some(pending) => &mut pending.input,
                 None => return false,
@@ -1105,6 +1124,9 @@ impl ToolPanel for ProjectPanel {
     }
 
     fn drag(&mut self, p: Point) -> bool {
+        if self.selecting {
+            return self.search.drag(p);
+        }
         if self.view.bar_drag(p) {
             return true;
         }
@@ -1118,6 +1140,9 @@ impl ToolPanel for ProjectPanel {
     }
 
     fn release(&mut self) -> bool {
+        if std::mem::take(&mut self.selecting) {
+            return false;
+        }
         if self.view.bar_release() {
             return true;
         }

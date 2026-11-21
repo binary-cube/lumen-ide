@@ -19,7 +19,7 @@ use i18n::{t, tr};
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
-use ui_components::ds::{self, Ctx, Tone, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size, radius};
 use ui_components::{
     Palette, Splitter, SplitterStyle, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind,
     ViewerPaint, ViewerProvider,
@@ -149,23 +149,21 @@ enum Hit {
     Branch(usize),
     /// A branch's commits to push / to pull (their tooltip).
     BranchSync(usize),
-    /// The branches panel's filter field, and its ×.
+    /// The branches panel's filter field (the app's search field: its × its own).
     BranchSearch,
-    ClearBranches,
     /// A file's history: every file of the commit, or only this one.
     AllFiles,
-    /// The filter bar: the text field, its `.*` and `Cc`, its ×.
+    /// The filter bar: the text field (the app's search field: its × its own), its `.*` and
+    /// `Cc`.
     TextField,
     Regex,
     MatchCase,
-    ClearText,
     /// A filter's pill (its list), its ×.
     Pill(filters::FilterKind),
     ClearPill(filters::FilterKind),
-    /// The open list: itself, its search (and its ×), a row, the interval's fields and Apply.
+    /// The open list: itself, its search (the app's search field: its × its own), a row.
     Popup,
     PopupQuery,
-    ClearPopupQuery,
     PopupRow(usize),
 }
 

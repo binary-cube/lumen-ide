@@ -430,10 +430,9 @@ impl Modal {
     fn paint_zoom(
         &mut self,
         layer: &mut Layer,
-        text: &mut TextSystem,
+        (text, icons): (&mut TextSystem, &Icons),
         ctx: &Ctx<'_>,
-        right: f32,
-        mid: f32,
+        (right, mid): (f32, f32),
         level: f32,
     ) {
         let px = |v: f32| ctx.px(v);
@@ -450,13 +449,11 @@ impl Modal {
         for (step, label, w) in parts {
             x -= w;
             let r = Rect::new(x.round(), (mid - h / 2.0).round(), w.round(), h);
-            if self.hover == Some(ModalHit::Zoom(step)) {
-                layer.quad(Quad::filled(r, ctx.fade(ctx.palette.tab_hover)).rounded(px(5.0)));
-            }
-            let shaped = text.shape_line(&label, &font);
-            let base = ds::optical_baseline(r.min_y(), r.size.height, &font);
-            let color = ctx.fade(ctx.palette.text_muted);
-            draw_text(layer, &shaped, (r.min_x() + (w - shaped.width) / 2.0).round(), base, color);
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .label(&label)
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(self.hover == Some(ModalHit::Zoom(step)));
+            ds::button(layer, text, icons, ctx, r, spec);
             self.zoom.push((r, step));
             x -= px(2.0);
         }
@@ -558,7 +555,7 @@ impl Modal {
             if let Some(level) = spec.zoom {
                 let layer = scene.push_layer(Some(p));
                 let mid = p.max_y() - footer_h / 2.0;
-                self.paint_zoom(layer, text, ctx, p.max_x() - frame.pad, mid, level);
+                self.paint_zoom(layer, (text, icons), ctx, (p.max_x() - frame.pad, mid), level);
             }
             return;
         }
@@ -822,10 +819,7 @@ impl Modal {
             );
         }
         let layer = scene.push_layer(Some(frame.panel));
-        layer.quad(Quad::filled(
-            Rect::new(nav.max_x(), nav.min_y(), ctx.line(), nav.size.height),
-            ctx.fade(palette.border),
-        ));
+        ds::divider_vertical(layer, ctx, nav.max_x(), nav.min_y(), nav.max_y());
         layer
     }
 }

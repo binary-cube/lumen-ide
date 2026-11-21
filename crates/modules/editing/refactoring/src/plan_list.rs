@@ -1,7 +1,8 @@
 //! A refactoring's places, as the previews list them: "every place", then the renamed
 //! files, then each file and its places — each with a checkbox, its line number and the
 //! line as it will read (the change highlighted); unsure places marked. Shared by the
-//! refactorings' previews.
+//! refactorings' previews. A list longer than its room scrolls (the wheel, through the
+//! page) and shows the shared scrollbar in a lane of its own on its right.
 
 use std::path::Path;
 use ui_components::ds::Pen;
@@ -11,9 +12,9 @@ use kernel::{Point, Rect};
 use refactor::{Certainty, Plan};
 use render_api::{Quad, Scene};
 use text_layout::{Font, TextSystem};
-use ui_components::ViewerAction;
 use ui_components::control::{Control, NOWHERE, Press};
 use ui_components::ds::{self, Check, Ctx, Tone, radius, space};
+use ui_components::{EdgeScrollbar, Scrollbar, ViewerAction};
 use ui_kit::draw_text;
 
 /// A row of the list.
@@ -38,18 +39,38 @@ pub struct Places<'a> {
 
 impl Control for Places<'_> {
     fn hit(&self, p: Point) -> bool {
-        self.list.contains(p)
+        self.list.contains(p) || self.list.bar.contains(p)
     }
 
     fn press(&mut self, p: Point, _clicks: u32) -> Press {
+        // Its scrollbar first: the thumb held, or the list jumped there.
+        if let Some(offset) = self.list.bar.press(p) {
+            self.list.scroll = offset.clamp(0.0, self.list.max_scroll);
+            return Press::Held;
+        }
         if let Some(plan) = self.plan.as_deref_mut() {
             *self.clicked = self.list.click(plan, p);
         }
         Press::Took
     }
 
+    fn drag(&mut self, p: Point) -> bool {
+        let Some(offset) = self.list.bar.drag(p) else { return false };
+        let offset = offset.clamp(0.0, self.list.max_scroll);
+        let changed = offset != self.list.scroll;
+        self.list.scroll = offset;
+        changed
+    }
+
+    fn release(&mut self) -> bool {
+        self.list.bar.release()
+    }
+
     fn hover(&mut self, p: Option<Point>) -> bool {
-        self.list.hover(p.unwrap_or(NOWHERE))
+        let p = p.unwrap_or(NOWHERE);
+        // Both asked: the bar widens while a row lights.
+        let bar = self.list.bar.hover(p);
+        self.list.hover(p) | bar
     }
 }
 
@@ -71,7 +92,14 @@ pub struct PlanList {
     max_scroll: f32,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
+    /// The shared scrollbar, on the list's right while it scrolls.
+    bar: EdgeScrollbar,
 }
+
+/// The room between the rows and the scrollbar's lane (logical pixels).
+const BAR_GAP: f32 = 4.0;
+/// A place's line under the mouse: its fill's alpha of the text.
+const PLACE_HOVER: f32 = 0.04;
 
 impl PlanList {
     /// "3 places in 2 files · 1 unsure", or that it's still searching.
@@ -191,12 +219,19 @@ impl PlanList {
         y += px(6.0);
         let list = Rect::new(x0, y, width, (area.max_y() - y).max(0.0));
         let rows = Self::rows(plan);
-        self.max_scroll = (rows.len() as f32 * row_h - list.size.height).max(0.0);
+        let content = rows.len() as f32 * row_h;
+        self.max_scroll = (content - list.size.height).max(0.0);
         self.scroll = self.scroll.min(self.max_scroll);
+        // While it scrolls, the rows leave the bar a lane of its own.
+        let lane = if self.max_scroll > 0.0 {
+            Scrollbar::track_thickness(ds.scale) + px(BAR_GAP)
+        } else {
+            0.0
+        };
         let layer = scene.push_layer(Some(list));
         let lines = Lines {
             x0,
-            width,
+            width: (width - lane).max(0.0),
             row_h,
             list,
             font: ds.ui_font(0.0),
@@ -215,6 +250,7 @@ impl PlanList {
                 Row::Place(i, j) => self.paint_place(pen, &lines, plan, (i, j), top),
             }
         }
+        self.bar.paint(scene, ds.palette, ds.scale, list, content, self.scroll);
     }
 
     /// The "every place" row, in `row`: a checkbox for all of them.
@@ -341,15 +377,16 @@ impl PlanList {
         let mid = top + row_h / 2.0;
         let o = &plan.files[i].occurrences[j];
         let indent = x0 + px(28.0);
-        if self.hover == Some(Hit::Show(i, j)) {
-            let shade = Rect::new(
-                indent + px(26.0),
-                top + px(2.0),
-                x0 + width - indent - px(26.0),
-                row_h - px(4.0),
-            );
-            layer.quad(Quad::filled(shade, p.text.with_alpha(0.04)).rounded(px(radius::SM)));
-        }
+        let shade = Rect::new(
+            indent + px(26.0),
+            top + px(2.0),
+            x0 + width - indent - px(26.0),
+            row_h - px(4.0),
+        );
+        ds::RowHighlight::new(false, self.hover == Some(Hit::Show(i, j)))
+            .radius(radius::SM)
+            .hover(ds::HoverFill::Faint(PLACE_HOVER))
+            .paint(layer, ds, shade);
         let check = if self.read_only {
             Rect::new(indent - px(10.0), mid, 0.0, 0.0)
         } else {
@@ -454,3 +491,7 @@ fn relative_dir(path: &Path, root: Option<&Path>) -> String {
     let shown = root.and_then(|r| dir.strip_prefix(r).ok()).unwrap_or(dir);
     shown.to_string_lossy().into_owned()
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/plan_list.rs"]
+mod tests;

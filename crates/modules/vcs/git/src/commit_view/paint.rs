@@ -1,6 +1,18 @@
 //! The screen's parts: its header, the lists, the message.
 
 use super::*;
+use ui_components::tree;
+
+/// A file row's highlight alphas: chosen (or marked), shown while others are marked too,
+/// and under the mouse.
+const FILE_CHOSEN_ALPHA: f32 = 0.12;
+const FILE_SHOWN_ALPHA: f32 = 0.2;
+const ROW_HOVER_ALPHA: f32 = 0.04;
+/// A place row's highlight alphas: the one shown, and under the mouse.
+const PLACE_LIT_ALPHA: f32 = 0.14;
+const PLACE_HOVER_ALPHA: f32 = 0.05;
+/// The current branch's dot (logical pixels).
+const CURRENT_DOT: f32 = 7.0;
 
 impl CommitView {
     /// The header at `y`: the title, the branch, the refresh link.
@@ -154,12 +166,14 @@ impl CommitView {
         let Some(state) = state else { return };
         let list_shown = self.selected.as_ref().is_some_and(|(_, s)| *s == staged);
         let shown = list_shown && self.selected.as_ref().is_some_and(|(q, _)| *q == file.path);
-        if list_shown && (shown || self.marked.contains(&file.path)) {
-            let alpha = if shown && self.marked.len() > 1 { 0.2 } else { 0.12 };
-            layer.quad(Quad::filled(row, p.accent.with_alpha(alpha)).rounded(px(radius::SM)));
-        } else if self.hover == Some(Hit::Row(i, staged)) {
-            layer.quad(Quad::filled(row, p.text.with_alpha(0.04)).rounded(px(radius::SM)));
-        }
+        let chosen = list_shown && (shown || self.marked.contains(&file.path));
+        let alpha =
+            if shown && self.marked.len() > 1 { FILE_SHOWN_ALPHA } else { FILE_CHOSEN_ALPHA };
+        ds::RowHighlight::new(chosen, self.hover == Some(Hit::Row(i, staged)))
+            .radius(radius::SM)
+            .selected_alpha(alpha)
+            .hover(ds::HoverFill::Faint(ROW_HOVER_ALPHA))
+            .paint(layer, ds, row);
         checkbox(layer, text, ds, row, staged, true);
         let room = row.size.width - px(30.0);
         let line = Rect::new(row.min_x() + px(30.0), row.min_y(), room, row.size.height);
@@ -358,11 +372,11 @@ impl CommitView {
             let x = r.min_x() + px(8.0) + row.depth as f32 * px(14.0);
             let mid = r.min_y() + row_h / 2.0;
             let lit = matches!(row.place, Place::Work(Work::FileStatus));
-            if lit {
-                layer.quad(Quad::filled(r, p.accent.with_alpha(0.14)).rounded(px(radius::SM)));
-            } else if self.hover == Some(Hit::Place(i)) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(radius::SM)));
-            }
+            ds::RowHighlight::new(lit, self.hover == Some(Hit::Place(i)))
+                .radius(radius::SM)
+                .selected_alpha(PLACE_LIT_ALPHA)
+                .hover(ds::HoverFill::Faint(PLACE_HOVER_ALPHA))
+                .paint(layer, ds, r);
             let draw_icon = |layer: &mut render_api::Layer, name: &str, at: f32, color| {
                 if let Some(id) = icons.id(name) {
                     let rect = Rect::new(at, (mid - icon / 2.0).round(), icon, icon);
@@ -398,9 +412,7 @@ impl CommitView {
                             px(12.0),
                             px(12.0),
                         );
-                        if let Some(id) = icons.id("chevron-right") {
-                            ui_kit::draw_icon(layer, icons, id, chevron, p.text_muted);
-                        }
+                        tree::chevron(layer, icons, chevron, false, p.text_muted);
                     }
                 }
                 Place::Work(work) => {
@@ -413,15 +425,14 @@ impl CommitView {
                     label(layer, &t(name), &font, p.text);
                 }
                 Place::Folder { label: name, expanded, .. } => {
-                    let glyph = if *expanded { "chevron-down" } else { "chevron-right" };
-                    draw_icon(layer, glyph, x, p.text_muted);
+                    let at = Rect::new(x, (mid - icon / 2.0).round(), icon, icon);
+                    tree::chevron(layer, icons, at, *expanded, p.text_muted);
                     label(layer, name, &font, p.text);
                 }
                 Place::Ref { label: name, current, ahead, kind, .. } => {
                     if *current {
-                        let d = px(7.0);
-                        let dot = Rect::new(x + (icon - d) / 2.0, (mid - d / 2.0).round(), d, d);
-                        layer.quad(Quad::filled(dot, p.accent).rounded(d / 2.0));
+                        let center = Point::new(x + icon / 2.0, mid);
+                        ds::dot(layer, ds, center, CURRENT_DOT, p.accent);
                     } else if *kind == version_control::RefKind::Tag {
                         draw_icon(layer, "tag", x, p.text_muted);
                     }
@@ -457,19 +468,20 @@ impl CommitView {
         }
     }
 
-    /// The places' filter in `field`: the magnifier, what's typed (or its hint), its × once
-    /// something is.
+    /// The places' filter in `field`: the app's search field (the magnifier, what's typed or
+    /// its hint, × once something is; the caret only while it has the keys).
     fn paint_places_filter(&mut self, pen: &mut LayerPainter<'_>, field: Rect) {
         let focused = self.keys() == Keys::Places;
-        ds::search_input(pen, field, &self.places_filter, focused, &t("git.places_filter"));
-        self.hits.push((field, Hit::PlacesFilter));
-        if !self.places_filter.text().is_empty() {
-            let (cx, mid) =
-                (field.max_x() - pen.ds.px(16.0), field.min_y() + field.size.height / 2.0);
-            let hovered = self.hover == Some(Hit::ClearPlacesFilter);
-            let clear = ds::clear_button(pen.layer, pen.icons, &pen.ds, cx, mid, hovered);
-            self.hits.push((clear, Hit::ClearPlacesFilter));
-        }
+        let placeholder = t("git.places_filter");
+        let ds = pen.ds;
+        self.places_filter.paint(
+            pen.layer,
+            pen.text,
+            pen.icons,
+            &ds,
+            (field, focused),
+            &placeholder,
+        );
     }
 }
 
@@ -500,8 +512,7 @@ pub(super) fn paint_card(
     let inner = |y: f32, h: f32| Rect::new(rect.min_x() + edge, y, rect.size.width - 2.0 * edge, h);
     layer.quad(Quad::filled(inner(rect.min_y() + edge, head - edge), shade).rounded(r - edge));
     layer.quad(Quad::filled(inner(rect.min_y() + head / 2.0, head / 2.0), shade));
-    let line = Rect::new(rect.min_x(), rect.min_y() + head - edge, rect.size.width, edge);
-    layer.quad(Quad::filled(line, p.card_border));
+    ds::divider_card(layer, ds, rect.min_x(), rect.max_x(), rect.min_y() + head - edge);
     let font = ds.ui_font(-0.5).with_weight(Font::SEMIBOLD);
     let shaped = text.shape_line(title, &font);
     let baseline = ds::optical_baseline(rect.min_y(), head, &font);

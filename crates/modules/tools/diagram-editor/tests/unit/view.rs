@@ -1007,6 +1007,47 @@ fn a_number_typed_has_the_keys_before_the_search() {
     assert_eq!(view.palette.search.text(), "cyl", "then the search");
 }
 
+/// The palette's search is the app's search field: pressed, it has the view's focus (the
+/// number typed let go: one caret); typed into, ⌘A selects it (⌘C copies it), its × empties
+/// it and shows the sections again; a number typed meanwhile takes the focus from it.
+#[test]
+fn the_palette_s_search_is_the_app_s_field_with_one_focus() {
+    use super::properties::{Number, Prop};
+    let mut text = TextSystem::new();
+    let (mut view, _f) = editing(&mut text);
+    view.selection = vec!["save".into()];
+    paint(&mut view, &mut text);
+    let at = view.prop_for_tests(Prop::Type(Number::W)).unwrap();
+    view.pointer_down(at, 1, PressMods::default());
+    view.release();
+    assert!(view.props.typing.is_some());
+    view.pointer_down(view.palette_hits_for_search(), 1, PressMods::default());
+    view.release();
+    assert!(view.props.typing.is_none(), "the number let go");
+    assert_eq!(view.controls.focused(), Some(super::parts::PALETTE), "the search's caret");
+    assert!(view.text_input("cyl"));
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("cyl"), "⌘A: all of it");
+    paint(&mut view, &mut text);
+    assert_eq!(view.palette_hits_for_tests().len(), 1, "only the cylinder");
+    let field = view.palette.search.area();
+    // × sits at the field's right end (the shared field's room for it).
+    let clear = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    view.hover(clear);
+    assert_eq!(view.cursor_at(clear), Some(ViewerCursor::Pointer), "a hand on ×");
+    view.pointer_down(clear, 1, PressMods::default());
+    view.release();
+    assert!(view.palette.search.text().is_empty(), "× empties it");
+    paint(&mut view, &mut text);
+    assert!(view.palette_hits_for_tests().len() > 1, "the sections again");
+    // A number typed: the focus is its, the search's caret gone (the search stays open).
+    let at = view.prop_for_tests(Prop::Type(Number::W)).unwrap();
+    view.pointer_down(at, 1, PressMods::default());
+    view.release();
+    assert_eq!(view.controls.focused(), Some(super::parts::TYPING));
+    assert!(view.palette.searching);
+}
+
 /// The bar, the quick bar and the page tabs are parts: their tooltips and their hand where
 /// the mouse is; a press on the bar ends the text edited in place, leaves the number typed
 /// and the search open, and the number's selection is what's copied; past the bar, the
@@ -1049,4 +1090,23 @@ fn the_view_s_zones_are_parts() {
     view.pointer_down(view.sheet().center(), 1, PressMods::default());
     view.release();
     assert!(view.props.typing.is_none(), "the sheet lets it go");
+}
+
+/// The palette's sections, longer than its room, show the shared scrollbar: its thumb
+/// pressed and dragged down scrolls them (the sheet stays), let go it ends.
+#[test]
+fn the_palette_scrolls_by_its_thumb() {
+    let mut text = TextSystem::new();
+    let (mut view, _f) = editing(&mut text);
+    view.palette.open.iter_mut().for_each(|open| *open = true);
+    paint(&mut view, &mut text);
+    let area = view.palette_area();
+    let top = area.max_y() - view.palette_room();
+    let thumb = Point::new(area.max_x() - 4.0, top + 6.0);
+    let camera = view.camera;
+    view.pointer_down(thumb, 1, PressMods::default());
+    assert!(view.drag(Point::new(thumb.x, top + 120.0)));
+    assert!(view.palette.scroll > 0.0, "dragged down: scrolled");
+    assert!(view.release());
+    assert_eq!(view.camera, camera, "the sheet stayed");
 }

@@ -12,6 +12,7 @@ use database::fields::{self, Binding, FieldKind, FieldSpec, FieldTab, UrlError};
 use database::folders::{self, FolderId, SourceColor, SourceFolder};
 use database::{ConnectionSpec, DataSource, DataSourceId, Scope, SecretPolicy, Target};
 use kernel::Secret;
+use ui_components::search_field::SearchField;
 use ui_kit::TextInput;
 
 /// What the modal knows of a driver.
@@ -178,7 +179,8 @@ pub struct Editor {
     /// Removed here (those the catalog had).
     pub removed: Vec<DataSource>,
     pub selected: Option<usize>,
-    pub filter: TextInput,
+    /// The list's filter (the app's search field: ×, ⌘A; its focus the modal's).
+    pub filter: SearchField,
     pub tab: Tab,
     /// The selected source's fields.
     pub name: TextInput,
@@ -220,7 +222,7 @@ impl Editor {
             entries,
             removed: Vec::new(),
             selected: None,
-            filter: TextInput::new(""),
+            filter: SearchField::new(),
             tab: Tab::General,
             name: TextInput::new(""),
             comment: TextInput::new(""),
@@ -351,7 +353,7 @@ impl Editor {
     /// (a source selected), the folder's name (a folder selected).
     pub fn inputs(&self) -> Vec<(Field, &TextInput)> {
         let mut out = vec![
-            (Field::Filter, &self.filter),
+            (Field::Filter, &self.filter.input),
             (Field::Name, &self.name),
             (Field::Comment, &self.comment),
             (Field::Url, &self.url),
@@ -370,8 +372,9 @@ impl Editor {
         out
     }
 
-    /// [`Self::inputs`], to be edited (the same fields, in the same order).
-    pub fn inputs_mut(&mut self) -> Vec<(Field, &mut TextInput)> {
+    /// [`Self::inputs`], to be edited (the same fields, in the same order): the filter
+    /// whole (its × with it), the others' text.
+    pub fn inputs_mut(&mut self) -> (&mut SearchField, Vec<(Field, &mut TextInput)>) {
         let Self {
             filter,
             name,
@@ -387,7 +390,6 @@ impl Editor {
             ..
         } = self;
         let mut out = vec![
-            (Field::Filter, filter),
             (Field::Name, name),
             (Field::Comment, comment),
             (Field::Url, url),
@@ -403,12 +405,12 @@ impl Editor {
         if selected_folder.is_some() {
             out.push((Field::FolderName, folder_name));
         }
-        out
+        (filter, out)
     }
 
     pub fn input(&self, field: &Field) -> Option<&TextInput> {
         Some(match field {
-            Field::Filter => &self.filter,
+            Field::Filter => &self.filter.input,
             Field::Name => &self.name,
             Field::Comment => &self.comment,
             Field::Url => &self.url,
@@ -426,7 +428,7 @@ impl Editor {
 
     pub fn input_mut(&mut self, field: &Field) -> Option<&mut TextInput> {
         Some(match field {
-            Field::Filter => &mut self.filter,
+            Field::Filter => &mut self.filter.input,
             Field::Name => &mut self.name,
             Field::Comment => &mut self.comment,
             Field::Url => &mut self.url,

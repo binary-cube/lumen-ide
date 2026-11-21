@@ -76,18 +76,17 @@ impl ToolPanel for DatabaseWindow {
             self.scroll = offset;
             return None;
         }
-        match self.hit(p) {
-            Some(Hover::Clear) => {
-                self.filter.set_text("");
+        // The filter (its caret put, or emptied by its ×): it has the keys; any other press
+        // gives them back to the rows.
+        if self.with_controls(|c, parts| c.press(parts, p, clicks)).is_some() {
+            if self.filter.take_cleared() {
                 self.filtered();
-                self.typing = false;
             }
-            Some(Hover::Field) => {
-                self.typing = true;
-                self.filter.press(p.x, clicks);
-            }
+            return self.action.take();
+        }
+        match self.hit(p) {
+            Some(Hover::Field) | None => {}
             Some(Hover::Row(i)) => {
-                self.typing = false;
                 let key = self.rows[i].key.clone();
                 self.selected = Some(key.clone());
                 if self.on_chevron(i, p) {
@@ -96,7 +95,6 @@ impl ToolPanel for DatabaseWindow {
                     self.activate(&key);
                 }
             }
-            None => self.typing = false,
         }
         self.action.take()
     }
@@ -107,15 +105,12 @@ impl ToolPanel for DatabaseWindow {
             self.scroll = offset;
             return changed;
         }
-        if self.typing && self.field.contains(p) {
-            self.filter.extend_to(p.x);
-            return true;
-        }
-        false
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
-        self.bar.release()
+        let field = self.with_controls(|c, parts| c.release(parts));
+        self.bar.release() | field.is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {
@@ -123,15 +118,17 @@ impl ToolPanel for DatabaseWindow {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed || bar
+        let field = self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        changed || bar || field
     }
 
     fn clickable(&self, p: Point) -> bool {
-        matches!(self.hit(p), Some(Hover::Row(_) | Hover::Clear))
+        matches!(self.hit(p), Some(Hover::Row(_)))
+            || self.cursor_at(p) == Some(ViewerCursor::Pointer)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        (self.hit(p) == Some(Hover::Field)).then_some(ViewerCursor::Text)
+        (self.hit(p) == Some(Hover::Field)).then(|| Control::cursor(&self.filter, p)).flatten()
     }
 
     /// A row's icon: what it stands for (a key, where a foreign key points, a view…).
@@ -146,7 +143,7 @@ impl ToolPanel for DatabaseWindow {
     }
 
     fn wants_text(&self) -> bool {
-        self.typing
+        self.typing()
     }
 
     fn takes_keys(&self) -> bool {
@@ -158,10 +155,11 @@ impl ToolPanel for DatabaseWindow {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
-        self.filter.insert(&text);
-        self.filtered();
-        true
+        let taken = self.with_controls(|c, parts| c.text(parts, text)).is_some();
+        if taken {
+            self.filtered();
+        }
+        taken
     }
 
     /// Typing on the rows filters them (the field takes the keys).
@@ -169,14 +167,13 @@ impl ToolPanel for DatabaseWindow {
         if text.chars().all(char::is_control) {
             return false;
         }
-        self.typing = true;
-        self.filter.select_all();
+        self.set_typing(true);
+        self.filter.input.select_all();
         self.text_input(text)
     }
 
     fn selected_text(&self) -> Option<String> {
-        let selected = self.filter.selected_text();
-        (self.typing && !selected.is_empty()).then(|| selected.to_owned())
+        self.typing().then(|| Control::selected_text(&self.filter)).flatten()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -184,59 +181,40 @@ impl ToolPanel for DatabaseWindow {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if self.typing {
-            let used = match key {
-                ViewerKey::Backspace => {
-                    self.filter.backspace(reach.word);
-                    true
-                }
-                ViewerKey::Delete => {
-                    self.filter.delete();
-                    true
-                }
-                ViewerKey::Left => {
-                    self.filter.move_left(reach.word, reach.extend);
-                    return true;
-                }
-                ViewerKey::Right => {
-                    self.filter.move_right(reach.word, reach.extend);
-                    return true;
-                }
-                ViewerKey::Home => {
-                    self.filter.home(reach.extend);
-                    return true;
-                }
-                ViewerKey::End => {
-                    self.filter.end(reach.extend);
-                    return true;
-                }
-                ViewerKey::Escape => {
-                    self.filter.set_text("");
-                    self.typing = false;
-                    true
-                }
-                // The rows take the keys back (↑ ↓ ↵ through what's filtered).
-                _ => {
-                    self.typing = false;
-                    return self.row_key(key);
-                }
-            };
-            if used {
+        if !self.typing() {
+            return self.row_key(key);
+        }
+        // Esc empties the filter and gives the keys back to the rows.
+        if key == ViewerKey::Escape {
+            self.filter.set_text("");
+            self.set_typing(false);
+            self.filtered();
+            return true;
+        }
+        // The filter's editing keys; any other goes back to the rows (↑ ↓ ↵ through what's
+        // filtered).
+        if self.with_controls(|c, parts| c.key(parts, key, reach)).is_some() {
+            if matches!(key, ViewerKey::Backspace | ViewerKey::Delete) {
                 self.filtered();
             }
-            return used;
+            return true;
         }
+        self.set_typing(false);
         self.row_key(key)
     }
 
     fn command(&mut self, id: &str) -> bool {
         match id {
             "refresh" => self.run("refresh"),
-            "select_all" if self.typing => {
-                self.filter.select_all();
-                true
+            // The filter's editing commands while it has the keys (⌘A, ⌘X, ⌘Z, ⌘⇧Z).
+            "select_all" | "cut" | "undo" | "redo" if self.typing() => {
+                let used = self.with_controls(|c, parts| c.command(parts, id)).is_some();
+                if used && id != "select_all" {
+                    self.filtered();
+                }
+                used
             }
-            "copy" if !self.typing => self.run("copy-name"),
+            "copy" if !self.typing() => self.run("copy-name"),
             // The picker closed with nothing: what it asked for is given up (the next file
             // picked, for another, isn't taken as its).
             "picked-file-cancelled" => {

@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use i18n::{t, tr};
 use kernel::{Point, Rect};
 use render_api::Quad;
-use ui_components::ds::{self, Ctx};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx};
 use ui_components::editor_toolbar::{
     EditorToolbar, EditorToolbarProvider, HEIGHT, ToolbarAction, ToolbarContext, ToolbarPaint,
 };
@@ -460,11 +460,12 @@ impl EditorToolbar for DownloadBar {
             let w = (text.shape_line(&label, &button_font).width + px(24.0)).round();
             let r = Rect::new((right - w).round(), (mid - h / 2.0).round(), w, h);
             let hovered = self.hovered == Some(button);
-            if matches!(button, Button::Download | Button::Retry | Button::Choose(0)) {
-                ds::primary_button(layer, text, &ds, r, &label, true, hovered);
-            } else {
-                ds::secondary_button(layer, text, &ds, r, &label, true, hovered);
-            }
+            let kind = match button {
+                Button::Download | Button::Retry | Button::Choose(0) => ButtonKind::Primary,
+                _ => ButtonKind::Secondary,
+            };
+            let spec = ButtonSpec::new(kind).label(&label).hovered(hovered);
+            ds::button(layer, text, icons, &ds, r, spec);
             buttons.push((r, button));
             right = r.min_x() - px(8.0);
         }

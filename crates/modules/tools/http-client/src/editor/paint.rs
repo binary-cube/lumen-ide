@@ -6,15 +6,24 @@ use i18n::t;
 use kernel::{Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
-use ui_components::ds::{self, Check, Ctx, DropdownSpec, ToolbarButton};
+use ui_components::ds::{
+    self, ButtonKind, ButtonSpec, Check, Ctx, DropdownSpec, Tone, button_size,
+};
+use ui_components::tab_strip::{self, UnderlineTab};
 use ui_components::{MultilineSpec, Viewer, ViewerPaint};
-use ui_kit::{TextInputStyle, draw_icon, draw_text};
+use ui_kit::{TextInputStyle, draw_text};
 
 use super::form::{AuthKind, BodyKind, Row, Table};
 use super::{Area, Focus, Hit, RequestEditor, Tab};
 use crate::response_view::Part;
 
 const TOP: f32 = 48.0;
+/// The form's tabs: the room each side of a label (logical pixels) while they fit, closer
+/// together when they don't, then smaller; the gap between them while they fit.
+const TAB_PAD: f32 = 10.0;
+const TAB_PAD_CLOSE: f32 = 6.0;
+const TAB_PAD_SMALL: f32 = 5.0;
+const TAB_GAP: f32 = 4.0;
 /// Its tabs' row: as high as the response's status row beside it (one line across).
 const TABS: f32 = crate::response_view::STATUS;
 const ROW: f32 = 34.0;
@@ -65,55 +74,33 @@ impl RequestEditor {
         let mid = top.min_y() + top.size.height / 2.0;
         let h = px(32.0);
         let method_r = Rect::new(top.min_x() + px(PAD), mid - h / 2.0, px(104.0), h);
-        let method_color = crate::format::method_color(&form.method, p);
-        layer.quad(Quad::filled(method_r, method_color.with_alpha(0.16)).rounded(px(6.0)));
-        let bold = font.clone().with_weight(Font::SEMIBOLD);
-        let shaped = text.shape_line(&form.method, &bold);
-        draw_text(
-            layer,
-            &shaped,
-            method_r.min_x() + px(12.0),
-            ds::optical_baseline(method_r.min_y(), h, &bold),
-            method_color,
-        );
-        if let Some(id) = icons.id("chevron-down") {
-            let s = px(12.0);
-            draw_icon(
-                layer,
-                icons,
-                id,
-                Rect::new(method_r.max_x() - px(22.0), mid - s / 2.0, s, s),
-                method_color,
-            );
-        }
+        // The method: the shared dropdown, its value in the method's color.
+        let look = ds::DropdownLook {
+            value_color: Some(crate::format::method_color(&form.method, p)),
+            ..ds::DropdownLook::default()
+        };
+        let spec = DropdownSpec {
+            value: &form.method,
+            open: self.picker.is_open() && self.picking == Some(super::Pick::Method),
+            hovered: self.hover == Some(Hit::Method),
+            enabled: true,
+            note: None,
+            placeholder: None,
+        };
+        ds::dropdown_styled(layer, text, icons, &ds, method_r, (spec, look));
         hits.push((method_r, Hit::Method));
         // Send, or Cancel while its run goes.
         let (send_label, cancel_label) = (t("http.send"), t("http.cancel"));
         let send_w = ds::primary_width(text, &ds, &[send_label.as_str(), cancel_label.as_str()]);
         let send_r = Rect::new(top.max_x() - px(PAD) - send_w, mid - h / 2.0, send_w, h);
-        if running {
-            ds::danger_button(
-                layer,
-                text,
-                &ds,
-                send_r,
-                &cancel_label,
-                true,
-                self.hover == Some(Hit::Cancel),
-            );
-            hits.push((send_r, Hit::Cancel));
+        let (kind, label, hit) = if running {
+            (ButtonKind::Danger, &cancel_label, Hit::Cancel)
         } else {
-            ds::primary_button(
-                layer,
-                text,
-                &ds,
-                send_r,
-                &send_label,
-                true,
-                self.hover == Some(Hit::Send),
-            );
-            hits.push((send_r, Hit::Send));
-        }
+            (ButtonKind::Primary, &send_label, Hit::Send)
+        };
+        let spec = ButtonSpec::new(kind).label(label).hovered(self.hover == Some(hit));
+        ds::button(layer, text, icons, &ds, send_r, spec);
+        hits.push((send_r, hit));
         let url_r = Rect::new(
             method_r.max_x() + px(8.0),
             mid - h / 2.0,
@@ -181,38 +168,25 @@ impl RequestEditor {
         let width_of = |text: &mut text_layout::TextSystem, font: &Font, pad: f32, gap: f32| {
             labels.iter().map(|l| text.shape_line(l, font).width + pad + gap).sum::<f32>()
         };
-        let (tab_font, tab_pad, tab_gap) = if width_of(text, &font, px(20.0), px(4.0)) <= room {
-            (font.clone(), px(20.0), px(4.0))
-        } else if width_of(text, &font, px(12.0), 0.0) <= room {
-            (font.clone(), px(12.0), 0.0)
-        } else {
-            (ds.ui_font(-1.5), px(10.0), 0.0)
-        };
+        // Each tab's room on each side of its label (logical pixels) and the gap after it.
+        let (tab_font, tab_pad, tab_gap) =
+            if width_of(text, &font, 2.0 * px(TAB_PAD), px(TAB_GAP)) <= room {
+                (font.clone(), TAB_PAD, px(TAB_GAP))
+            } else if width_of(text, &font, 2.0 * px(TAB_PAD_CLOSE), 0.0) <= room {
+                (font.clone(), TAB_PAD_CLOSE, 0.0)
+            } else {
+                (ds.ui_font(-1.5), TAB_PAD_SMALL, 0.0)
+            };
         let tabs_layer = &mut *layer;
         let mut x = tabs.min_x() + px(PAD);
         for (tab, label) in Tab::ALL.into_iter().zip(&labels) {
-            let font = &tab_font;
-            let shaped = text.shape_line(label, font);
-            let r = Rect::new(x, tabs.min_y(), shaped.width + tab_pad, tabs.size.height);
+            let shown = UnderlineTab::new(label).on(tab == current).pad(tab_pad);
             // What doesn't fit even so isn't drawn over the response beside it.
-            if r.max_x() > tabs.max_x() {
+            if x + shown.width(text, &ds, &tab_font) > tabs.max_x() {
                 break;
             }
-            let active = tab == current;
-            let color = if active { p.text } else { p.text_muted };
-            draw_text(
-                tabs_layer,
-                &shaped,
-                r.min_x() + tab_pad / 2.0,
-                ds::optical_baseline(r.min_y(), r.size.height, font),
-                color,
-            );
-            if active {
-                tabs_layer.quad(Quad::filled(
-                    Rect::new(r.min_x(), r.max_y() - px(2.0), r.size.width, px(2.0)),
-                    p.accent,
-                ));
-            }
+            let at = (x, tabs.min_y(), tabs.size.height);
+            let r = tab_strip::underline_tab(tabs_layer, text, &ds, &tab_font, at, &shown);
             if let Some(seen) = r.intersect(&tabs) {
                 hits.push((seen, Hit::Tab(tab)));
             }
@@ -266,16 +240,11 @@ impl RequestEditor {
                     preview.min_y() + px(42.0),
                     p.text,
                 );
-                if let Some(id) = icons.id("copy") {
-                    let s = px(15.0);
-                    draw_icon(
-                        layer,
-                        icons,
-                        id,
-                        Rect::new(copy_r.min_x() + px(7.0), copy_r.min_y() + px(7.0), s, s),
-                        p.text_muted,
-                    );
-                }
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon("copy")
+                    .rest_tone(Tone::Neutral)
+                    .hovered(self.hover == Some(Hit::CopyUrl));
+                ds::button(layer, text, icons, &ds, copy_r, spec);
                 hits.push((copy_r, Hit::CopyUrl));
                 let caption_y = preview.max_y() + px(12.0);
                 let caption = text.shape_line(&t("http.query_params"), &small);
@@ -299,19 +268,11 @@ impl RequestEditor {
                     bulk_w,
                     px(ds::TOOLBAR_BUTTON_H),
                 );
-                ds::toolbar_button(
-                    layer,
-                    text,
-                    icons,
-                    &ds,
-                    bulk_r,
-                    ToolbarButton {
-                        label: &bulk_label,
-                        icon: "file-text",
-                        accent: false,
-                        hovered: self.hover == Some(Hit::Bulk),
-                    },
-                );
+                let spec = ButtonSpec::new(ButtonKind::Toolbar)
+                    .label(&bulk_label)
+                    .icon("file-text")
+                    .hovered(self.hover == Some(Hit::Bulk));
+                ds::button(layer, text, icons, &ds, bulk_r, spec);
                 hits.push((bulk_r, Hit::Bulk));
                 let table_top = actions_y + px(ds::TOOLBAR_BUTTON_H) + px(8.0);
                 let area = Rect::new(
@@ -583,19 +544,11 @@ impl RequestEditor {
                     });
                     let w = ds::toolbar_button_width(text, &ds, &label);
                     let r = Rect::new(content.min_x() + px(160.0), y, w, px(ds::TOOLBAR_BUTTON_H));
-                    ds::toolbar_button(
-                        layer,
-                        text,
-                        icons,
-                        &ds,
-                        r,
-                        ToolbarButton {
-                            label: &label,
-                            icon: "arrow-right",
-                            accent: false,
-                            hovered: self.hover == Some(Hit::KeyPlace),
-                        },
-                    );
+                    let spec = ButtonSpec::new(ButtonKind::Toolbar)
+                        .label(&label)
+                        .icon("arrow-right")
+                        .hovered(self.hover == Some(Hit::KeyPlace));
+                    ds::button(layer, text, icons, &ds, r, spec);
                     hits.push((r, Hit::KeyPlace));
                 }
                 if form.auth_kind == AuthKind::OAuth2 {
@@ -769,22 +722,10 @@ impl RequestEditor {
         let parts: Vec<Part> = self.shown_parts();
         let mut x = head.min_x() + px(PAD);
         for part in &parts {
-            let shaped = text.shape_line(&part.title(), &font);
-            let r = Rect::new(x, head.min_y(), shaped.width + px(20.0), head.size.height);
-            let active = *part == part_shown;
-            draw_text(
-                layer,
-                &shaped,
-                r.min_x() + px(10.0),
-                ds::optical_baseline(r.min_y(), r.size.height, &font),
-                if active { p.text } else { p.text_muted },
-            );
-            if active {
-                layer.quad(Quad::filled(
-                    Rect::new(r.min_x(), r.max_y() - px(2.0), r.size.width, px(2.0)),
-                    p.accent,
-                ));
-            }
+            let title = part.title();
+            let shown = UnderlineTab::new(&title).on(*part == part_shown);
+            let at = (x, head.min_y(), head.size.height);
+            let r = tab_strip::underline_tab(layer, text, &ds, &font, at, &shown);
             hits.push((r, Hit::Part(*part)));
             x = r.max_x();
         }
@@ -887,19 +828,20 @@ fn actions_row(
     ] {
         let w = ds::toolbar_button_width(text, ds, &label);
         let r = Rect::new(x, content.min_y(), w, h);
-        ds::toolbar_button(
-            layer,
-            text,
-            icons,
-            ds,
-            r,
-            ToolbarButton { label: &label, icon, accent: false, hovered: hover == Some(hit) },
-        );
+        let spec = ButtonSpec::new(ButtonKind::Toolbar)
+            .label(&label)
+            .icon(icon)
+            .hovered(hover == Some(hit));
+        ds::button(layer, text, icons, ds, r, spec);
         hits.push((r, hit));
         x = r.max_x() + px(8.0);
     }
     Rect::new(content.min_x(), content.min_y(), content.size.width, h)
 }
+
+/// How far past a row's checkbox its remove button's center is (logical pixels): 12 apart,
+/// then half its 16-pixel icon.
+const TRASH_CENTER: f32 = 20.0;
 
 /// A table's rows: the name, the value, on / off, remove (a multipart field: file or text).
 #[allow(clippy::too_many_arguments)]
@@ -978,20 +920,11 @@ fn paint_rows(
             let label = t(if row.file { "http.part_file" } else { "http.part_text" });
             let shaped = text.shape_line(&label, &ds.ui_font(-1.0));
             let r = Rect::new(x, y + px(6.0), shaped.width + px(14.0), row_h - px(12.0));
-            layer.quad(
-                Quad::filled(
-                    r,
-                    p.text.with_alpha(if hover == Some(Hit::FileToggle(i)) { 0.1 } else { 0.05 }),
-                )
-                .rounded(px(5.0)),
-            );
-            draw_text(
-                layer,
-                &shaped,
-                r.min_x() + px(7.0),
-                ds::optical_baseline(r.min_y(), r.size.height, &ds.ui_font(-1.0)),
-                p.text_muted,
-            );
+            let spec = ButtonSpec::new(ButtonKind::Soft)
+                .label(&label)
+                .rest_tone(Tone::Neutral)
+                .hovered(hover == Some(Hit::FileToggle(i)));
+            ds::button(layer, text, icons, ds, r, spec);
             hits.push((r, Hit::FileToggle(i)));
             x = r.max_x() + px(8.0);
         }
@@ -1005,11 +938,19 @@ fn paint_rows(
             true,
         );
         hits.push((check, Hit::Check(table, i)));
-        let trash = Rect::new(check.max_x() + px(12.0), mid - px(8.0), px(16.0), px(16.0));
-        if let Some(id) = icons.id("trash") {
-            let color = if hover == Some(Hit::Remove(table, i)) { p.danger } else { p.text_muted };
-            draw_icon(layer, icons, id, trash, color);
-        }
+        let trash = ds::square_button(
+            ds,
+            (check.max_x() + px(TRASH_CENTER) - px(button_size::SMALL) / 2.0, mid),
+            button_size::SMALL,
+        );
+        let lit = hover == Some(Hit::Remove(table, i));
+        // Removing it: in the danger color under the mouse.
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("trash")
+            .rest_tone(Tone::Neutral)
+            .hover_content_tone(Tone::Danger)
+            .hovered(lit);
+        ds::button(layer, text, icons, ds, trash, spec);
         hits.push((trash, Hit::Remove(table, i)));
         ds::divider(layer, ds, area.min_x(), area.max_x(), y + row_h);
     }

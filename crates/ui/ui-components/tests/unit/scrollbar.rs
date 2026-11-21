@@ -111,3 +111,33 @@ fn only_the_thumb_grows_when_the_look_says_so() {
     assert_eq!(ScrollbarVisibility::parse("scrolling"), Some(ScrollbarVisibility::WhileScrolling));
     assert_eq!(ScrollbarVisibility::parse("sometimes"), None);
 }
+
+/// A lane: its background, its tint, and the part in view a block across the whole lane,
+/// its alpha by how the pointer holds it.
+#[test]
+fn a_lane_draws_its_block_by_the_pointers_state() {
+    let p = Palette::dark();
+    let look = LaneLook::new(&p, p.editor_background);
+    let m = ScrollMetrics { content: 4000.0, viewport: 400.0, offset: 0.0 };
+    let paint = |b: &Scrollbar| {
+        let mut layer = Layer::default();
+        b.paint_lane(&mut layer, m, &look);
+        layer.quads
+    };
+    let mut b = bar();
+    let rest = paint(&b);
+    assert_eq!(rest.len(), 3, "background, tint, block");
+    assert_eq!(rest[0].color, p.editor_background);
+    assert_eq!(rest[1].color, p.text.with_alpha(0.025));
+    assert_eq!(rest[2].bounds, Rect::new(488.0, 0.0, 12.0, 40.0), "square, the lane's width");
+    assert_eq!(rest[2].corner_radius, 0.0);
+    assert_eq!(rest[2].color, p.text.with_alpha(0.06));
+    b.hover(Point::new(490.0, 10.0));
+    assert_eq!(paint(&b)[2].color, p.text.with_alpha(0.10));
+    b.begin_drag(Point::new(490.0, 10.0), m);
+    assert_eq!(paint(&b)[2].color, p.text.with_alpha(0.14));
+    let none = ScrollMetrics { content: 100.0, viewport: 400.0, offset: 0.0 };
+    let mut layer = Layer::default();
+    b.paint_lane(&mut layer, none, &look);
+    assert_eq!(layer.quads.len(), 2, "nothing to scroll: no block");
+}

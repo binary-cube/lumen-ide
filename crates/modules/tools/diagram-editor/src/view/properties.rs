@@ -355,10 +355,7 @@ impl DiagramView {
         let px = |v: f32| ds.px(v);
         let layer = ctx.scene.push_layer(Some(area));
         layer.quad(Quad::filled(area, p.sidebar_background));
-        layer.quad(Quad::filled(
-            Rect::new(area.min_x(), area.min_y(), ctx.scale.max(1.0), area.size.height),
-            p.border,
-        ));
+        ds::divider_vertical(layer, &ds, area.min_x(), area.min_y(), area.max_y());
         self.props.hits.clear();
         let label_font = ds.ui_font(-1.0);
         let head_font = ds.ui_font(-1.5).with_weight(text_layout::Font::SEMIBOLD);

@@ -4,7 +4,8 @@
 //! (and nothing is over it there); the focus moves among them by the view's own keys (Tab,
 //! ↑ ↓, the filter's row), never the parts' order.
 //!
-//! Their rules differ from a plain field's: a press only puts the caret (a second one
+//! The filter is the app's search field (its press, drag, editing keys, ⌘A / ⌘X / ⌘Z, ×
+//! emptying it). The others' rules differ from a plain field's: a press only puts the caret (a second one
 //! selects no word), a newline typed is dropped (never made a space), a cut with nothing
 //! selected isn't used, and the password's text is never copied nor cut.
 
@@ -12,6 +13,7 @@ use std::borrow::Borrow;
 
 use kernel::{Point, Rect};
 use ui_components::control::{Control, Press};
+use ui_components::search_field::SearchField;
 use ui_components::{KeyReach, ViewerCursor, ViewerKey};
 use ui_kit::TextInput;
 
@@ -26,14 +28,67 @@ pub(in crate::sources) struct FieldPart<'a, I> {
     pub hits: &'a [(Rect, Hit)],
 }
 
+/// `p` is on `field` as drawn last: the topmost hit there is it.
+fn on(hits: &[(Rect, Hit)], field: &Field, p: Point) -> bool {
+    hits.iter()
+        .rev()
+        .find(|(r, _)| r.contains(p))
+        .is_some_and(|(_, hit)| matches!(hit, Hit::Field(f) if f == field))
+}
+
+/// The list's filter as a control, the window's hits with it (what's over it).
+pub(in crate::sources) struct FilterPart<'a> {
+    pub search: &'a mut SearchField,
+    pub hits: &'a [(Rect, Hit)],
+}
+
+impl Control for FilterPart<'_> {
+    fn hit(&self, p: Point) -> bool {
+        on(self.hits, &Field::Filter, p)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        Control::press(self.search, p, clicks)
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(self.search, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(&*self.search, p)
+    }
+
+    /// The view moves the focus among its fields by its own keys.
+    fn in_tab_order(&self) -> bool {
+        false
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        Control::key(self.search, key, reach)
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        Control::text(self.search, typed)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&*self.search)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        Control::command(self.search, id)
+    }
+}
+
 impl<I: Borrow<TextInput>> FieldPart<'_, I> {
     /// `p` is on its field as drawn last: the topmost hit there is it.
     fn on(&self, p: Point) -> bool {
-        self.hits
-            .iter()
-            .rev()
-            .find(|(r, _)| r.contains(p))
-            .is_some_and(|(_, hit)| matches!(hit, Hit::Field(f) if *f == self.field))
+        on(self.hits, &self.field, p)
     }
 
     /// What it has selected; never the password's.

@@ -2,6 +2,17 @@
 
 use super::*;
 
+/// The ✓ on the page size in force (logical pixels).
+const PAGE_CHECK: f32 = 13.0;
+
+/// A popup's row under the mouse: lit as a menu's (the theme's hover, small corners).
+fn menu_row_hover(layer: &mut Layer, ds: &Ctx<'_>, row: Rect, hovered: bool) {
+    ds::RowHighlight::new(false, hovered)
+        .radius(radius::SM)
+        .hover(ds::HoverFill::Background)
+        .paint(layer, ds, row);
+}
+
 impl<S: GridSource> DataGrid<S> {
     /// A long value edited on several lines, over the grid: its column and row, the text,
     /// Apply and Cancel (nothing behind it gets a click until one of them).
@@ -161,33 +172,13 @@ impl<S: GridSource> DataGrid<S> {
         for (size, label) in choices {
             let row = Rect::new(r.min_x() + px(6.0), y, r.size.width - px(12.0), row_h);
             let hit = Hit::PageChoice(size);
-            if self.hover == Some(hit) {
-                layer.quad(Quad::filled(row, p.hover_background).rounded(px(radius::SM)));
-            }
             let chosen = self.paging.size == size;
-            if chosen && let Some(id) = icons.id("check") {
-                let s = px(13.0);
-                ui_kit::draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(
-                        row.min_x() + px(8.0),
-                        (row.min_y() + (row_h - s) / 2.0).round(),
-                        s,
-                        s,
-                    ),
-                    p.accent,
-                );
-            }
-            let shaped = text.shape_line(&label, &font);
-            draw_text(
-                layer,
-                &shaped,
-                row.min_x() + px(30.0),
-                ds::optical_baseline(row.min_y(), row_h, &font),
-                if chosen { p.accent } else { p.text },
-            );
+            let spec = ds::CheckRowSpec::new(&label, chosen, self.hover == Some(hit))
+                .radius(radius::SM)
+                .hover_fill(p.hover_background)
+                .icon(PAGE_CHECK)
+                .untinted();
+            ds::check_row(layer, text, icons, ds, row, spec);
             self.hits.push((row, hit));
             y += row_h;
         }
@@ -255,9 +246,7 @@ impl<S: GridSource> DataGrid<S> {
             last = Some(group(tool));
             let row = Rect::new(r.min_x() + px(6.0), y, r.size.width - px(12.0), row_h);
             let hit = Hit::MoreChoice(tool);
-            if enabled && self.hover == Some(hit) {
-                layer.quad(Quad::filled(row, p.hover_background).rounded(px(radius::SM)));
-            }
+            menu_row_hover(layer, ds, row, enabled && self.hover == Some(hit));
             let color = if enabled { p.text } else { p.text_muted.with_alpha(0.6) };
             if let Some(id) = tool_icon(tool).and_then(|i| icons.id(i)) {
                 let s = px(14.0);
@@ -405,9 +394,7 @@ impl<S: GridSource> DataGrid<S> {
                 }
                 PopRow::Choice { id, name, problem } => {
                     let usable = problem.is_none();
-                    if usable && hovered {
-                        layer.quad(Quad::filled(line, p.hover_background).rounded(px(radius::SM)));
-                    }
+                    menu_row_hover(layer, ds, line, usable && hovered);
                     let on = *id == chosen;
                     if on {
                         mark(layer, "check", p.accent);
@@ -439,9 +426,7 @@ impl<S: GridSource> DataGrid<S> {
                     self.hits.push((line, hit));
                 }
                 PopRow::Toggle { computed, label } => {
-                    if hovered {
-                        layer.quad(Quad::filled(line, p.hover_background).rounded(px(radius::SM)));
-                    }
+                    menu_row_hover(layer, ds, line, hovered);
                     let on = if *computed { options.skip_computed } else { options.skip_generated };
                     let check = if on { ds::Check::On } else { ds::Check::Off };
                     ds::checkbox(
@@ -458,9 +443,7 @@ impl<S: GridSource> DataGrid<S> {
                     self.hits.push((line, hit));
                 }
                 PopRow::Action { command, label } => {
-                    if hovered {
-                        layer.quad(Quad::filled(line, p.hover_background).rounded(px(radius::SM)));
-                    }
+                    menu_row_hover(layer, ds, line, hovered);
                     let icon = if *command == extractors::OPEN_DIRECTORY_COMMAND {
                         "folder-open"
                     } else {

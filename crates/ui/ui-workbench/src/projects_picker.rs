@@ -19,7 +19,9 @@ use icons::Icons;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
-use ui_kit::{KeyHint, TextInput, TextInputStyle, draw_icon, draw_text};
+use ui_components::control::{Control, Press};
+use ui_components::search_field::SearchField;
+use ui_kit::{KeyHint, draw_icon, draw_text};
 
 use crate::Painter;
 use crate::ds::{self, Ctx};
@@ -279,6 +281,9 @@ enum Mark {
 /// short of the row, so the guides never touch a row's hover or selection.
 const INDENT: f32 = 28.0;
 
+/// The filter field's height (logical pixels).
+const FIELD_H: f32 = 38.0;
+
 /// How far the mouse moves before a press becomes a drag (logical pixels).
 const DRAG_START: f32 = 5.0;
 
@@ -289,7 +294,10 @@ const EDGE_SPEED: f32 = 900.0;
 
 #[derive(Debug, Default)]
 pub struct ProjectsPicker {
-    pub query: TextInput,
+    /// The filter (the app's search field: ×, ⌘A through the app's field with the keys).
+    pub query: SearchField,
+    /// A press in the filter: a drag selects in it.
+    selecting: bool,
     /// The home screen's field has the keyboard (another field, e.g. the project panel's
     /// file search, may have it instead).
     pub focused: bool,
@@ -298,8 +306,6 @@ pub struct ProjectsPicker {
     selected: usize,
     rows: Vec<(Rect, usize)>,
     hover: Option<usize>,
-    clear: Option<Rect>,
-    clear_hover: bool,
     /// The list's scroll (its content's height measured at the last paint bounds it).
     scroll: ui_components::ScrollState,
     list: Rect,
@@ -515,18 +521,18 @@ impl ProjectsPicker {
     }
 
     pub fn type_text(&mut self, typed: &str) {
-        self.query.insert(typed);
+        Control::text(&mut self.query, typed);
         self.selected = 0;
         self.scroll.reset();
     }
 
     pub fn backspace(&mut self) {
-        self.query.backspace(false);
+        Control::key(&mut self.query, ui_components::ViewerKey::Backspace, Default::default());
         self.selected = 0;
     }
 
     pub fn select_all(&mut self) {
-        self.query.select_all();
+        self.query.input.select_all();
     }
 
     pub fn has_query(&self) -> bool {
@@ -566,12 +572,18 @@ impl ProjectsPicker {
         }
     }
 
-    /// Click: a row, the × button, or (in the modal) outside it.
+    /// Click: a row, the filter (its × empties it, else the caret put, a drag selecting),
+    /// or (in the modal) outside it.
     pub fn hit(&mut self, p: Point) -> Option<PickerAction> {
         self.press = None;
         self.drag = None;
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            self.clear_query();
+        self.selecting = false;
+        if self.query.hit(p) {
+            match Control::press(&mut self.query, p, 1) {
+                Press::Held => self.selecting = true,
+                _ if self.query.take_cleared() => self.selected = 0,
+                _ => {}
+            }
             return None;
         }
         if self.new_group.is_some_and(|r| r.contains(p) && self.list.contains(p)) {
@@ -608,23 +620,22 @@ impl ProjectsPicker {
     pub fn hover(&mut self, p: Point) -> bool {
         let hover =
             self.rows.iter().find(|(r, _)| r.contains(p) && self.list.contains(p)).map(|(_, i)| *i);
-        let clear = self.clear.is_some_and(|r| r.contains(p));
+        let clear = Control::hover(&mut self.query, Some(p));
         let new_group = self.new_group.is_some_and(|r| r.contains(p) && self.list.contains(p));
         let frame = self.modal.is_open() && self.modal.hover(p);
         let restore = self.restore_at(p);
         let changed = hover != self.hover
-            || clear != self.clear_hover
+            || clear
             || new_group != self.new_group_hover
             || restore != self.restore_hover;
         self.restore_hover = restore;
         self.hover = hover;
-        self.clear_hover = clear;
         self.new_group_hover = new_group;
         changed || frame
     }
 
     pub fn over_clickable(&self, p: Point) -> bool {
-        self.clear.is_some_and(|r| r.contains(p))
+        self.query.cursor(p) == Some(ui_components::ViewerCursor::Pointer)
             || self.new_group.is_some_and(|r| r.contains(p) && self.list.contains(p))
             || self.restore_at(p).is_some()
             || self.rows.iter().any(|(r, _)| r.contains(p) && self.list.contains(p))
@@ -645,46 +656,14 @@ impl ProjectsPicker {
         scene: &mut Scene,
         ctx: &Ctx<'_>,
     ) -> Rect {
-        let p = ctx.palette;
-        let px = |v: f32| ctx.px(v);
-        let field = Rect::new(area.min_x(), area.min_y(), area.size.width, px(38.0));
+        let field = Rect::new(area.min_x(), area.min_y(), area.size.width, ctx.px(FIELD_H));
         let layer = scene.push_layer(None);
-        let mut input = ds::search_field(layer, icons, ctx, field, true);
-        self.clear = self.has_query().then(|| {
-            let mid = field.min_y() + field.size.height / 2.0;
-            ds::clear_button(
-                layer,
-                icons,
-                ctx,
-                field.max_x() - px(8.0) - px(9.0),
-                mid,
-                self.clear_hover,
-            )
-        });
-        if let Some(clear) = self.clear {
-            input.size.width = (clear.min_x() - px(6.0) - input.min_x()).max(0.0);
-        }
-        let style = TextInputStyle {
-            font: ctx.ui_font(-0.5),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: ctx.fade(p.text),
-            placeholder: ctx.fade(p.text_muted),
-            selection: ctx.fade(p.selection),
-            caret: ctx.fade(p.caret),
-            radius: 0.0,
-            border_width: 0.0,
-            padding: 0.0,
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        let input_layer = scene.push_layer(Some(input));
         let files_mode = !self.items.iter().any(|i| {
             matches!(i, Item::Project { .. } | Item::Group { .. } | Item::HistoryHeader(_))
         });
-        let placeholder = if files_mode { "home.filter_files" } else { "home.filter" };
-        self.query.paint(input_layer, text, input, self.focused, &i18n::t(placeholder), &style);
+        let placeholder = i18n::t(if files_mode { "home.filter_files" } else { "home.filter" });
+        // Its caret only while it has the keys (the project panel's search may have them).
+        self.query.paint(layer, text, icons, ctx, (field, self.focused), &placeholder);
         field
     }
 }

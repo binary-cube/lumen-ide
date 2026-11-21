@@ -9,15 +9,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use i18n::t;
 use kernel::{Point, Rect};
-use render_api::Quad;
 use text_layout::Font;
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size};
 use ui_components::editor_toolbar::{
     EditorState, EditorToolbar, StatementMark, ToolbarAction, ToolbarPaint,
 };
 use ui_components::picker::PickerItem;
 use ui_components::{Tip, ViewerAction, ViewerCursor, WithHost};
-use ui_kit::{draw_icon, draw_text};
+use ui_kit::draw_text;
 
 use crate::runs::Runs;
 
@@ -301,28 +300,18 @@ impl EditorToolbar for HttpBar {
         ds::divider(layer, &ds, b.min_x(), b.max_x(), b.max_y() - ds.line());
         self.hits.clear();
         let mid = b.min_y() + b.size.height / 2.0;
-        let size = px(26.0);
+        let size = button_size::MEDIUM;
         let mut x = b.min_x() + px(8.0);
-        for (tool, icon, tint) in
-            [(Tool::RunAll, "play", Some(p.vcs_added)), (Tool::Stop, "square", Some(p.danger))]
+        for (tool, icon, tone) in
+            [(Tool::RunAll, "play", Tone::Success), (Tool::Stop, "square", Tone::Danger)]
         {
-            let r = Rect::new(x, (mid - size / 2.0).round(), size, size);
-            let enabled = self.enabled(tool);
-            if enabled && self.hover == Some(tool) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-            }
-            if let Some(id) = icons.id(icon) {
-                let s = px(15.0);
-                let ir = Rect::new(
-                    (r.min_x() + (size - s) / 2.0).round(),
-                    (r.min_y() + (size - s) / 2.0).round(),
-                    s,
-                    s,
-                );
-                let color =
-                    if enabled { tint.unwrap_or(p.text) } else { p.text_muted.with_alpha(0.4) };
-                draw_icon(layer, icons, id, ir, color);
-            }
+            let r = ds::square_button(&ds, (x, mid), size);
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon(icon)
+                .tone(tone)
+                .enabled(self.enabled(tool))
+                .hovered(self.hover == Some(tool));
+            ds::button(layer, text, icons, &ds, r, spec);
             self.hits.push((r, tool));
             x = r.max_x() + px(2.0);
         }
@@ -352,20 +341,11 @@ impl EditorToolbar for HttpBar {
         ds::dropdown(layer, text, icons, &ds, field, spec);
         self.hits.push((field, Tool::Environment));
         // The chain as a graph, at the bar's right end.
-        let graph = Rect::new(b.max_x() - px(8.0) - size, (mid - size / 2.0).round(), size, size);
-        if self.hover == Some(Tool::Graph) {
-            layer.quad(Quad::filled(graph, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-        }
-        if let Some(id) = icons.id("graph") {
-            let s = px(15.0);
-            let ir = Rect::new(
-                (graph.min_x() + (size - s) / 2.0).round(),
-                (graph.min_y() + (size - s) / 2.0).round(),
-                s,
-                s,
-            );
-            draw_icon(layer, icons, id, ir, p.text.with_alpha(0.86));
-        }
+        let graph = ds::square_button(&ds, (b.max_x() - px(8.0) - px(size), mid), size);
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("graph")
+            .hovered(self.hover == Some(Tool::Graph));
+        ds::button(layer, text, icons, &ds, graph, spec);
         self.hits.push((graph, Tool::Graph));
     }
 

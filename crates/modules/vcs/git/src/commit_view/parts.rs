@@ -5,10 +5,10 @@
 
 use std::path::Path;
 
-use kernel::Point;
+use kernel::{Point, Rect};
 use ui_components::control::{Control, Press};
+use ui_components::search_field::SearchField;
 use ui_components::{KeyReach, MultilineField, PressMods, ViewerCursor, ViewerKey};
-use ui_kit::TextInput;
 
 /// The commit's message: the pointer and the editing keys as any field of several lines
 /// (a press never extends: ⇧ chooses files here), ↵ a new line; every edit is kept as the
@@ -111,25 +111,51 @@ impl Control for MessagePart<'_> {
     }
 }
 
-/// The places' filter with the keys (it was clicked: the screen gives it the focus): the
-/// editing keys and the text edit it, Esc empties it; empty, Esc and Tab ask to leave it
-/// (`leave`). `edited`: what it holds changed (the places' rows are made again).
+/// The places' filter (the app's search field): pressed, it takes the focus (the caret
+/// put, a drag selecting, × emptying it); with the focus the editing keys, the text and the
+/// edit commands edit it, Esc empties it; empty, Esc and Tab ask to leave it (`leave`).
+/// `edited`: what it holds changed (the places' rows are made again).
 pub(super) struct PlacesLane<'a> {
-    pub(super) filter: &'a mut TextInput,
+    pub(super) filter: &'a mut SearchField,
     pub(super) edited: &'a mut bool,
     pub(super) leave: &'a mut bool,
 }
 
 impl PlacesLane<'_> {
-    /// `edit` applied to the filter, noting a change of what it holds.
-    fn edit(&mut self, edit: impl FnOnce(&mut TextInput)) {
-        let before = TextInput::text(self.filter).to_owned();
-        edit(self.filter);
-        *self.edited |= TextInput::text(self.filter) != before;
+    /// `edit` applied to the filter, noting a change of what it holds; what `edit` answered.
+    fn edit<R>(&mut self, edit: impl FnOnce(&mut SearchField) -> R) -> R {
+        let answer = edit(self.filter);
+        *self.edited |= self.filter.take_edited();
+        answer
     }
 }
 
 impl Control for PlacesLane<'_> {
+    fn area(&self) -> Option<Rect> {
+        Control::area(&*self.filter)
+    }
+
+    /// A press on × empties it (said by [`SearchField::take_cleared`]): its rows again.
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let press = Control::press(&mut *self.filter, p, clicks);
+        // A press changes the text only by × (said by both).
+        self.filter.take_cleared();
+        *self.edited |= self.filter.take_edited();
+        press
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(&mut *self.filter, p)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        Control::hover(&mut *self.filter, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(&*self.filter, p)
+    }
+
     fn focusable(&self) -> bool {
         true
     }
@@ -140,42 +166,26 @@ impl Control for PlacesLane<'_> {
 
     fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         match key {
-            ViewerKey::Escape if !TextInput::text(self.filter).is_empty() => {
-                self.edit(|input| input.set_text(""));
+            ViewerKey::Escape if !SearchField::text(self.filter).is_empty() => {
+                self.filter.set_text("");
+                *self.edited = true;
             }
             ViewerKey::Escape | ViewerKey::Tab => *self.leave = true,
-            _ => {
-                let mut used = false;
-                self.edit(|input| used = reach.edit(input, key));
-                return used;
-            }
+            _ => return self.edit(|filter| Control::key(filter, key, reach)),
         }
         true
     }
 
     fn text(&mut self, typed: &str) -> bool {
-        self.edit(|input| input.insert(typed));
-        true
+        self.edit(|filter| Control::text(filter, typed))
     }
 
     fn selected_text(&self) -> Option<String> {
-        let selected = self.filter.selected_text();
-        (!selected.is_empty()).then(|| selected.to_owned())
+        Control::selected_text(&*self.filter)
     }
 
     fn command(&mut self, id: &str) -> bool {
-        match id {
-            "select_all" => self.filter.select_all(),
-            "cut" => self.edit(|input| input.insert("")),
-            "undo" => self.edit(|input| {
-                input.undo();
-            }),
-            "redo" => self.edit(|input| {
-                input.redo();
-            }),
-            _ => return false,
-        }
-        true
+        self.edit(|filter| Control::command(filter, id))
     }
 }
 

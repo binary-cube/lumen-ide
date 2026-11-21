@@ -446,12 +446,13 @@ pub fn card_header(
     rect
 }
 
+/// The line under a card's header: the cards' border at this alpha.
+const HEADER_RULE: f32 = 0.7;
+
 /// The line between a card's header and its rows.
 pub fn header_divider(layer: &mut Layer, ds: &Ctx<'_>, r: Rect, header: Rect) {
-    layer.quad(Quad::filled(
-        Rect::new(r.min_x(), header.max_y(), r.size.width, ds.line()),
-        ds.palette.card_border.with_alpha(0.7),
-    ));
+    let line = ds.palette.card_border.with_alpha(HEADER_RULE);
+    crate::ds::divider_in(layer, ds, (r.min_x(), r.max_x(), header.max_y()), line);
 }
 
 /// What a card's row shows: a mark before it (`+`, a key), its label, and a detail on its
@@ -791,8 +792,21 @@ pub fn arrow(
     }
 }
 
-/// The toolbar's ← at `r`: its hover, its arrow.
-pub fn back_button(pen: Pen<'_, '_>, r: Rect, hovered: bool) {
+/// The toolbar's back button: the shared ghost button with its ← (what a caller draws with
+/// [`ds::button`] in its rect).
+pub fn back_button_spec(hovered: bool) -> ds::ButtonSpec<'static> {
+    ds::ButtonSpec::new(ds::ButtonKind::Ghost).icon("arrow-left").hovered(hovered)
+}
+
+/// The toolbar's ← at `r`: [`back_button_spec`] drawn with the shared button.
+pub fn back_button(pen: Pen<'_, '_>, icons: &icons::Icons, r: Rect, hovered: bool) {
+    let Pen { layer, text, ds } = pen;
+    ds::button(layer, text, icons, ds, r, back_button_spec(hovered));
+}
+
+/// The toolbar's ← at `r`, without the icons at hand: its hover, the arrow as text. A
+/// caller with the icons draws [`back_button`] (the shared button) instead.
+pub fn back_button_text(pen: Pen<'_, '_>, r: Rect, hovered: bool) {
     let Pen { layer, text, ds } = pen;
     let p = ds.palette;
     if hovered {

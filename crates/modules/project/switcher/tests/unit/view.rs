@@ -124,5 +124,66 @@ fn the_filter_has_the_keyboard_through_the_controls() {
     assert_eq!(view.selected_text().as_deref(), Some("blog"));
     assert!(!view.edit_key(ViewerKey::Tab), "Tab is the cards' (with its reach)");
     assert_eq!(view.controls.focused(), Some(FILTER), "the focus stays in the filter");
-    assert!(!view.command("undo"), "only ⌘A is the filter's");
+    assert!(view.command("cut"), "the field's edit commands");
+    assert_eq!(view.shown().len(), 3, "emptied: every window again");
+    assert!(view.command("undo"));
+    assert_eq!(view.chosen().map(|p| p.window), Some(20), "`blog` back");
+}
+
+/// The filter is the app's search field: drawn with its ×, a press on it empties it (the
+/// list filtered again) and leaves the keys there; a press on a card doesn't take them.
+#[test]
+fn the_filter_is_the_apps_search_field() {
+    let mut view = opened();
+    let palette = ui_components::Palette::dark();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let icons = icons::Icons::builtin();
+    let bounds = Rect::new(0.0, 0.0, WIDTH, 600.0);
+    let mut paint = |view: &mut SwitcherView, scene: &mut render_api::Scene| {
+        let (palette, icons, text) = (&palette, &icons, &mut text);
+        view.paint(ViewerPaint {
+            bounds,
+            scale: 1.0,
+            text,
+            scene,
+            palette,
+            icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    view.text_input("shop");
+    assert_eq!(view.shown().len(), 1);
+    paint(&mut view, &mut scene);
+    let field = view.filter.area();
+    let clear = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    assert_eq!(view.cursor_at(clear), None, "no hover yet");
+    view.hover(clear);
+    assert_eq!(view.cursor_at(clear), Some(ViewerCursor::Pointer), "× is a hand");
+    assert!(view.click(clear).is_none());
+    assert_eq!(view.filter.text(), "");
+    assert_eq!(view.shown().len(), 3, "filtered again");
+    assert_eq!(view.controls.focused(), Some(FILTER), "the keys kept");
+    paint(&mut view, &mut scene);
+    let (card, _) = view.cards[1];
+    view.click(Point::new(card.min_x() + 4.0, card.min_y() + 4.0));
+    assert_eq!(view.controls.focused(), Some(FILTER), "a card leaves them in the filter");
+}
+
+/// Only a change of the filter's text is an edit (the field's own `take_edited`): ⌫ on an
+/// empty filter or ⌘A isn't; typing and ⌘X are.
+#[test]
+fn the_filter_tells_only_its_text_changed() {
+    let mut filter = SearchField::new();
+    let mut edited = false;
+    let mut part = FilterPart { filter: &mut filter, edited: &mut edited };
+    assert!(part.key(ViewerKey::Backspace, KeyReach::default()));
+    assert!(part.command("select_all"));
+    assert!(!*part.edited, "nothing changed");
+    assert!(part.text("ab"));
+    assert!(*part.edited);
+    *part.edited = false;
+    assert!(part.command("select_all") && part.command("cut"));
+    assert!(*part.edited, "⌘X: an edit");
 }

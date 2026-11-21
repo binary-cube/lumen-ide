@@ -17,7 +17,7 @@ use icons::Icons;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
-use ui_kit::{draw_icon, draw_text};
+use ui_kit::draw_text;
 
 use crate::ds::{self, Ctx};
 use crate::palette::Palette;
@@ -416,7 +416,7 @@ enum Hit {
 
 /// Logical pixels: the side buttons' strip, a button, the text's inset.
 const STRIP: f32 = 36.0;
-const BUTTON: f32 = 26.0;
+const BUTTON: f32 = ds::button_size::MEDIUM;
 const INSET: f32 = 10.0;
 const TOP: f32 = 6.0;
 
@@ -658,7 +658,13 @@ impl LogView {
 
     // ─── Painting ───
 
-    fn paint_buttons(&mut self, layer: &mut Layer, icons: &Icons, ds: &Ctx<'_>) {
+    fn paint_buttons(
+        &mut self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        icons: &Icons,
+        ds: &Ctx<'_>,
+    ) {
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let b = self.bounds;
@@ -679,28 +685,17 @@ impl LogView {
                 _ => false,
             };
             let hovered = self.hover == Some(Hit::Button(button));
-            if on {
-                layer.quad(Quad::filled(r, p.accent.with_alpha(0.14)).rounded(px(ds::radius::SM)));
-            } else if hovered {
-                layer.quad(Quad::filled(r, p.tab_hover).rounded(px(ds::radius::SM)));
-            }
-            if let Some(id) = icons.id(button.icon()) {
-                let icon = px(15.0);
-                let ir = Rect::new(
-                    (r.min_x() + (size - icon) / 2.0).round(),
-                    (r.min_y() + (size - icon) / 2.0).round(),
-                    icon,
-                    icon,
-                );
-                let color = if on { p.accent } else { p.text_muted };
-                draw_icon(layer, icons, id, ir, color);
-            }
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon(button.icon())
+                .rest_tone(ds::Tone::Neutral)
+                .on(on)
+                .hovered(hovered);
+            ds::button(layer, text, icons, ds, r, spec);
             self.buttons.push((r, button));
             y += size + px(4.0);
             // Copy and clear apart from the toggles.
             if button == Button::Follow {
-                let sep = Rect::new(x + px(5.0), y, size - px(10.0), ds.line());
-                layer.quad(Quad::filled(sep, p.border));
+                ds::divider(layer, ds, x + px(5.0), x + size - px(5.0), y);
                 y += px(5.0);
             }
         }
@@ -847,7 +842,7 @@ impl Viewer for LogView {
             Rect::new(b.min_x() + strip, b.min_y(), (b.size.width - strip).max(0.0), b.size.height);
         let base = ctx.scene.push_layer(Some(b));
         base.quad(Quad::filled(b, p.editor_background));
-        self.paint_buttons(base, ctx.icons, &ds);
+        self.paint_buttons(base, ctx.text, ctx.icons, &ds);
         // The rows: brought up to the lines (only the new ones laid out).
         let room = self.text_area.size.width - 2.0 * px(INSET);
         let cols = (room / self.advance.max(1.0)).floor().max(1.0) as usize;

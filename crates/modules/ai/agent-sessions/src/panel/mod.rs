@@ -38,6 +38,7 @@ use kernel::{Point, Rect};
 use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx};
 use ui_components::picker::{PickerEvent, PickerItem};
+use ui_components::search_field::SearchField;
 use ui_components::{
     Asked, EdgeScrollbar, KeyReach, PanelButton, PanelContext, ToolPanel, ToolPanelAction,
     ViewMenuEntry, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
@@ -204,14 +205,11 @@ pub struct SessionsPanel {
     /// The session a right click was on (its agent and its id: the list may be read again
     /// while the menu is open).
     menu_on: Option<(&'static str, String)>,
-    /// What's searched for in the titles (it has the keys while it's the focused part), and
-    /// what its last key or text asked.
-    query: TextInput,
+    /// What's searched for in the titles (the app's search field: it has the keys while
+    /// it's the focused part), what its last key, text or × asked, and where it's laid out.
+    query: SearchField,
     search_asked: Option<parts::FieldAsk>,
     field: Rect,
-    /// The search's × (while there's text).
-    clear: Option<Rect>,
-    hover_clear: bool,
     /// The sessions shown (indices: the search's), for the read and the search they were
     /// made for.
     shown: Vec<usize>,
@@ -286,11 +284,9 @@ impl Default for SessionsPanel {
             agents: None,
             chats: None,
             menu_on: None,
-            query: TextInput::default(),
+            query: SearchField::default(),
             search_asked: None,
             field: Rect::default(),
-            clear: None,
-            hover_clear: false,
             shown: Vec::new(),
             shown_for: None,
             generation: 0,
@@ -590,19 +586,13 @@ impl SessionsPanel {
         }
     }
 
-    /// The search field: the app's pill, what's typed, its ×.
+    /// The search field: the app's (its pill, what's typed, its ×, its caret while it has
+    /// the keys).
     fn paint_search(&mut self, ctx: &mut ViewerPaint<'_>, ds: &Ctx<'_>) {
         let layer = ctx.scene.push_layer(Some(ctx.bounds));
-        let mut pen = ui_components::LayerPainter::new(layer, ctx.text, ctx.icons, *ds);
         let typing = self.typing();
-        ds::search_input(&mut pen, self.field, &self.query, typing, &t("agents.search"));
-        self.clear = None;
-        if !self.query.text().is_empty() {
-            let mid = self.field.min_y() + self.field.size.height / 2.0;
-            let x = self.field.max_x() - ds.px(18.0);
-            let close = ds::clear_button(pen.layer, ctx.icons, ds, x, mid, self.hover_clear);
-            self.clear = Some(close);
-        }
+        let placeholder = t("agents.search");
+        self.query.paint(layer, ctx.text, ctx.icons, ds, (self.field, typing), &placeholder);
     }
 
     /// Run `launch` in a terminal tab of the editor known by `key`, called `title` with the
@@ -1240,9 +1230,11 @@ impl ToolPanel for SessionsPanel {
                 self.filter_list_event(event);
                 return None;
             }
-            // Pressed elsewhere than in the renamed row: the name's given.
+            // Pressed elsewhere than in the renamed row: the name's given (its × pressed:
+            // searched again).
             Some((SEARCH_FIELD, _)) => {
                 self.finish_rename();
+                self.follow(SEARCH_FIELD);
                 return None;
             }
             Some(_) => return None,
@@ -1255,13 +1247,6 @@ impl ToolPanel for SessionsPanel {
             if anchor.size.width > 0.0 {
                 self.open_agent_filter();
             }
-            return None;
-        }
-        // The search: its ×, or the keys to it (a click elsewhere takes them back).
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            self.query = TextInput::default();
-            self.with_controls(|c, parts| c.focus(parts, Some(SEARCH_FIELD)));
-            self.searching();
             return None;
         }
         if self.more_rect.is_some_and(|r| r.contains(p)) {
@@ -1352,18 +1337,13 @@ impl ToolPanel for SessionsPanel {
         changed |= folder != self.hovered_folder;
         self.hovered_folder = folder;
         let row = self.row_at(p);
-        let clear = self.clear.is_some_and(|r| r.contains(p));
         let star = self.star_at(p);
         let more = self.more_at(p).is_some();
         let filter = self.filter_field.is_some_and(|r| r.contains(p));
         changed |= filter != self.hover_filter;
         self.hover_filter = filter;
-        changed |= row != self.hovered
-            || clear != self.hover_clear
-            || star != self.hover_star
-            || more != self.hover_more;
-        (self.hovered, self.hover_clear, self.hover_star, self.hover_more) =
-            (row, clear, star, more);
+        changed |= row != self.hovered || star != self.hover_star || more != self.hover_more;
+        (self.hovered, self.hover_star, self.hover_more) = (row, star, more);
         changed
     }
 
@@ -1423,10 +1403,10 @@ impl ToolPanel for SessionsPanel {
         if self.filter_list.is_open() {
             return Some(self.filter_list.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
         }
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            return Some(ViewerCursor::Pointer);
+        if self.field.contains(p) {
+            return Control::cursor(&self.query, p);
         }
-        if self.field.contains(p) || self.renaming.as_ref().is_some_and(|n| n.field.contains(p)) {
+        if self.renaming.as_ref().is_some_and(|n| n.field.contains(p)) {
             return Some(ViewerCursor::Text);
         }
         self.clickable(p).then_some(ViewerCursor::Pointer)
@@ -1637,15 +1617,11 @@ impl SessionsPanel {
         let mut rename = self.renaming.as_mut().map(|r| parts::FieldPart {
             input: &mut r.input,
             area: r.field,
-            aside: None,
-            search: false,
             asked: &mut self.rename_asked,
         });
-        let mut search = parts::FieldPart {
-            input: &mut self.query,
+        let mut search = parts::SearchPart {
+            field: &mut self.query,
             area: self.field,
-            aside: self.clear,
-            search: true,
             asked: &mut self.search_asked,
         };
         let mut rows = parts::RowDrag { pressed: self.press, dragging: &mut self.dragging, from };

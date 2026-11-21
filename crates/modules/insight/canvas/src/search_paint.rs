@@ -1,6 +1,11 @@
 //! The "Jump to file or function" field (top right) and its results, painted.
 
 use super::*;
+use ui_components::search_field::{SearchExtras, SearchField};
+
+/// A result row's corners (logical pixels) and its hover's alpha.
+const RESULT_RADIUS: f32 = 8.0;
+const RESULT_HOVER_ALPHA: f32 = 0.05;
 
 impl Canvas {
     /// The "Jump to file or function" field (top right) and its results.
@@ -18,14 +23,15 @@ impl Canvas {
         let field = Rect::new(b.max_x() - w - px(18.0), b.min_y() + px(16.0), w, px(40.0));
         let layer = scene.push_layer(Some(b));
         self.paint_search_field(Pen { layer, text, ds }, icons, field);
-        if self.search.as_ref().is_some_and(|s| !s.query.trim().is_empty()) {
+        if self.search.as_ref().is_some_and(|s| !s.query().trim().is_empty()) {
             let layer = scene.push_layer(Some(b));
             self.paint_search_results(Pen { layer, text, ds }, graph, field);
         }
     }
 
-    /// The search field: what's typed (or the placeholder) and the caret, the ⌘K key, the ×
-    /// that clears it.
+    /// The search field: the app's (what's typed or the placeholder, the caret while open,
+    /// × once there is text), on a raised surface; the ⌘K key always in the room it keeps on
+    /// its right (× left of it).
     pub(crate) fn paint_search_field(
         &mut self,
         pen: Pen<'_, '_>,
@@ -33,96 +39,25 @@ impl Canvas {
         field: Rect,
     ) {
         let Pen { layer, text, ds } = pen;
-        let px = |v: f32| ds.px(v);
         ds::surface(layer, ds, field, ds::Elevation::Low, 20.0);
-        let open = self.search.is_some();
-        let input = ds::search_field(layer, icons, ds, field, open);
-        self.paint_search_query(Pen { layer, text, ds }, field, input);
-        let key = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
-        let keycap = ds::keycap(
-            layer,
-            text,
-            ds,
-            key,
-            field.max_x() - px(12.0),
-            field.min_y() + field.size.height / 2.0,
-            false,
-        );
         self.hits.push((field, Hit::SearchField));
-        // × (clears the text), left of the ⌘K key, while something is typed.
-        if self.search.as_ref().is_some_and(|s| !s.query.is_empty()) {
-            let cx = keycap.min_x() - px(16.0);
-            let hovered = self.hover == Some(Hit::SearchClear);
-            let r = ds::clear_button(
-                layer,
-                icons,
-                ds,
-                cx,
-                field.min_y() + field.size.height / 2.0,
-                hovered,
-            );
-            let pad = px(4.0);
-            let r = Rect::new(
-                r.min_x() - pad,
-                r.min_y() - pad,
-                r.size.width + 2.0 * pad,
-                r.size.height + 2.0 * pad,
-            );
-            self.hits.push((r, Hit::SearchClear));
-        }
-    }
-
-    /// What's typed in the search field at `input` (selected whole, the caret after it), or
-    /// the placeholder (the caret before it, while open).
-    pub(crate) fn paint_search_query(&self, pen: Pen<'_, '_>, field: Rect, input: Rect) {
-        let Pen { layer, text, ds } = pen;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-0.5);
-        let base = ds::optical_baseline(field.min_y(), field.size.height, &font);
-        match &self.search {
-            Some(search) if !search.query.is_empty() => {
-                let shaped = text.shape_line(&search.query, &font);
-                if search.all {
-                    let h = (field.size.height * 0.5).round();
-                    layer.quad(
-                        Quad::filled(
-                            Rect::new(
-                                input.min_x() - px(1.0),
-                                (field.min_y() + (field.size.height - h) / 2.0).round(),
-                                shaped.width + px(2.0),
-                                h,
-                            ),
-                            p.selection,
-                        )
-                        .rounded(px(3.0)),
-                    );
-                }
-                draw_text(layer, &shaped, input.min_x(), base, p.text);
-                let caret_h = (field.size.height * 0.45).round();
-                ui_kit::caret::paint(
-                    layer,
-                    self.search_caret(
-                        input.min_x() + shaped.width + px(1.0),
-                        field,
-                        caret_h,
-                        px(1.5).max(1.0),
-                        p.caret,
-                    ),
-                );
+        let placeholder = t("canvas.search");
+        let key = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
+        // The key cap's room, in the field's logical pixels.
+        let trailing = ds::keycap_width(text, ds, key) / ds.px(1.0).max(f32::EPSILON);
+        let extras = SearchExtras { trailing, invalid: false };
+        let room = match &mut self.search {
+            Some(search) => {
+                search.field.paint_with(layer, text, icons, ds, (field, true), &placeholder, extras)
             }
-            _ => {
-                let shaped = text.shape_line(&t("canvas.search"), &font);
-                draw_text(layer, &shaped, input.min_x(), base, p.text_muted);
-                if self.search.is_some() {
-                    let caret_h = (field.size.height * 0.45).round();
-                    ui_kit::caret::paint(
-                        layer,
-                        self.search_caret(input.min_x(), field, caret_h, px(1.5).max(1.0), p.caret),
-                    );
-                }
+            None => {
+                // Closed: an empty field to open (no caret, nothing kept).
+                let mut closed = SearchField::new();
+                closed.paint_with(layer, text, icons, ds, (field, false), &placeholder, extras)
             }
-        }
+        };
+        let mid = room.min_y() + room.size.height / 2.0;
+        ds::keycap(layer, text, ds, key, room.max_x(), mid, false);
     }
 
     /// The search's results under its field (or "no results"): a glyph for the kind, the
@@ -165,11 +100,10 @@ impl Canvas {
                 row_h,
             );
             let hovered = self.hover == Some(Hit::SearchResult(i));
-            if i == search.selected {
-                layer.quad(Quad::filled(r, p.accent.with_alpha(0.10)).rounded(px(8.0)));
-            } else if hovered {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(8.0)));
-            }
+            ds::RowHighlight::new(i == search.selected, hovered)
+                .radius(RESULT_RADIUS)
+                .hover(ds::HoverFill::Faint(RESULT_HOVER_ALPHA))
+                .paint(layer, ds, r);
             let glyph = match e.kind {
                 None => "▢",
                 Some(k) if k.is_type() => "C",

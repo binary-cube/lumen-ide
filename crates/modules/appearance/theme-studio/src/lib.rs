@@ -29,9 +29,10 @@ use theming::studio::{PREVIEW_ID, StudioInput, ThemeDraft, compose};
 use ui_components::color_picker::ColorPart;
 use ui_components::control::{Control, Controls, Shown, Thumb};
 use ui_components::ds::{self, Ctx, radius};
+use ui_components::search_field::SearchField;
 use ui_components::{
-    AppRequest, ColorPicker, LayerPainter, PickerAction, Viewer, ViewerAction, ViewerKey,
-    ViewerKind, ViewerPaint, ViewerProvider,
+    AppRequest, ColorPicker, LayerPainter, PickerAction, ViewMenuEntry, Viewer, ViewerAction,
+    ViewerKey, ViewerKind, ViewerPaint, ViewerProvider,
 };
 use ui_kit::{TextInput, TextInputStyle, draw_text};
 
@@ -183,17 +184,16 @@ enum Hit {
     /// The decorations used with every theme.
     Overlay,
     Name,
-    /// The search field; a found setting (its place in the results); the search cleared.
+    /// The search field (its × too: the field's own); a found setting (its place in the
+    /// results).
     Search,
     Found(usize),
-    ClearSearch,
     /// An effect's card: opened / closed (its header), dragged (its handle), switched on /
-    /// off, its menu, a row of its menu; one of its sections opened / closed.
+    /// off, its menu (the app's, under its button); one of its sections opened / closed.
     Fold(usize),
     Handle(usize),
     Toggle(usize),
     Menu(usize),
-    MenuItem(usize, effects::MenuItem),
     Section(usize, effects::Sec),
     /// The gallery of effects opened (`true`) or closed.
     Gallery(bool),
@@ -227,8 +227,9 @@ struct Studio {
     thumbs: Vec<Option<ThemeDraft>>,
     draft: Option<ThemeDraft>,
     name: TextInput,
-    /// The search across every setting.
-    query: TextInput,
+    /// The search across every setting (the app's search field: ×, ⌘A; its focus the
+    /// controls').
+    query: SearchField,
     /// What a key in the name's or the search's field asked (see [`parts::FieldPart`]).
     name_asked: Option<parts::FieldAsk>,
     query_asked: Option<parts::FieldAsk>,
@@ -277,13 +278,13 @@ struct Studio {
     /// The preview shows a dialog on the draft's backdrop (while that's being changed).
     backdrop_shown: bool,
     /// The effects' cards: which are open, their sections opened or closed by hand (the
-    /// effect, the section, open), where each was drawn, the one dragged, the one whose menu
-    /// is open.
+    /// effect, the section, open), where each was drawn, the one dragged; an effect's menu
+    /// asked for under its button, for the app to show.
     open_layers: Vec<bool>,
     sections: Vec<(usize, effects::Sec, bool)>,
     cards_at: Vec<(usize, Rect)>,
     drag: Option<effects::Drag>,
-    menu_for: Option<usize>,
+    asked_menu: Option<(Rect, Vec<ViewMenuEntry>)>,
     /// The gallery of effects: open, scrolled, how tall its content is, its thumbnails'
     /// painters (kept while it's open), one moving under the mouse.
     gallery_open: bool,
@@ -536,20 +537,15 @@ impl Studio {
             focused: &mut self.slider_focused,
             asked: &mut self.slider_asked,
         };
-        let mut catch = parts::Catch {
-            hits: &self.hits,
-            menu_for: &mut self.menu_for,
-            gallery_open: self.gallery_open,
-        };
+        let mut catch = parts::Catch { hits: &self.hits, gallery_open: self.gallery_open };
         let mut name = parts::FieldPart {
             input: &mut self.name,
             own: Hit::Name,
             hits: &self.hits,
             asked: &mut self.name_asked,
         };
-        let mut query = parts::FieldPart {
-            input: &mut self.query,
-            own: Hit::Search,
+        let mut query = parts::SearchPart {
+            field: &mut self.query,
             hits: &self.hits,
             asked: &mut self.query_asked,
         };
@@ -653,87 +649,14 @@ struct Column<'a> {
     w: f32,
 }
 
-/// An icon as a choice: a square pill with it, lit when chosen.
-fn icon_pill(
-    layer: &mut Layer,
-    ds: &Ctx<'_>,
-    icons: &icons::Icons,
-    r: Rect,
-    name: &str,
-    on: bool,
-    hovered: bool,
-) {
-    let p = ds.palette;
-    let (fill, border) = if on {
-        (p.accent.with_alpha(0.12), p.accent.with_alpha(0.7))
-    } else if hovered {
-        (p.text.with_alpha(0.05), p.border)
-    } else {
-        (Rgba::TRANSPARENT, p.border)
-    };
-    layer.quad(Quad::filled(r, fill).rounded(ds.px(radius::MD)).bordered(ds.line(), border));
-    if let Some(id) = icons.id(name) {
-        let side = ds.px(16.0).round();
-        let at = Rect::new(
-            (r.min_x() + (r.size.width - side) / 2.0).round(),
-            (r.min_y() + (r.size.height - side) / 2.0).round(),
-            side,
-            side,
-        );
-        ui_kit::draw_icon(layer, icons, id, at, if on { p.accent } else { p.text });
-    }
+/// The name's field: the shared field's look (its frame, lit while it has the keys), with
+/// the room the studio's rows give it.
+fn name_style(ds: &Ctx<'_>) -> TextInputStyle {
+    TextInputStyle { padding: ds.px(NAME_PADDING), ..ds::field_style(ds, ds.ui_font(-0.5), false) }
 }
 
-/// A choice as a pill (the presets, a layer's shapes): lit when chosen, tinted on hover.
-fn pill(
-    layer: &mut Layer,
-    ds: &Ctx<'_>,
-    r: Rect,
-    shaped: &text_layout::ShapedLine,
-    font: &Font,
-    on: bool,
-    hovered: bool,
-) {
-    let p = ds.palette;
-    let (fill, border) = if on {
-        (p.accent.with_alpha(0.12), p.accent.with_alpha(0.7))
-    } else if hovered {
-        (p.text.with_alpha(0.05), p.border)
-    } else {
-        (Rgba::TRANSPARENT, p.border)
-    };
-    let h = r.size.height;
-    layer.quad(Quad::filled(r, fill).rounded(h / 2.0).bordered(ds.line(), border));
-    draw_text(
-        layer,
-        shaped,
-        r.min_x() + ds.px(12.0),
-        ds::optical_baseline(r.min_y(), h, font),
-        if on { p.accent } else { p.text },
-    );
-}
-
-/// A text field's look (the name, the search): the frame is drawn around it, so the field
-/// itself has none.
-fn field_style(ds: &Ctx<'_>, padding: f32) -> TextInputStyle {
-    let p = ds.palette;
-    let px = |v: f32| ds.px(v);
-    TextInputStyle {
-        font: ds.ui_font(-0.5),
-        background: Rgba::TRANSPARENT,
-        border: Rgba::TRANSPARENT,
-        border_focused: Rgba::TRANSPARENT,
-        text: p.text,
-        placeholder: p.text_muted,
-        selection: p.selection,
-        caret: p.caret,
-        radius: 0.0,
-        border_width: 0.0,
-        padding: px(padding),
-        caret_width: px(1.5).max(1.0),
-        lead: 0.0,
-    }
-}
+/// The room inside the name's field, on each side (logical pixels).
+const NAME_PADDING: f32 = 12.0;
 
 #[cfg(test)]
 #[path = "../tests/unit/lib.rs"]

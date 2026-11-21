@@ -1,8 +1,8 @@
 //! The panel's parts as a form's controls (see `SessionsPanel::with_controls`), each with
 //! the behavior it has here: the agents' list (over everything while open, its keys too; a
-//! press is one click, never a selection dragged), the field renaming a row and the search
-//! (a press puts the caret, the editing keys reach a character or a word, ↵ and Esc are the
-//! panel's to act on), a session pressed and dragged toward a folder (held from the panel's
+//! press is one click, never a selection dragged), the field renaming a row (a press puts
+//! the caret, the editing keys reach a character or a word, ↵ and Esc are the panel's to
+//! act on), the search (the app's search field, ↵ and Esc the panel's), a session pressed and dragged toward a folder (held from the panel's
 //! own press: what it's dropped on is the panel's).
 //! What a part asks of the panel (a list's row chosen, a name given, the search changed) is
 //! written to the cell it's given; the panel does it after.
@@ -10,6 +10,7 @@
 use kernel::{Point, Rect};
 use ui_components::control::{Control, Press};
 use ui_components::picker::{Picker, PickerEvent};
+use ui_components::search_field::SearchField;
 use ui_components::{KeyReach, ViewerKey};
 use ui_kit::TextInput;
 
@@ -101,33 +102,113 @@ pub(super) enum FieldAsk {
     Searched,
 }
 
-/// A row's field renaming it, or the search: hit in `area` (the search's × aside); a press
-/// puts the caret; the editing keys reach a character or a word; ↵ and Esc ask the panel
-/// (the search, not empty, is emptied by Esc); ⌘A, ⌘X, ⌘Z, ⇧⌘Z edit it (always used).
-/// Tab goes through it (no other part has the keys) and isn't used.
+/// The panel's search, the app's search field (its pill, its ×, its selection dragged,
+/// its editing keys and commands), hit in `area`: ↵ asks for the first session found, Esc
+/// empties it (emptied, it lets go of the keys); what changes its text is said (`Searched`),
+/// × too. Tab goes through it (no other part has the keys) and isn't used.
 #[derive(Debug)]
-pub(super) struct FieldPart<'a> {
-    pub input: &'a mut TextInput,
+pub(super) struct SearchPart<'a> {
+    pub field: &'a mut SearchField,
     pub area: Rect,
-    /// What a press on it leaves to others (the search's ×).
-    pub aside: Option<Rect>,
-    /// The search (Esc empties it first, its changes are said), or a row's name.
-    pub search: bool,
     pub asked: &'a mut Option<FieldAsk>,
 }
 
-impl FieldPart<'_> {
-    /// The text changed by what was just done: said, for the search.
-    fn said_if_changed(&mut self, before: &str) {
-        if self.search && TextInput::text(self.input) != before {
+impl SearchPart<'_> {
+    /// Its text changed (`edited`): said, for the panel to search again.
+    fn said(&mut self, edited: bool) {
+        if edited {
             *self.asked = Some(FieldAsk::Searched);
         }
     }
 }
 
+impl Control for SearchPart<'_> {
+    fn hit(&self, p: Point) -> bool {
+        self.area.contains(p)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let press = Control::press(self.field, p, clicks);
+        let cleared = self.field.take_cleared();
+        self.said(cleared);
+        press
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(self.field, p)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        Control::hover(self.field, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ui_components::ViewerCursor> {
+        Control::cursor(&*self.field, p)
+    }
+
+    fn keeps_tab(&self) -> bool {
+        true
+    }
+
+    fn in_tab_order(&self) -> bool {
+        false
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        match key {
+            ViewerKey::Enter => *self.asked = Some(FieldAsk::Enter),
+            ViewerKey::Escape if !SearchField::text(self.field).is_empty() => {
+                self.field.set_text("");
+                self.said(true);
+            }
+            ViewerKey::Escape => *self.asked = Some(FieldAsk::Escape),
+            _ => {
+                let used = Control::key(self.field, key, reach);
+                self.said(used && matches!(key, ViewerKey::Backspace | ViewerKey::Delete));
+                return used;
+            }
+        }
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        let took = Control::text(self.field, typed);
+        self.said(took);
+        took
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&*self.field)
+    }
+
+    /// The edit commands, always used (⌘Z with nothing to undo too).
+    fn command(&mut self, id: &str) -> bool {
+        if !matches!(id, SELECT_ALL | CUT | UNDO | REDO) {
+            return false;
+        }
+        let edited = Control::command(self.field, id) && id != SELECT_ALL;
+        self.said(edited);
+        true
+    }
+}
+
+/// A row's field renaming it: hit in `area`; a press puts the caret; the editing keys reach
+/// a character or a word; ↵ and Esc ask the panel; ⌘A, ⌘X, ⌘Z, ⇧⌘Z edit it (always used).
+/// Tab goes through it (no other part has the keys) and isn't used.
+#[derive(Debug)]
+pub(super) struct FieldPart<'a> {
+    pub input: &'a mut TextInput,
+    pub area: Rect,
+    pub asked: &'a mut Option<FieldAsk>,
+}
+
 impl Control for FieldPart<'_> {
     fn hit(&self, p: Point) -> bool {
-        self.area.contains(p) && !self.aside.is_some_and(|r| r.contains(p))
+        self.area.contains(p)
     }
 
     fn press(&mut self, p: Point, _clicks: u32) -> Press {
@@ -148,48 +229,31 @@ impl Control for FieldPart<'_> {
     }
 
     fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        let before = TextInput::text(self.input).to_owned();
         match key {
             ViewerKey::Enter => *self.asked = Some(FieldAsk::Enter),
-            ViewerKey::Escape if self.search && !before.is_empty() => {
-                *self.input = TextInput::default();
-            }
             ViewerKey::Escape => *self.asked = Some(FieldAsk::Escape),
-            _ => {
-                let used = reach.edit(self.input, key);
-                self.said_if_changed(&before);
-                return used;
-            }
+            _ => return reach.edit(self.input, key),
         }
-        self.said_if_changed(&before);
         true
     }
 
     fn text(&mut self, typed: &str) -> bool {
         let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
         self.input.insert(&typed);
-        if self.search {
-            *self.asked = Some(FieldAsk::Searched);
-        }
         true
     }
 
     fn command(&mut self, id: &str) -> bool {
-        let edited = match id {
-            SELECT_ALL => {
-                self.input.select_all();
-                false
+        match id {
+            SELECT_ALL => self.input.select_all(),
+            CUT => self.input.insert(""),
+            UNDO => {
+                self.input.undo();
             }
-            CUT => {
-                self.input.insert("");
-                true
+            REDO => {
+                self.input.redo();
             }
-            UNDO => self.input.undo(),
-            REDO => self.input.redo(),
             _ => return false,
-        };
-        if edited && self.search {
-            *self.asked = Some(FieldAsk::Searched);
         }
         true
     }

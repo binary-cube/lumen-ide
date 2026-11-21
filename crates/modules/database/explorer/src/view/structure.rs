@@ -7,10 +7,13 @@ use database::{FkAction, Structure};
 use kernel::Rect;
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
-use ui_components::ds::{self, Ctx};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size};
 use ui_kit::draw_text;
 
 use super::{DataView, Hit};
+
+/// The focused row: its fill's alpha of the accent.
+const FOCUS_FILL: f32 = 0.14;
 
 /// A section of the structure.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -303,32 +306,19 @@ fn paint_section(
     if let Some((label, hovered)) = add {
         // A quiet button on the title's line, at the right: `+ Column` (only `+` when the
         // title wouldn't fit beside it, its label then in its tooltip).
-        let font = ds.ui_font(-1.0);
-        let shaped = text.shape_line(label, &font);
-        let full = (shaped.width + px(34.0)).round();
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("plus")
+            .label(label)
+            .tone(Tone::Accent)
+            .hovered(hovered);
+        let h = px(button_size::MEDIUM);
+        let full = ds::button_width(text, ds, &spec, h);
         let title_w = text.shape_line(&section.title, &title_font).width;
         compact = title_w + px(12.0) + full > width;
-        let w = if compact { px(28.0) } else { full };
-        let left = if compact { x + width - w } else { x + width - shaped.width - px(34.0) };
-        let r = Rect::new(left.round(), (y - px(2.0)).round(), w, px(26.0));
-        if hovered {
-            layer.quad(Quad::filled(r, p.accent.with_alpha(0.10)).rounded(px(ds::radius::SM)));
-        }
-        if let Some(id) = icons.id("plus") {
-            let s = px(13.0);
-            let left = if compact { r.min_x() + (w - s) / 2.0 } else { r.min_x() + px(9.0) };
-            let at = Rect::new(left.round(), (r.min_y() + (r.size.height - s) / 2.0).round(), s, s);
-            ui_kit::draw_icon(layer, icons, id, at, p.accent);
-        }
-        if !compact {
-            draw_text(
-                layer,
-                &shaped,
-                r.min_x() + px(26.0),
-                ds::optical_baseline(r.min_y(), r.size.height, &font),
-                p.accent,
-            );
-        }
+        let (w, spec) =
+            if compact { (h, ButtonSpec { label: None, ..spec }) } else { (full, spec) };
+        let r = Rect::new((x + width - w).round(), (y - px(2.0)).round(), w, h);
+        ds::button(layer, text, icons, ds, r, spec);
         title_room = r.min_x() - x - px(12.0);
         add_rect = Some(r);
     }
@@ -389,7 +379,10 @@ fn paint_section(
         row_rects.push(Rect::new(x, y, width, row_h));
         if section.focus == Some(r) {
             let lit = Rect::new(x + ds.line(), y, width - 2.0 * ds.line(), row_h);
-            layer.quad(Quad::filled(lit, p.accent.with_alpha(0.14)));
+            ds::RowHighlight::new(true, false)
+                .selected_alpha(FOCUS_FILL)
+                .radius(0.0)
+                .paint(layer, ds, lit);
             layer.quad(Quad::filled(Rect::new(x + ds.line(), y, px(3.0), row_h), p.accent));
         }
         ds::divider(layer, ds, x, x + width, y);

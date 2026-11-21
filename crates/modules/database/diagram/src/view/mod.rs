@@ -16,11 +16,11 @@ use i18n::{t, tr};
 use kernel::{Point, Rect, Subscription};
 use ui_components::control::{Control, Controls};
 use ui_components::diagram::{History, Insets, Release, Viewport};
+use ui_components::search_field::SearchField;
 use ui_components::{
     AppRequest, PressMods, Tip, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey,
     ViewerPaint,
 };
-use ui_kit::TextInput;
 
 use self::filter::FilterField;
 
@@ -56,9 +56,8 @@ pub enum Hit {
     Card(usize),
     /// A column's row: table, column.
     Row(usize, usize),
-    /// The filter field, its ×.
+    /// The filter field.
     Field,
-    Clear,
     /// A depth of the neighbors shown.
     Depth(usize),
     /// Every table again (out of a table's neighbors).
@@ -185,10 +184,10 @@ pub struct RelationsView {
     /// The table whose neighbors are shown (none: every table), how far.
     focus: Option<usize>,
     depth: usize,
-    filter: TextInput,
-    /// Where the filter's pill and its × were drawn last (none: not drawn).
-    filter_area: Rect,
-    clear_area: Rect,
+    /// The filter (the app's search field: ×, ⌘A; its focus the controls').
+    filter: SearchField,
+    /// The filter was drawn by the last paint (only what's drawn can be pressed).
+    filter_shown: bool,
     /// Its parts' state of use (see `with_controls`): the filter has the keys while it has
     /// the focus.
     controls: Controls,
@@ -250,9 +249,8 @@ impl Default for RelationsView {
             error: None,
             focus: None,
             depth: 1,
-            filter: TextInput::new(""),
-            filter_area: Rect::default(),
-            clear_area: Rect::default(),
+            filter: SearchField::new(),
+            filter_shown: false,
             controls: Controls::default(),
             selected: None,
             shown: Shown::default(),
@@ -799,10 +797,6 @@ impl RelationsView {
                 self.clicked = Some(t);
                 self.select(t);
             }
-            Hit::Clear => {
-                self.filter.set_text("");
-                self.filtered();
-            }
             Hit::Depth(d) => {
                 if let Some(f) = self.focus
                     && d != self.depth
@@ -888,9 +882,8 @@ impl RelationsView {
     ) -> R {
         let (mut edited, mut left) = (false, None);
         let mut filter = FilterField {
-            input: &mut self.filter,
-            area: self.filter_area,
-            clear: self.clear_area,
+            field: &mut self.filter,
+            shown: self.filter_shown,
             edited: &mut edited,
             left: &mut left,
         };
@@ -986,7 +979,7 @@ impl Viewer for RelationsView {
             "back" => self.back(),
             "find" => {
                 self.with_controls(|c, parts| c.focus(parts, Some(FILTER)));
-                self.filter.select_all();
+                self.filter.input.select_all();
                 true
             }
             "refresh" => {
@@ -1181,6 +1174,10 @@ impl Viewer for RelationsView {
     }
 
     fn tooltip_at(&self, p: Point) -> Option<Tip> {
+        // The filter's ×: what it does.
+        if self.filter_shown && Control::cursor(&self.filter, p) == Some(ViewerCursor::Pointer) {
+            return Some(Tip::new(self.filter.area(), t("relations.tip_clear")));
+        }
         let under = self.hit(p)?;
         self.tips
             .iter()
@@ -1267,8 +1264,7 @@ impl Viewer for RelationsView {
             *self.waker.lock().unwrap_or_else(PoisonError::into_inner) = Some(Arc::clone(waker));
         }
         // Only what's drawn now can be pressed.
-        self.filter_area = Rect::default();
-        self.clear_area = Rect::default();
+        self.filter_shown = false;
         self.paint_view(ctx);
     }
 }

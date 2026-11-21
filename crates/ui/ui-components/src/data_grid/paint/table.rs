@@ -391,10 +391,7 @@ impl<S: GridSource> DataGrid<S> {
                 color,
             );
         }
-        layer.quad(Quad::filled(
-            Rect::new(numbers.max_x() - ds.line(), body.min_y(), ds.line(), body.size.height),
-            p.border,
-        ));
+        ds::divider_vertical(layer, ds, numbers.max_x() - ds.line(), body.min_y(), body.max_y());
 
         // The headers.
         let layer = scene.push_layer(Some(header));
@@ -600,13 +597,16 @@ impl<S: GridSource> DataGrid<S> {
         let mid = header.min_y() + header.size.height / 2.0;
         let mut x = header.min_x() + px(10.0);
         let back = place > 0;
-        let r = icon_button(
+        let r = grid_button(
             layer,
+            text,
             icons,
             ds,
             (x, mid),
-            "chevron-left",
-            Look { enabled: back, hovered: self.hover == Some(Hit::RecordPrev), on: false },
+            ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon("chevron-left")
+                .enabled(back)
+                .hovered(self.hover == Some(Hit::RecordPrev)),
         );
         if back {
             self.hits.push((r, Hit::RecordPrev));
@@ -628,13 +628,16 @@ impl<S: GridSource> DataGrid<S> {
         );
         x += shaped.width + px(12.0);
         let forward = place + 1 < rows;
-        let r = icon_button(
+        let r = grid_button(
             layer,
+            text,
             icons,
             ds,
             (x, mid),
-            "chevron-right",
-            Look { enabled: forward, hovered: self.hover == Some(Hit::RecordNext), on: false },
+            ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon("chevron-right")
+                .enabled(forward)
+                .hovered(self.hover == Some(Hit::RecordNext)),
         );
         if forward {
             self.hits.push((r, Hit::RecordNext));

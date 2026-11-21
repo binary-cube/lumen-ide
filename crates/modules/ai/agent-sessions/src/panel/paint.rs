@@ -4,10 +4,10 @@
 //! folder, set in), and "Show more…" after the last.
 
 use kernel::{Rect, Rgba};
-use render_api::{Layer, Quad};
+use render_api::Layer;
 use text_layout::{Font, TextSystem};
-use ui_components::ViewerPaint;
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size};
+use ui_components::{ViewerPaint, tree};
 use ui_kit::draw_text;
 
 use super::{AGE_COLUMN, DropOn, ROW, Renamed, Row, SessionsPanel, Star, around, now};
@@ -15,6 +15,15 @@ use i18n::t;
 
 /// How far a folder's sessions are set in (logical pixels).
 const INDENT: f32 = 18.0;
+/// A row's fills (alphas): under the mouse (of the text), dragged (of the text), tinted by
+/// its color label, and a folder lit as a drop's target (of the accent, and its outline).
+const ROW_HOVER: f32 = 0.06;
+const DRAGGED_SHADE: f32 = 0.1;
+const LABEL_TINT: f32 = 0.18;
+const DROP_FILL: f32 = 0.14;
+const DROP_OUTLINE: f32 = 0.6;
+/// The unread dot's diameter (logical pixels).
+const UNREAD_DOT: f32 = 6.0;
 
 /// What every row is drawn with: the layer, the text, the fonts, the time now.
 struct Pen<'a, 'b> {
@@ -116,23 +125,18 @@ impl SessionsPanel {
         let Some(folder) = self.folders.get(f) else { return };
         let r = self.row_rect(ds, top);
         let target = matches!(&self.drop_on, Some(DropOn::Folder(id)) if *id == folder.id);
-        if target {
-            pen.layer.quad(
-                Quad::filled(r, p.accent.with_alpha(0.14))
-                    .rounded(px(radius::MD))
-                    .bordered(ds.line(), p.accent.with_alpha(0.6)),
-            );
-        } else if self.hovered_folder == Some(f) {
-            pen.layer.quad(Quad::filled(r, p.text.with_alpha(0.06)).rounded(px(radius::MD)));
-        }
+        // Lit as a drop's target (outlined in the accent), or under the mouse.
+        let highlight = ds::RowHighlight::new(target, self.hovered_folder == Some(f))
+            .selected_alpha(DROP_FILL)
+            .hover(ds::HoverFill::Faint(ROW_HOVER));
+        let highlight =
+            if target { highlight.outline(p.accent.with_alpha(DROP_OUTLINE)) } else { highlight };
+        highlight.paint(pen.layer, ds, r);
         let open = folder.open || self.searched();
         let s = px(14.0);
         let mid = top + (self.row_h - s) / 2.0;
-        let chevron = if open { "chevron-down" } else { "chevron-right" };
-        if let Some(id) = pen.icons.id(chevron) {
-            let at = Rect::new(r.min_x() + px(4.0), mid, s, s);
-            ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.text_muted);
-        }
+        let at = Rect::new(r.min_x() + px(4.0), mid, s, s);
+        tree::chevron(pen.layer, pen.icons, at, open, p.text_muted);
         let icon = if open { "folder-open" } else { "folder" };
         if let Some(id) = pen.icons.id(icon) {
             let at = Rect::new(r.min_x() + px(22.0), mid, s, s);
@@ -190,20 +194,22 @@ impl SessionsPanel {
         let done = mark.as_ref().is_some_and(|m| m.done);
         // Its color label: the row tinted.
         if let Some(label) = mark.as_ref().and_then(|m| m.label) {
-            let tint = Rgba::rgb(label.rgb()).with_alpha(0.18);
-            pen.layer.quad(Quad::filled(r, tint).rounded(px(radius::MD)));
+            let tint = Rgba::rgb(label.rgb()).with_alpha(LABEL_TINT);
+            ds::RowHighlight::new(true, false).selected_fill(tint).paint(pen.layer, ds, r);
         }
         let hovered = self.hovered == Some(i);
         let dragged = self.dragging == Some(i);
-        if hovered || dragged {
-            let shade = if dragged { 0.1 } else { 0.06 };
-            pen.layer.quad(Quad::filled(r, p.text.with_alpha(shade)).rounded(px(radius::MD)));
-        }
+        let shade = if dragged { DRAGGED_SHADE } else { ROW_HOVER };
+        ds::RowHighlight::new(false, hovered || dragged)
+            .hover(ds::HoverFill::Faint(shade))
+            .paint(pen.layer, ds, r);
         // Unread: a dot at its start.
         if mark.as_ref().is_some_and(|m| m.unread) {
-            let d = px(6.0);
-            let dot = Rect::new(r.min_x() + indent + px(1.0), top + (self.row_h - d) / 2.0, d, d);
-            pen.layer.quad(Quad::filled(dot, p.accent).rounded(d));
+            let center = kernel::Point::new(
+                r.min_x() + indent + px(1.0 + UNREAD_DOT / 2.0),
+                top + self.row_h / 2.0,
+            );
+            ds::dot(pen.layer, ds, center, UNREAD_DOT, p.accent);
         }
         let s = px(14.0);
         let faded = |c: Rgba| if done { c.with_alpha(c.a * 0.55) } else { c };
@@ -227,27 +233,33 @@ impl SessionsPanel {
             ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.text_muted);
             right -= px(22.0);
         }
-        if let Some(id) = pen.icons.id(crate::FAVORITE_ICON) {
-            let at = Rect::new(column - px(20.0), top + (self.row_h - s) / 2.0, s, s);
-            let favorite = self.favorite.get(i).copied().unwrap_or(false);
-            let lit = self.hover_star == Some(Star::Session(i));
+        let at = Rect::new(column - px(20.0), top + (self.row_h - s) / 2.0, s, s);
+        let star = around(at, px(5.0));
+        let favorite = self.favorite.get(i).copied().unwrap_or(false);
+        let lit = self.hover_star == Some(Star::Session(i));
+        if favorite || lit || hovered {
+            let mut spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon(crate::FAVORITE_ICON)
+                .rest_tone(Tone::Neutral)
+                .hovered(lit);
             if favorite || lit {
-                ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.accent);
-            } else if hovered {
-                ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.text_muted.with_alpha(0.6));
+                spec = spec.tone(Tone::Accent);
             }
-            self.stars.push((around(at, px(5.0)), Star::Session(i)));
+            ds::button(pen.layer, pen.text, pen.icons, pen.ds, star, spec);
         }
+        self.stars.push((star, Star::Session(i)));
         // Under the mouse: its "⋮" in the age's place.
-        if hovered && let Some(id) = pen.icons.id("more-vertical") {
-            let b = px(22.0);
-            let at = Rect::new(r.max_x() - px(4.0) - b, top + (self.row_h - b) / 2.0, b, b);
-            if self.hover_more {
-                let lit = Quad::filled(at, p.text.with_alpha(0.08)).rounded(px(radius::SM));
-                pen.layer.quad(lit);
-            }
-            let icon = Rect::new(at.min_x() + (b - s) / 2.0, at.min_y() + (b - s) / 2.0, s, s);
-            ui_kit::draw_icon(pen.layer, pen.icons, id, icon, p.text_muted);
+        if hovered {
+            let at = ds::square_button(
+                pen.ds,
+                (r.max_x() - px(4.0) - px(button_size::SMALL), top + self.row_h / 2.0),
+                button_size::SMALL,
+            );
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon("more-vertical")
+                .rest_tone(Tone::Neutral)
+                .hovered(self.hover_more);
+            ds::button(pen.layer, pen.text, pen.icons, pen.ds, at, spec);
             self.more_button = Some((at, i));
         } else {
             let base = ds::optical_baseline(top, self.row_h, &pen.small);

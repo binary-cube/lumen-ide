@@ -61,3 +61,33 @@ fn a_title_that_fits_is_whole() {
         .count();
     assert_eq!(letters, "Project".len(), "not cut");
 }
+
+/// An action in effect is the shared button turned on: its back and its icon in the accent;
+/// the others are muted at rest, with no back.
+#[test]
+fn a_lit_action_is_on_in_the_accent() {
+    let (mut text, palette, icons) = (TextSystem::new(), crate::Palette::dark(), Icons::builtin());
+    let id = icons.id("plus").unwrap();
+    let actions = [
+        PanelAction { id: "half", icon: id, lit: true },
+        PanelAction { id: "hide", icon: id, lit: false },
+    ];
+    let groups: Vec<&[PanelAction]> = vec![&actions[..]];
+    let mut header = PanelHeader::default();
+    header.set_bounds(Rect::new(0.0, 0.0, 400.0, 44.0), 1.0);
+    let mut scene = Scene::default();
+    let painter = Painter { text: &mut text, scene: &mut scene, palette: &palette, icons: &icons };
+    header.paint(None, "Terminal", &groups, painter);
+    let (lit, _) = header.rects.iter().find(|(_, a)| *a == "half").copied().unwrap();
+    let quads: Vec<_> = scene.layers().iter().flat_map(|l| l.quads.iter()).collect();
+    assert!(quads.iter().any(|q| q.bounds == lit && q.color.r == palette.accent.r));
+    let icon_colors: Vec<_> = scene
+        .layers()
+        .iter()
+        .flat_map(|l| l.glyphs.iter())
+        .filter(|g| icons::is_icon(g.key))
+        .map(|g| g.color)
+        .collect();
+    assert!(icon_colors.contains(&palette.accent), "the lit one in the accent");
+    assert!(icon_colors.contains(&palette.text_muted), "the other muted");
+}

@@ -642,8 +642,10 @@ fn the_places_beside_the_screen_fold_and_lead_to_the_log() {
     assert!(view.place_rows.len() < rows, "folded");
 }
 
-/// The places' filter: clicked, the keyboard types in it and the rows follow (from the top);
-/// Esc empties it, Esc again gives the keyboard back to the message; a click elsewhere too.
+/// The places' filter is the app's search field: pressed, the keyboard types in it (only it
+/// has the caret, not the message) and the rows follow (from the top); ⌘A selects its text,
+/// × empties it (every row again), Esc empties it, Esc again gives the keyboard back to the
+/// message; a click elsewhere too.
 #[test]
 fn the_places_filter_takes_the_keyboard_while_it_s_clicked() {
     let repo = Arc::new(crate::fake::FakeRepository::default());
@@ -654,11 +656,30 @@ fn the_places_filter_takes_the_keyboard_while_it_s_clicked() {
         ..places::Places::default()
     };
     view.lay_places();
-    let field = Rect::new(0.0, 0.0, 100.0, 20.0);
-    view.hits = vec![(field, Hit::PlacesFilter), (Rect::new(0.0, 40.0, 100.0, 20.0), Hit::Refresh)];
+    let all = view.place_rows.len();
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut paint = |view: &mut CommitView| {
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 1200.0, 700.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut render_api::Scene::default(),
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut view);
+    let field = view.places_filter.area();
+    assert!(field.size.width > 0.0, "the filter drawn");
+    let inside = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
     view.places_scroll = 50.0;
-    view.click(Point::new(5.0, 5.0));
-    assert_eq!(view.keys(), Keys::Places);
+    view.press(inside, 1);
+    view.release();
+    assert_eq!(view.keys(), Keys::Places, "the filter has the keys, the message not");
     view.text_input("vend");
     let shown: Vec<_> = view.place_rows.iter().map(|r| r.place.clone()).collect();
     assert_eq!(shown.last(), Some(&places::Place::Submodule("vendor/y".into())));
@@ -670,12 +691,26 @@ fn the_places_filter_takes_the_keyboard_while_it_s_clicked() {
     // ⌘A selects the filter's text (not the message's), and copy takes it.
     assert!(view.command("select_all"));
     assert_eq!(view.selected_text().as_deref(), Some("ven"));
+    // × (at the shared field's right end) empties it: every place again.
+    paint(&mut view);
+    let clear = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    view.hover(clear);
+    assert_eq!(view.cursor_at(clear), Some(ViewerCursor::Pointer), "a hand on ×");
+    view.press(clear, 1);
+    view.release();
+    assert!(view.places_filter.text().is_empty());
+    assert_eq!(view.place_rows.len(), all, "every place again");
+    assert_eq!(view.keys(), Keys::Places);
+    view.text_input("v");
     view.edit_key(ViewerKey::Escape);
     assert!(view.places_filter.text().is_empty() && view.keys() == Keys::Places);
     view.edit_key(ViewerKey::Escape);
     assert_eq!(view.keys(), Keys::Message);
-    view.click(Point::new(5.0, 5.0));
-    view.click(Point::new(5.0, 45.0));
+    view.press(inside, 1);
+    view.release();
+    assert_eq!(view.keys(), Keys::Places);
+    view.hits = vec![(Rect::new(0.0, 900.0, 100.0, 20.0), Hit::Refresh)];
+    view.click(Point::new(5.0, 905.0));
     assert_eq!(view.keys(), Keys::Message, "a click elsewhere takes it away");
 }
 

@@ -24,14 +24,15 @@ use kernel::{Point, ProjectId, Rect};
 use render_api::Quad;
 use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, radius};
+use ui_components::search_field::SearchField;
 use ui_components::{
     EdgeScrollbar, KeyReach, Tip, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey,
     ViewerKind, ViewerPaint, ViewerProvider,
 };
-use ui_kit::{TextInput, draw_icon, draw_text};
+use ui_kit::{draw_icon, draw_text};
 use workbench_model::WorkbenchHost;
 
-use crate::field::KeyField;
+use crate::field::SearchPart;
 use crate::history::Histories;
 use crate::runtime::Runtime;
 
@@ -111,9 +112,16 @@ enum Hit {
 /// A row of the list (logical pixels).
 pub const ROW_H: f32 = 50.0;
 const FIELD_H: f32 = 36.0;
+/// How far the count of what's found ends from the search's right edge (logical pixels):
+/// with text, clear of its ×.
+const COUNT_INSET: f32 = 14.0;
+const COUNT_INSET_CLEAR: f32 = 34.0;
 /// The search's place among the window's parts.
 const SEARCH: usize = 1;
 const FOOTER_H: f32 = 64.0;
+/// A statement's row: the chosen one's accent alpha, the hovered one's text alpha.
+const ROW_CHOSEN: f32 = 0.12;
+const ROW_HOVER: f32 = 0.04;
 /// The statement's box under the list: its lines at most, their height.
 const PREVIEW_LINES: usize = 6;
 const PREVIEW_ROW: f32 = 20.0;
@@ -133,7 +141,8 @@ pub struct HistoryView {
     entries: Option<Vec<HistoryEntry>>,
     /// The history's generation they were read at.
     seen: Option<u64>,
-    query: TextInput,
+    /// The search (the app's search field: ×, ⌘A; it has the keys the whole time).
+    query: SearchField,
     /// The entries shown (their indices), for the search and generation they were made for.
     shown: Vec<usize>,
     shown_for: Option<(String, u64)>,
@@ -142,8 +151,6 @@ pub struct HistoryView {
     scroll: f32,
     max_scroll: f32,
     list: Rect,
-    /// Where the search was drawn last.
-    field: Rect,
     bar: EdgeScrollbar,
     hits: Vec<(Rect, Hit)>,
     hover: Option<Hit>,
@@ -348,12 +355,7 @@ impl HistoryView {
     ) -> R {
         let mut edited = false;
         let mut list = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
-        let mut query = KeyField {
-            input: &mut self.query,
-            area: self.field,
-            selects: false,
-            edited: &mut edited,
-        };
+        let mut query = SearchPart { field: &mut self.query, edited: &mut edited };
         let mut parts: [&mut dyn Control; 2] = [&mut list, &mut query];
         self.controls.focus(&mut parts, Some(SEARCH));
         let answer = f(&mut self.controls, &mut parts);
@@ -529,14 +531,8 @@ impl Viewer for HistoryView {
         let layer = scene.push_layer(Some(b));
         // The search, how many it found at its right.
         let field = Rect::new(left, b.min_y() + px(4.0), right - left, px(FIELD_H));
-        ui_components::ds::search_input(
-            &mut ui_components::LayerPainter::new(layer, text, icons, ds),
-            field,
-            &self.query,
-            true,
-            &t("console.history_search"),
-        );
-        self.field = field;
+        let placeholder = t("console.history_search");
+        self.query.paint(layer, text, icons, &ds, (field, true), &placeholder);
         let total = self.entries.as_ref().map_or(0, Vec::len);
         if total > 0 {
             let count = if self.query.text().trim().is_empty() {
@@ -546,10 +542,11 @@ impl Viewer for HistoryView {
             };
             let small = ds.ui_font(-1.0);
             let shaped = text.shape_line(&count, &small);
+            let inset = if self.query.text().is_empty() { COUNT_INSET } else { COUNT_INSET_CLEAR };
             draw_text(
                 layer,
                 &shaped,
-                (field.max_x() - px(14.0) - shaped.width).round(),
+                (field.max_x() - px(inset) - shaped.width).round(),
                 ds::optical_baseline(field.min_y(), field.size.height, &small),
                 p.text_muted,
             );
@@ -604,25 +601,16 @@ impl Viewer for HistoryView {
                     let rect = Rect::new(list.min_x(), top, list.size.width, row_h);
                     let chosen = k == self.selected;
                     let hovered = self.hover == Some(Hit::Row(k));
-                    if chosen || hovered {
-                        let fill = if chosen {
-                            p.accent.with_alpha(0.12)
-                        } else {
-                            p.text.with_alpha(0.04)
-                        };
-                        rows.quad(
-                            Quad::filled(
-                                Rect::new(
-                                    rect.min_x(),
-                                    rect.min_y() + px(2.0),
-                                    rect.size.width,
-                                    row_h - px(4.0),
-                                ),
-                                fill,
-                            )
-                            .rounded(px(radius::MD)),
-                        );
-                    }
+                    let lit = Rect::new(
+                        rect.min_x(),
+                        rect.min_y() + px(2.0),
+                        rect.size.width,
+                        row_h - px(4.0),
+                    );
+                    ds::RowHighlight::new(chosen, hovered)
+                        .selected_alpha(ROW_CHOSEN)
+                        .hover(ds::HoverFill::Faint(ROW_HOVER))
+                        .paint(rows, &ds, lit);
                     let (icon, color) = outcome_icon(entry.outcome, p);
                     if let Some(id) = icons.id(icon) {
                         let s = px(14.0);

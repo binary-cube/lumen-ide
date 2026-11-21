@@ -1014,11 +1014,11 @@ impl OverlaySlot for ProjectsMenuSlot {
     }
 
     fn input<'a>(&self, wb: &'a Workbench) -> Option<&'a ui_kit::TextInput> {
-        Some(&wb.home.projects_menu.query)
+        Some(&wb.home.projects_menu.query.input)
     }
 
     fn input_mut<'a>(&self, wb: &'a mut Workbench) -> Option<&'a mut ui_kit::TextInput> {
-        Some(&mut wb.home.projects_menu.query)
+        Some(&mut wb.home.projects_menu.query.input)
     }
 
     fn is_open(&self, wb: &Workbench) -> bool {

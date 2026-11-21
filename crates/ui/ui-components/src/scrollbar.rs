@@ -13,7 +13,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 use kernel::{Point, Rect, Rgba};
-use render_api::{Quad, Scene};
+use render_api::{Layer, Quad, Scene};
 
 use crate::palette::Palette;
 use crate::splitter::Orientation;
@@ -146,6 +146,43 @@ impl ScrollbarStyle {
 impl Default for ScrollbarStyle {
     fn default() -> Self {
         Self::from_palette(&Palette::dark())
+    }
+}
+
+/// A bar drawn as a lane of its own (the code editor's overview, beside the text): a
+/// background, a faint tint over it, and the part in view a square block across the whole
+/// lane, its tint by how the pointer holds it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LaneLook {
+    /// What's under the lane (the surface it stands on: no content under it).
+    pub background: Rgba,
+    /// The tint over the background.
+    pub tint: Rgba,
+    /// The block's color; its alpha is the state's, below.
+    pub thumb: Rgba,
+    /// The block's alpha at rest, under the pointer and while dragged.
+    pub rest: f32,
+    pub hover: f32,
+    pub drag: f32,
+}
+
+/// The lane's tint and its block's alphas (at rest, under the pointer, held).
+const LANE_TINT: f32 = 0.025;
+const LANE_REST: f32 = 0.06;
+const LANE_HOVER: f32 = 0.10;
+const LANE_DRAG: f32 = 0.14;
+
+impl LaneLook {
+    /// The usual lane on `background`: the theme's text faint over it.
+    pub fn new(p: &Palette, background: Rgba) -> Self {
+        Self {
+            background,
+            tint: p.text.with_alpha(LANE_TINT),
+            thumb: p.text,
+            rest: LANE_REST,
+            hover: LANE_HOVER,
+            drag: LANE_DRAG,
+        }
     }
 }
 
@@ -322,6 +359,24 @@ impl Scrollbar {
 
     pub fn end_drag(&mut self) -> bool {
         self.drag.take().is_some()
+    }
+
+    /// Drawn as a lane of its own (see [`LaneLook`]) in `layer`, over its whole track: the
+    /// background, the tint, and the part in view (none with nothing to scroll).
+    pub fn paint_lane(&self, layer: &mut Layer, m: ScrollMetrics, look: &LaneLook) {
+        let t = self.track;
+        layer.quad(Quad::filled(t, look.background));
+        layer.quad(Quad::filled(t, look.tint));
+        if let Some(thumb) = self.thumb_rect(m) {
+            let alpha = if self.is_dragging() {
+                look.drag
+            } else if self.is_hovered() {
+                look.hover
+            } else {
+                look.rest
+            };
+            layer.quad(Quad::filled(thumb, look.thumb.with_alpha(alpha)));
+        }
     }
 
     pub fn paint(&self, scene: &mut Scene, m: ScrollMetrics) {

@@ -8,8 +8,9 @@ use std::sync::Arc;
 use extensions::{Module, ModuleContext, ModuleError, ModuleId, ModuleManifest};
 use kernel::Point;
 use ui_components::{
-    AppRequest, LEVEL_PICKER_EXTENSION, LevelChoices, LevelClick, LevelPick, LevelPicker, Painter,
-    Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint, ViewerProvider,
+    AppRequest, KeyReach, LEVEL_PICKER_EXTENSION, LevelChoices, LevelClick, LevelPick, LevelPicker,
+    Painter, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
+    ViewerProvider,
 };
 
 static MANIFEST: ModuleManifest = ModuleManifest {
@@ -58,6 +59,8 @@ struct PickerView {
     action: Option<ViewerAction>,
     /// Chosen or given up: the app closes it.
     done: bool,
+    /// A press on the filter holds the pointer: a drag selects in it until it's let go.
+    selecting: bool,
 }
 
 impl PickerView {
@@ -94,6 +97,25 @@ impl Viewer for PickerView {
         self.picker.paint(choices, painter);
     }
 
+    /// On the filter: its caret put (two a word, three all of it), × emptying it, a drag
+    /// from there selecting; anywhere else as a click.
+    fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
+        self.selecting = self.picker.press_field(p, clicks);
+        if self.selecting {
+            return None;
+        }
+        self.click(p)
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        self.selecting && self.picker.drag(p)
+    }
+
+    fn release(&mut self) -> bool {
+        self.selecting = false;
+        false
+    }
+
     /// A pill chooses; outside, it closes (and does nothing else).
     fn click(&mut self, p: Point) -> Option<ViewerAction> {
         match self.picker.click(p) {
@@ -108,8 +130,9 @@ impl Viewer for PickerView {
         self.picker.hover(p)
     }
 
+    /// A hand on a pill, a scope or ×; the text's over the filter.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        self.picker.over_clickable(p).then_some(ViewerCursor::Pointer)
+        self.picker.cursor_at(p)
     }
 
     fn wants_text(&self) -> bool {
@@ -125,9 +148,24 @@ impl Viewer for PickerView {
         self.text_input(text)
     }
 
-    /// ← → ↑ ↓ move, Tab switches the scope, ↵ chooses; Esc clears the filter first, then
-    /// closes.
+    /// What's selected in the filter (⌘C).
+    fn selected_text(&self) -> Option<String> {
+        self.picker.selected_text()
+    }
+
+    /// The filter's edit commands (⌘A, ⌘X, ⌘Z, ⇧⌘Z).
+    fn command(&mut self, id: &str) -> bool {
+        self.picker.command(id)
+    }
+
     fn edit_key(&mut self, key: ViewerKey) -> bool {
+        self.edit_key_with(key, KeyReach::default())
+    }
+
+    /// ← → ↑ ↓ move, Tab switches the scope, ↵ chooses; Esc clears the filter first, then
+    /// closes; the filter's editing keys (⌫, Delete, Home, End, by word and extending) edit
+    /// it.
+    fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         let has_file = self.choices.as_ref().is_some_and(|c| c.file_name.is_some());
         match key {
             ViewerKey::Escape if !self.picker.query.text().is_empty() => {
@@ -139,7 +177,9 @@ impl Viewer for PickerView {
             ViewerKey::Up => self.picker.step(-1, true),
             ViewerKey::Down => self.picker.step(1, true),
             ViewerKey::Tab => self.picker.toggle_scope(has_file),
-            ViewerKey::Backspace => self.picker.backspace(),
+            ViewerKey::Backspace | ViewerKey::Delete | ViewerKey::Home | ViewerKey::End => {
+                return self.picker.field_key(key, reach);
+            }
             ViewerKey::Enter => {
                 if let Some(pick) = self.picker.confirm() {
                     self.pick(pick);

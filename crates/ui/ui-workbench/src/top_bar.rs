@@ -10,6 +10,7 @@ use render_api::{ImageData, Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_kit::{centered_baseline, draw_icon, draw_text};
 
+use crate::ds;
 use crate::palette::Palette;
 
 /// The bar height, in logical pixels.
@@ -65,6 +66,12 @@ pub enum TopBarHit {
 /// A window button's width (logical pixels): smaller than Windows' own (46), to suit the
 /// bar's other buttons.
 const CONTROL_WIDTH: f32 = 36.0;
+/// A window button's glyph and corners (logical pixels).
+const CONTROL_GLYPH: f32 = 12.0;
+const CONTROL_CORNER: f32 = 7.0;
+/// The branch button's icon, and the height of the badge after it (logical pixels).
+const BRANCH_ICON: f32 = 15.0;
+const BADGE_H: f32 = 20.0;
 
 #[derive(Debug, Default)]
 pub struct TopBar {
@@ -208,14 +215,11 @@ impl TopBar {
         let s = self.scale;
         let px = |v: f32| (v * s).round();
         let layer = scene.push_layer(Some(b));
+        let ctx = ds::Ctx::new(palette, s);
         self.occupied.clear();
         if model.full_screen && model.controls.is_some() {
             layer.quad(Quad::filled(b, palette.window_background));
-            let line = px(1.0).max(1.0);
-            layer.quad(Quad::filled(
-                Rect::new(b.min_x(), b.max_y() - line, b.size.width, line),
-                palette.border,
-            ));
+            ds::divider(layer, &ctx, b.min_x(), b.max_x(), b.max_y() - ctx.line());
         }
         let font = Font::new(palette.ui_font.clone(), px(palette.ui_font_size));
         let bold = font.clone().with_weight(Font::SEMIBOLD);
@@ -230,27 +234,12 @@ impl TopBar {
         if let Some(open) = model.menu {
             let size = px(28.0);
             self.menu = Rect::new(x, pill_top, size, pill_h);
-            let active = open || self.hover == Some(TopBarHit::Menu);
-            if active {
-                layer.quad(Quad::filled(self.menu, palette.tab_hover).rounded(px(7.0)));
-            }
-            if let Some(id) = icons.id("menu") {
-                let icon = px(16.0);
-                let r = Rect::new(
-                    (self.menu.min_x() + (size - icon) / 2.0).round(),
-                    (pill_top + (pill_h - icon) / 2.0).round(),
-                    icon,
-                    icon,
-                );
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    r,
-                    if open { palette.text } else { palette.text_muted },
-                );
-                self.occupied.push(r);
-            }
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon("menu")
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(open || self.hover == Some(TopBarHit::Menu));
+            ds::button(layer, text, icons, &ctx, self.menu, spec);
+            self.occupied.push(icon_room(self.menu, px(ICON)));
             x = self.menu.max_x() + px(4.0);
         }
 
@@ -304,44 +293,31 @@ impl TopBar {
         self.branch = Rect::default();
         if let Some(branch) = model.branch {
             let from = x;
-            let shaped = text.shape_line(branch, &font);
             let icon = px(15.0);
-            let chevron = if model.branch_button { px(6.0) + px(12.0) } else { 0.0 };
-            let inner = icon + px(6.0) + shaped.width + chevron;
             if model.branch_button {
-                let h = px(26.0);
-                let r = Rect::new(
-                    x - px(8.0),
-                    (b.min_y() + (b.size.height - h) / 2.0).round(),
-                    inner + px(16.0),
-                    h,
-                );
-                let lit = self.hover == Some(TopBarHit::Branch);
-                if lit {
-                    layer.quad(Quad::filled(r, palette.text.with_alpha(0.07)).rounded(px(6.0)));
-                }
-                self.branch = r;
-            }
-            let color = if self.hover == Some(TopBarHit::Branch) {
-                palette.text
-            } else {
-                palette.text_muted
-            };
-            if let Some(id) = icons.id("git-branch") {
-                let r = Rect::new(x, b.min_y() + (b.size.height - icon) / 2.0, icon, icon);
-                draw_icon(layer, icons, id, r, color);
-            }
-            x += icon + px(6.0);
-            draw_text(layer, &shaped, x, baseline, color);
-            x += shaped.width;
-            if model.branch_button
-                && let Some(id) = icons.id("chevron-down")
-            {
-                let size = px(12.0);
+                let h = px(ds::button_size::MEDIUM);
+                let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                    .icon("git-branch")
+                    .label(branch)
+                    .icon_size(BRANCH_ICON)
+                    .menu(true)
+                    .rest_tone(ds::Tone::Neutral)
+                    .hovered(self.hover == Some(TopBarHit::Branch));
+                let w = ds::button_width(text, &ctx, &spec, h);
                 let r =
-                    Rect::new(x + px(6.0), b.min_y() + (b.size.height - size) / 2.0, size, size);
-                draw_icon(layer, icons, id, r, palette.text_muted);
-                x += px(6.0) + size;
+                    Rect::new(x - px(8.0), (b.min_y() + (b.size.height - h) / 2.0).round(), w, h);
+                ds::button(layer, text, icons, &ctx, r, spec);
+                self.branch = r;
+                x = r.max_x() - px(8.0);
+            } else {
+                let shaped = text.shape_line(branch, &font);
+                if let Some(id) = icons.id("git-branch") {
+                    let r = Rect::new(x, b.min_y() + (b.size.height - icon) / 2.0, icon, icon);
+                    draw_icon(layer, icons, id, r, palette.text_muted);
+                }
+                x += icon + px(6.0);
+                draw_text(layer, &shaped, x, baseline, palette.text_muted);
+                x += shaped.width;
             }
             let h = px(16.0);
             let top = b.min_y() + (b.size.height - h) / 2.0;
@@ -351,28 +327,17 @@ impl TopBar {
         // A module's word on this project (its shortcut), in a small frame.
         self.badge = Rect::default();
         if let Some(badge) = model.badge {
-            let small = Font::new(palette.ui_font.clone(), px(palette.ui_font_size - 1.5));
-            let shaped = text.shape_line(badge, &small);
-            let h = px(20.0);
-            let r = Rect::new(
-                x,
-                (b.min_y() + (b.size.height - h) / 2.0).round(),
-                shaped.width + px(12.0),
-                h,
-            );
-            layer.quad(
-                Quad::filled(r, palette.text.with_alpha(0.04))
-                    .rounded(px(5.0))
-                    .bordered(self.scale.round().max(1.0), palette.border),
-            );
-            let base = centered_baseline(r.min_y(), h, &text.metrics(&small));
-            let hovered = self.hover == Some(TopBarHit::Badge);
-            let color = if hovered { palette.text } else { palette.text_muted };
-            draw_text(layer, &shaped, r.min_x() + px(6.0), base, color);
+            let h = px(BADGE_H);
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Soft)
+                .label(badge)
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(self.hover == Some(TopBarHit::Badge));
+            let w = ds::button_width(text, &ctx, &spec, h);
+            let r = Rect::new(x, (b.min_y() + (b.size.height - h) / 2.0).round(), w, h);
+            ds::button(layer, text, icons, &ctx, r, spec);
             self.occupied.push(r);
             self.badge = r;
         }
-
         // Far right: the window's buttons (Windows), like the bar's other buttons, thin
         // icons; closing turns red under the mouse.
         let mut right = b.max_x();
@@ -393,7 +358,6 @@ impl TopBar {
                 self.close.max_x() - self.minimize.min_x(),
                 h,
             ));
-            let glyph = px(12.0);
             let middle = match (model.full_screen, maximized) {
                 (true, _) => "minimize-2",
                 (false, true) => "copy",
@@ -406,48 +370,49 @@ impl TopBar {
             ] {
                 let hovered = self.hover == Some(hit)
                     || (hit == TopBarHit::Maximize && model.maximize_hovered);
-                let (fill, color) = match hit {
-                    TopBarHit::Close if hovered => (Some(Rgba::rgb(0xC42B1C)), Rgba::WHITE),
-                    _ if hovered => (Some(palette.tab_hover), palette.text),
-                    _ => (None, palette.text_muted),
-                };
-                if let Some(fill) = fill {
-                    layer.quad(Quad::filled(rect, fill).rounded(px(7.0)));
-                }
-                if let Some(id) = icons.id(name) {
-                    let r = Rect::new(
-                        (rect.min_x() + (rect.size.width - glyph) / 2.0).round(),
-                        (rect.min_y() + (rect.size.height - glyph) / 2.0).round(),
-                        glyph,
-                        glyph,
-                    );
-                    draw_icon(layer, icons, id, r, color);
-                }
+                let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                    .icon(name)
+                    .icon_size(CONTROL_GLYPH)
+                    .corner(CONTROL_CORNER)
+                    .rest_tone(ds::Tone::Neutral)
+                    .hovered(hovered);
+                let spec =
+                    if hit == TopBarHit::Close { spec.hover_tone(ds::Tone::Danger) } else { spec };
+                ds::button(layer, text, icons, &ctx, rect, spec);
             }
         }
 
         // Right: the registered buttons (search, settings), left of the window's.
-        let button = px(28.0);
-        let icon = px(16.0);
+        let button = px(ds::button_size::LARGE);
         self.actions.clear();
         let mut x = right - px(10.0) - button;
         for (id, icon_id) in model.actions.iter().rev() {
             let rect = Rect::new(x, pill_top, button, button);
-            if self.hover == Some(TopBarHit::Action(id)) {
-                layer.quad(Quad::filled(rect, palette.tab_hover).rounded(px(7.0)));
-            }
-            let r = Rect::new(
-                rect.min_x() + (button - icon) / 2.0,
-                rect.min_y() + (button - icon) / 2.0,
-                icon,
-                icon,
-            );
-            draw_icon(layer, icons, *icon_id, r, palette.text_muted);
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon(icons.name(*icon_id).unwrap_or_default())
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(self.hover == Some(TopBarHit::Action(id)));
+            ds::button(layer, text, icons, &ctx, rect, spec);
+            let r = icon_room(rect, px(ICON));
             self.actions.push((rect, id));
             self.occupied.push(r);
             x -= button + px(4.0);
         }
     }
+}
+
+/// The room a bar button's icon takes (what the theme's decorations keep clear), logical
+/// pixels.
+const ICON: f32 = 16.0;
+
+/// The icon's room, `size` across, centered in a button at `rect`.
+fn icon_room(rect: Rect, size: f32) -> Rect {
+    Rect::new(
+        (rect.min_x() + (rect.size.width - size) / 2.0).round(),
+        (rect.min_y() + (rect.size.height - size) / 2.0).round(),
+        size,
+        size,
+    )
 }
 
 /// A project's initials: the first letters of the first two words (`docker.acme.test` →

@@ -5,7 +5,7 @@
 use kernel::{Point, Rect};
 use render_api::Quad;
 use ui_components::Viewer;
-use ui_components::ds::{self, Ctx};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, button_size};
 use ui_kit::draw_text;
 
 use super::DiagramView;
@@ -199,13 +199,9 @@ impl DiagramView {
         let p = ctx.palette;
         let layer = ctx.scene.push_layer(Some(area));
         layer.quad(Quad::filled(area, p.tab_bar_background));
-        let line = ctx.scale.max(1.0);
-        layer.quad(Quad::filled(
-            Rect::new(area.min_x(), area.max_y() - line, area.size.width, line),
-            p.border,
-        ));
+        ds::divider(layer, &ds, area.min_x(), area.max_x(), area.max_y() - ds.line());
         self.tools.clear();
-        let size = ds.px(28.0);
+        let size = ds.px(button_size::LARGE);
         let mut x = area.min_x() + ds.px(8.0);
         let y = (area.center().y - size / 2.0).round();
         for (g, group) in GROUPS.iter().enumerate() {
@@ -220,20 +216,11 @@ impl DiagramView {
                     Tool::Properties => self.show_properties,
                     _ => tool.draw().is_some_and(|d| d == self.draw),
                 };
-                if on {
-                    layer.quad(Quad::filled(r, p.tab_active_background).rounded(ds.px(6.0)));
-                }
-                let color =
-                    if self.tool_enabled(tool) { p.text } else { p.text_muted.with_alpha(0.45) };
-                if let Some(icon) = ctx.icons.id(tool.icon()) {
-                    let inner = Rect::new(
-                        r.min_x() + ds.px(6.0),
-                        r.min_y() + ds.px(6.0),
-                        size - ds.px(12.0),
-                        size - ds.px(12.0),
-                    );
-                    ui_kit::draw_icon(layer, ctx.icons, icon, inner, color);
-                }
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon(tool.icon())
+                    .on(on)
+                    .enabled(self.tool_enabled(tool));
+                ds::button(layer, ctx.text, ctx.icons, &ds, r, spec);
                 self.tools.push((r, tool));
                 x = r.max_x() + ds.px(2.0);
                 // The zoom's value after −.

@@ -167,3 +167,60 @@ fn more_rows_are_selected_with_cmd_and_shift() {
     assert_eq!(view.selection(&tree), vec![ids[4]]);
     assert!(!view.select_more(Point::new(10.0, 500.0), &mut tree, true), "no row there");
 }
+
+/// Paints `view` over `tree` into a fresh scene (the files' icons plain).
+fn painted(view: &ProjectTreeView, tree: &mut FileTree) -> Scene {
+    let (mut text, mut scene, icons) = (TextSystem::new(), Scene::default(), Icons::builtin());
+    let file_icon = |_: &str| (icons.id("file").unwrap(), Rgba::WHITE);
+    view.paint(tree, &mut text, &mut scene, &icons, &file_icon, &|_| None);
+    scene
+}
+
+/// The folder a drag would drop into: the shared row highlight, in the tree's selection,
+/// outlined in the accent.
+#[test]
+fn a_drop_target_is_the_shared_highlight_outlined() {
+    let (mut view, mut tree) = setup();
+    let app = tree.visible_rows()[1].id;
+    assert!(view.set_drop_target(Some(app)));
+    let scene = painted(&view, &mut tree);
+    let style = ProjectTreeStyle::default();
+    let outlined = scene
+        .layers()
+        .iter()
+        .flat_map(|l| l.quads.iter())
+        .find(|q| q.border_width > 0.0)
+        .expect("the drop target's outline");
+    assert_eq!(outlined.color, style.selection);
+    assert_eq!(outlined.border_color, style.input_border);
+    assert_eq!(outlined.border_width, 2.0, "1.5 on whole pixels");
+}
+
+/// A rename's field is the shared field (its frame in the accent, the danger color while
+/// the name can't be used), its text typed and edited as before.
+#[test]
+fn a_rename_s_field_is_the_shared_field() {
+    let (mut view, mut tree) = setup();
+    let index = tree.visible_rows()[2].id;
+    assert!(view.begin_rename(index, &mut tree));
+    let frame = |view: &ProjectTreeView, tree: &mut FileTree| {
+        let scene = painted(view, tree);
+        scene
+            .layers()
+            .iter()
+            .flat_map(|l| l.quads.iter())
+            .find(|q| q.border_width > 0.0)
+            .map(|q| (q.color, q.border_color))
+            .expect("the field's frame")
+    };
+    let palette = Palette::dark();
+    assert_eq!(frame(&view, &mut tree), (palette.input_background, palette.accent));
+    let input = &mut view.pending_mut().unwrap().input;
+    assert_eq!(input.text(), "index.php");
+    input.select_all();
+    input.insert("main.php");
+    assert_eq!(view.pending().unwrap().input.text(), "main.php");
+    view.pending_mut().unwrap().error = true;
+    assert_eq!(frame(&view, &mut tree).1, palette.danger);
+    assert!(view.cancel_new().is_some());
+}

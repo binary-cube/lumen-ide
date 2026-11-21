@@ -16,24 +16,416 @@ pub struct BadgeSpec<'a> {
 /// `mid`; `x` is the right edge if `align_right`. Returns the rectangle.
 pub fn badge(layer: &mut Layer, text: &mut TextSystem, ctx: &Ctx<'_>, spec: BadgeSpec<'_>) -> Rect {
     let BadgeSpec { label, x, mid, align_right, tone } = spec;
-    let font = ctx.ui_font(-1.5);
-    let shaped = text.shape_line(label, &font);
-    let (w, h) = (shaped.width + ctx.px(14.0), ctx.px(20.0));
-    let left = if align_right { x - w } else { x };
-    let rect = Rect::new(left.round(), (mid - h / 2.0).round(), w.round(), h);
-    let (fill, color) = match tone {
-        Tone::Neutral => (ctx.palette.text.with_alpha(0.05), ctx.palette.text_muted),
-        t => (t.color(ctx.palette).with_alpha(0.12), t.color(ctx.palette)),
-    };
-    layer.quad(Quad::filled(rect, ctx.fade(fill)).rounded(h / 2.0));
-    draw_text(
-        layer,
-        &shaped,
-        rect.min_x() + ctx.px(7.0),
-        optical_baseline(rect.min_y(), h, &font),
-        ctx.fade(color),
-    );
-    rect
+    let badge = Badge::new(label).tone(tone);
+    if align_right {
+        badge.paint_right(layer, text, ctx, x, mid)
+    } else {
+        badge.paint(layer, text, ctx, x, mid)
+    }
+}
+
+/// A badge's height, by name (logical pixels).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum BadgeSize {
+    /// 15: a mark after a tab's title.
+    Tiny,
+    /// 16: a card's tag.
+    Small,
+    /// 18: a count beside a row's label.
+    Medium,
+    /// 20: the usual.
+    #[default]
+    Regular,
+    /// A height of the caller's (a pill fitted to a table's row).
+    Custom(f32),
+}
+
+impl BadgeSize {
+    /// Its height (logical pixels).
+    pub fn height(self) -> f32 {
+        match self {
+            Self::Tiny => 15.0,
+            Self::Small => 16.0,
+            Self::Medium => 18.0,
+            Self::Regular => 20.0,
+            Self::Custom(h) => h,
+        }
+    }
+}
+
+/// Where a badge's text sits on its height.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum BadgeBaseline {
+    /// Optically centered (by the cap height: [`optical_baseline`]).
+    #[default]
+    Optical,
+    /// Centered by the font's ascent and descent.
+    Metrics,
+    /// On the caller's baseline (a pill among a row's words: the row's).
+    At(f32),
+}
+
+/// The usual badge's padding on each side, its fill's alpha in a tone and in neutral, and
+/// its font (relative to the UI's).
+const BADGE_PAD: f32 = 7.0;
+const BADGE_FILL: f32 = 0.12;
+const BADGE_NEUTRAL_FILL: f32 = 0.05;
+const BADGE_FONT: f32 = -1.5;
+
+/// A badge's icon's side by default, and the room between its parts (the icon, the muted
+/// run, the label), in logical pixels.
+const BADGE_ICON: f32 = 12.0;
+const BADGE_PART_GAP: f32 = 4.0;
+
+/// The icon before a badge's text (a lock before "Read-only"): which, how big, its color.
+#[derive(Clone, Copy)]
+pub struct BadgeIcon<'a> {
+    pub icons: &'a icons::Icons,
+    pub name: &'a str,
+    /// Its side (logical pixels).
+    pub size: f32,
+    /// Its color; `None`: the label's.
+    pub color: Option<Rgba>,
+}
+
+impl std::fmt::Debug for BadgeIcon<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BadgeIcon")
+            .field("name", &self.name)
+            .field("size", &self.size)
+            .field("color", &self.color)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A badge, as configured: a rounded pill with a small label in a tone. Its defaults are
+/// [`badge`]'s; each option changes only what a place asks for. Sizes in logical pixels,
+/// times [`Self::zoom`].
+///
+/// ```ignore
+/// Badge::new("3").size(BadgeSize::Medium).centered().min_width(18.0).paint_right(…);
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub struct Badge<'a> {
+    pub label: &'a str,
+    pub tone: Tone,
+    /// The text's color, and its fill's base, over the tone's.
+    pub color: Option<Rgba>,
+    /// The fill's own color, over the one made from the color.
+    pub fill: Option<Rgba>,
+    /// The fill's alpha over the color (by default 0.12; 0.05 of the text in neutral).
+    pub fill_alpha: Option<f32>,
+    pub size: BadgeSize,
+    /// The room on each side of the label.
+    pub pad: f32,
+    /// The narrowest it gets (a count's round pill).
+    pub min_width: f32,
+    /// The corners' radius; `None`: half the height (a pill).
+    pub radius: Option<f32>,
+    /// The label centered (a count), else from the left after the padding.
+    pub centered: bool,
+    /// The label in bold.
+    pub bold: bool,
+    /// The label's font size (relative to the UI's).
+    pub font_delta: f32,
+    /// The label's font, over the one made from the size and the weight.
+    pub font: Option<&'a Font>,
+    pub baseline: BadgeBaseline,
+    /// What its sizes are multiplied by (a bar zoomed apart from the UI).
+    pub zoom: f32,
+    /// An outline in this color, a line wide (a chip over a card); `None`: none.
+    pub border: Option<Rgba>,
+    /// An icon before its text; `None`: none.
+    pub icon: Option<BadgeIcon<'a>>,
+    /// A muted run before the label (a figure's name before its value: `rows 1 204`).
+    pub lead: Option<&'a str>,
+    /// The muted run's font; `None`: the label's.
+    pub lead_font: Option<&'a Font>,
+}
+
+impl<'a> Badge<'a> {
+    /// The usual badge (neutral, 20 high).
+    pub fn new(label: &'a str) -> Self {
+        Self {
+            label,
+            tone: Tone::Neutral,
+            color: None,
+            fill: None,
+            fill_alpha: None,
+            size: BadgeSize::Regular,
+            pad: BADGE_PAD,
+            min_width: 0.0,
+            radius: None,
+            centered: false,
+            bold: false,
+            font_delta: BADGE_FONT,
+            font: None,
+            baseline: BadgeBaseline::Optical,
+            zoom: 1.0,
+            border: None,
+            icon: None,
+            lead: None,
+            lead_font: None,
+        }
+    }
+
+    pub fn tone(mut self, tone: Tone) -> Self {
+        self.tone = tone;
+        self
+    }
+
+    /// Its text in `color`, the fill made from it.
+    pub fn color(mut self, color: Rgba) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    /// Its fill in `fill`.
+    pub fn fill(mut self, fill: Rgba) -> Self {
+        self.fill = Some(fill);
+        self
+    }
+
+    /// Its fill at `alpha` of its color.
+    pub fn fill_alpha(mut self, alpha: f32) -> Self {
+        self.fill_alpha = Some(alpha);
+        self
+    }
+
+    pub fn size(mut self, size: BadgeSize) -> Self {
+        self.size = size;
+        self
+    }
+
+    /// The room on each side of the label.
+    pub fn pad(mut self, pad: f32) -> Self {
+        self.pad = pad;
+        self
+    }
+
+    pub fn min_width(mut self, width: f32) -> Self {
+        self.min_width = width;
+        self
+    }
+
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = Some(radius);
+        self
+    }
+
+    /// The label centered (a count).
+    pub fn centered(mut self) -> Self {
+        self.centered = true;
+        self
+    }
+
+    pub fn bold(mut self) -> Self {
+        self.bold = true;
+        self
+    }
+
+    /// The label's font size (relative to the UI's).
+    pub fn font_delta(mut self, delta: f32) -> Self {
+        self.font_delta = delta;
+        self
+    }
+
+    /// The label in `font`.
+    pub fn font(mut self, font: &'a Font) -> Self {
+        self.font = Some(font);
+        self
+    }
+
+    pub fn baseline(mut self, baseline: BadgeBaseline) -> Self {
+        self.baseline = baseline;
+        self
+    }
+
+    /// Its sizes times `zoom`.
+    pub fn zoom(mut self, zoom: f32) -> Self {
+        self.zoom = zoom;
+        self
+    }
+
+    /// Outlined in `color`, a line wide.
+    pub fn border(mut self, color: Rgba) -> Self {
+        self.border = Some(color);
+        self
+    }
+
+    /// Icon `name` of `icons` before its text, 12 high, in the label's color.
+    pub fn icon(mut self, icons: &'a icons::Icons, name: &'a str) -> Self {
+        self.icon = Some(BadgeIcon { icons, name, size: BADGE_ICON, color: None });
+        self
+    }
+
+    /// Its icon `size` high (logical pixels).
+    pub fn icon_size(mut self, size: f32) -> Self {
+        if let Some(icon) = &mut self.icon {
+            icon.size = size;
+        }
+        self
+    }
+
+    /// Its icon in `color`, apart from the label's.
+    pub fn icon_color(mut self, color: Rgba) -> Self {
+        if let Some(icon) = &mut self.icon {
+            icon.color = Some(color);
+        }
+        self
+    }
+
+    /// A muted run `lead` before the label.
+    pub fn lead(mut self, lead: &'a str) -> Self {
+        self.lead = Some(lead);
+        self
+    }
+
+    /// The muted run in `font`.
+    pub fn lead_font(mut self, font: &'a Font) -> Self {
+        self.lead_font = Some(font);
+        self
+    }
+
+    /// A logical size at the context's scale and the zoom (physical pixels).
+    fn px(&self, ctx: &Ctx<'_>, v: f32) -> f32 {
+        ctx.px(v * self.zoom)
+    }
+
+    /// The label's font.
+    fn label_font(&self, ctx: &Ctx<'_>) -> Font {
+        if let Some(font) = self.font {
+            return font.clone();
+        }
+        let font = ctx.ui_font(self.font_delta);
+        let font = if self.zoom == 1.0 {
+            font
+        } else {
+            let size = ctx.px((ctx.palette.ui_font_size + self.font_delta) * self.zoom);
+            Font::new(font.family, size)
+        };
+        if self.bold { font.with_weight(Font::BOLD) } else { font }
+    }
+
+    /// Its width (physical pixels, whole).
+    pub fn width(&self, text: &mut TextSystem, ctx: &Ctx<'_>) -> f32 {
+        let font = self.label_font(ctx);
+        let label = text.shape_line(self.label, &font).width;
+        let lead = self.lead_shaped(text, &font).map_or(0.0, |l| l.width);
+        self.width_of(label + lead + self.extras(ctx), ctx).round()
+    }
+
+    /// Its whole width around content `inner` wide (physical pixels).
+    fn width_of(&self, inner: f32, ctx: &Ctx<'_>) -> f32 {
+        (inner + self.px(ctx, 2.0 * self.pad)).max(self.px(ctx, self.min_width))
+    }
+
+    /// The room its icon and its muted run take beside their text (physical pixels).
+    fn extras(&self, ctx: &Ctx<'_>) -> f32 {
+        let icon = self.icon.map_or(0.0, |i| self.px(ctx, i.size + BADGE_PART_GAP));
+        let lead = if self.lead.is_some() { self.px(ctx, BADGE_PART_GAP) } else { 0.0 };
+        icon + lead
+    }
+
+    /// The muted run shaped (in its font, else the label's).
+    fn lead_shaped(
+        &self,
+        text: &mut TextSystem,
+        font: &Font,
+    ) -> Option<std::sync::Arc<text_layout::ShapedLine>> {
+        let lead = self.lead?;
+        Some(text.shape_line(lead, self.lead_font.unwrap_or(font)))
+    }
+
+    /// Its fill and its text's color.
+    fn colors(&self, p: &Palette) -> (Rgba, Rgba) {
+        let (fill, color) = match (self.color, self.tone) {
+            (Some(c), _) => (c.with_alpha(self.fill_alpha.unwrap_or(BADGE_FILL)), c),
+            (None, Tone::Neutral) => {
+                (p.text.with_alpha(self.fill_alpha.unwrap_or(BADGE_NEUTRAL_FILL)), p.text_muted)
+            }
+            (None, t) => (t.color(p).with_alpha(self.fill_alpha.unwrap_or(BADGE_FILL)), t.color(p)),
+        };
+        (self.fill.unwrap_or(fill), color)
+    }
+
+    /// Drawn from `left`, centered on `mid`. Returns its rectangle.
+    pub fn paint(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        ctx: &Ctx<'_>,
+        left: f32,
+        mid: f32,
+    ) -> Rect {
+        self.paint_at(layer, text, ctx, (left, false), mid)
+    }
+
+    /// Drawn ending at `right`, centered on `mid`. Returns its rectangle.
+    pub fn paint_right(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        ctx: &Ctx<'_>,
+        right: f32,
+        mid: f32,
+    ) -> Rect {
+        self.paint_at(layer, text, ctx, (right, true), mid)
+    }
+
+    fn paint_at(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        ctx: &Ctx<'_>,
+        (x, align_right): (f32, bool),
+        mid: f32,
+    ) -> Rect {
+        let font = self.label_font(ctx);
+        let shaped = text.shape_line(self.label, &font);
+        let lead = self.lead_shaped(text, &font);
+        let inner = shaped.width + lead.as_ref().map_or(0.0, |l| l.width) + self.extras(ctx);
+        let w = self.width_of(inner, ctx);
+        let h = self.px(ctx, self.size.height());
+        let left = if align_right { x - w } else { x };
+        let rect = Rect::new(left.round(), (mid - h / 2.0).round(), w.round(), h);
+        let (fill, color) = self.colors(ctx.palette);
+        let r = self.radius.map_or(h / 2.0, |v| self.px(ctx, v));
+        let quad = Quad::filled(rect, ctx.fade(fill)).rounded(r);
+        layer.quad(match self.border {
+            Some(border) => quad.bordered(ctx.line(), ctx.fade(border)),
+            None => quad,
+        });
+        let mut tx = if self.centered {
+            (rect.min_x() + (rect.size.width - inner) / 2.0).round()
+        } else {
+            rect.min_x() + self.px(ctx, self.pad)
+        };
+        if let Some(icon) = self.icon {
+            let side = self.px(ctx, icon.size);
+            let mid = rect.min_y() + h / 2.0;
+            if let Some(id) = icon.icons.id(icon.name) {
+                let at = Rect::new(tx.round(), (mid - side / 2.0).round(), side, side);
+                ui_kit::draw_icon(layer, icon.icons, id, at, ctx.fade(icon.color.unwrap_or(color)));
+            }
+            tx += side + self.px(ctx, BADGE_PART_GAP);
+        }
+        let base = match self.baseline {
+            BadgeBaseline::Optical => optical_baseline(rect.min_y(), h, &font),
+            BadgeBaseline::Metrics => {
+                ui_kit::centered_baseline(rect.min_y(), h, &text.metrics(&font))
+            }
+            BadgeBaseline::At(base) => base,
+        };
+        if let Some(lead) = &lead {
+            draw_text(layer, lead, tx.round(), base, ctx.fade(ctx.palette.text_muted));
+            tx += lead.width + self.px(ctx, BADGE_PART_GAP);
+        }
+        // Rounded only after parts before it (the label alone stays where it always was).
+        let tx = if self.icon.is_some() || lead.is_some() { tx.round() } else { tx };
+        draw_text(layer, &shaped, tx, base, ctx.fade(color));
+        rect
+    }
 }
 
 /// What a count means: its color by meaning.
@@ -79,6 +471,16 @@ pub fn dot_badge(layer: &mut Layer, ctx: &Ctx<'_>, at: Point, badge: DotBadge) -
     let outer = Rect::new(rect.min_x() - ring, rect.min_y() - ring, d + 2.0 * ring, d + 2.0 * ring);
     layer.quad(Quad::filled(outer, outline).rounded(outer.size.height / 2.0));
     layer.quad(Quad::filled(rect, if lit { Rgba::WHITE } else { tone }).rounded(d / 2.0));
+    rect
+}
+
+/// A plain round dot of `diameter` (logical pixels) centered on `center`, in `color` (the
+/// current branch, a lane's node, a state): on whole pixels, scaled with the zoom. Returns its
+/// rectangle.
+pub fn dot(layer: &mut Layer, ctx: &Ctx<'_>, center: Point, diameter: f32, color: Rgba) -> Rect {
+    let d = ctx.px(diameter);
+    let rect = Rect::new((center.x - d / 2.0).round(), (center.y - d / 2.0).round(), d, d);
+    layer.quad(Quad::filled(rect, ctx.fade(color)).rounded(d / 2.0));
     rect
 }
 
@@ -140,37 +542,138 @@ pub fn keycap(
     mid: f32,
     hovered: bool,
 ) -> Rect {
-    let font = ctx.ui_font(-2.0);
-    let shaped = text.shape_line(key, &font);
-    let (w, h) = ((shaped.width + ctx.px(16.0)).max(ctx.px(28.0)), ctx.px(26.0));
-    let rect = Rect::new((right - w).round(), (mid - h / 2.0).round(), w.round(), h);
-    layer.quad(
-        Quad::filled(
-            rect,
-            ctx.fade(if hovered {
-                ctx.palette.text.with_alpha(0.06)
-            } else {
-                ctx.palette.popup_background
-            }),
-        )
-        .rounded(ctx.px(radius::SM))
-        .bordered(
-            ctx.line(),
-            ctx.fade(if hovered {
-                ctx.palette.text_muted.with_alpha(0.5)
-            } else {
-                ctx.palette.border
-            }),
-        ),
-    );
-    draw_text(
-        layer,
-        &shaped,
-        (rect.min_x() + (w - shaped.width) / 2.0).round(),
-        optical_baseline(rect.min_y(), h, &font),
-        ctx.fade(if hovered { ctx.palette.text } else { ctx.palette.text_muted }),
-    );
-    rect
+    Keycap::new(key).hovered(hovered).paint_right(layer, text, ctx, right, mid)
+}
+
+/// The width [`keycap`] draws `key` at (physical pixels), to place it.
+pub fn keycap_width(text: &mut TextSystem, ctx: &Ctx<'_>, key: &str) -> f32 {
+    Keycap::new(key).width(text, ctx)
+}
+
+/// A key cap's size, by name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum KeycapSize {
+    /// 26 high, at least 28 wide: a field's or a modal's corner (`esc`).
+    #[default]
+    Regular,
+    /// 20 high, at least 22 wide: a key in a dense row.
+    Small,
+}
+
+impl KeycapSize {
+    /// Its height, its least width, the room around its label (logical pixels) and its
+    /// font (relative to the UI's).
+    fn metrics(self) -> (f32, f32, f32, f32) {
+        match self {
+            Self::Regular => (26.0, 28.0, 16.0, -2.0),
+            Self::Small => (20.0, 22.0, 12.0, -2.5),
+        }
+    }
+}
+
+/// A key cap in a field's corner, as configured: its key, lit under the mouse, its size.
+/// Drawn by the one key cap ([`ui_kit::paint_keycap`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Keycap<'a> {
+    pub key: &'a str,
+    pub hovered: bool,
+    pub size: KeycapSize,
+}
+
+/// A field's key cap under the mouse: its fill's alpha (of the text) and its outline's.
+const KEYCAP_HOVER_FILL: f32 = 0.06;
+const KEYCAP_HOVER_BORDER: f32 = 0.5;
+
+impl<'a> Keycap<'a> {
+    pub fn new(key: &'a str) -> Self {
+        Self { key, hovered: false, size: KeycapSize::Regular }
+    }
+
+    pub fn hovered(mut self, hovered: bool) -> Self {
+        self.hovered = hovered;
+        self
+    }
+
+    pub fn size(mut self, size: KeycapSize) -> Self {
+        self.size = size;
+        self
+    }
+
+    fn font(&self, ctx: &Ctx<'_>) -> Font {
+        ctx.ui_font(self.size.metrics().3)
+    }
+
+    /// Its width (physical pixels).
+    pub fn width(&self, text: &mut TextSystem, ctx: &Ctx<'_>) -> f32 {
+        let (_, least, room, _) = self.size.metrics();
+        (text.shape_line(self.key, &self.font(ctx)).width + ctx.px(room)).max(ctx.px(least))
+    }
+
+    /// Its look: the popup's fill and the border at rest, lit under the mouse.
+    pub fn look(&self, ctx: &Ctx<'_>) -> ui_kit::KeycapLook {
+        let p = ctx.palette;
+        let (fill, border, label) = if self.hovered {
+            (
+                p.text.with_alpha(KEYCAP_HOVER_FILL),
+                p.text_muted.with_alpha(KEYCAP_HOVER_BORDER),
+                p.text,
+            )
+        } else {
+            (p.popup_background, p.border, p.text_muted)
+        };
+        ui_kit::KeycapLook {
+            background: ctx.fade(fill),
+            border: Some(ui_kit::KeycapBorder { width: ctx.line(), color: ctx.fade(border) }),
+            relief: None,
+            radius: ctx.px(radius::SM),
+            text: ctx.fade(label),
+        }
+    }
+
+    /// Drawn ending at `right`, centered on `mid`. Returns its rectangle.
+    pub fn paint_right(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        ctx: &Ctx<'_>,
+        right: f32,
+        mid: f32,
+    ) -> Rect {
+        let w = self.width(text, ctx);
+        self.paint_at(layer, text, ctx, right - w, mid, w)
+    }
+
+    /// Drawn from `left`, centered on `mid`. Returns its rectangle.
+    pub fn paint(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        ctx: &Ctx<'_>,
+        left: f32,
+        mid: f32,
+    ) -> Rect {
+        let w = self.width(text, ctx);
+        self.paint_at(layer, text, ctx, left, mid, w)
+    }
+
+    fn paint_at(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        ctx: &Ctx<'_>,
+        left: f32,
+        mid: f32,
+        w: f32,
+    ) -> Rect {
+        let font = self.font(ctx);
+        let shaped = text.shape_line(self.key, &font);
+        let h = ctx.px(self.size.metrics().0);
+        let rect = Rect::new(left.round(), (mid - h / 2.0).round(), w.round(), h);
+        let base = optical_baseline(rect.min_y(), h, &font);
+        let x = ui_kit::keycap_label_x(rect.min_x(), w, shaped.width);
+        ui_kit::paint_keycap(layer, rect, &shaped, (x, base), &self.look(ctx));
+        rect
+    }
 }
 
 /// A key drawn over a picture (About's illustration, a full-window scene): a dark,

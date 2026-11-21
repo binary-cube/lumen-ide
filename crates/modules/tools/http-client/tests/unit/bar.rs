@@ -43,3 +43,37 @@ fn a_big_file_is_read_on_a_worker() {
     bar.sync_editor(&state(&shorter, 2, shorter.len() - 1));
     assert_eq!(bar.parsed_version, 1, "the read before serves until the new one's read");
 }
+
+/// Its buttons are the shared ones: Stop, with nothing running, is drawn off and never lit
+/// under the mouse, nor pressed; Run all is lit there.
+#[test]
+fn stop_is_off_until_something_runs() {
+    use ui_components::editor_toolbar::{EditorToolbar, ToolbarPaint};
+    let mut bar = bar();
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let bounds = Rect::new(0.0, 0.0, 800.0, HEIGHT);
+    let mut paint = |bar: &mut HttpBar| {
+        let mut scene = render_api::Scene::default();
+        bar.paint(ToolbarPaint {
+            bounds,
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+        });
+        scene.layers().iter().map(|l| l.quads.len()).sum::<usize>()
+    };
+    let at_rest = paint(&mut bar);
+    let area =
+        |bar: &HttpBar, tool: Tool| bar.hits.iter().find(|(_, t)| *t == tool).map(|(r, _)| *r);
+    let stop = area(&bar, Tool::Stop).expect("Stop drawn");
+    assert!(bar.hover(Some(stop.center())));
+    assert_eq!(paint(&mut bar), at_rest, "off: not lit");
+    assert!(bar.pointer_down(stop.center()).is_none(), "nor pressed");
+    let run = area(&bar, Tool::RunAll).expect("Run all drawn");
+    assert!(bar.hover(Some(run.center())));
+    assert_eq!(paint(&mut bar), at_rest + 1, "lit under the mouse");
+}

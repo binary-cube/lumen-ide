@@ -23,13 +23,13 @@ fn the_files_separator_is_dragged_or_put_back() {
 /// the text while the files' search has it is left to them; Esc leaves it.
 #[test]
 fn the_bar_s_field_takes_the_keys_while_typed_in() {
-    let (mut text, mut branches) = (TextInput::default(), TextInput::default());
-    let (mut focus, mut popup, mut answer) = (None, None, None);
+    let (mut text, mut branches) = (SearchField::default(), SearchField::default());
+    let (mut focus, mut answer) = (None, None);
     let mut field = BarField {
         focus: &mut focus,
         text: &mut text,
         branches: &mut branches,
-        popup: &mut popup,
+        query: None,
         picker_open: false,
         text_elsewhere: false,
         answer: &mut answer,

@@ -1142,3 +1142,62 @@ fn a_module_s_row_says_its_author_version_and_date() {
     let unknown = ModuleRow { author: "Someone".into(), ..ModuleRow::default() };
     assert_eq!(super::modules::module_about(&unknown), "Someone");
 }
+
+/// On the keymap's page, its shortcuts' search and the settings' search are one focus: a
+/// click in the shortcuts' search gives it the keys (only it shows a caret), what's typed
+/// and ⌘A are its, the settings' search untouched; Esc leaves it and typing searches the
+/// settings again.
+#[test]
+fn the_shortcuts_search_and_the_settings_search_have_one_focus() {
+    let model = model();
+    let mut view = SettingsView::default();
+    view.set_viewport(Rect::new(0.0, 0.0, 1200.0, 900.0), 1.0);
+    view.open();
+    view.set_sections(&model);
+    view.show_page("keymap");
+    let mut text = TextSystem::new();
+    let mut paint = |view: &mut SettingsView| {
+        view.paint(&model, &Icons::builtin(), &mut text, &mut Scene::default(), &Palette::dark());
+    };
+    paint(&mut view);
+    let field = view.shortcuts.filter.area();
+    assert!(field.size.width > 0.0, "the shortcuts' search drawn");
+    view.hit(Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0));
+    assert!(view.shortcuts_have_keys(), "its search has the keys");
+    view.type_text("save");
+    assert_eq!(view.shortcuts.filter.text(), "save");
+    assert_eq!(view.query.text(), "", "the settings' search untouched");
+    view.query_input_mut().select_all();
+    assert_eq!(view.query_input().selected_text(), "save", "⌘A in the shortcuts' search");
+    assert_eq!(view.query.input.selected_text(), "", "not in the settings' search");
+    assert!(view.cancel_text(), "Esc leaves it");
+    assert!(!view.shortcuts_have_keys());
+    view.type_text("x");
+    assert_eq!(view.query.text(), "x", "typing searches the settings again");
+}
+
+/// The shortcuts' search focused, then its page left: copy and paste reach the same field
+/// (the settings' search, the one shown), and asking for it never moves the focus.
+#[test]
+fn copy_and_paste_reach_one_field_when_the_keymap_is_left() {
+    let model = model();
+    let mut view = SettingsView::default();
+    view.set_viewport(Rect::new(0.0, 0.0, 1200.0, 900.0), 1.0);
+    view.open();
+    view.set_sections(&model);
+    view.show_page("keymap");
+    let mut text = TextSystem::new();
+    view.paint(&model, &Icons::builtin(), &mut text, &mut Scene::default(), &Palette::dark());
+    let field = view.shortcuts.filter.area();
+    view.hit(Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0));
+    view.type_text("save");
+    view.shortcuts.filter.input.select_all();
+    view.show_page("appearance");
+    view.query.set_text("abc");
+    view.query.input.select_all();
+    assert_eq!(view.query_input().selected_text(), "abc", "⌘C copies the shown search");
+    view.query_input_mut().insert("z");
+    assert_eq!(view.query.text(), "z", "⌘V pastes into the same field");
+    assert_eq!(view.shortcuts.filter.text(), "save", "the hidden search untouched");
+    assert_eq!(view.controls.focused(), Some(FILTER), "the focus not moved");
+}

@@ -49,14 +49,18 @@ impl ProjectsPicker {
         self.rows.iter().find(|(_, i)| *i == at).map(|(r, _)| *r)
     }
 
-    /// A press on a project or a group waits to become a click or a drag.
+    /// A press on a project or a group waits to become a click or a drag (or one in the
+    /// filter selects while dragged).
     pub fn pressed(&self) -> bool {
-        self.press.is_some()
+        self.press.is_some() || self.selecting
     }
 
     /// The mouse moved while pressed: the row is dragged (past a few pixels), over where it
     /// would go. `true`: redraw.
     pub fn drag(&mut self, p: Point) -> bool {
+        if self.selecting {
+            return Control::drag(&mut self.query, p);
+        }
         let Some((item, start)) = self.press else { return false };
         let moved = (p.x - start.x).abs().max((p.y - start.y).abs());
         if self.drag.is_none() && moved < DRAG_START * self.scale.max(1.0) {
@@ -69,6 +73,7 @@ impl ProjectsPicker {
 
     /// The press ends: a click (the row's action) or a drop (a move).
     pub fn release(&mut self) -> Option<PickerAction> {
+        self.selecting = false;
         let (item, _) = self.press.take()?;
         self.edge_step = None;
         match self.drag.take() {

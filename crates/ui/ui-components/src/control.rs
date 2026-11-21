@@ -885,6 +885,21 @@ pub struct TabView<'a> {
     pub view: &'a mut dyn crate::Viewer,
     pub area: Rect,
     pub action: &'a mut Option<crate::ViewerAction>,
+    /// The menu it asked for under a button of its own: the owner's to give the app
+    /// (its own [`crate::Viewer::take_menu`]).
+    pub menu: &'a mut Option<AskedMenu>,
+}
+
+/// A menu a view asked for under a button of its own: the button's area and its rows
+/// ([`crate::Viewer::take_menu`]).
+pub type AskedMenu = (Rect, Vec<ViewMenuEntry>);
+
+/// What `view` asked for under a button of its own, kept in `menu` for its owner (a menu
+/// asked before and not taken yet stays when it asked for none since).
+fn keep_asked_menu(view: &mut dyn crate::Viewer, menu: &mut Option<AskedMenu>) {
+    if let Some(asked) = view.take_menu() {
+        *menu = Some(asked);
+    }
 }
 
 impl std::fmt::Debug for TabView<'_> {
@@ -899,6 +914,7 @@ impl Control for TabView<'_> {
     }
     fn press_with(&mut self, p: Point, clicks: u32, mods: PressMods) -> Press {
         *self.action = self.view.pointer_down(p, clicks, mods);
+        keep_asked_menu(self.view, self.menu);
         Press::Held
     }
     fn drag(&mut self, p: Point) -> bool {
@@ -909,6 +925,7 @@ impl Control for TabView<'_> {
         if let Some(action) = self.view.take_action() {
             *self.action = Some(action);
         }
+        keep_asked_menu(self.view, self.menu);
         changed
     }
     fn hover(&mut self, p: Option<Point>) -> bool {
@@ -939,7 +956,9 @@ impl Control for TabView<'_> {
         self.view.selected_text()
     }
     fn command(&mut self, id: &str) -> bool {
-        self.view.command(id)
+        let used = self.view.command(id);
+        keep_asked_menu(self.view, self.menu);
+        used
     }
     fn tooltip(&self, p: Point) -> Option<Tip> {
         self.view.tooltip_at(p)
@@ -1142,11 +1161,13 @@ impl Control for Divider<'_> {
 
 /// A view inside a view (a log's lines, a text to read, any [`crate::Viewer`]) as a
 /// control in `area`: the input it takes is the view's own; what a press decided is kept in
-/// `action` for the owner.
+/// `action` for the owner, a menu it asked for under a button of its own in `menu` (the
+/// owner gives it to the app from its own [`crate::Viewer::take_menu`]).
 pub struct Embedded<'a> {
     pub view: &'a mut dyn crate::Viewer,
     pub area: Rect,
     pub action: &'a mut Option<crate::ViewerAction>,
+    pub menu: &'a mut Option<AskedMenu>,
 }
 
 impl std::fmt::Debug for Embedded<'_> {
@@ -1166,6 +1187,7 @@ impl Control for Embedded<'_> {
 
     fn press_with(&mut self, p: Point, clicks: u32, mods: PressMods) -> Press {
         *self.action = self.view.press_with(p, clicks, mods);
+        keep_asked_menu(self.view, self.menu);
         Press::Held
     }
 
@@ -1178,6 +1200,7 @@ impl Control for Embedded<'_> {
         if let Some(action) = self.view.take_action() {
             *self.action = Some(action);
         }
+        keep_asked_menu(self.view, self.menu);
         changed
     }
 
@@ -1218,7 +1241,9 @@ impl Control for Embedded<'_> {
     }
 
     fn command(&mut self, id: &str) -> bool {
-        self.view.command(id)
+        let used = self.view.command(id);
+        keep_asked_menu(self.view, self.menu);
+        used
     }
 
     fn tooltip(&self, p: Point) -> Option<Tip> {

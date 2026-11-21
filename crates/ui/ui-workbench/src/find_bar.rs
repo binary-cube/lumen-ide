@@ -8,8 +8,8 @@ use render_api::Quad;
 use text_layout::{Font, TextSystem};
 use ui_kit::{TextInput, TextInputStyle, centered_baseline, draw_icon, draw_text};
 
-use crate::Painter;
 use crate::palette::Palette;
+use crate::{Painter, ds};
 
 /// Height of a bar row, in logical pixels.
 const ROW: f32 = 42.0;
@@ -132,7 +132,7 @@ impl FindBar {
 
         // ── Row 1 ──
         let top = bounds.min_y() + (row - field_h) / 2.0;
-        let (chevron, prev) = self.paint_buttons(layer, &look, bounds, top);
+        let (chevron, prev) = self.paint_buttons(layer, text, &look, bounds, top);
         let counter_right = prev.min_x() - px(12.0);
         self.paint_counter(layer, text, &look, &spec, (counter_right, top));
         // The field: everything between the chevron and the counter.
@@ -153,6 +153,7 @@ impl FindBar {
     fn paint_buttons(
         &mut self,
         layer: &mut render_api::Layer,
+        text: &mut TextSystem,
         look: &Look<'_>,
         bounds: Rect,
         top: f32,
@@ -167,13 +168,13 @@ impl FindBar {
         );
         let chevron_icon = if self.show_replace { "chevron-down" } else { "chevron-right" };
         let hits = &mut self.hits;
-        look.icon_button(layer, hits, chevron, (chevron_icon, px(14.0)), FindHit::ToggleReplace);
+        look.icon_button(layer, text, hits, chevron, chevron_icon, FindHit::ToggleReplace);
         let close = Rect::new(bounds.max_x() - px(10.0) - button, chevron.min_y(), button, button);
-        look.icon_button(layer, hits, close, ("x", px(14.0)), FindHit::Close);
+        look.icon_button(layer, text, hits, close, "x", FindHit::Close);
         let next = Rect::new(close.min_x() - px(12.0) - button, chevron.min_y(), button, button);
         let prev = Rect::new(next.min_x() - px(2.0) - button, chevron.min_y(), button, button);
-        look.icon_button(layer, hits, prev, ("chevron-up", px(15.0)), FindHit::Prev);
-        look.icon_button(layer, hits, next, ("chevron-down", px(15.0)), FindHit::Next);
+        look.icon_button(layer, text, hits, prev, "chevron-up", FindHit::Prev);
+        look.icon_button(layer, text, hits, next, "chevron-down", FindHit::Next);
         (chevron, prev)
     }
 
@@ -282,7 +283,6 @@ impl FindBar {
         field: Rect,
         options: &SearchQuery,
     ) -> f32 {
-        let palette = look.palette;
         let px = |v: f32| look.px(v);
         let toggle = px(26.0);
         let toggles_w = 3.0 * toggle + 2.0 * px(2.0);
@@ -293,20 +293,12 @@ impl FindBar {
             (".*", options.regex, FindHit::ToggleRegex),
         ] {
             let r = Rect::new(x, field.min_y() + px(3.0), toggle, field.size.height - px(6.0));
-            if active {
-                layer.quad(Quad::filled(r, palette.toggle_active).rounded(px(4.0)));
-            } else if look.hover == Some(hit) {
-                layer.quad(Quad::filled(r, look.hover_fill).rounded(px(4.0)));
-            }
-            let shaped = text.shape_line(label, &look.toggle_font);
-            let color = if active { palette.accent } else { palette.text_muted };
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                centered(r.min_y(), r.size.height, &look.toggle_font, text),
-                color,
-            );
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .label(label)
+                .rest_tone(ds::Tone::Neutral)
+                .on(active)
+                .hovered(look.hover == Some(hit));
+            ds::button(layer, text, look.icons, &look.ctx(), r, spec);
             self.hits.push((r, hit));
             x += toggle + px(2.0);
         }
@@ -323,7 +315,6 @@ impl FindBar {
         field: Rect,
         focused: bool,
     ) {
-        let palette = look.palette;
         let px = |v: f32| look.px(v);
         let (top, field_h) = (field.min_y(), field.size.height);
         let replace_focused = focused && self.focus == FindField::Replace;
@@ -345,18 +336,10 @@ impl FindBar {
         {
             let shaped = text.shape_line(&label, &look.small);
             let b = Rect::new(x, top, shaped.width + px(20.0), field_h);
-            let fill =
-                if look.hover == Some(hit) { look.hover_fill } else { palette.input_background };
-            layer.quad(
-                Quad::filled(b, fill).rounded(px(5.0)).bordered(look.line, palette.input_border),
-            );
-            draw_text(
-                layer,
-                &shaped,
-                (b.min_x() + px(10.0)).round(),
-                centered(top, field_h, &look.small, text),
-                palette.text,
-            );
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Soft)
+                .label(&label)
+                .hovered(look.hover == Some(hit));
+            ds::button(layer, text, look.icons, &look.ctx(), b, spec);
             self.hits.push((b, hit));
             x = b.max_x() + px(8.0);
         }
@@ -370,7 +353,6 @@ struct Look<'a> {
     icons: &'a Icons,
     scale: f32,
     small: Font,
-    toggle_font: Font,
     /// The fields draw only their text; the bar draws the container (background, border,
     /// the magnifier and the options inside it).
     input_style: TextInputStyle,
@@ -379,8 +361,6 @@ struct Look<'a> {
     button: f32,
     line: f32,
     hover: Option<FindHit>,
-    /// Over the panel background in every theme (`tab_hover` can equal it).
-    hover_fill: Rgba,
 }
 
 impl<'a> Look<'a> {
@@ -388,7 +368,6 @@ impl<'a> Look<'a> {
         let px = |v: f32| (v * scale).round();
         let font = Font::new(palette.ui_font.clone(), px(palette.ui_font_size));
         let small = Font::new(palette.ui_font.clone(), px(palette.ui_font_size - 1.0));
-        let toggle_font = Font::new(palette.code_font.clone(), px(palette.ui_font_size - 1.5));
         let input_style = TextInputStyle {
             font,
             background: Rgba::TRANSPARENT,
@@ -409,14 +388,12 @@ impl<'a> Look<'a> {
             icons,
             scale,
             small,
-            toggle_font,
             input_style,
             row: px(ROW),
             field_h: px(30.0),
-            button: px(26.0),
+            button: px(ds::button_size::MEDIUM),
             line: scale.round().max(1.0),
             hover,
-            hover_fill: palette.text.with_alpha(0.1),
         }
     }
 
@@ -424,29 +401,26 @@ impl<'a> Look<'a> {
         (v * self.scale).round()
     }
 
-    /// A square icon button (hover background), registered as `hit`; `icon`: its name and
-    /// size.
+    /// The design system's context at the bar's scale (for the shared buttons).
+    fn ctx(&self) -> ds::Ctx<'a> {
+        ds::Ctx::new(self.palette, self.scale)
+    }
+
+    /// A square ghost icon button, registered as `hit`.
     fn icon_button(
         &self,
         layer: &mut render_api::Layer,
+        text: &mut TextSystem,
         hits: &mut Vec<(Rect, FindHit)>,
         r: Rect,
-        icon: (&str, f32),
+        icon: &str,
         hit: FindHit,
     ) {
-        let (icon, size) = icon;
-        if self.hover == Some(hit) {
-            layer.quad(Quad::filled(r, self.hover_fill).rounded(self.px(5.0)));
-        }
-        if let Some(id) = self.icons.id(icon) {
-            let ir = Rect::new(
-                (r.min_x() + (r.size.width - size) / 2.0).round(),
-                (r.min_y() + (r.size.height - size) / 2.0).round(),
-                size,
-                size,
-            );
-            draw_icon(layer, self.icons, id, ir, self.palette.text_muted);
-        }
+        let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+            .icon(icon)
+            .rest_tone(ds::Tone::Neutral)
+            .hovered(self.hover == Some(hit));
+        ds::button(layer, text, self.icons, &self.ctx(), r, spec);
         hits.push((r, hit));
     }
 

@@ -22,6 +22,7 @@ tracing.workspace = true
 
 [dev-dependencies]
 version-control.workspace = true
+icons.workspace = true
 
 [lints]
 workspace = true

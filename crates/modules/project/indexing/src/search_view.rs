@@ -289,7 +289,9 @@ impl SearchView {
             Ask::Act(action) => self.act(action),
             Ask::Field(action, p) => {
                 self.act(action);
-                self.panel.place_caret(p);
+                if self.panel.place_caret(p) {
+                    self.typed();
+                }
             }
             Ask::Typed => self.typed(),
             Ask::Suggest => self.suggest(),

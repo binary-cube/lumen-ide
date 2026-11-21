@@ -107,47 +107,20 @@ fn draw_fitted(
     draw_text(layer, &dots, (x + end).round(), baseline, color);
 }
 
-/// How an icon button shows: pressable, under the mouse, turned on.
-#[derive(Debug, Clone, Copy)]
-struct Look {
-    enabled: bool,
-    hovered: bool,
-    on: bool,
-}
+/// The size of the grid's icon buttons (its toolbar, its find bar, the record's arrows).
+const ICON_BUTTON: f32 = ds::button_size::LARGE;
 
-/// A square icon button (28 logical), its hover drawn. Returns its area.
-fn icon_button(
+/// A ghost icon button of the grid at `(x, mid)`, drawn as `spec` says. Returns its area.
+fn grid_button(
     layer: &mut Layer,
+    text: &mut TextSystem,
     icons: &icons::Icons,
     ds: &Ctx<'_>,
-    (x, mid): (f32, f32),
-    icon: &str,
-    look: Look,
+    at: (f32, f32),
+    spec: ds::ButtonSpec<'_>,
 ) -> Rect {
-    let Look { enabled, hovered, on } = look;
-    let p = ds.palette;
-    let size = ds.px(28.0);
-    let r = Rect::new(x.round(), (mid - size / 2.0).round(), size, size);
-    if on {
-        layer.quad(Quad::filled(r, p.accent.with_alpha(0.14)).rounded(ds.px(radius::SM)));
-    } else if hovered && enabled {
-        layer.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(ds.px(radius::SM)));
-    }
-    if let Some(id) = icons.id(icon) {
-        let s = ds.px(15.0);
-        let ir = Rect::new(
-            (r.min_x() + (size - s) / 2.0).round(),
-            (r.min_y() + (size - s) / 2.0).round(),
-            s,
-            s,
-        );
-        let color = match (enabled, on) {
-            (false, _) => p.text_muted.with_alpha(0.4),
-            (true, true) => p.accent,
-            (true, false) => p.text.with_alpha(0.86),
-        };
-        ui_kit::draw_icon(layer, icons, id, ir, color);
-    }
+    let r = ds::square_button(ds, at, ICON_BUTTON);
+    ds::button(layer, text, icons, ds, r, spec);
     r
 }
 

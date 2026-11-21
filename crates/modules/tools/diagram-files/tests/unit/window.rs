@@ -273,3 +273,28 @@ fn a_diagram_is_dragged_into_a_folder() {
         Some(ToolPanelAction::Move { from: dir.0.join("Flows/login.drawio"), into: dir.0.clone() })
     );
 }
+
+/// A long list shows the shared scrollbar: its thumb pressed and dragged down scrolls the
+/// rows, its release ends the drag; the wheel scrolls too.
+#[test]
+fn a_long_list_scrolls_by_its_thumb() {
+    let entries = (0..100)
+        .map(|n| Entry {
+            path: PathBuf::from(format!("d{n}.drawio")),
+            name: format!("d{n}.drawio"),
+            depth: 0,
+            is_dir: false,
+        })
+        .collect();
+    let mut panel = DiagramsPanel { entries, ..DiagramsPanel::default() };
+    paint(&mut panel);
+    assert!(panel.scroll(40.0), "the wheel");
+    panel.scroll = 0.0;
+    paint(&mut panel);
+    let thumb = Point::new(297.0, 10.0);
+    assert_eq!(panel.press(thumb, 1), None);
+    assert!(panel.drag(Point::new(297.0, 110.0)));
+    assert!(panel.scroll > 0.0, "dragged down: scrolled");
+    assert!(panel.release());
+    assert!(panel.take_action().is_none(), "no row clicked");
+}

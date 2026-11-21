@@ -84,7 +84,8 @@ fn the_text_filters_once_typing_pauses() {
     view.edit_key(ViewerKey::Enter);
     assert!(view.bar.invalid);
     assert_eq!(ids(&view), ["cart", "shop"]);
-    view.clear_text();
+    view.bar.text.set_text("");
+    view.apply_text();
     settle(&mut view);
     assert_eq!(ids(&view).len(), 3);
     assert!(!view.bar.invalid);
@@ -284,6 +285,16 @@ fn the_fields_take_the_edit_commands() {
     assert_eq!(view.selected_text().as_deref(), Some("01.01.2026"));
 }
 
+/// `field` drawn as the app's search field in `rect` (its × placed), and where its × is.
+fn painted_clear(field: &mut SearchField, rect: Rect) -> Point {
+    let palette = ui_components::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let (mut layer, mut text) = (render_api::Layer::default(), TextSystem::new());
+    field.paint(&mut layer, &mut text, &icons::Icons::builtin(), &ctx, (rect, true), "");
+    // The × is the shared field's, at its right end, in the middle.
+    Point::new(rect.max_x() - 17.0, rect.min_y() + rect.size.height / 2.0)
+}
+
 /// A list's search emptied by its ×: every row again, its search keeping the keys.
 #[test]
 fn a_list_s_search_clears_with_its_x() {
@@ -292,10 +303,39 @@ fn a_list_s_search_clears_with_its_x() {
     let all = labels(&view);
     view.text_input("login");
     assert_eq!(labels(&view), [i18n::t("git.branches_local").as_str(), "feature/login"]);
-    assert!(view.press_filter(Hit::ClearPopupQuery, Point::new(0.0, 0.0), 1));
+    let rect = Rect::new(0.0, 0.0, 300.0, 30.0);
+    let clear = painted_clear(&mut view.bar.popup.as_mut().unwrap().query, rect);
+    assert!(view.press_filter(Hit::PopupQuery, clear, 1));
     assert!(view.bar.popup.as_ref().unwrap().query.text().is_empty());
     assert_eq!(labels(&view), all);
     assert_eq!(view.bar.focus, Some(filters::Field::Query));
+}
+
+/// The branches' filter is the app's search field: typed into, ⌘A selects its text (not the
+/// bar's), × empties it and the branches are all listed again; only it has the caret.
+#[test]
+fn the_branches_filter_selects_and_empties_with_its_x() {
+    let mut view = view(vec![by("a1", "Ana")]);
+    view.rebuild_branches();
+    let all = view.branch_rows.len();
+    let rect = Rect::new(0.0, 0.0, 300.0, 30.0);
+    painted_clear(&mut view.bar.branch_query, rect);
+    assert!(view.press_filter(Hit::BranchSearch, Point::new(60.0, 15.0), 1));
+    view.text_input("login");
+    assert!(view.branch_rows.len() < all, "filtered");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("login"));
+    assert_eq!(view.bar.text.input.selected_text(), "", "not the bar's text");
+    assert_eq!(view.bar.focus, Some(filters::Field::Branches), "one field has the keys");
+    let clear = painted_clear(&mut view.bar.branch_query, rect);
+    assert!(view.press_filter(Hit::BranchSearch, clear, 1));
+    assert_eq!(view.bar.branch_query.text(), "");
+    assert_eq!(view.branch_rows.len(), all, "all again");
+    // The bar's text pressed: the keys and the caret go there.
+    assert!(view.press_filter(Hit::TextField, Point::default(), 1));
+    assert_eq!(view.bar.focus, Some(filters::Field::Text));
+    view.text_input("x");
+    assert_eq!(view.bar.branch_query.text(), "");
 }
 
 /// The order's list (no search in it): ↑ / ↓ move in it, ↵ chooses, as its footer says —
@@ -327,4 +367,80 @@ fn the_date_picker_has_the_focus_while_open() {
     assert!(view.bar.picker.is_none(), "Esc: it closes");
     assert!(!view.text_input("x"), "nothing takes it");
     assert_eq!(view.controls.focused(), None, "the focus back where it was");
+}
+
+/// A set filter's pill is the shared chip: its × is a hit of its own (`ChipRects.clear`),
+/// beside its body (which opens its list), and pressed it clears that filter.
+#[test]
+fn a_set_pill_s_x_is_its_own_hit_and_clears_it() {
+    let mut view = view(vec![by("a1", "Ana")]);
+    view.toggle_popup(filters::FilterKind::Branch);
+    view.text_input("flog");
+    view.edit_key(ViewerKey::Enter);
+    view.edit_key(ViewerKey::Escape);
+    assert!(view.pill_label(filters::FilterKind::Branch).1);
+    let mut text = TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1400.0, 600.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let find = |hit: Hit| view.hits.iter().find(|(_, h)| *h == hit).map(|(r, _)| *r);
+    let body = find(Hit::Pill(filters::FilterKind::Branch)).expect("the pill's body");
+    let clear = find(Hit::ClearPill(filters::FilterKind::Branch)).expect("its ×");
+    assert!(body.max_x() <= clear.min_x(), "the × isn't under the body");
+    let at = Point::new(clear.min_x() + clear.size.width / 2.0, clear.min_y() + 4.0);
+    assert_eq!(view.hit(at), Some(Hit::ClearPill(filters::FilterKind::Branch)));
+    view.press_filter(Hit::ClearPill(filters::FilterKind::Branch), at, 1);
+    assert!(view.filter.references.is_empty());
+    assert!(!view.pill_label(filters::FilterKind::Branch).1);
+}
+
+/// An open list longer than its room shows the shared scrollbar: its thumb pressed,
+/// dragged down and let go scrolls the rows (the list stays open, its search typed in);
+/// the rows leave the bar a lane of its own.
+#[test]
+fn an_open_list_s_thumb_is_dragged() {
+    let mut view = view(vec![by("a1", "Ana")]);
+    view.toggle_popup(filters::FilterKind::Branch);
+    settle(&mut view);
+    let popup = view.bar.popup.as_mut().expect("the list open");
+    let row = popup.rows.last().cloned().expect("a row");
+    popup.rows.extend(std::iter::repeat_n(row, 40));
+    let paint = |view: &mut LogView| {
+        let mut text = TextSystem::new();
+        let mut scene = render_api::Scene::default();
+        let palette = ui_components::Palette::dark();
+        let icons = icons::Icons::builtin();
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 1400.0, 600.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut view);
+    let list = view.bar.popup.as_ref().unwrap().list;
+    let lane = ui_components::Scrollbar::track_thickness(1.0);
+    let rows = view.hits.iter().filter(|(_, h)| matches!(h, Hit::PopupRow(_)));
+    assert!(rows.into_iter().all(|(r, _)| r.max_x() <= list.max_x() - lane), "a lane of its own");
+    let thumb = Point::new(list.max_x() - 4.0, list.min_y() + 6.0);
+    assert_eq!(view.press(thumb, 1), None);
+    assert!(view.drag(Point::new(thumb.x, thumb.y + 60.0)), "the rows moved");
+    assert!(view.release(), "the thumb let go");
+    let popup = view.bar.popup.as_ref().expect("still open");
+    assert!(popup.scroll > 0.0, "scrolled");
+    assert_eq!(view.bar.focus, Some(filters::Field::Query), "its search keeps the keys");
 }

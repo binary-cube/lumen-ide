@@ -31,9 +31,8 @@ use database::console::{
 use database::events::DataSourcesChanged;
 use database::{DataSourceId, Isolation, SchemaSwitch};
 use kernel::{Memo, Point, Rect, Rgba, Subscription};
-use render_api::{Layer, Quad};
 use text_layout::Font;
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size};
 use ui_components::editor_toolbar::{
     EditorState, EditorToolbar, StatementMark, ToolbarAction, ToolbarPaint,
 };
@@ -47,6 +46,14 @@ use crate::runner::{Lease, Runner, Snapshot};
 
 /// The bar's height (logical pixels).
 pub const HEIGHT: f32 = 40.0;
+
+/// A pill's field (Tx, Mode) showing `value`; its menu is the bar's, so never shown open.
+fn pill_spec(value: &str, hovered: bool, enabled: bool) -> ds::DropdownSpec<'_> {
+    ds::DropdownSpec { value, open: false, hovered, enabled, note: None, placeholder: None }
+}
+
+/// The height of its pills: Tx, Mode, the place, the source (logical pixels).
+const PILL_H: f32 = 26.0;
 
 /// What the layout depends on (besides the width): the transaction, the texts' widths.
 type LayoutKey = (
@@ -735,50 +742,64 @@ impl ConsoleBar {
 
         let font = ds.ui_font(-1.0);
         let strong = font.clone().with_weight(Font::SEMIBOLD);
-        let chevron = px(12.0);
-        let pill_pad = px(10.0);
         let tx_label = self.tx_label();
         let mode_label = i18n::t(match self.spec.mode {
             RunMode::Playground => "console.mode_playground",
             RunMode::Script => "console.mode_script",
         });
         let place_label = self.place_label();
-        let tx_shaped = text.shape_line(&tx_label, &font);
-        let mode_shaped = text.shape_line(&mode_label, &font);
-        let place_shaped = text.shape_line(&place_label, &font);
+        // `Tx:` muted before the mode; an open transaction's dot (red: failed) before it all.
+        let tx_prefix = i18n::tr!("console.tx_label", mode = "").trim().to_owned();
+        let tx_value = tx_label.strip_prefix(tx_prefix.as_str()).unwrap_or(&tx_label).trim_start();
+        let tx_dot = match self.snapshot.tx {
+            TxState::Failed => Some(p.danger),
+            _ if self.snapshot.tx.is_open() => Some(p.warning),
+            _ => None,
+        };
+        let tx_look = ds::DropdownLook {
+            prefix: Some(&tx_prefix),
+            dot: tx_dot,
+            compact: true,
+            ..ds::DropdownLook::default()
+        };
+        let compact = ds::DropdownLook { compact: true, ..ds::DropdownLook::default() };
         let status = self.status();
         let status_w = status.as_ref().map(|(s, _)| text.shape_line(s, &font).width + px(22.0));
         let limited = self.snapshot.limited || self.capabilities().limited;
         let limited_label = i18n::t("console.limited");
-        let small = ds.ui_font(-1.5);
-        let limited_w = limited.then(|| text.shape_line(&limited_label, &small).width + px(30.0));
-        let read_only = self.brief.as_ref().is_some_and(|s| s.read_only);
         let read_only_label = i18n::t("console.read_only");
-        let read_only_w =
-            read_only.then(|| text.shape_line(&read_only_label, &small).width + px(30.0));
-        let production = self.production();
         let production_label = i18n::t("console.production_badge");
-        let production_w = production.then(|| {
-            let strong = small.clone().with_weight(Font::BOLD);
-            text.shape_line(&production_label, &strong).width + px(30.0)
-        });
-        // Rounded up: rounded down, a cut label (the source's) would end in "…" for nothing.
-        let pill = |w: f32| (w + pill_pad * 2.0 + chevron + px(4.0)).ceil();
+        let small = ds.ui_font(-1.5);
+        let bold = small.clone().with_weight(Font::BOLD);
+        let notice = |tool: Tool| match tool {
+            Tool::Limited => notice_badge(&limited_label, "info", p.warning, &small, icons),
+            Tool::Production => notice_badge(&production_label, "alert", p.danger, &bold, icons),
+            _ => notice_badge(&read_only_label, "lock", p.text_muted, &small, icons),
+        };
+        let limited_w = limited.then(|| notice(Tool::Limited).width(text, &ds));
+        let read_only = self.brief.as_ref().is_some_and(|s| s.read_only);
+        let read_only_w = read_only.then(|| notice(Tool::ReadOnly).width(text, &ds));
+        let production = self.production();
+        let production_w = production.then(|| notice(Tool::Production).width(text, &ds));
         let source_label = self.spec.is_attached().then(|| self.source_label());
-        let source_shaped = source_label.as_ref().map(|l| text.shape_line(l, &font));
+        let mut with_icon = |value: &str| {
+            ds::dropdown_width_with_icon(text, &ds, (pill_spec(value, false, true), compact))
+        };
+        let place_w = with_icon(&place_label);
+        let source_w = source_label.as_deref().map(&mut with_icon);
         let spec = BarSpec {
             min_x: b.min_x(),
             max_x: b.max_x(),
             metrics: Metrics::new(px),
             transaction: self.snapshot.in_transaction,
-            tx_w: pill(tx_shaped.width),
-            mode_w: pill(mode_shaped.width),
-            place_w: pill(place_shaped.width) + px(18.0),
+            tx_w: ds::dropdown_width(text, &ds, (pill_spec(tx_value, false, true), tx_look)),
+            mode_w: ds::dropdown_width(text, &ds, (pill_spec(&mode_label, false, true), compact)),
+            place_w,
             status_w,
             limited_w,
             read_only_w,
             production_w,
-            source_w: source_shaped.as_ref().map(|s| pill(s.width) + px(18.0)),
+            source_w,
         };
         let key: LayoutKey = (
             spec.min_x.to_bits(),
@@ -813,108 +834,66 @@ impl ConsoleBar {
                 | Tool::Settings
                 | Tool::Services
                 | Tool::More => {
-                    let (icon, tint) = match tool {
-                        Tool::Run => ("play", Some(green)),
+                    let (icon, tone) = match tool {
+                        Tool::Run | Tool::Commit => {
+                            (if tool == Tool::Run { "play" } else { "check" }, Some(Tone::Success))
+                        }
                         Tool::History => ("clock", None),
                         Tool::Params => ("parameter", None),
-                        Tool::Commit => ("check", Some(green)),
                         Tool::Rollback => ("undo", None),
-                        Tool::Stop => ("stop", Some(p.danger)),
+                        Tool::Stop => ("stop", Some(Tone::Danger)),
                         Tool::Settings => ("gear", None),
                         Tool::Services => ("services", None),
                         _ => ("more-horizontal", None),
                     };
-                    icon_button(
-                        layer,
-                        icons,
-                        &ds,
-                        r,
-                        icon,
-                        tint,
-                        ui_components::ds::Press::new(enabled, hovered),
-                    );
+                    let mut spec = ButtonSpec::new(ButtonKind::Ghost)
+                        .icon(icon)
+                        .enabled(enabled)
+                        .hovered(hovered);
+                    if let Some(tone) = tone {
+                        spec = spec.tone(tone);
+                    }
+                    ds::button(layer, text, icons, &ds, r, spec);
                 }
                 Tool::RunMenu => {
-                    if hovered {
-                        layer
-                            .quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-                    }
-                    if let Some(id) = icons.id("chevron-down") {
-                        let s = px(11.0);
-                        let ir = Rect::new(
-                            (r.min_x() + (w - s) / 2.0).round(),
-                            (mid - s / 2.0).round(),
-                            s,
-                            s,
-                        );
-                        let color =
-                            if enabled { p.text_muted } else { p.text_muted.with_alpha(0.4) };
-                        draw_icon(layer, icons, id, ir, color);
-                    }
-                }
-                Tool::Tx | Tool::Mode | Tool::Place | Tool::Source => {
-                    let shaped = match tool {
-                        Tool::Tx => &tx_shaped,
-                        Tool::Mode => &mode_shaped,
-                        Tool::Source => match &source_shaped {
-                            Some(shaped) => shaped,
-                            None => continue,
-                        },
-                        _ => &place_shaped,
-                    };
-                    let r = Rect::new(x, (mid - px(13.0)).round(), w, px(26.0));
-                    let fill =
-                        if hovered { p.text.with_alpha(0.08) } else { p.text.with_alpha(0.035) };
-                    layer.quad(
-                        Quad::filled(r, fill).rounded(px(radius::SM)).bordered(ds.line(), p.border),
+                    // Its chevron drawn small (a split button's half), its hit the bar's height.
+                    let back = Rect::new(
+                        r.min_x(),
+                        (mid - px(button_size::SMALL) / 2.0).round(),
+                        w,
+                        px(button_size::SMALL),
                     );
-                    let mut tx = r.min_x() + pill_pad;
-                    if tool == Tool::Place || tool == Tool::Source {
-                        // An attached file's source pill has the driver's icon.
-                        let icon = match tool {
-                            Tool::Place if self.spec.is_attached() => "database",
-                            _ => self.brief.as_ref().map_or("database", |b| b.icon),
-                        };
-                        if let Some(id) = icons.id(icon) {
-                            let s = px(13.0);
-                            let ir = Rect::new(tx.round(), (mid - s / 2.0).round(), s, s);
-                            draw_icon(layer, icons, id, ir, p.text_muted);
-                        }
-                        tx += px(18.0);
-                    }
-                    let base = ds::optical_baseline(r.min_y(), r.size.height, &font);
-                    let color = if enabled { p.text } else { p.text_muted };
-                    // An attached file's source cut to its pill (a narrow bar).
-                    let cut;
-                    let shaped = match (&source_label, tool) {
-                        (Some(label), Tool::Source)
-                            if shaped.width > r.max_x() - pill_pad - chevron - px(4.0) - tx =>
-                        {
-                            let room = r.max_x() - pill_pad - chevron - px(4.0) - tx;
-                            let line = ds::ellipsize(text, label, &font, room.max(0.0));
-                            cut = text.shape_line(&line, &font);
-                            &cut
-                        }
-                        _ => shaped,
+                    let spec = ButtonSpec::new(ButtonKind::Ghost)
+                        .icon("chevron-down")
+                        .tone(Tone::Neutral)
+                        .enabled(enabled)
+                        .hovered(hovered);
+                    ds::button(layer, text, icons, &ds, back, spec);
+                }
+                Tool::Tx | Tool::Mode => {
+                    let r = Rect::new(x, (mid - px(PILL_H) / 2.0).round(), w, px(PILL_H));
+                    let field = match tool {
+                        Tool::Tx => (pill_spec(tx_value, hovered, enabled), tx_look),
+                        _ => (pill_spec(&mode_label, hovered, enabled), compact),
                     };
-                    // `Tx:` muted, its mode in full.
-                    draw_text(layer, shaped, tx.round(), base, color);
-                    if let Some(id) = icons.id("chevron-down") {
-                        let ir = Rect::new(
-                            (r.max_x() - pill_pad - chevron + px(3.0)).round(),
-                            (mid - chevron / 2.0).round(),
-                            chevron,
-                            chevron,
-                        );
-                        draw_icon(layer, icons, id, ir, p.text_muted);
-                    }
-                    if self.snapshot.tx.is_open() && tool == Tool::Tx {
-                        // An open transaction: a dot on the pill's corner (red: failed).
-                        let d = px(7.0);
-                        let dot = Rect::new(r.max_x() - d * 0.7, r.min_y() - d * 0.3, d, d);
-                        let tint = if self.snapshot.tx.is_failed() { p.danger } else { p.warning };
-                        layer.quad(Quad::filled(dot, tint).rounded(d / 2.0));
-                    }
+                    ds::dropdown_styled(layer, text, icons, &ds, r, field);
+                    self.hits.push((r, tool));
+                    continue;
+                }
+                Tool::Place | Tool::Source => {
+                    let value = match (tool, &source_label) {
+                        (Tool::Source, Some(label)) => label.as_str(),
+                        (Tool::Source, None) => continue,
+                        _ => place_label.as_str(),
+                    };
+                    let r = Rect::new(x, (mid - px(PILL_H) / 2.0).round(), w, px(PILL_H));
+                    // An attached file's source pill has the driver's icon.
+                    let icon = match tool {
+                        Tool::Place if self.spec.is_attached() => "database",
+                        _ => self.brief.as_ref().map_or("database", |b| b.icon),
+                    };
+                    let field = (pill_spec(value, hovered, enabled), compact);
+                    ds::dropdown_with_icon(layer, text, icons, &ds, r, field, icon);
                     self.hits.push((r, tool));
                     continue;
                 }
@@ -955,31 +934,7 @@ impl ConsoleBar {
                     continue;
                 }
                 Tool::Limited | Tool::ReadOnly | Tool::Production => {
-                    let (label, icon, color) = match tool {
-                        Tool::Limited => (&limited_label, "info", p.warning),
-                        Tool::Production => (&production_label, "alert", p.danger),
-                        _ => (&read_only_label, "lock", p.text_muted),
-                    };
-                    let r = Rect::new(x, (mid - px(11.0)).round(), w, px(22.0));
-                    layer.quad(
-                        Quad::filled(r, color.with_alpha(0.10))
-                            .rounded(px(11.0))
-                            .bordered(ds.line(), color.with_alpha(0.35)),
-                    );
-                    if let Some(id) = icons.id(icon) {
-                        let s = px(12.0);
-                        let ir =
-                            Rect::new((r.min_x() + px(8.0)).round(), (mid - s / 2.0).round(), s, s);
-                        draw_icon(layer, icons, id, ir, color);
-                    }
-                    let face = if tool == Tool::Production {
-                        small.clone().with_weight(Font::BOLD)
-                    } else {
-                        small.clone()
-                    };
-                    let shaped = text.shape_line(label, &face);
-                    let base = ds::optical_baseline(r.min_y(), r.size.height, &face);
-                    draw_text(layer, &shaped, (r.min_x() + px(24.0)).round(), base, color);
+                    let r = notice(tool).paint(layer, text, &ds, x, mid);
                     self.hits.push((r, tool));
                     continue;
                 }
@@ -992,36 +947,30 @@ impl ConsoleBar {
     }
 }
 
-/// An icon button: its background when hovered, its icon tinted (`tint`: Run's green, Stop's
-/// red) or in the text's color, dimmed when disabled.
-pub(crate) fn icon_button(
-    layer: &mut Layer,
-    icons: &icons::Icons,
-    ds: &Ctx<'_>,
-    r: Rect,
-    icon: &str,
-    tint: Option<Rgba>,
-    press: ds::Press,
-) {
-    let ds::Press { enabled, hovered } = press;
-    let p = ds.palette;
-    if hovered {
-        layer.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(ds.px(radius::SM)));
-    }
-    let Some(id) = icons.id(icon) else { return };
-    let s = ds.px(15.0);
-    let ir = Rect::new(
-        (r.min_x() + (r.size.width - s) / 2.0).round(),
-        (r.min_y() + (r.size.height - s) / 2.0).round(),
-        s,
-        s,
-    );
-    let color = match (enabled, tint) {
-        (false, _) => p.text_muted.with_alpha(0.4),
-        (true, Some(tint)) => tint,
-        (true, None) => p.text.with_alpha(0.86),
-    };
-    draw_icon(layer, icons, id, ir, color);
+/// A notice's chip's height, the room on each side, its fill's and its outline's alpha of
+/// its color (logical pixels).
+const NOTICE_H: f32 = 22.0;
+const NOTICE_PAD: f32 = 8.0;
+const NOTICE_FILL: f32 = 0.10;
+const NOTICE_BORDER: f32 = 0.35;
+
+/// A notice of the bar (limited, read-only, production): its icon and label in `color`, in
+/// a pill outlined in it.
+fn notice_badge<'a>(
+    label: &'a str,
+    icon: &'a str,
+    color: Rgba,
+    font: &'a Font,
+    icons: &'a icons::Icons,
+) -> ds::Badge<'a> {
+    ds::Badge::new(label)
+        .color(color)
+        .fill_alpha(NOTICE_FILL)
+        .border(color.with_alpha(NOTICE_BORDER))
+        .size(ds::BadgeSize::Custom(NOTICE_H))
+        .pad(NOTICE_PAD)
+        .font(font)
+        .icon(icons, icon)
 }
 
 impl EditorToolbar for ConsoleBar {

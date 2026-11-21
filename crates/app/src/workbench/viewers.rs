@@ -598,6 +598,7 @@ impl Workbench {
     /// (needing the text system) at the next action's turn.
     pub(super) fn take_command_action(&mut self) {
         use ui_workbench::ViewerAction;
+        self.open_asked_view_menu();
         let action = self
             .tabs
             .get_mut(self.active)
@@ -769,10 +770,43 @@ impl Workbench {
         Some(view_menu(entries))
     }
 
+    /// The menu a view asked for under a button of its own (its "Export ▾"), opened under
+    /// it: the window over the editor's view, else the bottom window's while it has the
+    /// keys (a command reached it), else the active tab's. `true` if there was one.
+    pub(super) fn open_asked_view_menu(&mut self) -> bool {
+        let modal = self.modal_view.as_mut().and_then(|m| m.viewer.take_menu());
+        if let Some((anchor, entries)) = modal {
+            self.open_context_menu(view_menu(entries), menu_under(anchor, self.scale));
+            return true;
+        }
+        if self.focus == Focus::Panel && self.open_asked_tool_view_menu() {
+            return true;
+        }
+        let asked = self
+            .tabs
+            .get_mut(self.active)
+            .and_then(|t| t.viewer.as_mut())
+            .and_then(|v| v.viewer.take_menu());
+        let Some((anchor, entries)) = asked else { return false };
+        self.open_context_menu(view_menu(entries), menu_under(anchor, self.scale));
+        true
+    }
+
+    /// The menu the bottom window's current view asked for under a button of its own,
+    /// opened under it, its rows coming back to that view: `true` if there was one.
+    pub(super) fn open_asked_tool_view_menu(&mut self) -> bool {
+        let asked = self.tools.panel_viewer().and_then(|v| v.take_menu());
+        let Some((anchor, entries)) = asked else { return false };
+        let entries = prefixed_menu(entries, super::TOOL_VIEW_MENU);
+        self.open_context_menu(entries, menu_under(anchor, self.scale));
+        true
+    }
+
     /// A row of a view's menu chosen: sent to the view as a command, what it asks done.
     pub fn run_view_menu(&mut self, text: &mut TextSystem, id: &str) -> bool {
         if let Some(used) = self.modal_view_command(id) {
             self.take_modal_action(text);
+            self.open_asked_view_menu();
             return used;
         }
         let used = self
@@ -781,8 +815,18 @@ impl Workbench {
             .and_then(|t| t.viewer.as_mut())
             .is_some_and(|v| v.viewer.command(id));
         self.take_viewer_action(text);
+        // A row that opens another menu under the view's button (a choice with its own list).
+        self.open_asked_view_menu();
         used
     }
+}
+
+/// The room between a view's button and the menu it opens under it (logical pixels).
+const MENU_UNDER_GAP: f32 = 4.0;
+
+/// Where a menu asked for under `anchor` opens (its top left corner).
+pub(super) fn menu_under(anchor: Rect, scale: f32) -> Point {
+    Point::new(anchor.min_x(), anchor.max_y() + MENU_UNDER_GAP * scale)
 }
 
 /// The prefix of a view's menu rows' ids among the app's menu commands.

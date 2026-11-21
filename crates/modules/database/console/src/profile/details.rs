@@ -606,6 +606,11 @@ pub struct DetailsList {
 /// Sizes (logical pixels).
 const HEAD_H: f32 = 28.0;
 const ROW_H: f32 = 22.0;
+/// A line under the mouse: the text's alpha over a value's, its severity's over a problem's,
+/// and its corners (logical pixels).
+const LINE_HOVER: f32 = 0.05;
+const PROBLEM_HOVER: f32 = 0.08;
+const LINE_RADIUS: f32 = 4.0;
 
 impl DetailsList {
     pub fn hit(&self, p: kernel::Point) -> Option<DetailHit> {
@@ -663,7 +668,6 @@ impl DetailsList {
     ) {
         let ui_components::Painter { text, scene, palette, icons } = painter;
         use kernel::Rect;
-        use render_api::Quad;
         use ui_components::ds::{self, Ctx};
         use ui_kit::{draw_icon, draw_text};
         let p = palette;
@@ -709,20 +713,19 @@ impl DetailsList {
                 match line {
                     Line::Value { label, value, tip, code: is_code } => {
                         if visible {
-                            if self.hover == Some(index) && !value.is_empty() {
-                                layer.quad(
-                                    Quad::filled(
-                                        Rect::new(
-                                            x0 - px(6.0),
-                                            row.min_y(),
-                                            x1 - x0 + px(12.0),
-                                            row.size.height,
-                                        ),
-                                        p.text.with_alpha(0.05),
-                                    )
-                                    .rounded(px(4.0)),
-                                );
-                            }
+                            let lit = Rect::new(
+                                x0 - px(6.0),
+                                row.min_y(),
+                                x1 - x0 + px(12.0),
+                                row.size.height,
+                            );
+                            ds::RowHighlight::new(
+                                false,
+                                self.hover == Some(index) && !value.is_empty(),
+                            )
+                            .hover(ds::HoverFill::Faint(LINE_HOVER))
+                            .radius(LINE_RADIUS)
+                            .paint(layer, &ds, lit);
                             let shown = ds::ellipsize(text, label, &font, label_w - px(8.0));
                             let shaped = text.shape_line(&shown, &font);
                             draw_text(layer, &shaped, x0.round(), base, p.text_muted);
@@ -787,20 +790,17 @@ impl DetailsList {
                     }
                     Line::Problem { level: l, title, finding } => {
                         if visible {
-                            if self.hover == Some(index) {
-                                layer.quad(
-                                    Quad::filled(
-                                        Rect::new(
-                                            x0 - px(6.0),
-                                            row.min_y(),
-                                            x1 - x0 + px(12.0),
-                                            row.size.height,
-                                        ),
-                                        l.color(p).with_alpha(0.08),
-                                    )
-                                    .rounded(px(4.0)),
-                                );
-                            }
+                            let lit = Rect::new(
+                                x0 - px(6.0),
+                                row.min_y(),
+                                x1 - x0 + px(12.0),
+                                row.size.height,
+                            );
+                            let tint = l.color(p).with_alpha(PROBLEM_HOVER);
+                            ds::RowHighlight::new(false, self.hover == Some(index))
+                                .hover(ds::HoverFill::Color(tint))
+                                .radius(LINE_RADIUS)
+                                .paint(layer, &ds, lit);
                             if let Some(id) = icons.id(l.icon()) {
                                 let s = px(13.0);
                                 draw_icon(

@@ -39,6 +39,11 @@ pub struct TabTitle<'a> {
 
 /// The mark of a file outside the project (↗).
 const OUTSIDE_MARK: &str = "arrow-up-right";
+/// A tab's mark: its fill's alpha of its tint, the room on each side of its letters and its
+/// corners (logical pixels).
+const BADGE_FILL: f32 = 0.16;
+const BADGE_PAD: f32 = 5.0;
+const BADGE_RADIUS: f32 = 4.0;
 
 impl TabTitle<'_> {
     /// The small muted icons after the title, in order.
@@ -382,10 +387,8 @@ impl TabBar {
             )
             .rounded(card_radius),
         );
-        layer.quad(Quad::filled(
-            Rect::new(b.min_x(), b.max_y() - line, b.size.width, line),
-            palette.card_border,
-        ));
+        let ctx = crate::ds::Ctx::new(palette, look.scale);
+        crate::ds::divider_card(&mut *layer, &ctx, b.min_x(), b.max_x(), b.max_y() - line);
         let button = px(28.0);
         let nav_top = (b.min_y() + (b.size.height - button) / 2.0).round();
         self.back = Rect::new(b.min_x() + px(8.0), nav_top, button, button);
@@ -408,18 +411,14 @@ impl TabBar {
             }
         }
         let divider = self.forward.max_x() + px(8.0);
-        layer.quad(Quad::filled(
-            Rect::new(divider, b.min_y(), line, b.size.height - line),
-            palette.card_border,
-        ));
+        let card = palette.card_border;
+        crate::ds::divider_vertical_in(layer, &ctx, (divider, b.min_y(), b.max_y() - line), card);
         // At the right end, after a line: the editor area all the window, or back (as the
         // bottom window's own button).
         self.maximize = Rect::new(b.max_x() - px(8.0) - button, nav_top, button, button);
         let right_divider = self.maximize.min_x() - px(8.0);
-        layer.quad(Quad::filled(
-            Rect::new(right_divider, b.min_y(), line, b.size.height - line),
-            palette.card_border,
-        ));
+        let at = (right_divider, b.min_y(), b.max_y() - line);
+        crate::ds::divider_vertical_in(layer, &ctx, at, card);
         let icon = if navigation.maximized { "minimize-2" } else { "maximize-2" };
         if let Some(id) = icons.id(icon) {
             let size = px(15.0);
@@ -572,7 +571,21 @@ impl<'a> TabLook<'a> {
 
     /// A badge's width: its letters and a little room on each side.
     fn badge_width(&self, text: &mut TextSystem, badge: &str) -> f32 {
-        (text.shape_line(badge, &self.badge_font()).width + self.px(10.0)).round()
+        let font = self.badge_font();
+        let ctx = crate::ds::Ctx::new(self.palette, self.scale);
+        self.badge(badge, Rgba::WHITE, &font).width(text, &ctx)
+    }
+
+    /// A tab's mark (`badge`, in `tint`): small bold letters on a tinted pill.
+    fn badge<'f>(&self, badge: &'f str, tint: Rgba, font: &'f Font) -> crate::ds::Badge<'f> {
+        crate::ds::Badge::new(badge)
+            .color(tint)
+            .fill_alpha(BADGE_FILL)
+            .size(crate::ds::BadgeSize::Tiny)
+            .pad(BADGE_PAD)
+            .radius(BADGE_RADIUS)
+            .font(font)
+            .baseline(crate::ds::BadgeBaseline::Metrics)
     }
 
     /// The slot of a tab starting at `x`, `width` wide.
@@ -677,20 +690,28 @@ impl<'a> TabLook<'a> {
         if let Some((badge, tint)) = tab.badge {
             // Its mark: small bold letters on a tinted pill after the title.
             let x = (after + self.gap * 0.75).round();
-            let w = self.badge_width(text, badge);
-            let h = self.px(15.0);
-            let r = Rect::new(x, (b.min_y() + (b.size.height - h) / 2.0).round(), w, h);
-            layer.quad(Quad::filled(r, tint.with_alpha(0.16)).rounded(self.px(4.0)));
-            let shaped = text.shape_line(badge, &self.badge_font());
-            let base = ui_kit::centered_baseline(r.min_y(), h, &text.metrics(&self.badge_font()));
-            draw_text(layer, &shaped, (r.min_x() + self.px(5.0)).round(), base, tint);
+            let font = self.badge_font();
+            let ctx = crate::ds::Ctx::new(palette, self.scale);
+            self.badge(badge, tint, &font).paint(
+                layer,
+                text,
+                &ctx,
+                x,
+                b.min_y() + b.size.height / 2.0,
+            );
         }
-        self.paint_right_slot(layer, tab, slot);
+        self.paint_right_slot(layer, text, tab, slot);
     }
 
     /// The right slot: the pin (pinned tab); • for unsaved changes (the active tab too),
     /// turning into × under the mouse; × on the active / hovered tab.
-    fn paint_right_slot(&self, layer: &mut render_api::Layer, tab: &TabTitle<'_>, slot: TabSlot) {
+    fn paint_right_slot(
+        &self,
+        layer: &mut render_api::Layer,
+        text: &mut TextSystem,
+        tab: &TabTitle<'_>,
+        slot: TabSlot,
+    ) {
         let (palette, close) = (self.palette, slot.close);
         let (is_active, hovered) = (slot.active, slot.hovered);
         let centered = |size: f32| {
@@ -701,14 +722,14 @@ impl<'a> TabLook<'a> {
                 size,
             )
         };
+        let ctx = crate::ds::Ctx::new(palette, self.scale);
+        let ghost = crate::ds::ButtonSpec::new(crate::ds::ButtonKind::Ghost);
         if tab.pinned && !hovered {
-            if let Some(id) = self.icons.id("pin") {
-                draw_icon(layer, self.icons, id, centered(self.px(13.0)), palette.accent);
-            }
+            let pin = ghost.icon("pin").tone(crate::ds::Tone::Accent);
+            crate::ds::button(layer, text, self.icons, &ctx, close, pin);
         } else if (is_active && !tab.dirty) || hovered {
-            if let Some(id) = self.icons.id("x") {
-                draw_icon(layer, self.icons, id, centered(self.px(13.0)), palette.text_muted);
-            }
+            let x = ghost.icon("x").rest_tone(crate::ds::Tone::Neutral);
+            crate::ds::button(layer, text, self.icons, &ctx, close, x);
         } else if tab.dirty {
             let dot = self.px(7.0);
             layer.quad(Quad::filled(centered(dot), palette.accent).rounded(dot / 2.0));

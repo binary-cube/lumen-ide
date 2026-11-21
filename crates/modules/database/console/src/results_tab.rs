@@ -117,6 +117,10 @@ impl Viewer for ResultsTab {
         self.view()?.context_menu(p)
     }
 
+    fn take_menu(&mut self) -> Option<(kernel::Rect, Vec<ui_components::ViewMenuEntry>)> {
+        self.view()?.take_menu()
+    }
+
     fn drag(&mut self, p: Point) -> bool {
         self.view().is_some_and(|v| v.drag(p))
     }

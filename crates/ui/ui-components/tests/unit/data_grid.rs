@@ -1011,3 +1011,27 @@ fn a_column_that_becomes_a_key_is_fitted_again() {
     let before = fitted(true, &mut text);
     assert_eq!(after, before, "the key's room whichever came first");
 }
+
+/// The find's field is the app's search field: typed into, ⌘A selects it, its caret only
+/// while it has the keys, its × (a hand over it) empties it and keeps the keys.
+#[test]
+fn the_find_field_is_the_shared_search_field_with_its_clear_button() {
+    let mut text = text_layout::TextSystem::new();
+    let mut g = grid(30, Some(100));
+    g.open_find();
+    assert!(g.text_input("n2"));
+    assert!(g.select_all());
+    assert_eq!(g.selected_text().as_deref(), Some("n2"));
+    paint_at(&mut g, &mut text, 1200.0);
+    assert!(g.find.search.shows_caret(), "it has the keys: its caret");
+    let clear = g.hits.iter().find(|(_, h)| *h == Hit::ClearFind).expect("× with text").0;
+    let at = Point::new(clear.min_x() + 2.0, clear.min_y() + 2.0);
+    assert_eq!(g.cursor_at(at), Some(crate::ViewerCursor::Pointer));
+    g.press(at, 1, NONE);
+    g.release();
+    assert_eq!(g.find.search.text(), "");
+    assert!(g.wants_text(), "emptied, the keys still its");
+    g.field = None;
+    paint_at(&mut g, &mut text, 1200.0);
+    assert!(!g.find.search.shows_caret(), "not the field with the keys: no caret");
+}

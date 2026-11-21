@@ -651,3 +651,28 @@ fn the_wheel_over_the_field_written_by_hand_is_its_own() {
     assert!(c.scroll(0.0, 400.0));
     assert_eq!(c.scroll, 0.0, "the rows stayed");
 }
+
+/// The toolbar's buttons are the shared ones and keep their behavior: the steps and the
+/// mode's two segments are hit, Save is pressable only once something can be saved, and
+/// "By hand" is a toggle that stays hit while on.
+#[test]
+fn the_toolbar_s_buttons_are_hit_as_drawn() {
+    let area = |c: &Compare, hit: Hit| c.hits.iter().find(|(_, h)| *h == hit).map(|(r, _)| *r);
+    let mut c = compare("a\nb\n", "a\nc\n");
+    paint(&mut c);
+    let prev = area(&c, Hit::Prev).expect("previous");
+    let next = area(&c, Hit::Next).expect("next");
+    assert_eq!(prev.size.width, ui_components::ds::button_size::MEDIUM);
+    assert!(next.min_x() > prev.max_x(), "side by side");
+    let diff = area(&c, Hit::Mode(false)).expect("the mode's first segment");
+    let merge = area(&c, Hit::Mode(true)).expect("its second");
+    assert!(merge.min_x() >= diff.max_x(), "in order");
+    let mut c = resolving();
+    paint(&mut c);
+    assert!(area(&c, Hit::Save).is_none(), "a conflict is left: Save can't be pressed");
+    assert!(area(&c, Hit::ByHand).is_some());
+    c.toggle_by_hand();
+    paint(&mut c);
+    assert!(area(&c, Hit::ByHand).is_some(), "on: still a toggle");
+    assert!(area(&c, Hit::Save).is_some(), "written by hand: saved as written");
+}

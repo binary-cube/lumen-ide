@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use kernel::FuzzyStyle;
 use ui_components::Date;
-use ui_kit::TextInput;
+use ui_components::search_field::SearchField;
 use version_control::{LogFilter, LogOrder, TextFilter, TextMatcher};
 
 use super::*;
@@ -120,11 +120,13 @@ impl DateChoice {
 #[derive(Debug, Default)]
 pub(super) struct Popup {
     pub kind: Option<FilterKind>,
-    pub query: TextInput,
+    pub query: SearchField,
     pub rows: Vec<Row>,
     /// More rows matched than are listed.
     pub more: usize,
     pub scroll: f32,
+    /// The shared scrollbar on its rows' right while they scroll.
+    pub bar: ui_components::EdgeScrollbar,
     /// The row the keys move (`↑ ↓`, `↵`).
     pub active: Option<usize>,
     /// Where it was painted (a click outside closes it), and its rows.
@@ -157,7 +159,7 @@ impl Lists {
 /// The bar's state (what's applied is the view's [`LogFilter`]).
 #[derive(Default)]
 pub(super) struct FilterBar {
-    pub text: TextInput,
+    pub text: SearchField,
     pub regex: bool,
     pub match_case: bool,
     /// The regular expression typed isn't one.
@@ -176,7 +178,7 @@ pub(super) struct FilterBar {
     pub paths_generation: u64,
     pub paths_matching: Option<Receiver<(u64, Vec<Row>, usize)>>,
     /// The branches panel's filter.
-    pub branch_query: TextInput,
+    pub branch_query: SearchField,
     /// The pills (from the last paint): where their lists open, their ×.
     pub pills: Vec<(FilterKind, Rect)>,
 }
@@ -551,12 +553,6 @@ impl LogView {
         }
         self.apply_filter(filter);
         self.refresh_rows();
-    }
-
-    /// The text cleared (its ×).
-    pub(super) fn clear_text(&mut self) {
-        self.bar.text.set_text("");
-        self.apply_text();
     }
 
     /// What filter `kind`'s pill says, and whether it's set (lit, with its ×).

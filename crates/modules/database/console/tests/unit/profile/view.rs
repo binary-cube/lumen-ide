@@ -610,9 +610,10 @@ fn a_profile_is_compared_with_another_of_its_console() {
 }
 
 /// The view's tooltips (some of several lines: a step's words and kind, the statement);
-/// with its own dropdown open, nothing under or behind it shows one.
+/// Export ▾ asks the app for its menu under it (its rows the export's, those it can't
+/// write greyed out).
 #[test]
-fn no_tooltip_shows_while_the_views_dropdown_is_open() {
+fn the_tooltips_and_the_export_menu() {
     let s = setup("profile-tip-dropdown");
     let mut view = ProfileView::new(s.runner.clone(), s.tab);
     paint(&mut view, 1400.0);
@@ -625,9 +626,19 @@ fn no_tooltip_shows_while_the_views_dropdown_is_open() {
     assert!(with_tip.iter().filter_map(|p| view.tooltip_at(*p)).any(|t| t.label.contains('\n')));
     let (export, ..) = *view.hits.iter().find(|(_, h, _)| *h == Hit::Export).unwrap();
     view.click(Point::new(export.min_x() + 4.0, export.min_y() + 4.0));
-    assert!(view.dropdown.is_some());
-    paint(&mut view, 1400.0);
-    assert!(with_tip.iter().all(|p| view.tooltip_at(*p).is_none()));
+    let (anchor, entries) = view.take_menu().expect("the export's menu");
+    assert_eq!(anchor, export, "under its button");
+    let ids: Vec<&str> = entries
+        .iter()
+        .filter_map(|e| match e {
+            ViewMenuEntry::Item { id, .. } => Some(id.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(!ids.is_empty() && ids.iter().all(|id| id.starts_with("profile.export:")), "{ids:?}");
+    assert!(view.take_menu().is_none(), "taken once");
+    assert!(view.command("export"), "from its key too");
+    assert!(view.take_menu().is_some());
 }
 
 /// The panel's width is the project's: dragged, it's kept in its sizes; the next profile
@@ -745,4 +756,80 @@ fn a_character_starts_the_filter_through_the_controls() {
     view.click(Point::new(f32::MAX, f32::MAX));
     assert!(view.key('h'), "a press on nothing keeps the keys with the filter");
     assert!(view.wants_text());
+}
+
+/// The filter is the app's search field among the view's parts: a press on it gives it the
+/// keys (the caret), what's typed filters, ⌘A then typing replaces it all, and its × empties
+/// it, the steps all shown again and the keys given back.
+#[test]
+fn the_filter_field_is_pressed_typed_into_and_cleared() {
+    let s = setup("profile-filter-field");
+    let mut view = ProfileView::new(s.runner.clone(), s.tab);
+    paint(&mut view, 1400.0);
+    let all = view.table_mut().visible().len();
+    let field = view.filter.area();
+    assert!(field.size.width > 0.0, "drawn as a field at this width");
+    let inside = Point::new(field.min_x() + 30.0, field.min_y() + field.size.height / 2.0);
+    view.pointer_down(inside, 1, PressMods::default());
+    view.release();
+    assert!(view.wants_text(), "pressed, it has the keys");
+    assert!(view.text_input("xyz"));
+    assert_eq!(view.filter.text(), "xyz");
+    assert!(view.select_all());
+    assert!(view.text_input("hash"));
+    assert_eq!(view.filter.text(), "hash", "⌘A then typing replaces it");
+    assert!(view.table_mut().visible().len() < all);
+    // Its ×, drawn once it has text.
+    paint(&mut view, 1400.0);
+    let clear = view.filter.clear_area().expect("× with text");
+    let on_clear = Point::new(clear.min_x() + clear.size.width / 2.0, clear.min_y() + 4.0);
+    view.hover(on_clear);
+    assert_eq!(view.cursor_at(on_clear), Some(ViewerCursor::Pointer));
+    view.pointer_down(on_clear, 1, PressMods::default());
+    view.release();
+    assert!(view.filter.text().is_empty());
+    assert!(!view.wants_text(), "× gives the keys back");
+    assert_eq!(view.table_mut().visible().len(), all);
+}
+
+/// Narrow, the filter is an icon alone: the field isn't there to be pressed.
+#[test]
+fn a_narrow_bar_s_filter_is_an_icon_with_no_field() {
+    let s = setup("profile-filter-narrow");
+    let mut view = ProfileView::new(s.runner.clone(), s.tab);
+    paint(&mut view, 1400.0);
+    assert!(view.filter.area().size.width > 0.0);
+    paint(&mut view, 420.0);
+    assert_eq!(view.filter.area(), Rect::default());
+}
+
+/// The views' switcher is the shared segmented control at the bar's height: a segment per
+/// view that can be chosen, each pressed choosing its view; narrow, it's a menu button whose
+/// chevron, at its right end, opens the views' menu.
+#[test]
+fn the_switcher_s_segments_and_its_menu_button() {
+    let s = setup("profile-switcher");
+    let mut view = ProfileView::new(s.runner.clone(), s.tab);
+    paint(&mut view, 1400.0);
+    let segments: Vec<(Rect, usize)> = view
+        .hits
+        .iter()
+        .filter_map(|(r, h, _)| match h {
+            Hit::Mode(i) => Some((*r, *i)),
+            _ => None,
+        })
+        .collect();
+    let choosable = ProfileMode::ALL.iter().filter(|m| m.available()).count();
+    assert_eq!(segments.len(), choosable, "a disabled view has no hit");
+    assert!(segments.iter().all(|(r, _)| r.size.height < 26.0 && r.size.height > 16.0));
+    let (flame, _) =
+        *segments.iter().find(|(_, i)| ProfileMode::ALL[*i] == ProfileMode::Flame).unwrap();
+    view.click(Point::new(flame.min_x() + flame.size.width / 2.0, flame.min_y() + 4.0));
+    assert_eq!(view.mode, ProfileMode::Flame);
+    paint(&mut view, 450.0);
+    assert!(!view.hits.iter().any(|(_, h, _)| matches!(h, Hit::Mode(_))));
+    let (menu, ..) = *view.hits.iter().find(|(_, h, _)| *h == Hit::ModeMenu).unwrap();
+    view.click(Point::new(menu.max_x() - 3.0, menu.min_y() + menu.size.height / 2.0));
+    let (_, entries) = view.take_menu().expect("its chevron opens the views' menu");
+    assert_eq!(entries.len(), ProfileMode::ALL.len());
 }

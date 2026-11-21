@@ -10,23 +10,42 @@ fix in it reaches every place. What a component lacks is **added to the componen
 option, a default method on its trait), never copied into a module. A custom drawing found
 where a component exists is replaced by it (as the scrollbars were).
 
+**Every control (checkbox, switch, radio, scrollbar, slider, progress, spinner, keycap,
+badge, chevron, tabs, row highlight, divider) comes from its component; what a place needs
+is added to the component as an option, defaults unchanged.** The defaults are the look
+every caller has today: a new option never moves a pixel where it isn't asked for.
+
 ## What there is
 
 | Need | Component |
 |---|---|
-| Tokens, surfaces, dividers, row highlight, focus ring | `ds` (`ds::surface`, `ds::divider*`, `ds::row_highlight`, `ds::focus_ring`, `space`, `radius`) |
-| Buttons (primary, secondary, danger, with a key, busy), switch, checkbox, choices (pills), segmented, stepper, radio card, search field | `ds::controls` |
+| Tokens, surfaces, focus ring | `ds` (`ds::surface`, `ds::focus_ring`, `space`, `radius`) |
+| Dividers (the border, the cards' border `divider_card`, a color of the caller's `divider_in` / `divider_vertical_in`, faded) | `ds::divider*` |
+| A row's highlight (chosen, hovered, chosen in a list without the keys; its corners, its hover token: faint, `hover_background`, `tree_hover`; its alpha) | `ds::row_highlight` / `ds::RowHighlight` |
+| Buttons (primary, secondary, danger, with a key, busy), choices (pills), segmented, stepper, radio card, search field | `ds::controls` |
+| A switch (small, off limits: `switch_enabled`), a checkbox (`Checkbox`: sizes, hover), a bare radio (`Radio`, `ds::radio`) | `ds::controls` |
 | A field showing a choice, its list opened by a click | `ds::dropdown` + `picker::Picker` (settings: `SettingsRow::Dropdown`) |
+| Every button (primary, danger, secondary, a header's, a ghost icon or toggle, a soft action, raised over content, round, with a tone, a key, a menu's ▾, busy, disabled) | `ds::button` + `ButtonSpec` (`button_width`, `square_button`, `button_size`, `button_label_font`) |
+| A pill with a × of its own (a filter) | `ds::chip` (`ChipRects { body, clear }`) |
+| A chip with an icon, a muted run before its value (`rows 1 204`), an outline, a label pill of a given size | `ds::Badge` (`.icon`, `.icon_size`, `.icon_color`, `.lead`, `.lead_font`, `.border`, `.min_width`) |
+| A color's field (swatch, value, pipette) opening the picker; a color's swatch alone (edge ring, or ringed around when chosen among a few) | `ds::ColorField`, `ds::ColorSwatch` (`.ringed_around`) |
+| Segments (height, place, disabled ones, icons); a choice with a color dot; a dropdown with a prefix, a dot or an icon | `ds::segmented_styled`, `ds::choice_with_dot`, `ds::dropdown_styled` / `dropdown_with_icon` |
+| A row with a ✓ (its corners, hover token, under the keys, ✓ size, chosen untinted) | `ds::check_row` + `CheckRowSpec::new(…)` |
+| A search or filter field (pill, magnifier, × to empty, ⌘A, one caret) | `search_field::SearchField` |
 | A list to choose from, with search (one or many) | `picker::Picker` |
 | A dropdown's list asked by an editor bar (it has no keys of its own) | `ToolbarAction::List` (the app shows the shared picker under the field) |
-| Badges, a dot on a button, a key cap, a file's row | `ds::badges` |
+| Badges (named sizes 15/16/18/20, a color, a fill's alpha, a count centered, corners, bold, a font, a baseline, a zoom) | `ds::Badge` (`ds::badge` + `BadgeSpec` the usual one) |
+| Key caps: a field's corner (`ds::keycap`, `ds::Keycap`: from either side, sizes, `keycap_width`), a footer's hints, a key in a button — one drawing, named looks | `ui_kit::paint_keycap` + `KeycapLook` (`hint`, `flat`; `ds::inline_key_look`) |
+| A dot on a button, a file's row | `ds::badges` |
 | Text that fits (ellipsized, wrapped), a section title | `ds::text` |
-| Loader, progress bar, empty state, tooltip pill, keys' footer, modal footer and its buttons | `ds::feedback`, `ds::progress` |
-| Scrollbars (always this one: thumb drag, lane of its own) | `scrollbar::{Scrollbar, EdgeScrollbar}` |
+| Loader and spinner (by the clock or the caller's `elapsed`; `loader_spinner` alone), empty state, tooltip pill, keys' footer, modal footer and its buttons | `ds::feedback` |
+| Progress (a fill's color and alpha, a track's or none, on dark, least fill, corners, whole pixels, split in parts, a sweep gliding at the caller's clock); a meter of small vertical bars | `ds::ProgressBar`, `ds::Meter` |
+| Scrollbars (always this one: thumb drag; a lane of its own: `paint_lane` + `LaneLook`) | `scrollbar::{Scrollbar, EdgeScrollbar}` |
+| Pill tabs (icon, label, × / pin slot, in force and lit / in force / hovered) and their strip's border | `tab_strip` (`PillTab`, `pill_tab`, `strip_border`) |
 | A resizable separator between panels | `splitter::Splitter` |
 | The parts every table shares: header band, a column's name and subtitle, the edges between headers (lit when held), the lines between columns, alternating rows | `table` (`header_band`, `header_cell`, `header_edge`, `header_rule`, `column_lines`, `stripe`, `HEADER_H`) |
 | Every tabular listing (rows from a source, lazy, filter WHERE / ORDER, paging, resizable columns, zebra rows, a cell's icon) | `data_grid` (`GridSource`) |
-| A tree (project tree, a remote's) | `tree` (`TreeList`, chevrons, guides) |
+| A tree (project tree, a remote's), every fold's chevron | `tree` (`TreeList`, `tree::chevron`, guides) |
 | A tree on columns (rows with depth, folded / opened) | `tree_table::TreeTable` |
 | Columns fitted to a width by priority | `columns` |
 | Charts, sparklines, an icicle (flame graph), a ring | `chart`, `icicle`, `progress_ring` |
@@ -96,6 +115,24 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
   - **A field with behavior of its own** (its key set, its Tab order, a password never
     copied) is a control of its module that does exactly that. It is never a `typing`
     bool routed by hand, and never the generic field if that would change the behavior.
+- **Every button is `ds::button`**, described by a `ButtonSpec`:
+  - its kind: primary, danger, secondary, toolbar, ghost (transparent, lit under the
+    mouse: a bar's icon, a toggle like `.*`, a link), soft (a faint fill and border),
+    raised (floating over content);
+  - its shape (box or round), its icon and / or label, its tone (or a color of its own:
+    `tone_color`), a key, a menu's ▾, `on`, `busy` (or `busy_amount`), `enabled`,
+    `hovered` (or `hover_amount`), a hover's tone, a theme's colors, a fixed surface;
+  - its size from `button_size` (named, never a raw number).
+
+  Never a rounded quad, an icon and a hit drawn by hand, never a module's own
+  `icon_button` helper. What the button lacks is added to it, for everyone.
+- **Every search or filter field is `SearchField`**, never a pill, a ×, a caret drawn by
+  hand: the same look (magnifier, × once there's text), the same keys (⌘A, ⌘X, ⌘Z,
+  copy, paste) everywhere. It is a part of its view's `Controls`, so only the focused
+  field shows a caret. The field the app edits for the clipboard (`input` / `input_mut`)
+  is the focused one: asking for it never moves the focus from one field to another (with
+  none focused, the view's default field takes it). `take_cleared` tells the
+  view × emptied it.
 - **Nothing generic names a module, a language or a view**: no `"php"`, `"terminal"`,
   `"database"` in the app or in components; what differs is said by whoever it belongs to
   (a field on its contribution, a default method it overrides).
@@ -151,10 +188,15 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
   entry's properties), "… Settings…" comes first and "Properties…" right after it, last in
   its group — the same in every menu.
 - **Menus are the app's one component** (`ViewMenuEntry` → the context menu); what a menu
-  needs that it lacks is added to it (a greyed-out row, a ✓ at the end, a color dot:
-  `RowLook`), never drawn by a module. A row shown greyed out is one the user should know
-  exists but can't use here (an agent not hosted yet, one not installed); a row with no
+  needs that it lacks is added to it (a greyed-out row, a ✓ at the end, a color dot, a
+  removal in the danger color: `RowLook`), never drawn by a module. A row shown greyed out
+  is one the user should know exists but can't use here (an agent not hosted yet, one not installed); a row with no
   partner at all stays hidden (`presence`).
+- **A menu under a view's own button** ("Export ▾", a card's "⋮"): the view keeps it and
+  gives it to the app with `Viewer::take_menu` (the anchor and the rows) after the press or
+  the command; the app shows it under the button, the row chosen coming back as a command
+  (a panel: `ToolPanelAction::MenuUnder`). A host that embeds views forwards `take_menu`
+  (the Services panel, `control::{Embedded, TabView}`'s `menu`).
 
 ## The status bar
 

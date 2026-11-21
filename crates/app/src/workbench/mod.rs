@@ -1473,7 +1473,8 @@ fn paint_viewer(
         (ViewMode::Split, "view-split"),
         (ViewMode::Preview, "view-preview"),
     ];
-    let (bw, bh, pad) = (px(28.0), px(24.0), px(3.0));
+    let (bw, bh, pad) = (px(ui_workbench::ds::button_size::LARGE), px(24.0), px(3.0));
+    let ctx = ui_workbench::ds::Ctx::new(palette, scale);
     let width = bw * modes.len() as f32 + 2.0 * pad;
     let bar =
         Rect::new(area.max_x() - width - px(22.0), area.min_y() + px(10.0), width, bh + 2.0 * pad);
@@ -1485,22 +1486,11 @@ fn paint_viewer(
     );
     for (i, (mode, icon)) in modes.into_iter().enumerate() {
         let r = Rect::new(bar.min_x() + pad + i as f32 * bw, bar.min_y() + pad, bw, bh);
-        let active = v.mode == mode;
-        if active {
-            layer.quad(Quad::filled(r, palette.accent.with_alpha(0.14)).rounded(px(6.0)));
-        }
-        if let Some(id) = icons.id(icon) {
-            let size = px(15.0);
-            let ir =
-                Rect::new(r.min_x() + (bw - size) / 2.0, r.min_y() + (bh - size) / 2.0, size, size);
-            draw_icon(
-                layer,
-                icons,
-                id,
-                ir,
-                if active { palette.accent } else { palette.text_muted },
-            );
-        }
+        let spec = ui_workbench::ds::ButtonSpec::new(ui_workbench::ds::ButtonKind::Ghost)
+            .icon(icon)
+            .rest_tone(ui_workbench::ds::Tone::Neutral)
+            .on(v.mode == mode);
+        ui_workbench::ds::button(layer, text, icons, &ctx, r, spec);
         v.toggles.push((r, mode));
     }
 }

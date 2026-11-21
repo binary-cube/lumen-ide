@@ -18,14 +18,13 @@
 //! The dialog is non-blocking: the answer (the button id) is picked up by the app, which
 //! continues the action that requested it.
 
-use std::sync::Arc;
 use std::time::Duration;
 use ui_components::control::{Control, Controls, Press, Thumb};
 
 use icons::Icons;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
-use text_layout::{Font, FontMetrics, ShapedLine, TextSystem};
+use text_layout::{Font, FontMetrics, TextSystem};
 use ui_kit::{centered_baseline, draw_icon, draw_text};
 
 use crate::anim::Appear;
@@ -425,7 +424,7 @@ impl Dialog {
         let layer = paint_footer(&geo, scene, &ctx);
         let rects = layout_buttons(spec, &geo, &style, text);
         for (i, &r) in rects.iter().enumerate() {
-            self.paint_button(spec, i, r, &style, text, layer);
+            self.paint_button(spec, i, r, (&style, icons), text, layer);
         }
         self.rects = rects;
     }
@@ -504,44 +503,22 @@ impl Dialog {
         }
     }
 
-    /// A button (`spec.buttons[i]` at `r`): its fill by kind and hover, the focus ring
-    /// (keyboard navigation only), the label and its key (↵ / esc).
+    /// A button (`spec.buttons[i]` at `r`): the focus ring (keyboard navigation only), then
+    /// the shared button with its key (↵ / esc).
     fn paint_button(
         &self,
         spec: &DialogSpec,
         i: usize,
         r: Rect,
-        style: &Style<'_>,
+        (style, icons): (&Style<'_>, &Icons),
         text: &mut TextSystem,
         layer: &mut Layer,
     ) {
         let ctx = &style.ctx;
         let px = |v: f32| ctx.px(v);
-        let palette = ctx.palette;
-        let button = &spec.buttons[i];
-        let button_h = r.size.height;
-        let (label, key, w) = measure(button, spec.cancel, style, text);
-        let hovered = self.hover == Some(i);
-        let (fill, border, color) = match button.kind {
-            ButtonKind::Primary => {
-                let base = if self.checked { palette.danger } else { palette.accent };
-                let fill = if hovered { base.with_alpha(0.9) } else { base };
-                (fill, Rgba::TRANSPARENT, Rgba::WHITE)
-            }
-            ButtonKind::Secondary => {
-                let fill =
-                    if hovered { palette.text.with_alpha(0.06) } else { palette.popup_background };
-                (fill, palette.border, palette.text)
-            }
-            ButtonKind::Destructive => {
-                let fill =
-                    if hovered { palette.danger.with_alpha(0.08) } else { Rgba::TRANSPARENT };
-                (fill, Rgba::TRANSPARENT, palette.danger)
-            }
-        };
         if self.keyboard && i == self.focus {
-            let ring = px(2.0);
-            let gap = px(2.0);
+            let ring = px(FOCUS_RING);
+            let gap = px(FOCUS_GAP);
             let outer = Rect::new(
                 r.min_x() - ring - gap,
                 r.min_y() - ring - gap,
@@ -550,51 +527,38 @@ impl Dialog {
             );
             layer.quad(
                 Quad::filled(outer, Rgba::TRANSPARENT)
-                    .rounded(px(radius::SM + 1.0) + ring + gap)
-                    .bordered(ring, ctx.fade(palette.accent.with_alpha(0.55))),
+                    .rounded(px(radius::MD) + ring + gap)
+                    .bordered(ring, ctx.fade(ctx.palette.accent.with_alpha(0.55))),
             );
         }
-        layer.quad(
-            Quad::filled(r, ctx.fade(fill))
-                .rounded(px(radius::SM + 1.0))
-                .bordered(ctx.line(), ctx.fade(border)),
-        );
-        let key_w = key.as_ref().map_or(0.0, |k| k.width + px(16.0));
-        let lx = r.min_x() + (w - label.width - key_w) / 2.0;
-        draw_text(
-            layer,
-            &label,
-            lx.round(),
-            centered_baseline(r.min_y(), button_h, &style.button_m),
-            ctx.fade(color),
-        );
-        let Some(key) = key else { return };
-        let kh = px(18.0);
-        let kr = Rect::new(
-            (lx + label.width + px(8.0)).round(),
-            r.min_y() + (button_h - kh) / 2.0,
-            key.width + px(8.0),
-            kh,
-        );
-        let key_bg = if button.kind == ButtonKind::Primary {
-            Rgba::WHITE.with_alpha(0.18)
-        } else {
-            palette.text.with_alpha(0.06)
-        };
-        let key_color = if button.kind == ButtonKind::Primary {
-            Rgba::WHITE.with_alpha(0.85)
-        } else {
-            palette.text_muted
-        };
-        layer.quad(Quad::filled(kr, ctx.fade(key_bg)).rounded(px(4.0)));
-        draw_text(
-            layer,
-            &key,
-            kr.min_x() + px(4.0),
-            centered_baseline(kr.min_y(), kh, &style.key_m),
-            ctx.fade(key_color),
-        );
+        let button =
+            button_spec(&spec.buttons[i], spec.cancel, self.checked).hovered(self.hover == Some(i));
+        ds::button(layer, text, icons, ctx, r, button);
     }
+}
+
+/// A focused button's ring, and the room between it and the button (logical pixels).
+const FOCUS_RING: f32 = 2.0;
+const FOCUS_GAP: f32 = 2.0;
+
+/// The height of the dialog's buttons (logical pixels).
+const BUTTON_H: f32 = 32.0;
+
+/// A dialog button as the shared button: the main one filled (in the danger color once the
+/// checkbox asks for it) with ↵, the cancel one with esc, a destructive one a link in the
+/// danger color.
+fn button_spec<'a>(b: &'a DialogButton, cancel: &str, checked: bool) -> ds::ButtonSpec<'a> {
+    let spec = match b.kind {
+        ButtonKind::Primary if checked => ds::ButtonSpec::new(ds::ButtonKind::Danger).key("↵"),
+        ButtonKind::Primary => ds::ButtonSpec::new(ds::ButtonKind::Primary).key("↵"),
+        ButtonKind::Secondary => ds::ButtonSpec::new(ds::ButtonKind::Secondary),
+        ButtonKind::Destructive => ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+            .tone(Tone::Danger)
+            .hover_tint(Tone::Danger)
+            .strong(),
+    };
+    let spec = if b.kind != ButtonKind::Primary && b.id == cancel { spec.key("esc") } else { spec };
+    spec.label(&b.label)
 }
 
 /// The drawing context and the dialog's fonts with their metrics, measured once per paint.
@@ -605,10 +569,6 @@ struct Style<'p> {
     body: Font,
     strong: Font,
     body_m: FontMetrics,
-    button: Font,
-    button_m: FontMetrics,
-    key: Font,
-    key_m: FontMetrics,
 }
 
 impl<'p> Style<'p> {
@@ -618,11 +578,7 @@ impl<'p> Style<'p> {
         let body = ctx.ui_font(0.0);
         let strong = body.clone().with_weight(Font::SEMIBOLD);
         let body_m = text.metrics(&body);
-        let button = ds::button_font(&ctx);
-        let button_m = text.metrics(&button);
-        let key = ctx.ui_font(-2.5);
-        let key_m = text.metrics(&key);
-        Self { ctx, title, title_m, body, strong, body_m, button, button_m, key, key_m }
+        Self { ctx, title, title_m, body, strong, body_m }
     }
 }
 
@@ -637,9 +593,6 @@ struct Geometry {
     line_h: f32,
     footer_h: f32,
 }
-
-/// A button's label, its key (↵ for the primary one, esc for cancel) and its width.
-type Measured = (Arc<ShapedLine>, Option<Arc<ShapedLine>>, f32);
 
 /// The message, with highlights, wrapped word by word (a `\n` starts a new row; two, an
 /// empty one between): rows of (text, highlighted).
@@ -947,18 +900,9 @@ fn paint_footer<'s>(geo: &Geometry, scene: &'s mut Scene, ctx: &Ctx<'_>) -> &'s 
 }
 
 /// A button's label, key and width.
-fn measure(b: &DialogButton, cancel: &str, style: &Style<'_>, text: &mut TextSystem) -> Measured {
-    let px = |v: f32| style.ctx.px(v);
-    let label = text.shape_line(&b.label, &style.button);
-    let key = match b.kind {
-        ButtonKind::Primary => Some("↵"),
-        _ if b.id == cancel => Some("esc"),
-        _ => None,
-    }
-    .map(|k| text.shape_line(k, &style.key));
-    let key_w = key.as_ref().map_or(0.0, |k| k.width + px(8.0) + px(8.0));
-    let w = (label.width + key_w + px(28.0)).max(px(84.0));
-    (label, key, w)
+fn measure(b: &DialogButton, cancel: &str, style: &Style<'_>, text: &mut TextSystem) -> f32 {
+    let ctx = &style.ctx;
+    ds::button_width(text, ctx, &button_spec(b, cancel, false), ctx.px(BUTTON_H))
 }
 
 /// The buttons' places in the footer, in the spec's order: destructive ones on the left,
@@ -971,19 +915,19 @@ fn layout_buttons(
 ) -> Vec<Rect> {
     let px = |v: f32| style.ctx.px(v);
     let (card, footer_h) = (geo.card, geo.footer_h);
-    let button_h = px(32.0);
+    let button_h = px(BUTTON_H);
     let top = (card.max_y() - footer_h + (footer_h - button_h) / 2.0).round();
     let mut rects = vec![Rect::default(); spec.buttons.len()];
     let mut left = card.min_x() + geo.pad;
     let mut right = card.max_x() - geo.pad;
     let order: Vec<usize> = (0..spec.buttons.len()).collect();
     for &i in order.iter().filter(|&&i| spec.buttons[i].kind == ButtonKind::Destructive) {
-        let (_, _, w) = measure(&spec.buttons[i], spec.cancel, style, text);
+        let w = measure(&spec.buttons[i], spec.cancel, style, text);
         rects[i] = Rect::new(left, top, w.round(), button_h);
         left += w + px(8.0);
     }
     for &i in order.iter().rev().filter(|&&i| spec.buttons[i].kind != ButtonKind::Destructive) {
-        let (_, _, w) = measure(&spec.buttons[i], spec.cancel, style, text);
+        let w = measure(&spec.buttons[i], spec.cancel, style, text);
         rects[i] = Rect::new((right - w).round(), top, w.round(), button_h);
         right -= w + px(8.0);
     }

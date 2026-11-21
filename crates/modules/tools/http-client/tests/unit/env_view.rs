@@ -143,3 +143,40 @@ fn the_keys_go_to_the_name_being_typed_else_to_the_cell_pressed() {
     assert!(view.text_input("!"), "the cell has them again");
     assert!(view.lines[1][0].name.text().contains('!'));
 }
+
+/// Many variables show the shared scrollbar at the view's right: its thumb pressed and
+/// dragged down scrolls the rows (by whole rows, as drawn), let go it ends; the wheel
+/// scrolls too.
+#[test]
+fn many_rows_scroll_by_their_thumb() {
+    let mut view = EnvView {
+        names: vec!["dev".into()],
+        lines: vec![(0..40).map(|_| Line::empty()).collect()],
+        ..EnvView::default()
+    };
+    let (palette, icons) = (ui_components::Palette::dark(), icons::Icons::builtin());
+    let mut text = text_layout::TextSystem::new();
+    let mut paint = |view: &mut EnvView| {
+        let mut scene = render_api::Scene::default();
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 600.0, 400.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut view);
+    assert!(view.scroll(0.0, 40.0), "the wheel");
+    view.scroll = 0.0;
+    paint(&mut view);
+    let thumb = Point::new(596.0, 100.0);
+    view.pointer_down(thumb, 1, ui_components::PressMods::default());
+    assert!(view.drag(Point::new(596.0, 220.0)));
+    assert!(view.scroll > 0.0, "dragged down: scrolled");
+    assert!(view.release());
+    assert_eq!(view.focus, None, "no cell pressed");
+}

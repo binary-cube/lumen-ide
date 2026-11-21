@@ -3,9 +3,9 @@
 
 use icons::{IconId, Icons};
 use kernel::{Point, Rect, Rgba};
-use render_api::{Quad, Scene};
+use render_api::Scene;
 use text_layout::TextSystem;
-use ui_kit::{draw_icon, draw_text};
+use ui_kit::draw_text;
 
 use crate::ds::{self, Ctx};
 use crate::palette::Palette;
@@ -25,6 +25,9 @@ pub struct Breadcrumbs {
     segments: Vec<Rect>,
     hover: Option<usize>,
 }
+
+/// A crumb's icon (logical pixels).
+const CRUMB_ICON: f32 = 14.0;
 
 impl Breadcrumbs {
     /// Bar height (physical pixels).
@@ -78,40 +81,37 @@ impl Breadcrumbs {
         let px = |v: f32| ctx.px(v);
         let layer = scene.push_layer(Some(b));
         ds::divider(layer, &ctx, b.min_x(), b.max_x(), b.max_y() - ctx.line());
-        let font = ctx.ui_font(-1.0);
-        let strong = font.clone().with_weight(500);
+        let font = ds::button_label_font(&ctx);
         let sep = text.shape_line("›", &font);
-        let pill_h = px(22.0);
+        let pill_h = px(ds::button_size::SMALL);
         let top = b.min_y() + ((b.size.height - ctx.line() - pill_h) / 2.0).round();
         let mut x = b.min_x() + px(12.0);
         let last = crumbs.len() - 1;
         for (i, crumb) in crumbs.iter().enumerate() {
             let current = i == last;
-            let f = if current { &strong } else { &font };
-            let icon_w = if crumb.icon.is_some() { px(14.0) + px(6.0) } else { 0.0 };
+            let icon_w = if crumb.icon.is_some() { px(CRUMB_ICON) + px(6.0) } else { 0.0 };
             // A long name cut in the middle (its extension kept), at most a crumb's width, as
             // much as is left for the last one; too little left: nothing more.
-            let room = (b.max_x() - px(8.0) - x - px(12.0) - icon_w).min(px(crate::ds::NAME_MAX));
+            let room = (b.max_x() - px(8.0) - x - px(16.0) - icon_w).min(px(crate::ds::NAME_MAX));
             if room < px(40.0) {
                 break;
             }
-            let label = ds::ellipsize_file(text, &crumb.label, f, room);
-            let shaped = text.shape_line(&label, f);
-            let w = px(6.0) + icon_w + shaped.width + px(6.0);
-            let r = Rect::new(x, top, w, pill_h);
-            if self.hover == Some(i) {
-                layer.quad(
-                    Quad::filled(r, palette.text.with_alpha(0.055)).rounded(px(ds::radius::SM)),
-                );
-            }
-            let color = if current { palette.accent } else { palette.text_muted };
-            let mut tx = r.min_x() + px(6.0);
+            let label = ds::ellipsize_file(text, &crumb.label, &font, room);
+            let mut spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .label(&label)
+                .icon_size(CRUMB_ICON)
+                .hovered(self.hover == Some(i));
+            spec = if current {
+                spec.tone(ds::Tone::Accent)
+            } else {
+                spec.rest_tone(ds::Tone::Neutral)
+            };
             if let Some((id, tint)) = crumb.icon {
-                let s = px(14.0);
-                draw_icon(layer, icons, id, Rect::new(tx, top + (pill_h - s) / 2.0, s, s), tint);
-                tx += s + px(6.0);
+                spec = spec.icon_id(id).icon_color(tint);
             }
-            draw_text(layer, &shaped, tx, ds::optical_baseline(top, pill_h, f), color);
+            let w = ds::button_width(text, &ctx, &spec, pill_h);
+            let r = Rect::new(x, top, w, pill_h);
+            ds::button(layer, text, icons, &ctx, r, spec);
             self.segments.push(r);
             x = r.max_x();
             if !current {

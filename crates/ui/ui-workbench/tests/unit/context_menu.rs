@@ -283,3 +283,18 @@ fn a_disabled_row_is_shown_but_never_run() {
     menu.step(1);
     assert_eq!(menu.confirm().as_deref(), Some("c"), "the keys skip it");
 }
+
+/// A dangerous row (a removal) has its label and icon in the danger color, selected or not;
+/// the others keep the text's.
+#[test]
+fn a_dangerous_row_is_in_the_danger_color() {
+    let palette = Palette::dark();
+    let danger = RowLook { danger: true, ..RowLook::default() };
+    assert_eq!(row_ink(danger, false, &palette), (palette.danger, palette.danger));
+    assert_eq!(row_ink(danger, true, &palette), (palette.danger, palette.danger));
+    let plain = row_ink(RowLook::default(), false, &palette);
+    assert_eq!(plain, (palette.text, palette.text_muted));
+    assert_eq!(row_ink(RowLook::default(), true, &palette).1, palette.accent);
+    let entry = crate::ViewMenuEntry::item("remove", "Remove").danger_if(true);
+    assert!(matches!(entry, crate::ViewMenuEntry::Item { look, .. } if look.danger));
+}

@@ -84,7 +84,7 @@ impl Metrics {
     pub fn new(px: impl Fn(f32) -> f32) -> Self {
         Self {
             pad: px(8.0),
-            button: px(28.0),
+            button: px(ui_components::ds::button_size::LARGE),
             chevron: px(16.0),
             gap: px(2.0),
             divider: px(7.0),

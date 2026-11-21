@@ -21,11 +21,12 @@ use render_api::Quad;
 use ui_components::control::{Control, Controls, Thumb};
 use ui_components::date_range::{RangeAnswer, RangePart};
 use ui_components::ds::{self, Ctx, Tone, radius};
+use ui_components::search_field::SearchField;
 use ui_components::{
     AppRequest, Date, DateRangePicker, EdgeScrollbar, KeyReach, PickerEvent, ViewMenuEntry, Viewer,
     ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint, ViewerProvider,
 };
-use ui_kit::{TextInput, draw_text};
+use ui_kit::draw_text;
 
 use crate::local_time;
 use crate::session::RecentFile;
@@ -143,12 +144,10 @@ pub struct ChangedFiles {
     picker: Option<DateRangePicker>,
     /// Where "Days…" is (the calendar opens under it).
     pick_rect: Rect,
-    /// What's searched for in the paths (it has the keys once clicked into).
-    query: TextInput,
+    /// What's searched for in the paths (the app's search field: it has the keys once
+    /// clicked into), and where it's laid out.
+    query: SearchField,
     field: Rect,
-    /// The search's × (while there's text).
-    clear: Option<Rect>,
-    hover_clear: bool,
     scroll: f32,
     max_scroll: f32,
     bar: EdgeScrollbar,
@@ -194,10 +193,8 @@ impl Default for ChangedFiles {
             hover: None,
             picker: None,
             pick_rect: Rect::default(),
-            query: TextInput::default(),
+            query: SearchField::default(),
             field: Rect::default(),
-            clear: None,
-            hover_clear: false,
             scroll: 0.0,
             max_scroll: 0.0,
             bar: EdgeScrollbar::default(),
@@ -366,13 +363,8 @@ impl ChangedFiles {
             // While it's closed, its place takes nothing.
             let mut calendar =
                 self.picker.as_mut().map(|picker| RangePart { picker, answer: &mut answer });
-            let mut search = search::SearchField {
-                query: &mut self.query,
-                field: self.field,
-                clear: self.clear,
-                edited: &mut edited,
-                left: &mut left,
-            };
+            let mut search =
+                search::SearchPart { field: &mut self.query, edited: &mut edited, left: &mut left };
             let mut list = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
             let mut parts: [&mut dyn Control; 3] = [&mut calendar, &mut search, &mut list];
             f(&mut self.controls, &mut parts);
@@ -508,7 +500,8 @@ impl ChangedFiles {
         header_h
     }
 
-    /// The search field in `self.field`: the app's pill and magnifier, what's typed, its ×.
+    /// The search field in `self.field`: the app's (pill, magnifier, what's typed, its ×;
+    /// the caret while it has the keys).
     fn paint_search(
         &mut self,
         layer: &mut render_api::Layer,
@@ -516,36 +509,9 @@ impl ChangedFiles {
         icons: &icons::Icons,
         ds: &Ctx<'_>,
     ) {
-        let field = self.field;
         let typing = self.typing();
-        let area = ds::search_field(layer, icons, ds, field, typing);
-        let mut area = area;
-        self.clear = None;
-        if !self.query.text().is_empty() {
-            let mid = field.min_y() + field.size.height / 2.0;
-            let close = ds::clear_button(
-                layer,
-                icons,
-                ds,
-                field.max_x() - ds.px(16.0),
-                mid,
-                self.hover_clear,
-            );
-            self.clear = Some(close);
-            area.size.width = (close.min_x() - ds.px(6.0) - area.min_x()).max(0.0);
-        }
-        let style = ui_kit::TextInputStyle {
-            background: kernel::Rgba::TRANSPARENT,
-            border: kernel::Rgba::TRANSPARENT,
-            border_focused: kernel::Rgba::TRANSPARENT,
-            border_width: 0.0,
-            lead: 0.0,
-            padding: 0.0,
-            font: ds.ui_font(-0.5),
-            ..ds::search_input_style(ds, area.size.height)
-        };
         let placeholder = t("remote.changed_search");
-        self.query.paint(layer, text, area, typing, &placeholder, &style);
+        self.query.paint(layer, text, icons, ds, (self.field, typing), &placeholder);
     }
 
     /// The list: the fine line down its left side, each day's ring and name (its date
@@ -609,9 +575,9 @@ impl ChangedFiles {
                 self.list.max_x() - px(6.0) - lane - px(12.0),
                 row_h,
             );
-            if self.hovered_row == Some(i) {
-                rows.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(radius::MD)));
-            }
+            ds::RowHighlight::new(false, self.hovered_row == Some(i))
+                .hover(ds::HoverFill::Faint(ROW_HOVER))
+                .paint(rows, ds, r);
             timeline::dot(rows, Point::new(lane, mid), px(2.0), None, p.text.with_alpha(0.28));
             let mut x = lane + px(20.0);
             let time = self.stamps.get(i).map_or("", |s| s.time.as_str());
@@ -676,8 +642,7 @@ impl ChangedFiles {
         // The line passes behind it, as it does behind every heading.
         timeline::line(layer, lane, (band.min_y(), band.max_y()), line_w, p.text.with_alpha(0.16));
         DayHeading { day, count, today, lane, top }.paint(layer, text, ds);
-        let rule = Rect::new(band.min_x(), band.max_y() - ds.line(), band.size.width, ds.line());
-        layer.quad(Quad::filled(rule, p.card_border));
+        ds::divider_card(layer, ds, band.min_x(), band.max_x(), band.max_y() - ds.line());
     }
 }
 
@@ -719,6 +684,8 @@ impl DayHeading {
 
 /// The header's line height, and the search field's width (logical pixels).
 const HEADER_H: f32 = 44.0;
+/// A row under the mouse: the text's alpha over it.
+const ROW_HOVER: f32 = 0.05;
 const FIELD_MIN: f32 = 180.0;
 const FIELD_MAX: f32 = 280.0;
 
@@ -825,9 +792,8 @@ impl Viewer for ChangedFiles {
             return changed;
         }
         let (chip, row) = (self.chip_at(p), self.row_at(p));
-        let clear = self.clear.is_some_and(|r| r.contains(p));
-        changed |= chip != self.hover || row != self.hovered_row || clear != self.hover_clear;
-        (self.hover, self.hovered_row, self.hover_clear) = (chip, row, clear);
+        changed |= chip != self.hover || row != self.hovered_row;
+        (self.hover, self.hovered_row) = (chip, row);
         changed
     }
 
@@ -960,10 +926,7 @@ impl Viewer for ChangedFiles {
         self.make_list(span_rows);
         let mut pen = ui_components::LayerPainter::new(layer, ctx.text, ctx.icons, ds);
         let header_h = self.paint_header(&mut pen, b);
-        layer.quad(Quad::filled(
-            Rect::new(b.min_x(), b.min_y() + header_h, b.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, &ds, b.min_x(), b.max_x(), b.min_y() + header_h);
         self.list =
             Rect::new(b.min_x(), b.min_y() + header_h, b.size.width, b.size.height - header_h);
         if self.read_for != Some(self.span) {
@@ -1046,7 +1009,7 @@ impl ChangedFiles {
             self.stamps = self.rows.iter().map(Stamp::of).collect();
         }
         self.scroll = sample.scroll;
-        self.query = TextInput::new(&sample.query);
+        self.query.set_text(&sample.query);
         let typing = (!sample.query.is_empty()).then_some(SEARCH);
         self.with_controls(|c, parts| c.focus(parts, typing));
         self.sample = true;

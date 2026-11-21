@@ -874,7 +874,7 @@ fn the_text_goes_to_the_files_search_while_it_searches() {
     let popup = view.bar.popup.as_mut().unwrap();
     assert!(popup.query.text().is_empty());
     popup.query.set_text("ma");
-    popup.query.end(false);
+    popup.query.input.end(false);
     assert!(view.edit_key(ViewerKey::Backspace));
     assert_eq!(view.bar.popup.as_ref().unwrap().query.text(), "m", "the keys are the list's");
     assert_eq!(view.tree.query.text(), "st");
@@ -889,4 +889,47 @@ fn the_text_goes_to_the_files_search_while_it_searches() {
     assert!(view.text_input("x"));
     assert_eq!(view.bar.text.text(), "x");
     assert_eq!(view.tree.query.text(), "st");
+}
+
+/// Paints the log in a wide view.
+fn painted(view: &mut LogView) {
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, 1400.0, 600.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+}
+
+/// "Text or hash" is the app's search field: its `.*` and `Cc` in the room it keeps on the
+/// right, its × left of them (a hand over it); × pressed empties the text and the log shows
+/// every commit again.
+#[test]
+fn the_text_field_s_toggles_sit_right_of_its_clear_button() {
+    let mut view = view_with(vec![entry("m", &["a"]), entry("a", &[])]);
+    view.bar.text.set_text("zzz");
+    view.apply_text();
+    settle(&mut view);
+    assert!(view.rows().is_empty(), "nothing matches");
+    painted(&mut view);
+    let hit = |h: Hit| view.hits.iter().find(|(_, x)| *x == h).map(|(r, _)| *r).unwrap();
+    let (field, regex, case) = (hit(Hit::TextField), hit(Hit::Regex), hit(Hit::MatchCase));
+    let clear = view.bar.text.clear_area().expect("× shown with text");
+    assert!(field.contains(clear.center()) && field.contains(case.center()));
+    assert!(clear.max_x() <= regex.min_x() && regex.max_x() <= case.min_x(), "× . * Cc");
+    view.hover(clear.center());
+    assert_eq!(view.cursor_at(clear.center()), Some(ViewerCursor::Pointer));
+    view.press(clear.center(), 1);
+    view.release();
+    assert_eq!(view.bar.text.text(), "", "× empties it");
+    settle(&mut view);
+    assert_eq!(view.rows().len(), 2, "every commit again");
 }

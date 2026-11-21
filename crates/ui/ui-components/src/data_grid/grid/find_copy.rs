@@ -5,7 +5,7 @@ use super::*;
 impl<S: GridSource> DataGrid<S> {
     pub fn open_find(&mut self) {
         self.find.open = true;
-        self.find.input.select_all();
+        self.find.search.input.select_all();
         self.field = Some(Field::Find);
         self.find.stale = true;
     }
@@ -25,7 +25,7 @@ impl<S: GridSource> DataGrid<S> {
         }
         self.find.stale = false;
         self.find.matches.clear();
-        let needle = self.find.input.text().trim().to_lowercase();
+        let needle = self.find.search.input.text().trim().to_lowercase();
         if !self.find.open || needle.is_empty() {
             return;
         }
@@ -174,7 +174,7 @@ impl<S: GridSource> DataGrid<S> {
             let input = match field {
                 Field::Where => &self.where_input,
                 Field::Order => &self.order_input,
-                Field::Find => &self.find.input,
+                Field::Find => &self.find.search.input,
             };
             let selected = input.selected_text();
             return (!selected.is_empty()).then(|| selected.to_owned());

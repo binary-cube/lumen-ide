@@ -279,6 +279,62 @@ pe care o folosește.
   `decorations`, editorul de valori JSON al grid-ului, meniul de extractoare, dosarul și
   extensia temelor.
 
+## Făcut (2026-11-21: un câmp de căutare și un buton pentru toată aplicația)
+
+- **Câmpul de căutare comun** (`ui_components::search_field::SearchField`): pastila cu
+  lupa, × odată ce are text, ⌘A / ⌘X / ⌘Z, copierea, un singur cursor (focusul e al
+  view-ului, prin `Controls`). Cauza bug-ului din Keymap (⌘A nu mergea, două cursoare
+  clipeau): două bool-uri de focus și calea aplicației care forța focusul pe căutarea
+  setărilor.
+  - Opțiuni: `paint_with` + `SearchExtras { trailing, invalid }` (locul din dreapta pentru
+    ce e al view-ului: `.*` / `Cc`, ⌘K, butoanele căutării în fișiere; marginea roșie),
+    `take_edited` (textul s-a schimbat, fără copiere: amprentă), `take_cleared`, `forget`.
+  - Mutate pe el: setări și Keymap, picker-ul, nivelurile, fișierele schimbate, grid-ul,
+    proiectele, meniul, modulele de baze de date, proiect, git, agenți, unelte, aspect,
+    canvas, profiler, servicii, Task Manager, clientul HTTP, căutarea în fișiere.
+  - Un rând nou tastat sau lipit devine spațiu peste tot (înainte unele îl pierdeau).
+- **Butonul comun** (`ds::button` + `ButtonSpec`): felul (primar, pericol, secundar, bară,
+  fantomă, soft, ridicat), forma (dreptunghi, rotund), iconița și / sau eticheta, tonul
+  (și ca o culoare: `tone_color`), tasta, ▾ de meniu, pornit, ocupat (și treptat), hover
+  (animat, colorat, doar conținutul), culorile unei teme, pe o suprafață fixă; pastila cu
+  × (`chip`), mărimile cu nume (`button_size`). Lângă el: `segmented_styled`,
+  `dropdown_styled` / `dropdown_with_icon`, `choice_with_dot`, `check_row`.
+  - Vreo 90 de butoane desenate de mână mutate pe el; 14 funcții locale (`icon_button`,
+    `text_button`, `pill_button`, `icon_pill`…) șterse.
+  - Ce se vede diferit: iconițe de o singură mărime, același hover peste tot, `Cc` / `W` /
+    `.*` în fontul interfeței, butoanele de dialog late de cel puțin 96, × ferestrei în roșul
+    temei. Severitățile își păstrează paleta sigură pentru daltonism (`tone_color`).
+- Regulile (`.claude/rules/ui-components.md`): orice câmp de căutare e `SearchField`, orice
+  buton e `ds::button`.
+
+- **Și celelalte controale, din componente** (aceeași zi): bara de progres (culoare,
+  pistă, segmente, pe fundal închis, `Meter`), spinner-ul cu timpul dat din afară, banda
+  scrollbar-ului editorului, insignele (`Badge`: mărimi, culoare, iconiță, text estompat
+  înainte), tasta afișată (`Keycap`, două aspecte într-o componentă), rândul cu bifă și
+  fundalul de rând (`RowHighlight`), comutatorul dezactivat, separatorul în culoarea
+  cardurilor, `Radio`, `Checkbox`, `ColorSwatch` / `ColorField`, benzile de tab-uri
+  (`tab_strip`: `PillTab`, `UnderlineTab`), `ds::dot`. Mutate pe ele locurile desenate de
+  mână din componente, aplicație și toate modulele; trei liste fără bară de derulare
+  (planul de refactorizare, filtrele din git log, fișierele de diagrame, mediile HTTP,
+  paleta diagramelor) au primit scrollbar-ul comun, cu teste de tras.
+- **Meniurile sunt ale aplicației și când le cere un buton al vederii**
+  (`Viewer::take_menu`), oricine găzduiește vederea (taburi, panouri, Services, ferestrele
+  peste editor); rândurile distructive în culoarea de pericol (`RowLook.danger`).
+- **Recenzia independentă:** fără regresii grave; patru probleme mici reparate, fiecare cu
+  un test care pica înainte (focusul celor două câmpuri din setări la copiere / lipire,
+  eliberarea după un click care deschide un meniu, meniul cerut printr-o comandă în
+  Services, butonul ocupat cu tastă).
+
+## Lăsat (2026-11-21)
+
+- Insignele consolei (Limited / ReadOnly / Production) și ale profiler-ului: arată doar un
+  tooltip, nu sunt butoane.
+- Desenele care sunt conținut, nu controale (nodurile grafurilor, nuanțele diff-ului,
+  previzualizările, legendele, fundalurile cardurilor) rămân ale vederilor lor.
+- În componente: Submit și Count din grid, butonul din rândurile setărilor, elementele
+  barei de stare, pastila proiectului din bara de sus (insigna ei e o imagine).
+- Un buton secundar sau de pericol ocupat nu arată încă spinner.
+
 ## Lăsat
 
 - **Testul de alocări al Task Manager-ului** (`an_identical_repaint_allocates_nothing`) a

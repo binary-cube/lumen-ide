@@ -19,6 +19,7 @@ pub use ui_components::services;
 pub use ui_components::severity;
 pub use ui_components::shortcuts;
 pub use ui_components::snippets;
+pub use ui_components::tab_strip;
 pub use ui_components::toast;
 pub(crate) use ui_components::{
     anim, code_tokens, color_picker, palette, splitter, tool_panel, tooltip, viewer,

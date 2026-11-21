@@ -2,15 +2,18 @@
 //! behavior it has here: the color picker (over everything while open, its keys too), the
 //! sliders (held while dragged, stepped by the arrows once pressed), what an effect's menu
 //! or the gallery lets through (a press elsewhere closes the menu, or does nothing), the
-//! name's and the search's fields (a press puts the caret, the keys move and erase one
-//! character, Enter and Esc let go of them), an effect's handle (held while dragged).
+//! name's field (a press puts the caret, the keys move and erase one character, Enter and
+//! Esc let go of them), the search (the app's search field: its press, drag, editing keys,
+//! ⌘A / ⌘X / ⌘Z and ×; ↵ shows its first result, Esc empties it and lets go), an effect's
+//! handle (held while dragged).
 //! What a part asks of the studio (a slider's stop, the search's first result, a color
 //! picked) is written to the cell it's given; the studio does it after.
 
 use kernel::{Point, Rect};
 use ui_components::control::{Control, Press};
+use ui_components::search_field::SearchField;
 use ui_components::tool_panel::KeyReach;
-use ui_components::{SliderArea, ViewerKey};
+use ui_components::{SliderArea, ViewerCursor, ViewerKey};
 use ui_kit::TextInput;
 
 use crate::rows::Row;
@@ -96,23 +99,15 @@ impl Control for SliderPart<'_> {
     }
 }
 
-/// What an open effect's menu or the open gallery lets through: a press anywhere else
-/// closes the menu (the gallery stays: it closes by ×, Esc or a choice) and does nothing
-/// more.
+/// What the open gallery lets through: a press anywhere else does nothing (the gallery
+/// stays: it closes by ×, Esc or a choice).
 #[derive(Debug)]
 pub(crate) struct Catch<'a> {
     pub hits: &'a [(Rect, Hit)],
-    pub menu_for: &'a mut Option<usize>,
     pub gallery_open: bool,
 }
 
 impl Catch<'_> {
-    /// A press at `p` is the menu's to close (not on it).
-    fn closes_menu(&self, p: Point) -> bool {
-        self.menu_for.is_some()
-            && !matches!(hit_at(self.hits, p), Some(Hit::MenuItem(..) | Hit::Menu(_)))
-    }
-
     /// A press at `p` isn't on the open gallery's parts.
     fn outside_gallery(&self, p: Point) -> bool {
         self.gallery_open
@@ -125,13 +120,10 @@ impl Catch<'_> {
 
 impl Control for Catch<'_> {
     fn hit(&self, p: Point) -> bool {
-        self.closes_menu(p) || self.outside_gallery(p)
+        self.outside_gallery(p)
     }
 
-    fn press(&mut self, p: Point, _clicks: u32) -> Press {
-        if self.closes_menu(p) {
-            *self.menu_for = None;
-        }
+    fn press(&mut self, _p: Point, _clicks: u32) -> Press {
         Press::Took
     }
 }
@@ -147,21 +139,14 @@ pub(crate) enum FieldAsk {
     Searched,
 }
 
-/// The name's or the search's field: hit where it's the topmost hit (`own`); a press puts
-/// the caret; ⌫ ← → edit one character at a time; the name lets go of the keys on ↵ and
-/// Esc, the search shows its first result on ↵ and is emptied and let go on Esc.
+/// The name's field: hit where it's the topmost hit (`own`); a press puts the caret; ⌫ ← →
+/// edit one character at a time; it lets go of the keys on ↵ and Esc.
 #[derive(Debug)]
 pub(crate) struct FieldPart<'a> {
     pub input: &'a mut TextInput,
     pub own: Hit,
     pub hits: &'a [(Rect, Hit)],
     pub asked: &'a mut Option<FieldAsk>,
-}
-
-impl FieldPart<'_> {
-    fn is_search(&self) -> bool {
-        self.own == Hit::Search
-    }
 }
 
 impl Control for FieldPart<'_> {
@@ -183,11 +168,6 @@ impl Control for FieldPart<'_> {
             ViewerKey::Backspace => self.input.backspace(false),
             ViewerKey::Left => self.input.move_left(false, false),
             ViewerKey::Right => self.input.move_right(false, false),
-            ViewerKey::Enter if self.is_search() => *self.asked = Some(FieldAsk::Jump),
-            ViewerKey::Escape if self.is_search() => {
-                self.input.set_text("");
-                *self.asked = Some(FieldAsk::Leave);
-            }
             ViewerKey::Enter | ViewerKey::Escape => *self.asked = Some(FieldAsk::Leave),
             _ => return false,
         }
@@ -196,9 +176,6 @@ impl Control for FieldPart<'_> {
 
     fn text(&mut self, typed: &str) -> bool {
         self.input.insert(typed);
-        if self.is_search() {
-            *self.asked = Some(FieldAsk::Searched);
-        }
         true
     }
 
@@ -208,6 +185,86 @@ impl Control for FieldPart<'_> {
         }
         self.input.select_all();
         true
+    }
+}
+
+/// The search across every setting: hit where it's the topmost hit; the app's search field
+/// otherwise (see the module's doc), what changes its text asking for its results from the
+/// top.
+#[derive(Debug)]
+pub(crate) struct SearchPart<'a> {
+    pub field: &'a mut SearchField,
+    pub hits: &'a [(Rect, Hit)],
+    pub asked: &'a mut Option<FieldAsk>,
+}
+
+impl Control for SearchPart<'_> {
+    fn hit(&self, p: Point) -> bool {
+        hit_at(self.hits, p) == Some(&Hit::Search)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let press = Control::press(&mut *self.field, p, clicks);
+        // × emptied it: what it finds from the top.
+        if self.field.take_cleared() {
+            *self.asked = Some(FieldAsk::Searched);
+        }
+        press
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(&mut *self.field, p)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        Control::hover(&mut *self.field, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(&*self.field, p)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        match key {
+            ViewerKey::Enter => *self.asked = Some(FieldAsk::Jump),
+            ViewerKey::Escape => {
+                self.field.set_text("");
+                *self.asked = Some(FieldAsk::Leave);
+            }
+            _ => {
+                let erases = matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
+                return self.edited(erases, |f| Control::key(f, key, reach));
+            }
+        }
+        true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        self.edited(true, |f| Control::text(f, typed))
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&*self.field)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        self.edited(id != SELECT_ALL, |f| Control::command(f, id))
+    }
+}
+
+impl SearchPart<'_> {
+    /// `edit` on the field; used, and `changes` its text (typing, erasing, ⌘X, ⌘Z), its
+    /// results from the top.
+    fn edited(&mut self, changes: bool, edit: impl FnOnce(&mut SearchField) -> bool) -> bool {
+        let used = edit(self.field);
+        if used && changes {
+            *self.asked = Some(FieldAsk::Searched);
+        }
+        used
     }
 }
 

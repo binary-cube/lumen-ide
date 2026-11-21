@@ -19,12 +19,13 @@ use i18n::t;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
-use ui_components::ds::{self, Ctx};
+use ui_components::control::{Control, Press};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx};
+use ui_components::search_field::SearchField;
 use ui_components::tool_panel::KeyReach;
 use ui_components::tree::{self as tree_row, TreeList};
 use ui_components::{
-    EdgeScrollbar, LayerPainter, ViewMenuEntry, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
-    WithHost,
+    EdgeScrollbar, ViewMenuEntry, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint, WithHost,
 };
 use ui_kit::{TextInput, centered_baseline, draw_icon, draw_text};
 use workbench_model::{ProjectQueries, WorkbenchHost};
@@ -42,7 +43,9 @@ const FIELD_HEIGHT: f32 = 30.0;
 const LIST_TOP: f32 = FIELD_TOP + FIELD_HEIGHT + 6.0;
 const FOOTER: f32 = 36.0;
 /// A button beside the search (a new request, a new collection).
-const BUTTON: f32 = 30.0;
+const BUTTON: f32 = ds::button_size::ROOMY;
+/// The edit command choosing a whole field (it changes nothing found).
+const SELECT_ALL: &str = "select_all";
 
 /// A new request, as written at a file's end.
 pub const TEMPLATE: &str = "### A request\nGET https://example.com\nAccept: application/json\n";
@@ -139,8 +142,12 @@ pub struct RequestTree {
     listing: Arc<Listing>,
     reading: Pending<(u64, Listing)>,
     collapsed: BTreeSet<String>,
-    filter: TextInput,
+    /// The search (the app's search field: ×, ⌘A, a drag selecting), typed in while
+    /// `typing` (its caret only then, and only while the tree has the keys).
+    filter: SearchField,
     typing: bool,
+    /// A press in the search holds the pointer: the moves select.
+    selecting: bool,
     rows: Vec<Row>,
     slots: Vec<Slot>,
     scroll: f32,
@@ -712,35 +719,20 @@ impl RequestTree {
             (b.size.width - 2.0 * px(PADDING) - buttons).max(0.0),
             px(FIELD_HEIGHT),
         );
-        {
-            let mut pen = LayerPainter::new(base, text, icons, Ctx::new(p, scale));
-            ds::search_input(
-                &mut pen,
-                self.field,
-                &self.filter,
-                focused && self.typing,
-                &t("http.search_requests"),
-            );
-        }
+        let typing = focused && self.typing && self.naming.is_none();
+        let placeholder = t("http.search_requests");
+        self.filter.paint(base, text, icons, &ds, (self.field, typing), &placeholder);
         self.buttons_at.clear();
         if self.buttons {
             let size = px(BUTTON);
             let mut x = self.field.max_x() + px(4.0);
             for button in Button::ALL {
                 let r = Rect::new(x, self.field.min_y(), size, size);
-                if self.hover_button == Some(button) {
-                    layer_hover(base, r, p.tree_hover, px(6.0));
-                }
-                if let Some(id) = icons.id(button.icon()) {
-                    let s = px(16.0);
-                    let at = Rect::new(
-                        (r.min_x() + (size - s) / 2.0).round(),
-                        (r.min_y() + (size - s) / 2.0).round(),
-                        s,
-                        s,
-                    );
-                    draw_icon(base, icons, id, at, p.text_muted);
-                }
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon(button.icon())
+                    .rest_tone(ds::Tone::Neutral)
+                    .hovered(self.hover_button == Some(button));
+                ds::button(base, text, icons, &ds, r, spec);
                 self.buttons_at.push((r, button));
                 x = r.max_x() + px(2.0);
             }
@@ -813,14 +805,10 @@ impl RequestTree {
                 Slot::Naming(depth) => depth,
             };
             // The guides of what holds it, as the project's tree draws them.
-            for level in 0..depth {
-                let gx = (self.list.min_x()
-                    + px(PADDING)
-                    + f32::from(level) * px(INDENT)
-                    + chevron / 2.0)
-                    .round();
-                layer.quad(Quad::filled(Rect::new(gx, row_top, ds.line(), h), guide));
-            }
+            let guide_x = |level: usize| {
+                self.list.min_x() + px(PADDING) + level as f32 * px(INDENT) + chevron / 2.0
+            };
+            tree_row::guides(layer, 0..usize::from(depth), guide_x, (row_top, h), ds.line(), guide);
             let x = self.list.min_x() + px(PADDING) + f32::from(depth) * px(INDENT);
             let i = match self.slots[slot] {
                 Slot::Row(i) => i,
@@ -1003,7 +991,14 @@ impl RequestTree {
         }
         self.typing = self.field.contains(p);
         if self.typing {
-            self.filter.press(p.x, clicks);
+            self.selecting = Control::press(&mut self.filter, p, clicks) == Press::Held;
+            // × emptied it: every row again.
+            if self.filter.take_cleared() {
+                self.scroll = 0.0;
+                self.filtered();
+            }
+            self.pressed = None;
+            return;
         }
         self.dragged_to = None;
         self.pressed = self.row_at(p).map(|i| {
@@ -1019,6 +1014,9 @@ impl RequestTree {
 
     /// A request dragged: where it's over (it moves once it went a few pixels).
     pub fn drag(&mut self, p: Point) -> bool {
+        if self.selecting {
+            return Control::drag(&mut self.filter, p);
+        }
         let Some((i, from, ..)) = self.pressed else { return false };
         if !matches!(self.rows.get(i), Some(Row::Request { .. })) {
             return false;
@@ -1034,6 +1032,9 @@ impl RequestTree {
     /// Released: a click chooses its row; a request dropped on a folder (or another
     /// request's folder) moves into that folder's `requests.http`.
     pub fn release(&mut self) -> bool {
+        if std::mem::take(&mut self.selecting) {
+            return false;
+        }
         let Some((i, _, on_arrow, double)) = self.pressed.take() else { return false };
         match self.dragged_to.take() {
             None => self.activate(i, on_arrow, double),
@@ -1060,7 +1061,9 @@ impl RequestTree {
     pub fn hover(&mut self, p: Point) -> bool {
         let hover = self.row_at(p);
         let button = self.button_at(p);
-        let changed = self.hover != hover || self.hover_button != button;
+        // The search's × lit under the mouse.
+        let clear = Control::hover(&mut self.filter, Some(p));
+        let changed = clear || self.hover != hover || self.hover_button != button;
         self.hover = hover;
         self.hover_button = button;
         changed | self.bar.hover(p)
@@ -1075,7 +1078,11 @@ impl RequestTree {
     }
 
     pub fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.field.contains(p) || self.naming_field.contains(p) {
+        // The search's: the text's, a hand on its ×.
+        if self.field.contains(p) {
+            return Control::cursor(&self.filter, p);
+        }
+        if self.naming_field.contains(p) {
             return Some(ViewerCursor::Text);
         }
         self.clickable(p).then_some(ViewerCursor::Pointer)
@@ -1091,14 +1098,15 @@ impl RequestTree {
     }
 
     pub fn text_input(&mut self, text: &str) -> bool {
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
         if let Some((_, input)) = &mut self.naming {
-            input.insert(&text);
+            let name: String = text.chars().filter(|c| !c.is_control()).collect();
+            input.insert(&name);
             self.naming_error = false;
             return true;
         }
         self.typing = true;
-        self.filter.insert(&text);
+        // On one line, the search field's own way (its breaks as spaces).
+        Control::text(&mut self.filter, text);
         self.scroll = 0.0;
         self.filtered();
         true
@@ -1107,7 +1115,7 @@ impl RequestTree {
     pub fn selected_text(&self) -> Option<String> {
         let selected = match &self.naming {
             Some((_, input)) => input.selected_text(),
-            None if self.typing => self.filter.selected_text(),
+            None if self.typing => self.filter.input.selected_text(),
             None => "",
         };
         (!selected.is_empty()).then(|| selected.to_owned())
@@ -1115,15 +1123,24 @@ impl RequestTree {
 
     /// ⌘A in the name being typed, or in the search.
     pub fn select_all(&mut self) -> bool {
+        self.edit_command(SELECT_ALL)
+    }
+
+    /// An edit command (⌘A, ⌘X, ⌘Z, ⌘⇧Z) in the name being typed, or in the search (what
+    /// it changes filtered again).
+    pub fn edit_command(&mut self, id: &str) -> bool {
         if let Some((_, input)) = &mut self.naming {
-            input.select_all();
-            return true;
+            self.naming_error = false;
+            return Control::command(input, id);
         }
-        if self.typing {
-            self.filter.select_all();
-            return true;
+        if !self.typing || !Control::command(&mut self.filter, id) {
+            return false;
         }
-        false
+        if id != SELECT_ALL {
+            self.scroll = 0.0;
+            self.filtered();
+        }
+        true
     }
 
     pub fn edit_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
@@ -1165,7 +1182,7 @@ impl RequestTree {
                 self.activate(i, false, false);
             }
             _ => {
-                if self.typing && reach.edit(&mut self.filter, key) {
+                if self.typing && reach.edit(&mut self.filter.input, key) {
                     self.filtered();
                     return true;
                 }
@@ -1289,10 +1306,6 @@ impl RequestTree {
     pub fn refresh(&self) {
         self.stale.store(true, Ordering::Release);
     }
-}
-
-fn layer_hover(layer: &mut Layer, at: Rect, color: Rgba, radius: f32) {
-    layer.quad(Quad::filled(at, color).rounded(radius));
 }
 
 /// A message for the user, as the tree's action.

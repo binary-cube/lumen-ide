@@ -183,6 +183,41 @@ fn its_search_takes_the_edit_commands() {
     assert!(!ToolPanel::command(&mut panel, "select_all"), "not typed in: not its");
 }
 
+/// The search is the app's field: typed into, ⌘A selects it, × (drawn with text) empties it
+/// and the list is searched again; only the field with the keys shows its caret (the rename's
+/// field and the search never both).
+#[test]
+fn its_search_is_the_app_s_field_with_one_focus() {
+    let mut panel = listed(vec![session("a", 3), session("b", 2)]);
+    painted(&mut panel, 300.0, 400.0);
+    let field = panel.field;
+    let inside = Point::new(field.min_x() + 30.0, field.min_y() + field.size.height / 2.0);
+    assert!(panel.click(inside).is_none());
+    assert!(panel.typing(), "pressed: the search has the keys");
+    assert!(panel.text_input("session b"));
+    panel.filter();
+    assert_eq!(panel.shown, [1]);
+    assert!(ToolPanel::command(&mut panel, "select_all"));
+    assert_eq!(panel.selected_text().as_deref(), Some("session b"));
+    // Renaming a row: its field has the keys, the search none (one caret).
+    panel.start_rename(0);
+    assert_eq!(panel.controls.focused(), Some(RENAME_FIELD));
+    assert!(!panel.typing(), "the search lost its caret");
+    assert!(panel.text_input("x"));
+    assert_eq!(panel.query.text(), "session b", "the search untouched");
+    panel.finish_rename();
+    // × empties it and the list is searched again.
+    painted(&mut panel, 300.0, 400.0);
+    panel.hovered = Some(0);
+    let clear = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    assert_eq!(panel.cursor_at(clear), Some(ViewerCursor::Pointer), "× is a hand");
+    assert!(panel.click(clear).is_none());
+    assert_eq!(panel.query.text(), "");
+    assert_eq!(panel.hovered, None, "searched again");
+    panel.filter();
+    assert_eq!(panel.shown.len(), 2);
+}
+
 /// A row's star adds its session to the favorites (and says so in its tooltip), clicked
 /// again takes it off, without opening it; the header's star lists only the favorites.
 #[test]
@@ -447,11 +482,11 @@ fn folders_group_the_sessions() {
     panel.filter();
     assert_eq!(panel.folder_counts, [1]);
     // A search: the folder only with what's found in it.
-    panel.query = TextInput::new("session b");
+    panel.query.set_text("session b");
     panel.filter();
     assert!(!panel.rows.contains(&Row::Folder(0)), "nothing found in it: left out");
     // Deleted from its menu: its sessions back in the list.
-    panel.query = TextInput::default();
+    panel.query.set_text("");
     panel.filter();
     panel.menu_at(row(0.0)).unwrap();
     assert!(panel.menu_command(FOLDER_DELETE));

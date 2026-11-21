@@ -5,10 +5,12 @@
 use i18n::{t, tr};
 use icons::{IconId, Icons};
 use kernel::{Point, Rect, Rgba};
-use render_api::{Layer, Quad, Scene};
+use render_api::{Layer, Scene};
 use text_layout::{Font, FontMetrics, TextSystem};
 use text_search::Hit;
-use ui_kit::{KeyHint, TextInput, TextInputStyle, centered_baseline, draw_icon, draw_text};
+use ui_components::control::Control;
+use ui_components::search_field::SearchField;
+use ui_kit::{KeyHint, TextInput, centered_baseline, draw_icon, draw_text};
 use workspace::FileMatch;
 
 use ui_components::ds::{self, Ctx, Elevation, Tone, radius, space};
@@ -104,7 +106,8 @@ pub enum ProjectSearchAction {
 #[derive(Debug, Default)]
 pub struct ProjectSearch {
     open: bool,
-    pub input: TextInput,
+    /// What's searched: the app's search field (its × empties it).
+    pub input: SearchField,
     /// The folder searched in, relative to the project (empty: all of it).
     pub scope: TextInput,
     /// The files searched, as a mask (`*.php, !*.min.js`; empty: all of them), beside the
@@ -221,7 +224,7 @@ impl ProjectSearch {
             self.appear = Some(appear);
         }
         self.open = true;
-        self.input.select_all();
+        self.input.input.select_all();
         self.selected = 0;
         self.first = 0;
     }
@@ -463,7 +466,10 @@ impl ProjectSearch {
         let replace_all = self.replace_open && self.replace_all.contains(p);
         let forget = self.forget_buttons.iter().find(|(r, _)| r.contains(p)).map(|(_, i)| *i);
         let clear = self.clear_all.contains(p);
-        let changed = forget != self.forget_hover
+        // The search's × lit under the mouse.
+        let field = Control::hover(&mut self.input, Some(p));
+        let changed = field
+            || forget != self.forget_hover
             || clear != self.clear_hover
             || hover != self.hover
             || esc != self.esc_hover

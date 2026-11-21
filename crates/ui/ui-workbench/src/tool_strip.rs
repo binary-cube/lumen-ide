@@ -7,13 +7,16 @@
 
 use icons::{IconId, Icons};
 use kernel::{Point, Rect, Rgba};
-use render_api::{Quad, Scene};
-use ui_kit::draw_icon;
+use render_api::Scene;
+use text_layout::TextSystem;
 
 use crate::palette::Palette;
 
 /// The strip width, in logical pixels.
 const WIDTH: f32 = 44.0;
+
+/// A button's corners (logical pixels).
+const CORNER: f32 = 8.0;
 
 /// The strip's appearance; built from the theme or given individually.
 #[derive(Debug, Clone, PartialEq)]
@@ -34,7 +37,7 @@ impl ToolStripStyle {
             hover: p.tool_strip_hover,
             active_background: p.tool_strip_active_background,
             active_icon: p.tool_strip_active_icon,
-            button_size: 32.0,
+            button_size: crate::ds::button_size::SPACIOUS,
             icon_size: 18.0,
         }
     }
@@ -116,6 +119,7 @@ impl ToolStrip {
         &mut self,
         buttons: &[ToolButton],
         icons: &Icons,
+        text: &mut TextSystem,
         palette: &Palette,
         scene: &mut Scene,
     ) {
@@ -176,27 +180,31 @@ impl ToolStrip {
             }
         }
 
+        let ctx = crate::ds::Ctx::new(palette, self.scale);
         for (rect, button) in place {
             // Lit: the accent, or the tone the button asks for (a recording's red).
             let lit = button.tone.map_or(st.active_background, |t| t.color(palette));
-            let color = if button.active {
-                layer.quad(Quad::filled(rect, lit).rounded(px(8.0)));
-                st.active_icon
-            } else {
-                if self.hover == Some(button.id) {
-                    layer.quad(Quad::filled(rect, st.hover).rounded(px(8.0)));
-                }
-                st.icon
+            let colors = crate::ds::ButtonColors {
+                icon: st.icon,
+                hover: st.hover,
+                on_back: lit,
+                on_icon: st.active_icon,
             };
+            let spec = crate::ds::ButtonSpec::new(crate::ds::ButtonKind::Ghost)
+                .icon_id(button.icon)
+                .icon_size(st.icon_size)
+                .corner(CORNER)
+                .colors(colors)
+                .on(button.active)
+                .hovered(self.hover == Some(button.id));
+            crate::ds::button(layer, text, icons, &ctx, rect, spec);
             let r = Rect::new(
                 rect.min_x() + (size - icon) / 2.0,
                 (rect.min_y() + (size - icon) / 2.0).round(),
                 icon,
                 icon,
             );
-            draw_icon(layer, icons, button.icon, r, color);
             if let Some(kind) = button.badge {
-                let ctx = crate::ds::Ctx::new(palette, self.scale);
                 // At the icon's top right corner, cut out of what's behind it there: the lit
                 // button's own color, the hover's tint over the strip, else the strip.
                 // Inside the button, ring and all (nothing of it over the strip beside).

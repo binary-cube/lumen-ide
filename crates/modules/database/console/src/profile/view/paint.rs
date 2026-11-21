@@ -1,6 +1,32 @@
 //! The profile's parts painted: its bar, summary, panel, tables and menus.
 
 use super::*;
+use ui_components::ds::{ButtonKind, ButtonSpec, button_size};
+
+/// The height of the bar's controls: the switcher, the buttons, the filter (logical pixels).
+const BAR_CONTROL_H: f32 = button_size::MEDIUM;
+
+/// How lit a severity's pill is under the mouse (one filtering by it: all of it).
+const SEVERITY_HOVER: f32 = 0.5;
+
+/// A panel's count beside its title: its fill's alpha of the text and the room on each side.
+const COUNT_FILL: f32 = 0.08;
+const COUNT_PAD: f32 = 6.0;
+
+/// A severity's tone: its pill tinted in it.
+fn severity_tone(level: Level) -> Tone {
+    match level {
+        Level::Info => Tone::Accent,
+        Level::Warning => Tone::Warning,
+        Level::Critical => Tone::Danger,
+    }
+}
+
+/// A figure's chip (the summary's, the comparison's): its height, the room on each side,
+/// its fill's alpha of its tint (logical pixels).
+pub(super) const FIGURE_H: f32 = 22.0;
+pub(super) const FIGURE_PAD: f32 = 6.0;
+pub(super) const FIGURE_FILL: f32 = 0.05;
 
 impl ProfileView {
     pub(super) fn paint_bar(&mut self, ctx: &mut ViewerPaint<'_>, bar: Rect) {
@@ -10,11 +36,12 @@ impl ProfileView {
         let layer = ctx.scene.push_layer(Some(bar));
         layer.quad(Quad::filled(bar, p.editor_background));
         ds::divider(layer, &ds, bar.min_x(), bar.max_x(), bar.max_y() - ds.line());
+        // Pressed only where it's drawn this time.
+        self.filter.forget();
         let Some(set) = self.set.clone() else { return };
         let report = set.report.clone();
         let mid = (bar.min_y() + bar.size.height / 2.0).round();
-        let font = ds.ui_font(-1.0);
-        let h = px(26.0);
+        let h = px(BAR_CONTROL_H);
         let mut x = bar.min_x() + px(8.0);
         let mut right = bar.max_x() - px(8.0);
         // The right: the engine, ANALYZE / EXPLAIN, rolled back.
@@ -41,22 +68,37 @@ impl ProfileView {
             text.shape_line(l, &small).width + px(14.0) + px(6.0)
         };
         let mode_labels: Vec<String> = ProfileMode::ALL.iter().map(|m| m.label()).collect();
+        let mode_refs: Vec<&str> = mode_labels.iter().map(String::as_str).collect();
+        let mode_label = self.mode.label();
+        let mode_spec = ButtonSpec::new(ButtonKind::Soft)
+            .icon(self.mode.icon())
+            .label(&mode_label)
+            .menu(true)
+            .hovered(self.hover == Some(Hit::ModeMenu));
         let switcher_w = if self.laid.switcher_menu {
-            ctx.text.shape_line(&self.mode.label(), &font).width + px(52.0)
+            ds::button_width(ctx.text, &ds, &mode_spec, h)
         } else {
-            mode_labels.iter().map(|l| ctx.text.shape_line(l, &font).width + px(20.0)).sum::<f32>()
-                + px(6.0)
+            ds::segmented_width(ctx.text, &ds, &mode_refs)
         };
         let export_label = i18n::t("profile.view.export");
-        let export_w = ctx.text.shape_line(&export_label, &font).width + px(36.0);
-        let icon_w = px(28.0);
-        // Compare ▾ (an icon alone when the switcher is a menu).
+        let export_spec = ButtonSpec::new(ButtonKind::Soft)
+            .icon("download")
+            .label(&export_label)
+            .menu(true)
+            .hovered(self.hover == Some(Hit::Export));
+        let export_w = ds::button_width(ctx.text, &ds, &export_spec, h);
+        let icon_w = px(button_size::LARGE);
+        // Compare ▾ (an icon alone when the switcher is a menu), on while compared.
         let compare_label = i18n::t("profile.compare.button");
-        let compare_w = if self.laid.switcher_menu {
-            icon_w + px(14.0)
-        } else {
-            ctx.text.shape_line(&compare_label, &font).width + px(50.0)
-        };
+        let mut compare_spec = ButtonSpec::new(ButtonKind::Soft)
+            .icon("compare")
+            .menu(true)
+            .on(self.compare.is_some())
+            .hovered(self.hover == Some(Hit::Compare));
+        if !self.laid.switcher_menu {
+            compare_spec = compare_spec.label(&compare_label);
+        }
+        let compare_w = ds::button_width(ctx.text, &ds, &compare_spec, h);
         let services = matches!(self.source, Source::Services(_));
         let drawer = !self.laid.mode_wide;
         let fixed = switcher_w
@@ -131,191 +173,56 @@ impl ProfileView {
         // The switcher.
         if self.laid.switcher_menu {
             let r = Rect::new(x, mid - h / 2.0, switcher_w, h);
-            let hovered = self.hover == Some(Hit::ModeMenu);
-            pill_button(
-                &mut ui_components::LayerPainter::new(layer, ctx.text, ctx.icons, ds),
-                r,
-                (Some(self.mode.icon()), &self.mode.label()),
-                ui_components::ds::Press::new(true, hovered),
-                true,
-            );
+            ds::button(layer, ctx.text, ctx.icons, &ds, r, mode_spec);
             self.hits.push((r, Hit::ModeMenu, Some(i18n::t("profile.view.mode_tip"))));
             x = r.max_x() + px(8.0);
         } else {
-            let track = Rect::new(x, mid - h / 2.0, switcher_w, h);
-            layer.quad(
-                Quad::filled(track, p.text.with_alpha(0.05))
-                    .rounded(px(radius::SM))
-                    .bordered(ds.line(), p.border),
-            );
-            let mut sx = track.min_x() + px(3.0);
-            for (i, m) in ProfileMode::ALL.iter().enumerate() {
-                let label = &mode_labels[i];
-                let shaped = ctx.text.shape_line(label, &font);
-                let w = shaped.width + px(20.0);
-                let seg = Rect::new(sx, track.min_y() + px(3.0), w, h - px(6.0));
-                let on = *m == self.mode;
-                if on {
-                    layer.quad(
-                        Quad::filled(seg, p.popup_background)
-                            .rounded(px(radius::SM) - px(2.0))
-                            .bordered(ds.line(), p.card_border),
-                    );
-                } else if self.hover == Some(Hit::Mode(i)) && m.available() {
-                    layer.quad(
-                        Quad::filled(seg, p.text.with_alpha(0.05))
-                            .rounded(px(radius::SM) - px(2.0)),
-                    );
-                }
-                let color = if on {
-                    p.text
-                } else if m.available() {
-                    p.text_muted
-                } else {
-                    p.text_muted.with_alpha(0.45)
-                };
-                draw_text(
-                    layer,
-                    &shaped,
-                    (seg.min_x() + px(10.0)).round(),
-                    ds::optical_baseline(seg.min_y(), seg.size.height, &font),
-                    color,
-                );
-                let tip = if m.available() {
-                    m.label()
-                } else {
-                    i18n::tr!("profile.view.mode_later", view = m.label().as_str())
-                };
-                self.hits.push((seg, Hit::Mode(i), Some(tip)));
-                sx += w;
-            }
-            x = track.max_x() + px(8.0);
+            let selected = ProfileMode::ALL.iter().position(|m| *m == self.mode).unwrap_or(0);
+            let hovered = match self.hover {
+                Some(Hit::Mode(i)) => Some(i),
+                _ => None,
+            };
+            let disabled: Vec<usize> = ProfileMode::ALL
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| !m.available())
+                .map(|(i, _)| i)
+                .collect();
+            let spec = ds::SegmentedSpec { right: 0.0, mid, labels: &mode_refs, selected, hovered };
+            let look = ds::SegmentedLook {
+                height: BAR_CONTROL_H,
+                place: ds::SegmentPlace::Left(x),
+                disabled: &disabled,
+                icons: &[],
+            };
+            let hits = &mut self.hits;
+            ds::segmented_styled(layer, ctx.text, ctx.icons, &ds, (spec, look), |i, seg| {
+                let tip = ProfileMode::ALL.get(i).map(|m| m.label());
+                hits.push((seg, Hit::Mode(i), tip));
+            });
+            x += switcher_w + px(8.0);
         }
         // Compare ▾.
         {
             let r = Rect::new(x, mid - h / 2.0, compare_w, h);
-            let on = self.compare.is_some();
-            if on {
-                layer.quad(
-                    Quad::filled(r, p.accent.with_alpha(0.12))
-                        .rounded(px(radius::SM))
-                        .bordered(ds.line(), p.accent.with_alpha(0.6)),
-                );
-            }
-            let label = if self.laid.switcher_menu { "" } else { compare_label.as_str() };
-            if on {
-                // Its own frame drawn: the label and chevron over it.
-                if let Some(id) = ctx.icons.id("compare") {
-                    let s = px(13.0);
-                    draw_icon(
-                        layer,
-                        ctx.icons,
-                        id,
-                        Rect::new((r.min_x() + px(8.0)).round(), (mid - s / 2.0).round(), s, s),
-                        p.accent,
-                    );
-                }
-                let shaped = ctx.text.shape_line(label, &font);
-                draw_text(
-                    layer,
-                    &shaped,
-                    (r.min_x() + px(27.0)).round(),
-                    ds::optical_baseline(r.min_y(), r.size.height, &font),
-                    p.accent,
-                );
-                if let Some(id) = ctx.icons.id("chevron-down") {
-                    let s = px(10.0);
-                    draw_icon(
-                        layer,
-                        ctx.icons,
-                        id,
-                        Rect::new((r.max_x() - px(16.0)).round(), (mid - s / 2.0).round(), s, s),
-                        p.accent,
-                    );
-                }
-            } else {
-                pill_button(
-                    &mut ui_components::LayerPainter::new(layer, ctx.text, ctx.icons, ds),
-                    r,
-                    (Some("compare"), label),
-                    ui_components::ds::Press::new(true, self.hover == Some(Hit::Compare)),
-                    true,
-                );
-            }
+            ds::button(layer, ctx.text, ctx.icons, &ds, r, compare_spec);
             self.hits.push((r, Hit::Compare, Some(i18n::t("profile.compare.button_tip"))));
             x = r.max_x() + px(6.0);
         }
         // The filter.
         let fr = Rect::new(x, mid - h / 2.0, filter_w, h);
         if filter_w > icon_w {
-            let focused = self.typing;
-            layer.quad(
-                Quad::filled(fr, p.input_background)
-                    .rounded(px(radius::SM))
-                    .bordered(ds.line(), if focused { p.accent } else { p.input_border }),
-            );
-            if let Some(id) = ctx.icons.id("search") {
-                let s = px(13.0);
-                draw_icon(
-                    layer,
-                    ctx.icons,
-                    id,
-                    Rect::new((fr.min_x() + px(8.0)).round(), (mid - s / 2.0).round(), s, s),
-                    p.text_muted,
-                );
-            }
-            let tx = fr.min_x() + px(27.0);
-            let (shown, color) = if self.filter.is_empty() {
-                (i18n::t("profile.view.filter"), p.text_muted.with_alpha(0.8))
-            } else {
-                (self.filter.clone(), p.text)
-            };
-            let shown = ds::ellipsize(ctx.text, &shown, &font, fr.max_x() - tx - px(22.0));
-            let shaped = ctx.text.shape_line(&shown, &font);
-            draw_text(
-                layer,
-                &shaped,
-                tx.round(),
-                ds::optical_baseline(fr.min_y(), fr.size.height, &font),
-                color,
-            );
-            if focused {
-                let cx = if self.filter.is_empty() { tx } else { tx + shaped.width + px(1.0) };
-                layer.quad(Quad::filled(
-                    Rect::new(cx.round(), mid - px(7.0), ds.line(), px(14.0)),
-                    p.caret,
-                ));
-            }
+            let placeholder = i18n::t("profile.view.filter");
+            let field = (fr, self.typing);
+            self.filter.paint(layer, ctx.text, ctx.icons, &ds, field, &placeholder);
             self.hits.push((fr, Hit::Filter, Some(i18n::t("profile.view.filter_tip"))));
-            if !self.filter.is_empty() {
-                let cr = Rect::new(fr.max_x() - px(22.0), fr.min_y(), px(22.0), fr.size.height);
-                if let Some(id) = ctx.icons.id("x") {
-                    let s = px(11.0);
-                    draw_icon(
-                        layer,
-                        ctx.icons,
-                        id,
-                        Rect::new(
-                            (cr.min_x() + (cr.size.width - s) / 2.0).round(),
-                            (mid - s / 2.0).round(),
-                            s,
-                            s,
-                        ),
-                        p.text_muted,
-                    );
-                }
-                self.hits.push((cr, Hit::FilterClear, None));
-            }
         } else {
-            crate::bar::icon_button(
-                layer,
-                ctx.icons,
-                &ds,
-                fr,
-                "search",
-                None,
-                ui_components::ds::Press::new(true, self.hover == Some(Hit::Filter)),
-            );
+            // An icon alone: the field isn't there to be pressed.
+            self.filter.forget();
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon("search")
+                .hovered(self.hover == Some(Hit::Filter));
+            ds::button(layer, ctx.text, ctx.icons, &ds, fr, spec);
             self.hits.push((fr, Hit::Filter, Some(i18n::t("profile.view.filter_tip"))));
         }
         x = fr.max_x() + px(6.0);
@@ -334,62 +241,30 @@ impl ProfileView {
         };
         for (hit, icon, tip) in tool_list {
             let r = Rect::new(x, mid - h / 2.0, icon_w - px(2.0), h);
-            crate::bar::icon_button(
-                layer,
-                ctx.icons,
-                &ds,
-                r,
-                icon,
-                None,
-                ui_components::ds::Press::new(true, self.hover.as_ref() == Some(&hit)),
-            );
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon(icon)
+                .hovered(self.hover.as_ref() == Some(&hit));
+            ds::button(layer, ctx.text, ctx.icons, &ds, r, spec);
             self.hits.push((r, hit, Some(tip)));
             x = r.max_x() + px(2.0);
         }
         // Export ▾.
         let er = Rect::new(x + px(4.0), mid - h / 2.0, export_w, h);
-        pill_button(
-            &mut ui_components::LayerPainter::new(layer, ctx.text, ctx.icons, ds),
-            er,
-            (Some("download"), &export_label),
-            ui_components::ds::Press::new(true, self.hover == Some(Hit::Export)),
-            true,
-        );
+        ds::button(layer, ctx.text, ctx.icons, &ds, er, export_spec);
         self.hits.push((er, Hit::Export, Some(i18n::t("profile.view.export_tip"))));
         x = er.max_x() + px(6.0);
         // The panel's drawer.
         if drawer {
             let r = Rect::new(x, mid - h / 2.0, icon_w + px(22.0), h);
-            let on = self.drawer_open;
-            if on || self.hover == Some(Hit::Drawer) {
-                layer.quad(
-                    Quad::filled(
-                        r,
-                        if on { p.accent.with_alpha(0.14) } else { p.text.with_alpha(0.08) },
-                    )
-                    .rounded(px(radius::SM)),
-                );
-            }
-            if let Some(id) = ctx.icons.id("lightbulb") {
-                let s = px(14.0);
-                draw_icon(
-                    layer,
-                    ctx.icons,
-                    id,
-                    Rect::new((r.min_x() + px(7.0)).round(), (mid - s / 2.0).round(), s, s),
-                    if on { p.accent } else { p.text },
-                );
-            }
             let count =
                 report.as_ref().map_or(0, |r| r.findings.iter().filter(|f| f.is_problem()).count());
-            let shaped = ctx.text.shape_line(&count.to_string(), &small);
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + px(26.0)).round(),
-                ds::optical_baseline(r.min_y(), r.size.height, &small),
-                p.text_muted,
-            );
+            let count = count.to_string();
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon("lightbulb")
+                .label(&count)
+                .on(self.drawer_open)
+                .hovered(self.hover == Some(Hit::Drawer));
+            ds::button(layer, ctx.text, ctx.icons, &ds, r, spec);
             self.hits.push((r, Hit::Drawer, Some(i18n::t("profile.view.drawer_tip"))));
             x = r.max_x() + px(6.0);
         }
@@ -445,43 +320,28 @@ impl ProfileView {
         let mut right = area.max_x() - px(10.0);
         for (l, n) in counts.iter().rev() {
             let text = summary::count_text(*l, *n);
-            let shaped = ctx.text.shape_line(&text, &label_font);
-            let w = shaped.width + px(30.0);
-            let r = Rect::new((right - w).round(), (mid - px(11.0)).round(), w.round(), px(22.0));
             let on = self.severity == Some(*l);
             let hovered = self.hover == Some(Hit::Severity(*l));
-            let c = l.color(p);
-            layer.quad(
-                Quad::filled(
-                    r,
-                    c.with_alpha(if on {
-                        0.22
-                    } else if hovered {
-                        0.14
-                    } else {
-                        0.09
-                    }),
-                )
-                .rounded(px(11.0))
-                .bordered(ds.line(), c.with_alpha(if on { 0.9 } else { 0.35 })),
-            );
-            if let Some(id) = ctx.icons.id(l.icon()) {
-                let s = px(12.0);
-                draw_icon(
-                    layer,
-                    ctx.icons,
-                    id,
-                    Rect::new((r.min_x() + px(8.0)).round(), (mid - s / 2.0).round(), s, s),
-                    c,
-                );
-            }
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + px(24.0)).round(),
-                ds::optical_baseline(r.min_y(), r.size.height, &label_font),
-                c,
-            );
+            // On: as lit as it gets; under the mouse, part way.
+            let lit = if on {
+                1.0
+            } else if hovered {
+                SEVERITY_HOVER
+            } else {
+                0.0
+            };
+            let spec = ButtonSpec::new(ButtonKind::Soft)
+                .icon(l.icon())
+                .label(&text)
+                .round()
+                .tinted()
+                .tone(severity_tone(*l))
+                .tone_color(l.color(p))
+                .hover_amount(lit);
+            let h = px(button_size::SMALL);
+            let w = ds::button_width(ctx.text, &ds, &spec, h);
+            let r = Rect::new((right - w).round(), (mid - h / 2.0).round(), w, h);
+            ds::button(layer, ctx.text, ctx.icons, &ds, r, spec);
             self.hits.push((r, Hit::Severity(*l), Some(i18n::t("profile.view.severity_tip"))));
             right = r.min_x() - px(6.0);
         }
@@ -501,34 +361,22 @@ impl ProfileView {
         // The figures, from the left, as many as fit.
         let mut x = area.min_x() + px(10.0);
         for (i, pill) in summary::pills(report).into_iter().enumerate() {
-            let label = ctx.text.shape_line(&pill.label, &label_font);
-            let value = ctx.text.shape_line(&pill.value, &value_font);
-            let w = label.width + value.width + px(14.0) + px(20.0);
-            if x + w > right - px(8.0) {
+            let tint = if pill.warn { p.warning } else { p.text };
+            let badge = ds::Badge::new(&pill.value)
+                .font(&value_font)
+                .lead(&pill.label)
+                .lead_font(&label_font)
+                .color(tint)
+                .fill(tint.with_alpha(FIGURE_FILL))
+                .icon(ctx.icons, pill.icon)
+                .icon_color(if pill.warn { p.warning } else { p.text_muted })
+                .size(ds::BadgeSize::Custom(FIGURE_H))
+                .pad(FIGURE_PAD)
+                .radius(radius::SM);
+            if x + badge.width(ctx.text, &ds) > right - px(8.0) {
                 break;
             }
-            let r = Rect::new(x.round(), (mid - px(11.0)).round(), w.round(), px(22.0));
-            let tint = if pill.warn { p.warning } else { p.text };
-            layer.quad(Quad::filled(r, tint.with_alpha(0.05)).rounded(px(radius::SM)));
-            if let Some(id) = ctx.icons.id(pill.icon) {
-                let s = px(12.0);
-                draw_icon(
-                    layer,
-                    ctx.icons,
-                    id,
-                    Rect::new((r.min_x() + px(6.0)).round(), (mid - s / 2.0).round(), s, s),
-                    if pill.warn { p.warning } else { p.text_muted },
-                );
-            }
-            let base = ds::optical_baseline(r.min_y(), r.size.height, &label_font);
-            draw_text(layer, &label, (r.min_x() + px(22.0)).round(), base, p.text_muted);
-            draw_text(
-                layer,
-                &value,
-                (r.min_x() + px(26.0) + label.width).round(),
-                base,
-                if pill.warn { p.warning } else { p.text },
-            );
+            let r = badge.paint(layer, ctx.text, &ds, x.round(), mid);
             self.hits.push((r, Hit::Pill(i), Some(format!("{}: {}", pill.label, pill.tip))));
             x = r.max_x() + px(6.0);
         }
@@ -549,11 +397,14 @@ impl ProfileView {
         for &i in listed.iter().take(4) {
             let Some(f) = findings.get(i) else { continue };
             let row = Rect::new(area.min_x(), y, area.size.width, px(layout::COMPACT_ROW));
-            if self.selected_finding == Some(i) {
-                layer.quad(Quad::filled(row, p.tree_selection));
-            } else if self.hover == Some(Hit::Compact(i)) {
-                layer.quad(Quad::filled(row, p.tree_hover));
-            }
+            ds::RowHighlight::new(
+                self.selected_finding == Some(i),
+                self.hover == Some(Hit::Compact(i)),
+            )
+            .selected_fill(p.tree_selection)
+            .hover(ds::HoverFill::Tree)
+            .radius(0.0)
+            .paint(layer, &ds, row);
             let l = figures::level(f.severity);
             let color = if f.is_problem() { l.color(p) } else { p.heat(f.impact as f32) };
             let icon = if f.is_problem() { l.icon() } else { "flame" };
@@ -650,7 +501,6 @@ impl ProfileView {
         // The heads.
         let node = self.selected_node();
         let head_font = ds.ui_font(-0.5).with_weight(Font::SEMIBOLD);
-        let count_font = ds.ui_font(-1.5);
         let problems = findings.iter().filter(|f| f.is_problem()).count();
         let details_title = match node.and_then(|n| report.profile.get(n)) {
             Some(n) => format!(
@@ -701,33 +551,18 @@ impl ProfileView {
             draw_text(layer, &shaped, (r.min_x() + px(32.0)).round(), base, p.text);
             if let Some(n) = count.filter(|n| *n > 0) {
                 let text = n.to_string();
-                let cs = ctx.text.shape_line(&text, &count_font);
-                let pill = Rect::new(
-                    (r.min_x() + px(40.0) + shaped.width).round(),
-                    (mid - px(8.0)).round(),
-                    (cs.width + px(12.0)).round(),
-                    px(16.0),
-                );
-                layer.quad(Quad::filled(pill, p.text.with_alpha(0.08)).rounded(px(8.0)));
-                draw_text(
-                    layer,
-                    &cs,
-                    (pill.min_x() + px(6.0)).round(),
-                    ds::optical_baseline(pill.min_y(), pill.size.height, &count_font),
-                    p.text_muted,
-                );
+                ds::Badge::new(&text)
+                    .fill_alpha(COUNT_FILL)
+                    .size(ds::BadgeSize::Small)
+                    .pad(COUNT_PAD)
+                    .paint(layer, ctx.text, &ds, r.min_x() + px(40.0) + shaped.width, mid);
             }
             if close {
-                let cr = Rect::new(r.max_x() - px(30.0), mid - px(12.0), px(24.0), px(24.0));
-                crate::bar::icon_button(
-                    layer,
-                    ctx.icons,
-                    &ds,
-                    cr,
-                    "x",
-                    None,
-                    ui_components::ds::Press::new(true, self.hover == Some(Hit::DrawerClose)),
-                );
+                let cr = ds::square_button(&ds, (r.max_x() - px(30.0), mid), button_size::COMPACT);
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon("x")
+                    .hovered(self.hover == Some(Hit::DrawerClose));
+                ds::button(layer, ctx.text, ctx.icons, &ds, cr, spec);
                 self.hits.push((cr, Hit::DrawerClose, Some(i18n::t("profile.view.drawer_close"))));
             }
         }
@@ -827,119 +662,9 @@ impl ProfileView {
             self.hits.push((r, Hit::TablesNote, Some(note)));
         }
     }
-
-    pub(super) fn paint_dropdown(&mut self, ctx: &mut ViewerPaint<'_>) {
-        let Some(menu) = self.dropdown.as_mut() else { return };
-        let p = ctx.palette;
-        let ds = Ctx::new(p, ctx.scale);
-        let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-0.5);
-        let row_h = px(28.0);
-        let w = menu
-            .items
-            .iter()
-            .map(|it| ctx.text.shape_line(&it.1, &font).width)
-            .fold(px(120.0), f32::max)
-            + px(48.0);
-        let h = row_h * menu.items.len() as f32 + px(8.0);
-        let mut x = menu.anchor.min_x();
-        if x + w > self.bounds.max_x() - px(4.0) {
-            x = (self.bounds.max_x() - px(4.0) - w).max(self.bounds.min_x());
-        }
-        let r = Rect::new(x.round(), (menu.anchor.max_y() + px(4.0)).round(), w.round(), h.round());
-        menu.rect = r;
-        let layer = ctx.scene.push_layer(None);
-        ds::surface(layer, &ds, r, ds::Elevation::Medium, px(radius::MD));
-        let items = menu.items.clone();
-        for (i, (_, label, icon, enabled)) in items.iter().enumerate() {
-            let row = Rect::new(
-                r.min_x() + px(4.0),
-                r.min_y() + px(4.0) + row_h * i as f32,
-                r.size.width - px(8.0),
-                row_h,
-            );
-            if *enabled && self.hover == Some(Hit::MenuItem(i)) {
-                layer.quad(Quad::filled(row, p.hover_background).rounded(px(radius::SM)));
-            }
-            let color = if *enabled { p.text } else { p.text_muted.with_alpha(0.5) };
-            if let Some(id) = ctx.icons.id(icon) {
-                let s = px(14.0);
-                draw_icon(
-                    layer,
-                    ctx.icons,
-                    id,
-                    Rect::new(
-                        (row.min_x() + px(8.0)).round(),
-                        (row.min_y() + (row_h - s) / 2.0).round(),
-                        s,
-                        s,
-                    ),
-                    color,
-                );
-            }
-            let shaped = ctx.text.shape_line(label, &font);
-            draw_text(
-                layer,
-                &shaped,
-                (row.min_x() + px(30.0)).round(),
-                ds::optical_baseline(row.min_y(), row_h, &font),
-                color,
-            );
-            self.hits.push((row, Hit::MenuItem(i), None));
-        }
-    }
 }
 
 /// Of `report`'s findings, those at `shown`.
 pub(super) fn shown_of<'a>(report: &'a ProfileReport, shown: &[usize]) -> Vec<&'a Finding> {
     shown.iter().filter_map(|&i| report.findings.get(i)).collect()
-}
-
-/// A button with an icon, its label and maybe a chevron (Export ▾, the switcher's menu).
-pub(super) fn pill_button(
-    pen: &mut ui_components::LayerPainter<'_>,
-    r: Rect,
-    (icon, label): (Option<&str>, &str),
-    press: ds::Press,
-    chevron: bool,
-) {
-    let (layer, text, icons, ds) = (&mut *pen.layer, &mut *pen.text, pen.icons, &pen.ds);
-    let ds::Press { enabled, hovered } = press;
-    let p = ds.palette;
-    let px = |v: f32| ds.px(v);
-    let fill = if hovered { p.text.with_alpha(0.09) } else { p.text.with_alpha(0.04) };
-    layer.quad(Quad::filled(r, fill).rounded(px(radius::SM)).bordered(ds.line(), p.border));
-    let color: Rgba = if enabled { p.text } else { p.text_muted };
-    let mid = r.min_y() + r.size.height / 2.0;
-    let mut x = r.min_x() + px(8.0);
-    if let Some(id) = icon.and_then(|i| icons.id(i)) {
-        let s = px(13.0);
-        draw_icon(
-            layer,
-            icons,
-            id,
-            Rect::new(x.round(), (mid - s / 2.0).round(), s, s),
-            p.text_muted,
-        );
-        x += s + px(6.0);
-    }
-    let font = ds.ui_font(-1.0);
-    let shaped = text.shape_line(label, &font);
-    draw_text(
-        layer,
-        &shaped,
-        x.round(),
-        ds::optical_baseline(r.min_y(), r.size.height, &font),
-        color,
-    );
-    if chevron && let Some(id) = icons.id("chevron-down") {
-        let s = px(10.0);
-        draw_icon(
-            layer,
-            icons,
-            id,
-            Rect::new((r.max_x() - px(16.0)).round(), (mid - s / 2.0).round(), s, s),
-            p.text_muted,
-        );
-    }
 }

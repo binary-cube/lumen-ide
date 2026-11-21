@@ -30,6 +30,7 @@ use extensions::{Module, ModuleContext, ModuleError, ModuleId, ModuleManifest};
 use kernel::{Point, Rect};
 use render_api::Quad;
 use ui_components::control::{BarThumb, Control, Controls, Thumb};
+use ui_components::ds;
 use ui_components::{AppRequest, Viewer, ViewerAction, ViewerKind, ViewerPaint, ViewerProvider};
 use ui_kit::{draw_icon, draw_text};
 
@@ -542,26 +543,15 @@ impl Viewer for MarkdownViewer {
             .map(|(_, b)| (b, "copy"))
             .into_iter()
             .chain(self.zoom_button().map(|(_, b)| (b, "maximize-2")));
+        let ds = ds::Ctx::new(palette, ctx.scale);
         for (button, icon) in buttons {
-            let r = offset(&button);
             let over = self.hover.is_some_and(|h| button.contains(h));
-            let fill = if over { palette.tab_hover } else { palette.editor_background };
-            layer.quad(
-                Quad::filled(r, fill)
-                    .rounded((6.0 * ctx.scale).round())
-                    .bordered(ctx.scale.max(1.0), palette.border),
-            );
-            if let Some(id) = ctx.icons.id(icon) {
-                let inset = (6.0 * ctx.scale).round();
-                let icon = Rect::new(
-                    r.min_x() + inset,
-                    r.min_y() + inset,
-                    r.size.width - 2.0 * inset,
-                    r.size.height - 2.0 * inset,
-                );
-                let color = if over { palette.text } else { palette.text_muted };
-                draw_icon(layer, ctx.icons, id, icon, color);
-            }
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Raised)
+                .icon(icon)
+                .icon_size(FLOATING_ICON)
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(over);
+            ds::button(layer, ctx.text, ctx.icons, &ds, offset(&button), spec);
         }
         // Over the previews' budget: what's been out of sight longest goes.
         budget::frame_done(budget::GPU_BUDGET);
@@ -1140,10 +1130,14 @@ impl MarkdownViewer {
     }
 }
 
+/// A floating button's room from its block's corner, and its icon (logical pixels).
+const CORNER_INSET: f32 = 6.0;
+const FLOATING_ICON: f32 = 14.0;
+
 /// A block's corner button (document coordinates).
 fn corner(r: Rect, s: f32) -> Rect {
-    let side = (26.0 * s).round();
-    let inset = (6.0 * s).round();
+    let side = (ds::button_size::MEDIUM * s).round();
+    let inset = (CORNER_INSET * s).round();
     Rect::new(r.max_x() - side - inset, r.min_y() + inset, side, side)
 }
 

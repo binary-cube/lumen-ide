@@ -830,3 +830,40 @@ fn each_row_kind_has_its_own_icon() {
     assert_eq!(super::paint::link_color(crate::tree::Link::Open, &p), Some(p.vcs_added));
     assert_eq!(super::paint::link_color(crate::tree::Link::Failed, &p), Some(p.danger));
 }
+
+/// The filter is the app's search field: a press gives it the keys, typing filters, ⌘A
+/// selects it all, ⌘X / ⌘Z edit it (the rows following), its × empties it and the rows
+/// come back, a press on a row gives the keys back.
+#[test]
+fn the_filter_is_the_shared_search_field() {
+    let p = project();
+    let mut window = DatabaseWindow::new();
+    window.set_project(Some(p.id));
+    settle(&mut window, &p.manual);
+    p.sessions.catalog().add(file_source("users db")).unwrap();
+    settle(&mut window, &p.manual);
+    paint_window(&mut window);
+    let field = window.field;
+    let on = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
+    window.press(on, 1);
+    window.release();
+    assert!(window.wants_text(), "the press gave it the keys");
+    assert!(window.text_input("zzz"));
+    assert!(window.rows().is_empty());
+    assert!(window.command("select_all"));
+    assert_eq!(window.selected_text().as_deref(), Some("zzz"), "⌘A");
+    assert!(window.command("cut"));
+    assert_eq!(labels(&mut window), ["users db"], "⌘X: the rows again");
+    assert!(window.command("undo"));
+    assert!(window.rows().is_empty(), "⌘Z: filtered again");
+    paint_window(&mut window);
+    let x = Point::new(field.max_x() - 17.0, on.y);
+    assert_eq!(window.cursor_at(x), Some(ViewerCursor::Pointer), "a hand on ×");
+    window.press(x, 1);
+    window.release();
+    assert_eq!(window.filter.text(), "");
+    assert_eq!(labels(&mut window), ["users db"], "× filtered again");
+    let row = Point::new(field.min_x() + 40.0, window.list.min_y() + 14.0);
+    window.press(row, 1);
+    assert!(!window.wants_text(), "a row's press gave the keys back");
+}

@@ -1,5 +1,6 @@
-//! File search in the project panel: a "pill" field with a magnifier and, while there is
-//! text, the result list (instead of the tree), with the matched letters highlighted.
+//! File search in the project panel: the app's search field (pill, magnifier, × while
+//! there is text; its press, drag, editing keys and edit commands) and, while there is text,
+//! the result list (instead of the tree), with the matched letters highlighted.
 //!
 //! The component only displays and holds the field state; the search is the project's one
 //! path search ([`workspace::search_paths`]), done by the caller: the matching
@@ -7,30 +8,28 @@
 
 use icons::{IconId, Icons};
 use kernel::{Point, Rect, Rgba};
-use render_api::{Quad, Scene};
+use render_api::Scene;
 use text_layout::{Font, FontFamily, TextSystem};
-use ui_kit::{TextInput, TextInputStyle, centered_baseline, draw_icon, draw_text};
+use ui_components::control::Control;
+use ui_components::ds;
+use ui_components::search_field::SearchField;
+use ui_components::{KeyReach, Palette, ViewerCursor, ViewerKey};
+use ui_kit::{centered_baseline, draw_icon, draw_text};
 use workspace::{FileMatch, PathResults};
 
-use ui_components::Palette;
+/// A result row's highlight corners (logical pixels).
+const ROW_RADIUS: f32 = 6.0;
 
 /// The search's appearance; built from the theme or given individually. Sizes in logical
 /// pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FileSearchStyle {
-    pub field_background: Rgba,
-    pub field_border: Rgba,
-    pub field_border_focused: Rgba,
-    pub icon: Rgba,
     pub text: Rgba,
-    pub placeholder: Rgba,
     /// The matched letters in the file name.
     pub highlight: Rgba,
     pub muted: Rgba,
     pub selection: Rgba,
-    pub text_selection: Rgba,
     pub hover: Rgba,
-    pub caret: Rgba,
     pub font_family: FontFamily,
     pub font_size: f32,
     pub field_height: f32,
@@ -40,18 +39,11 @@ pub struct FileSearchStyle {
 impl FileSearchStyle {
     pub fn from_palette(p: &Palette) -> Self {
         Self {
-            field_background: p.search_field_background,
-            field_border: p.search_field_border,
-            field_border_focused: p.search_field_border_focused,
-            icon: p.text_muted,
             text: p.text,
-            placeholder: p.text_muted,
             highlight: p.accent,
             muted: p.text_muted,
             selection: p.tree_selection,
-            text_selection: p.selection,
             hover: p.tree_hover,
-            caret: p.caret,
             font_family: p.ui_font.clone(),
             font_size: p.ui_font_size,
             field_height: 34.0,
@@ -68,12 +60,14 @@ impl Default for FileSearchStyle {
 
 #[derive(Debug, Default)]
 pub struct FileSearch {
-    pub input: TextInput,
+    /// The field (the app's search field; its focus is the panel's).
+    pub field: SearchField,
     style: FileSearchStyle,
     scale: f32,
-    /// The field area (with surrounding margins) and the result list area.
+    /// The field area (with surrounding margins), where the field is laid out in it, and
+    /// the result list area.
     area: Rect,
-    field: Rect,
+    field_rect: Rect,
     list: Rect,
     /// The folders found, then the files.
     results: Vec<FileMatch>,
@@ -81,8 +75,6 @@ pub struct FileSearch {
     folders: usize,
     selected: usize,
     hovered: Option<usize>,
-    /// The mouse is on the × button (clears the field).
-    clear_hovered: bool,
     scroll_y: f32,
     /// The file index is still being built.
     pub indexing: bool,
@@ -109,7 +101,7 @@ impl FileSearch {
         self.list = list;
         let px = |v: f32| (v * scale).round();
         let h = px(self.style.field_height);
-        self.field = Rect::new(
+        self.field_rect = Rect::new(
             area.min_x() + px(12.0),
             area.min_y() + px(2.0),
             (area.size.width - px(24.0)).max(0.0),
@@ -119,27 +111,64 @@ impl FileSearch {
 
     /// The result list is shown (instead of the tree).
     pub fn is_active(&self) -> bool {
-        !self.input.text().trim().is_empty()
+        !self.query().trim().is_empty()
     }
 
     pub fn query(&self) -> &str {
-        self.input.text()
-    }
-
-    /// The × button on the right of the field (only with text).
-    pub fn clear_button(&self) -> Option<Rect> {
-        if self.input.text().is_empty() || self.field.size.width <= 0.0 {
-            return None;
-        }
-        let px = |v: f32| (v * self.scale).round();
-        let size = px(18.0);
-        let cx = self.field.max_x() - px(8.0) - size / 2.0;
-        let cy = self.field.min_y() + self.field.size.height / 2.0;
-        Some(Rect::new((cx - size / 2.0).round(), (cy - size / 2.0).round(), size, size))
+        self.field.text()
     }
 
     pub fn field_contains(&self, p: Point) -> bool {
-        self.field.contains(p)
+        self.field_rect.contains(p)
+    }
+
+    /// A press on the field, the `clicks`-th of a series: the caret put (two a word, three
+    /// all), held for a drag selecting; `Some(true)` when it was its × (the field emptied).
+    pub fn press(&mut self, p: Point, clicks: u32) -> Option<bool> {
+        if !self.field_contains(p) {
+            return None;
+        }
+        Control::press(&mut self.field, p, clicks);
+        Some(self.field.take_cleared() | self.field.take_edited())
+    }
+
+    /// The pointer moved while a press on the field holds it: the selection follows.
+    pub fn drag(&mut self, p: Point) -> bool {
+        Control::drag(&mut self.field, p)
+    }
+
+    /// `p` is on the field's × (shown while there is text).
+    pub fn on_clear(&self, p: Point) -> bool {
+        self.field_contains(p) && Control::cursor(&self.field, p) == Some(ViewerCursor::Pointer)
+    }
+
+    /// The cursor over the field: the text's, a hand on its ×.
+    pub fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.field_contains(p).then(|| Control::cursor(&self.field, p)).flatten()
+    }
+
+    /// A key for the field (its editing ones), what's typed, an edit command: `(used,
+    /// edited)`, edited when its text changed (the search asked again).
+    pub fn key(&mut self, key: ViewerKey, reach: KeyReach) -> (bool, bool) {
+        self.editing(|field| Control::key(field, key, reach))
+    }
+
+    pub fn text(&mut self, typed: &str) -> (bool, bool) {
+        self.editing(|field| Control::text(field, typed))
+    }
+
+    pub fn command(&mut self, id: &str) -> (bool, bool) {
+        self.editing(|field| Control::command(field, id))
+    }
+
+    pub fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&self.field)
+    }
+
+    /// `edit` done on the field, and whether its text changed.
+    fn editing(&mut self, edit: impl FnOnce(&mut SearchField) -> bool) -> (bool, bool) {
+        let used = edit(&mut self.field);
+        (used, self.field.take_edited())
     }
 
     pub fn list_contains(&self, p: Point) -> bool {
@@ -156,7 +185,7 @@ impl FileSearch {
     }
 
     pub fn clear(&mut self) {
-        self.input.set_text("");
+        self.field.set_text("");
         self.set_results(PathResults::default());
     }
 
@@ -206,10 +235,9 @@ impl FileSearch {
 
     pub fn hover(&mut self, p: Point) -> bool {
         let hovered = self.result_at(p);
-        let clear = self.clear_button().is_some_and(|r| r.contains(p));
-        let changed = hovered != self.hovered || clear != self.clear_hovered;
+        let field = Control::hover(&mut self.field, Some(p));
+        let changed = field || hovered != self.hovered;
         self.hovered = hovered;
-        self.clear_hovered = clear;
         changed
     }
 
@@ -221,71 +249,22 @@ impl FileSearch {
         self.scroll_y != before
     }
 
-    /// The field: pill with magnifier, text or placeholder.
+    /// The field: the app's search field (its caret while `focused`, × with text).
     pub fn paint_field(
-        &self,
+        &mut self,
         focused: bool,
         icons: &Icons,
         text: &mut TextSystem,
         scene: &mut Scene,
+        palette: &Palette,
     ) {
-        let st = &self.style;
-        let px = |v: f32| (v * self.scale).round();
-        let f = self.field;
-        if f.size.width <= 0.0 {
+        if self.field_rect.size.width <= 0.0 {
             return;
         }
-        let line = self.scale.round().max(1.0);
+        let ctx = ui_components::ds::Ctx::new(palette, self.scale);
         let layer = scene.push_layer(Some(self.area));
-        let border = if focused { st.field_border_focused } else { st.field_border };
-        layer.quad(
-            Quad::filled(f, st.field_background)
-                .rounded(f.size.height / 2.0)
-                .bordered(line, border),
-        );
-        let icon = px(15.0);
-        let icon_x = f.min_x() + px(13.0);
-        if let Some(id) = icons.id("search") {
-            let r =
-                Rect::new(icon_x, (f.min_y() + (f.size.height - icon) / 2.0).round(), icon, icon);
-            draw_icon(layer, icons, id, r, st.icon);
-        }
-        let input_style = TextInputStyle {
-            font: Font::new(st.font_family.clone(), px(st.font_size)),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: st.text,
-            placeholder: st.placeholder,
-            selection: st.text_selection,
-            caret: st.caret,
-            radius: 0.0,
-            border_width: 0.0,
-            padding: 0.0,
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        let text_x = icon_x + icon + px(9.0);
-        let mut right = f.max_x() - px(14.0);
-        // With text: the × button (subtle circle, small x) clears the field.
-        if let Some(r) = self.clear_button() {
-            let fill = st.text.with_alpha(if self.clear_hovered { 0.12 } else { 0.06 });
-            layer.quad(Quad::filled(r, fill).rounded(r.size.width / 2.0));
-            if let Some(id) = icons.id("x") {
-                let s = px(9.0);
-                let ir = Rect::new(
-                    (r.min_x() + (r.size.width - s) / 2.0).round(),
-                    (r.min_y() + (r.size.height - s) / 2.0).round(),
-                    s,
-                    s,
-                );
-                draw_icon(layer, icons, id, ir, if self.clear_hovered { st.text } else { st.icon });
-            }
-            right = r.min_x() - px(6.0);
-        }
-        let inner = Rect::new(text_x, f.min_y(), (right - text_x).max(0.0), f.size.height);
-        let layer = scene.push_layer(Some(inner));
-        self.input.paint(layer, text, inner, focused, &i18n::t("files.placeholder"), &input_style);
+        let placeholder = i18n::t("files.placeholder");
+        self.field.paint(layer, text, icons, &ctx, (self.field_rect, focused), &placeholder);
     }
 
     /// The results, in the list area. `file_icon(name)` gives the file's icon and color.
@@ -295,9 +274,11 @@ impl FileSearch {
         file_icon: &dyn Fn(&str) -> (IconId, Rgba),
         text: &mut TextSystem,
         scene: &mut Scene,
+        palette: &Palette,
     ) {
         let st = &self.style;
         let px = |v: f32| (v * self.scale).round();
+        let ctx = ds::Ctx::new(palette, self.scale);
         let b = self.list;
         let font = Font::new(st.font_family.clone(), px(st.font_size));
         let metrics = text.metrics(&font);
@@ -326,18 +307,19 @@ impl FileSearch {
                 b.size.width - 2.0 * inset,
                 row - px(2.0),
             );
-            if index == self.selected {
-                layer.quad(Quad::filled(pill, st.selection).rounded(px(6.0)));
-            } else if self.hovered == Some(index) {
-                layer.quad(Quad::filled(pill, st.hover).rounded(px(6.0)));
+            let lit = if index == self.selected {
+                Some(st.selection)
+            } else {
+                (self.hovered == Some(index)).then_some(st.hover)
+            };
+            if let Some(color) = lit {
+                ui_components::tree::highlight(layer, pill, color, px(ROW_RADIUS));
             }
             // A line between the folders and the files.
             if index == self.folders && self.folders > 0 {
-                let line = scale_line(self.scale);
-                layer.quad(Quad::filled(
-                    Rect::new(b.min_x() + padding, top.round(), b.size.width - 2.0 * padding, line),
-                    st.muted.with_alpha(0.25),
-                ));
+                let (x0, x1) = (b.min_x() + padding, b.max_x() - padding);
+                let color = st.muted.with_alpha(FOLDERS_LINE);
+                ds::divider_in(layer, &ctx, (x0, x1, top.round()), color);
             }
             rows.push((index, m, top, pill));
         }
@@ -416,10 +398,8 @@ impl FileSearch {
     }
 }
 
-/// A hairline, in physical pixels.
-fn scale_line(scale: f32) -> f32 {
-    scale.round().max(1.0)
-}
+/// The line between the folders and the files: its alpha of the muted text.
+const FOLDERS_LINE: f32 = 0.25;
 
 #[cfg(test)]
 #[path = "../tests/unit/file_search.rs"]

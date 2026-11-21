@@ -11,7 +11,7 @@ use kernel::{Point, Rect};
 use render_api::{Layer, Quad};
 use text_layout::TextSystem;
 use ui_components::ds::{self, Ctx};
-use ui_kit::{TextInput, TextInputStyle, draw_text};
+use ui_kit::draw_text;
 
 /// A command in the list.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -38,7 +38,6 @@ pub type ShortcutChanges = Vec<(String, Option<Vec<String>>)>;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Hit {
-    Filter,
     Row(String),
     /// A command's `n`th shortcut, removed.
     Remove(String, usize),
@@ -61,8 +60,8 @@ struct Conflict {
 /// The editor's state.
 #[derive(Debug, Default)]
 pub struct ShortcutsEditor {
-    filter: TextInput,
-    filter_focused: bool,
+    /// The list's search (a part of the settings' controls: its focus is theirs).
+    pub filter: ui_components::search_field::SearchField,
     open: Option<String>,
     recording: bool,
     conflict: Option<Conflict>,
@@ -94,32 +93,14 @@ impl ShortcutsEditor {
         self.conflict = None;
     }
 
-    /// The list's search field has the keys.
-    pub fn filter_focused(&self) -> bool {
-        self.filter_focused
-    }
-
-    pub fn type_text(&mut self, typed: &str) {
-        self.filter.insert(typed);
-    }
-
-    pub fn backspace(&mut self, word: bool) {
-        self.filter.backspace(word);
-    }
-
-    /// A click elsewhere: the search loses the keys.
-    pub fn blur(&mut self) {
-        self.filter_focused = false;
-    }
-
-    /// Esc: stops recording, gives up a conflict, leaves the search. `false` if nothing was.
+    /// Esc: stops recording, gives up a conflict. `false` if neither was.
     pub fn cancel(&mut self) -> bool {
         if self.recording || self.conflict.is_some() {
             self.recording = false;
             self.conflict = None;
             return true;
         }
-        std::mem::take(&mut self.filter_focused)
+        false
     }
 
     /// Keys pressed while recording (`spec`, as written): added to the open command, or, when
@@ -158,10 +139,8 @@ impl ShortcutsEditor {
     /// A click: opens a command, removes / adds / resets its keys, answers a conflict.
     pub fn click(&mut self, p: Point) -> Option<ShortcutChanges> {
         let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| h.clone());
-        self.filter_focused = hit == Some(Hit::Filter);
         let row = |command: &str| self.rows.iter().find(|r| r.command == command).cloned();
         match hit? {
-            Hit::Filter => None,
             Hit::Row(command) => {
                 self.recording = false;
                 self.conflict = None;
@@ -223,45 +202,24 @@ impl ShortcutsEditor {
         self.hits.clear();
     }
 
-    /// Draws the search and the commands from `top`; returns where it ends.
+    /// Draws the search (`focused`: its caret) and the commands from `top`; returns where
+    /// it ends.
     pub fn paint(
         &mut self,
         layer: &mut Layer,
         text: &mut TextSystem,
         (ctx, icons): (&Ctx<'_>, &icons::Icons),
-        (x0, top, width): (f32, f32, f32),
+        (x0, top, width, focused): (f32, f32, f32, bool),
         rows: &Arc<Vec<BindingRow>>,
     ) -> f32 {
         self.rows = Arc::clone(rows);
         self.hits.clear();
         let px = |v: f32| ctx.px(v);
         let p = ctx.palette;
-        // The search: by name or by keys.
+        // The search: by name or by keys (the app's search field, × and all).
         let field = Rect::new(x0, top, width, px(36.0));
-        let style = TextInputStyle {
-            font: ctx.ui_font(-0.5),
-            background: ctx.fade(p.input_background),
-            border: ctx.fade(p.input_border),
-            border_focused: ctx.fade(p.accent),
-            text: ctx.fade(p.text),
-            placeholder: ctx.fade(p.text_muted),
-            selection: ctx.fade(p.selection),
-            caret: ctx.fade(p.caret),
-            radius: px(8.0),
-            border_width: ctx.line(),
-            padding: px(12.0),
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        self.filter.paint(
-            layer,
-            text,
-            field,
-            self.filter_focused,
-            &i18n::t("shortcuts.filter"),
-            &style,
-        );
-        self.hits.push((field, Hit::Filter));
+        let placeholder = i18n::t("shortcuts.filter");
+        self.filter.paint(layer, text, icons, ctx, (field, focused), &placeholder);
         let filter = ui_kit::ListFilter::new(self.filter.text());
         let matches = |r: &BindingRow| {
             let texts = [r.label.as_str(), &r.group].into_iter();
@@ -353,9 +311,7 @@ impl ShortcutsEditor {
         let mid = top + px(17.0);
         let mut x = x0;
         for (n, keys) in row.shown.iter().enumerate() {
-            // A keycap's width (as `ds::keycap` makes it), to put it at `x`.
-            let w = (text.shape_line(keys, &ctx.ui_font(-2.0)).width + px(16.0)).max(px(28.0));
-            let cap = ds::keycap(layer, text, ctx, keys, x + w, mid, false);
+            let cap = ds::Keycap::new(keys).paint(layer, text, ctx, x, mid);
             let remove = Hit::Remove(row.command.clone(), n);
             let lit = self.hover == Some(remove.clone());
             let button = ds::clear_button(layer, icons, ctx, cap.max_x() + px(14.0), mid, lit);

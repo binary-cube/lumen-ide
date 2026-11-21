@@ -22,6 +22,13 @@ const GAP: f32 = 22.0;
 /// A table's row, a finding's row, a metric card, the timeline (logical pixels).
 const ROW_H: f32 = 30.0;
 const FINDING_H: f32 = 34.0;
+/// A table row under the mouse: the text's alpha.
+const ROW_HOVER: f32 = 0.05;
+/// A cell's share bar: its track (the text's alpha), its narrowest fill and its corners
+/// (logical pixels).
+const BAR_TRACK: f32 = 0.06;
+const BAR_MIN: f32 = 2.0;
+const BAR_RADIUS: f32 = 3.0;
 const CARD_H: f32 = 118.0;
 const TIMELINE_H: f32 = 150.0;
 /// The flame graph's band and axis, and each of its levels (logical pixels).
@@ -459,9 +466,10 @@ impl Page<'_, '_> {
             let top = header.max_y() + row_h * n as f32;
             let line = Rect::new(r.min_x() + ds.line(), top, r.size.width - 2.0 * ds.line(), row_h);
             table::stripe(layer, ds, line, n);
-            if self.lit_row == Some(n) {
-                layer.quad(Quad::filled(line, p.text.with_alpha(0.05)));
-            }
+            ds::RowHighlight::new(false, self.lit_row == Some(n))
+                .radius(0.0)
+                .hover(ds::HoverFill::Faint(ROW_HOVER))
+                .paint(layer, ds, line);
             self.rows.push((line, n));
             table::column_lines(
                 layer,
@@ -493,16 +501,12 @@ impl Page<'_, '_> {
                             (room - label_w - ds.px(10.0)).max(0.0),
                             row_h * 0.24,
                         );
-                        layer
-                            .quad(Quad::filled(track, p.text.with_alpha(0.06)).rounded(ds.px(3.0)));
-                        let fill_w = (track.size.width * share.clamp(0.0, 1.0)).max(ds.px(2.0));
-                        layer.quad(
-                            Quad::filled(
-                                Rect::new(track.min_x(), track.min_y(), fill_w, track.size.height),
-                                color.color(p),
-                            )
-                            .rounded(ds.px(3.0)),
-                        );
+                        ds::ProgressBar::of(*share)
+                            .tone(*color)
+                            .track_alpha(BAR_TRACK)
+                            .min_fill(BAR_MIN)
+                            .radius(BAR_RADIUS)
+                            .paint_bar(layer, ds, track);
                         let base = ds::optical_baseline(top, row_h, &mono);
                         let w = text.shape_line(said, &mono).width.min(label_w);
                         ds::draw_ellipsized(

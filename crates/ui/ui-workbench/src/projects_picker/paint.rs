@@ -466,12 +466,9 @@ fn paint_group(list: &mut ListArea<'_, '_>, r: Rect, name: &str, collapsed: bool
     let px = |v: f32| ctx.px(v);
     let icons = list.icons;
     let mid = r.min_y() + r.size.height / 2.0;
-    let chevron = if collapsed { "chevron-right" } else { "chevron-down" };
-    if let Some(id) = icons.id(chevron) {
-        let s = px(12.0);
-        let ir = Rect::new(r.min_x() + px(12.0), mid - s / 2.0, s, s);
-        draw_icon(list.layer, icons, id, ir, ctx.fade(p.text_muted));
-    }
+    let s = px(12.0);
+    let ir = Rect::new(r.min_x() + px(12.0), mid - s / 2.0, s, s);
+    ui_components::tree::chevron(list.layer, icons, ir, !collapsed, ctx.fade(p.text_muted));
     if let Some(id) = icons.id(if collapsed { "folder" } else { "folder-open" }) {
         let s = px(16.0);
         let ir = Rect::new(r.min_x() + px(30.0), mid - s / 2.0, s, s);
@@ -513,27 +510,20 @@ pub(super) fn paint_text_button(
     hovered: bool,
 ) -> Rect {
     let ctx = list.ctx;
-    let p = ctx.palette;
-    let px = |v: f32| ctx.px(v);
-    let font = ctx.ui_font(-1.5);
-    let label = list.text.shape_line(label, &font);
-    let icon = px(12.0);
-    let h = px(24.0);
-    let w = px(8.0) + icon + px(6.0) + label.width + px(10.0);
+    let h = ctx.px(TEXT_BUTTON_H);
+    let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+        .icon(icon_name)
+        .label(label)
+        .rest_tone(ds::Tone::Neutral)
+        .hovered(hovered);
+    let w = ds::button_width(list.text, ctx, &spec, h);
     let r = Rect::new(right - w, top, w, h);
-    if hovered {
-        list.layer
-            .quad(Quad::filled(r, ctx.fade(p.text.with_alpha(0.06))).rounded(px(ds::radius::SM)));
-    }
-    let color = if hovered { p.accent } else { p.text_muted };
-    if let Some(id) = list.icons.id(icon_name) {
-        let ir = Rect::new(r.min_x() + px(8.0), r.min_y() + (h - icon) / 2.0, icon, icon);
-        draw_icon(list.layer, list.icons, id, ir, ctx.fade(color));
-    }
-    let x = r.min_x() + px(8.0) + icon + px(6.0);
-    draw_text(list.layer, &label, x, ds::optical_baseline(r.min_y(), h, &font), ctx.fade(color));
+    ds::button(list.layer, list.text, list.icons, ctx, r, spec);
     r
 }
+
+/// The height of a [`paint_text_button`] (logical pixels).
+const TEXT_BUTTON_H: f32 = 24.0;
 
 /// Where a drop would go: the row (or title) outlined in the accent color.
 fn paint_drop_target(layer: &mut Layer, ctx: &Ctx<'_>, r: Rect) {

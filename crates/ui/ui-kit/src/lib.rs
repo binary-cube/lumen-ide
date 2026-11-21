@@ -5,10 +5,12 @@
 pub mod caret;
 mod filter;
 mod key_hints;
+mod keycap;
 mod text_input;
 
 pub use filter::{ListFilter, fold};
 pub use key_hints::{KeyHint, KeyHintsStyle, fitting_key_hints, key_hints_width, paint_key_hints};
+pub use keycap::{KeycapBorder, KeycapLook, KeycapRelief, keycap_label_x, paint_keycap};
 pub use text_input::{TextInput, TextInputStyle};
 
 use icons::{IconId, Icons};

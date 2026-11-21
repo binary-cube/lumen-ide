@@ -10,7 +10,7 @@ use kernel::{Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
 use ui_components::ViewerPaint;
-use ui_components::ds::{self, Check, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Check, Ctx, Tone, button_size, radius};
 use ui_kit::{TextInputStyle, draw_text};
 
 use super::form::{Kind, Text};
@@ -36,6 +36,13 @@ const BOTTOM_PAD: f32 = 12.0;
 /// The row confirming what's lost.
 const CONFIRM_H: f32 = 30.0;
 const PAD: f32 = 24.0;
+/// The column being edited: its row's accent alpha.
+const COLUMN_CHOSEN: f32 = 0.06;
+/// An index's column under the mouse: the text's alpha over it.
+const INDEX_HOVER: f32 = 0.04;
+/// A column's place in the index: its badge's accent alpha and the room beside its number.
+const PLACE_FILL: f32 = 0.16;
+const PLACE_PAD: f32 = 3.0;
 /// The NN / PK / AI / UQ columns' names spelled out (their headers' and boxes' tooltips).
 const TICK_TIPS: [&str; 4] =
     ["schema.tip_not_null", "schema.tip_primary", "schema.tip_auto", "schema.tip_unique"];
@@ -292,10 +299,7 @@ impl SchemaView {
         // What runs.
         let mut y = form_area.max_y() + px(8.0);
         let layer = scene.push_layer(Some(b));
-        layer.quad(Quad::filled(
-            Rect::new(b.min_x(), y - px(4.0), b.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, &ds, b.min_x(), b.max_x(), y - px(4.0));
         let sql = self.form.as_ref().is_some_and(|f| f.ctx.sql());
         let label = if sql { t("schema.preview_sql") } else { t("schema.preview_changes") };
         let small = ds.ui_font(-1.0).with_weight(Font::SEMIBOLD);
@@ -626,23 +630,13 @@ impl SchemaView {
         self.anchors.insert(Popup::Choice(choice), r);
     }
 
-    /// A small round button with an icon (take a row out, add one).
+    /// An icon's button (take a row out, add one): the shared one, its hit and its tooltip
+    /// kept.
     fn icon_button(&mut self, pen: &mut Pen<'_, '_>, icon: &str, r: Rect, hit: Hit, tip: String) {
-        let ds = pen.ds;
-        if self.hover.as_ref() == Some(&hit) {
-            pen.layer
-                .quad(Quad::filled(r, ds.palette.text.with_alpha(0.08)).rounded(ds.px(radius::SM)));
-        }
-        if let Some(id) = pen.icons.id(icon) {
-            let s = ds.px(14.0);
-            let at = Rect::new(
-                (r.min_x() + (r.size.width - s) / 2.0).round(),
-                (r.min_y() + (r.size.height - s) / 2.0).round(),
-                s,
-                s,
-            );
-            ui_kit::draw_icon(pen.layer, pen.icons, id, at, ds.palette.text_muted);
-        }
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon(icon)
+            .hovered(self.hover.as_ref() == Some(&hit));
+        ds::button(pen.layer, pen.text, pen.icons, pen.ds, r, spec);
         self.hits.push((r, hit));
         self.tips.push((r, tip));
     }
@@ -859,10 +853,9 @@ impl SchemaView {
         for i in 0..count {
             let row = Rect::new(x0 - px(8.0), *y, width + px(16.0), px(ROW_H));
             let chosen = self.selected == i;
-            if chosen {
-                pen.layer
-                    .quad(Quad::filled(row, p.accent.with_alpha(0.06)).rounded(px(radius::MD)));
-            }
+            ds::RowHighlight::new(chosen, false)
+                .selected_alpha(COLUMN_CHOSEN)
+                .paint(pen.layer, ds, row);
             self.hits.push((row, Hit::SelectColumn(i)));
             let fy = *y + (px(ROW_H) - field_h) / 2.0;
             self.input(
@@ -887,8 +880,8 @@ impl SchemaView {
                         Rect::new(ticks_x + j as f32 * tick_w, mid - px(12.0), tick_w, px(24.0));
                     self.tips.push((cell, spelled[j].clone()));
                 }
-                let r =
-                    Rect::new(ticks_x + 4.0 * tick_w + px(4.0), mid - px(13.0), px(26.0), px(26.0));
+                let at = (ticks_x + 4.0 * tick_w + px(4.0), mid);
+                let r = ds::square_button(pen.ds, at, ds::button_size::MEDIUM);
                 self.icon_button(pen, "x", r, Hit::RemoveColumn(i), t("schema.tip_remove_column"));
             }
             *y += px(ROW_H);
@@ -938,34 +931,14 @@ impl SchemaView {
             self.paint_key(pen, k, x0, width, y, false);
         }
         let add = t("schema.add_key");
-        let font = ds.ui_font(-0.5);
-        let shaped = pen.text.shape_line(&add, &font);
-        let r = Rect::new(x0 - px(6.0), *y, shaped.width + px(36.0), px(28.0));
-        if self.hover == Some(Hit::AddKey) {
-            pen.layer.quad(Quad::filled(r, p.accent.with_alpha(0.08)).rounded(px(radius::SM)));
-        }
-        if let Some(id) = pen.icons.id("plus") {
-            let s = px(14.0);
-            ui_kit::draw_icon(
-                pen.layer,
-                pen.icons,
-                id,
-                Rect::new(
-                    r.min_x() + px(6.0),
-                    (r.min_y() + (r.size.height - s) / 2.0).round(),
-                    s,
-                    s,
-                ),
-                p.accent,
-            );
-        }
-        draw_text(
-            pen.layer,
-            &shaped,
-            r.min_x() + px(26.0),
-            ds::optical_baseline(r.min_y(), r.size.height, &font),
-            p.accent,
-        );
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("plus")
+            .label(&add)
+            .tone(Tone::Accent)
+            .hovered(self.hover == Some(Hit::AddKey));
+        let h = px(button_size::LARGE);
+        let r = Rect::new(x0 - px(6.0), *y, ds::button_width(pen.text, ds, &spec, h), h);
+        ds::button(pen.layer, pen.text, pen.icons, ds, r, spec);
         self.hits.push((r, Hit::AddKey));
         *y += px(36.0);
     }
@@ -1071,8 +1044,8 @@ impl SchemaView {
         x += w[3] + px(8.0);
         let upd = format!("{} {on_update}", t("schema.on_update_short"));
         self.dropdown(pen, Choice::OnUpdate(k), Rect::new(x, fy, w[4], h), &upd, "");
-        let r =
-            Rect::new(x0 + width - px(28.0), *y + (px(ROW_H) - px(26.0)) / 2.0, px(26.0), px(26.0));
+        let at = (x0 + width - px(28.0), *y + px(ROW_H) / 2.0);
+        let r = ds::square_button(pen.ds, at, ds::button_size::MEDIUM);
         self.icon_button(pen, "x", r, Hit::RemoveKey(k), t("schema.tip_remove_key"));
         *y += px(ROW_H) + px(8.0);
     }
@@ -1121,12 +1094,14 @@ impl SchemaView {
             let r = Rect::new(cx - px(8.0), cy, cell_w + px(8.0), px(LIST_H));
             let place = chosen.iter().position(|(c, _)| c == name);
             let hit = Hit::IndexColumn(name.clone());
-            if self.hover.as_ref() == Some(&hit) {
-                pen.layer.quad(Quad::filled(r, p.text.with_alpha(0.04)).rounded(px(radius::SM)));
-            }
+            let hovered = self.hover.as_ref() == Some(&hit);
+            ds::RowHighlight::new(false, hovered)
+                .hover(ds::HoverFill::Faint(INDEX_HOVER))
+                .radius(radius::SM)
+                .paint(pen.layer, ds, r);
             let mid = r.min_y() + r.size.height / 2.0;
             let state = if place.is_some() { Check::On } else { Check::Off };
-            ds::checkbox(pen.layer, pen.text, ds, cx, mid, state, true);
+            ds::Checkbox::new(state).hovered(hovered).paint(pen.layer, pen.text, ds, cx, mid);
             let order_right = cx + cell_w;
             let room = cell_w - px(28.0) - px(160.0);
             let shown = ds::ellipsize(pen.text, name, &font, room.max(px(40.0)));
@@ -1142,17 +1117,14 @@ impl SchemaView {
                 .push((Rect::new(r.min_x(), r.min_y(), cell_w - px(140.0), r.size.height), hit));
             if let Some(at) = place {
                 // Its place in the index, and its order (a click flips it).
-                let small = ds.ui_font(-1.5);
-                let n = pen.text.shape_line(&format!("{}", at + 1), &small);
-                let badge = Rect::new(order_right - px(150.0), mid - px(10.0), px(20.0), px(20.0));
-                pen.layer.quad(Quad::filled(badge, p.accent.with_alpha(0.16)).rounded(px(10.0)));
-                draw_text(
-                    pen.layer,
-                    &n,
-                    (badge.min_x() + (badge.size.width - n.width) / 2.0).round(),
-                    ds::optical_baseline(badge.min_y(), badge.size.height, &small),
-                    p.accent,
-                );
+                let number = format!("{}", at + 1);
+                ds::Badge::new(&number)
+                    .color(p.accent)
+                    .fill_alpha(PLACE_FILL)
+                    .pad(PLACE_PAD)
+                    .min_width(ds::BadgeSize::Regular.height())
+                    .centered()
+                    .paint(pen.layer, pen.text, ds, order_right - px(150.0), mid);
                 let desc = chosen[at].1;
                 let labels = ["ASC", "DESC"];
                 let hovered = matches!(&self.hover, Some(Hit::IndexOrder(c)) if c == name)

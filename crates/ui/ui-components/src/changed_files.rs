@@ -20,9 +20,11 @@ use i18n::{t, tr};
 use kernel::{FuzzyStyle, Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
-use ui_kit::{TextInput, draw_text};
+use ui_kit::draw_text;
 
-use crate::ds::{self, Ctx, radius};
+use crate::control::{Control, Press};
+use crate::ds::{self, Ctx};
+use crate::search_field::SearchField;
 use crate::tree::{self, EntryIcon, EntryLayout, FileIcons, TreeList};
 use crate::{EdgeScrollbar, Palette, PressMods, ViewerKey};
 
@@ -132,7 +134,8 @@ pub struct FilesTree {
     /// A plain list (sorted by path) rather than a tree.
     pub flat: bool,
     collapsed: HashSet<String>,
-    pub query: TextInput,
+    /// Its search (the app's search field: ×, ⌘A; the caret only while it has the keys).
+    pub query: SearchField,
     /// The search has the keys; it was pressed (a drag selects in it).
     pub searching: bool,
     selecting: bool,
@@ -160,7 +163,7 @@ impl Default for FilesTree {
             found: Vec::new(),
             flat: false,
             collapsed: HashSet::new(),
-            query: TextInput::default(),
+            query: SearchField::default(),
             searching: false,
             selecting: false,
             rows: Vec::new(),
@@ -440,18 +443,19 @@ impl FilesTree {
         reach: crate::KeyReach,
     ) -> Option<Option<TreeEvent>> {
         if self.searching {
-            let (word, extend) = (reach.word, reach.extend);
             match key {
                 ViewerKey::Escape => {
                     self.searching = false;
                     return Some(None);
                 }
-                ViewerKey::Backspace => self.query.backspace(word),
-                ViewerKey::Delete => self.query.delete(),
-                ViewerKey::Left => self.query.move_left(word, extend),
-                ViewerKey::Right => self.query.move_right(word, extend),
-                ViewerKey::Home => self.query.home(extend),
-                ViewerKey::End => self.query.end(extend),
+                ViewerKey::Backspace
+                | ViewerKey::Delete
+                | ViewerKey::Left
+                | ViewerKey::Right
+                | ViewerKey::Home
+                | ViewerKey::End => {
+                    Control::key(&mut self.query, key, reach);
+                }
                 ViewerKey::Up | ViewerKey::Down | ViewerKey::Enter => {
                     self.searching = false;
                     return self.key_with(key, reach);
@@ -510,8 +514,7 @@ impl FilesTree {
 
     /// What's selected in its search.
     pub fn selected_text(&self) -> Option<String> {
-        let selected = self.query.selected_text();
-        (self.searching && !selected.is_empty()).then(|| selected.to_owned())
+        self.searching.then(|| Control::selected_text(&self.query)).flatten()
     }
 
     /// An edit command for its search (⌘A, ⌘X, ⌘Z, ⇧⌘Z): `true` if it has the keys.
@@ -519,20 +522,11 @@ impl FilesTree {
         if !self.searching {
             return false;
         }
-        let edited = match id {
-            "select_all" => {
-                self.query.select_all();
-                false
-            }
-            "cut" => {
-                self.query.insert("");
-                true
-            }
-            "undo" => self.query.undo(),
-            "redo" => self.query.redo(),
-            _ => return false,
-        };
-        if edited {
+        if !matches!(id, "select_all" | "cut" | "undo" | "redo") {
+            return false;
+        }
+        // What's typed changed (a cut, an undo): the rows again.
+        if Control::command(&mut self.query, id) && id != "select_all" {
             self.scroll = 0.0;
             self.rebuild();
         }
@@ -544,8 +538,7 @@ impl FilesTree {
         if !self.searching {
             return false;
         }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.query.insert(&typed);
+        Control::text(&mut self.query, typed);
         self.scroll = 0.0;
         self.rebuild();
         true
@@ -573,7 +566,14 @@ impl FilesTree {
         self.searching = hit == Hit::Search;
         self.selecting = self.searching;
         match hit {
-            Hit::Search => self.query.press(p.x, clicks),
+            // × empties it (every file back), else the caret put, a drag selecting.
+            Hit::Search => {
+                self.selecting = Control::press(&mut self.query, p, clicks) == Press::Held;
+                if self.query.take_cleared() {
+                    self.scroll = 0.0;
+                    self.rebuild();
+                }
+            }
             Hit::Mode => {
                 self.flat = !self.flat;
                 self.rebuild();
@@ -659,8 +659,7 @@ impl FilesTree {
     pub fn drag(&mut self, p: Point) -> bool {
         // From a press in the search: its text selected.
         if self.selecting {
-            self.query.extend_to(p.x);
-            return true;
+            return Control::drag(&mut self.query, p);
         }
         let Some(offset) = self.bar.drag(p) else { return false };
         let changed = offset != self.scroll;
@@ -678,7 +677,13 @@ impl FilesTree {
         let hover = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
         let changed = hover != self.hover;
         self.hover = hover;
-        self.bar.hover(p) | changed
+        let clear = Control::hover(&mut self.query, Some(p));
+        self.bar.hover(p) | changed | clear
+    }
+
+    /// The cursor at `p`: the search's (the text's, a hand on its ×), else the view's.
+    pub fn cursor_at(&self, p: Point) -> Option<crate::ViewerCursor> {
+        self.query.hit(p).then(|| Control::cursor(&self.query, p)).flatten()
     }
 
     /// The tree in `area`: the count with the buttons (Tree / List, Expand / Collapse All),
@@ -720,14 +725,9 @@ impl FilesTree {
             ),
         };
         let placeholder = t("changed_files.search");
+        // Its caret only while the tree has the keys and they're the search's.
         let focus = focused && self.searching;
-        ds::search_input(
-            &mut crate::LayerPainter::new(layer, text, icons, *ds),
-            field,
-            &self.query,
-            focus,
-            &placeholder,
-        );
+        self.query.paint(layer, text, icons, ds, (field, focus), &placeholder);
         self.hits.push((field, Hit::Search));
         let top = match (in_row, self.head_row) {
             (Some(head), _) => area.min_y() + px(head.total) + px(6.0),
@@ -921,7 +921,7 @@ impl FilesTree {
             ds::optical_baseline(header.min_y(), header.size.height, &small),
             p.text_muted,
         );
-        let size = px(24.0);
+        let size = px(ds::button_size::COMPACT);
         let mid = header.min_y() + header.size.height / 2.0;
         let mut right = header.max_x() - px(10.0);
         let mode_icon = if self.flat { "folder" } else { "rows" };
@@ -934,18 +934,11 @@ impl FilesTree {
                 continue;
             }
             let r = Rect::new(right - size, (mid - size / 2.0).round(), size, size);
-            if self.hover == Some(hit) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(radius::MD)));
-            }
-            if let Some(id) = icons.id(icon) {
-                let inner = Rect::new(
-                    r.min_x() + px(5.0),
-                    r.min_y() + px(5.0),
-                    size - px(10.0),
-                    size - px(10.0),
-                );
-                ui_kit::draw_icon(layer, icons, id, inner, p.text_muted);
-            }
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon(icon)
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(self.hover == Some(hit));
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, hit));
             right = r.min_x() - px(2.0);
         }
@@ -1145,6 +1138,10 @@ impl crate::control::Control for TreePart<'_> {
 
     fn command(&mut self, id: &str) -> bool {
         self.tree.command(id)
+    }
+
+    fn cursor(&self, p: Point) -> Option<crate::ViewerCursor> {
+        self.tree.cursor_at(p)
     }
 
     fn tooltip(&self, p: Point) -> Option<crate::Tip> {

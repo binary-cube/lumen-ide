@@ -13,7 +13,7 @@ use kernel::{Point, ProjectId, Rect};
 use render_api::Quad;
 use ui_components::ViewerCursor;
 use ui_components::anim::Tween;
-use ui_components::ds::{self, Ctx};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, button_size};
 use ui_components::editor_toolbar::{
     EditorToolbar, EditorToolbarProvider, HEIGHT, ToolbarAction, ToolbarContext, ToolbarPaint,
 };
@@ -179,7 +179,7 @@ impl EditorToolbar for UploadBar {
         let mid = (b.min_y() + b.size.height / 2.0).round();
         // The buttons, from the right: Upload (the main one), Compare.
         let button_font = ds::button_font(&ds);
-        let h = px(26.0);
+        let h = px(button_size::MEDIUM);
         let mut right = b.max_x() - px(12.0);
         self.buttons.clear();
         for (button, key) in
@@ -191,11 +191,12 @@ impl EditorToolbar for UploadBar {
             let w = (text.shape_line(&label, &button_font).width + px(24.0) + extra).round();
             let r = Rect::new((right - w).round(), (mid - h / 2.0).round(), w, h);
             let hovered = self.hovered == Some(button);
-            if button == Button::Upload {
-                ds::busy_primary_button(layer, text, &ds, r, &label, busy, hovered);
-            } else {
-                ds::secondary_button(layer, text, &ds, r, &label, true, hovered);
-            }
+            // Upload's spinner slides in as the work starts (its eased amount).
+            let spec = match button {
+                Button::Upload => ButtonSpec::new(ButtonKind::Primary).busy_amount(busy),
+                Button::Compare => ButtonSpec::new(ButtonKind::Secondary),
+            };
+            ds::button(layer, text, icons, &ds, r, spec.label(&label).hovered(hovered));
             self.buttons.push((r, button));
             right = r.min_x() - px(8.0);
         }

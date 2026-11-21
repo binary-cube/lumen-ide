@@ -13,9 +13,9 @@ use ui_components::diagram::{
     self, CardFonts, CardLook, Dir, EdgeStyle, Head, Header, ROW_H, Row, clamp_into, clear_of,
     contains_rect,
 };
-use ui_components::ds::{self, Ctx, Pen, Tone, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Pen, Tone, button_size, radius};
 use ui_components::{Palette, ViewerPaint};
-use ui_kit::{TextInputStyle, draw_icon, draw_text};
+use ui_kit::{draw_icon, draw_text};
 
 use super::*;
 
@@ -29,6 +29,8 @@ const LABEL_ZOOM: f32 = 0.45;
 /// gets as the diagram zooms out (logical pixels).
 const LABEL_FONT: f32 = 2.5;
 const LABEL_MIN: f32 = 9.0;
+/// A relation's row under the mouse: the text's alpha over it.
+const ROW_HOVER: f32 = 0.05;
 
 /// The labels placed for the lines lit, and what they were placed for: found again only
 /// when the layout, the lines lit or the zoom change (never each frame).
@@ -113,11 +115,11 @@ impl RelationsView {
             // The graph the layout was made from (a decision's new one is laid out next).
             let graph = Arc::clone(&self.drawn);
             self.paint_diagram(&graph, &ds, ctx.text, ctx.scene, ctx.icons, area);
-            self.paint_controls(&ds, ctx.text, ctx.scene, area);
+            self.paint_controls(&ds, ctx.text, ctx.scene, ctx.icons, area);
             if self.list_open {
-                self.paint_list(&ds, ctx.text, ctx.scene, area);
+                self.paint_list(&ds, ctx.text, ctx.scene, ctx.icons, area);
             }
-            self.paint_popover(&ds, ctx.text, ctx.scene, area);
+            self.paint_popover(&ds, ctx.text, ctx.scene, ctx.icons, area);
         }
         self.paint_toolbar(&ds, ctx.text, ctx.scene, ctx.icons, b, ctx.focused);
     }
@@ -435,8 +437,8 @@ impl RelationsView {
         let mid = bar.min_y() + bar.size.height / 2.0;
         let mut x = bar.min_x() + px(20.0);
         if !self.history.is_empty() {
-            let r = Rect::new(x - px(6.0), mid - px(14.0), px(28.0), px(28.0));
-            diagram::back_button(Pen { layer, text, ds }, r, self.hover == Some(Hit::Back));
+            let r = ds::square_button(ds, (x - px(6.0), mid), ds::button_size::LARGE);
+            diagram::back_button(Pen { layer, text, ds }, icons, r, self.hover == Some(Hit::Back));
             self.hits.push((r, Hit::Back));
             self.tip(Hit::Back, r, "relations.tip_back", Some("database.diagram_back"));
             x = r.max_x() + px(10.0);
@@ -512,18 +514,15 @@ impl RelationsView {
                 self.tips.push((Hit::Depth(d), tip));
             }
             x += width + px(12.0);
-            let all = text.shape_line(&t("relations.show_all"), &small);
-            let r = Rect::new(x - px(6.0), mid - px(14.0), all.width + px(12.0), px(28.0));
-            if self.hover == Some(Hit::ShowAll) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(radius::MD)));
-            }
-            draw_text(
-                layer,
-                &all,
-                x,
-                ds::optical_baseline(bar.min_y(), bar.size.height, &small),
-                p.accent,
-            );
+            let all = t("relations.show_all");
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .label(&all)
+                .tone(Tone::Accent)
+                .hovered(self.hover == Some(Hit::ShowAll));
+            let h = px(button_size::LARGE);
+            let w = ds::button_width(text, ds, &spec, h);
+            let r = Rect::new(x - px(6.0), (mid - h / 2.0).round(), w, h);
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, Hit::ShowAll));
             x = r.max_x() + px(16.0);
         }
@@ -580,62 +579,14 @@ impl RelationsView {
         self.tips.push((hit, Tip::new(anchor, t(key)).with_shortcut(keys)));
     }
 
-    /// The filter's pill: the magnifier, the text (or what it's for), × once there's text.
+    /// The filter: the app's search field (the magnifier, the text or what it's for, ×
+    /// once there's text, the caret while it has the keys).
     fn paint_filter(&mut self, pen: Pen<'_, '_>, icons: &icons::Icons, f: Rect, typing: bool) {
         let Pen { layer, text, ds } = pen;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
-        let field = ds::search_field(layer, icons, ds, f, typing);
         self.hits.push((f, Hit::Field));
-        self.filter_area = f;
+        self.filter_shown = true;
         self.tip(Hit::Field, f, "relations.tip_filter", Some("database.diagram_find"));
-        let mut right = field.max_x();
-        if !self.filter.text().is_empty() {
-            let s = px(18.0);
-            let r = Rect::new(
-                f.max_x() - px(8.0) - s,
-                (f.min_y() + (f.size.height - s) / 2.0).round(),
-                s,
-                s,
-            );
-            let hovered = self.hover == Some(Hit::Clear);
-            layer.quad(
-                Quad::filled(r, p.text.with_alpha(if hovered { 0.12 } else { 0.06 }))
-                    .rounded(s / 2.0),
-            );
-            if let Some(id) = icons.id("x") {
-                let x = px(9.0);
-                let ir = Rect::new(
-                    (r.min_x() + (s - x) / 2.0).round(),
-                    (r.min_y() + (s - x) / 2.0).round(),
-                    x,
-                    x,
-                );
-                draw_icon(layer, icons, id, ir, p.text_muted);
-            }
-            self.hits.push((r, Hit::Clear));
-            self.clear_area = r;
-            self.tip(Hit::Clear, r, "relations.tip_clear", None);
-            right = r.min_x() - px(6.0);
-        }
-        let style = TextInputStyle {
-            font: Font::new(p.ui_font.clone(), px(p.ui_font_size - 0.5)),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: p.text,
-            placeholder: p.text_muted,
-            selection: p.selection,
-            caret: p.caret,
-            radius: 0.0,
-            border_width: 0.0,
-            padding: 0.0,
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        let area =
-            Rect::new(field.min_x(), f.min_y(), (right - field.min_x()).max(0.0), f.size.height);
-        self.filter.paint(layer, text, area, typing, &t("relations.filter"), &style);
+        self.filter.paint(layer, text, icons, ds, (f, typing), &t("relations.filter"));
     }
 }
 
@@ -691,30 +642,18 @@ fn key_label(key: &VirtualKey) -> String {
     format!("{} → {}", side(&key.table, &key.columns), side(&key.target, &key.references))
 }
 
-/// A button of text ending at `right` on `mid` (its hover shown). Returns its area.
-fn text_button(
-    pen: Pen<'_, '_>,
+/// A soft button's rect for `spec`, ending at `right`, centered on `mid` (as tall as the
+/// diagram's small buttons).
+fn soft_rect(
+    text: &mut TextSystem,
+    ds: &Ctx<'_>,
+    spec: &ButtonSpec<'_>,
     right: f32,
     mid: f32,
-    label: &str,
-    color: Rgba,
-    hovered: bool,
 ) -> Rect {
-    let Pen { layer, text, ds } = pen;
-    let font = ds.ui_font(-1.5).with_weight(ds::BUTTON_WEIGHT);
-    let shaped = text.shape_line(label, &font);
-    let (w, h) = (shaped.width + ds.px(16.0), ds.px(24.0));
-    let r = Rect::new((right - w).round(), (mid - h / 2.0).round(), w.round(), h);
-    let fill = color.with_alpha(if hovered { 0.18 } else { 0.10 });
-    layer.quad(Quad::filled(r, fill).rounded(ds.px(radius::SM)));
-    draw_text(
-        layer,
-        &shaped,
-        r.min_x() + ds.px(8.0),
-        ds::optical_baseline(r.min_y(), h, &font),
-        color,
-    );
-    r
+    let h = ds.px(button_size::MEDIUM);
+    let w = ds::button_width(text, ds, spec, h);
+    Rect::new((right - w).round(), (mid - h / 2.0).round(), w, h)
 }
 
 impl RelationsView {
@@ -725,6 +664,7 @@ impl RelationsView {
         ds: &Ctx<'_>,
         text: &mut TextSystem,
         scene: &mut render_api::Scene,
+        icons: &icons::Icons,
         area: Rect,
     ) {
         let p = ds.palette;
@@ -737,8 +677,13 @@ impl RelationsView {
         let width = ds::segmented_width(text, ds, &labels);
         let waiting = self.undecided().len();
         let found = tr!("relations.found_button", count = waiting);
-        let font = ds.ui_font(-1.5).with_weight(ds::BUTTON_WEIGHT);
-        let found_w = text.shape_line(&found, &font).width + px(16.0);
+        let tone = if waiting > 0 { Tone::Warning } else { Tone::Neutral };
+        let found_spec = ButtonSpec::new(ButtonKind::Soft)
+            .label(&found)
+            .tone(tone)
+            .on(self.list_open)
+            .hovered(self.hover == Some(Hit::Found));
+        let found_w = ds::button_width(text, ds, &found_spec, px(button_size::MEDIUM));
         let mid = area.max_y() - px(36.0);
         let left = area.min_x() + px(16.0);
         let back = Rect::new(left, mid - px(24.0), width + found_w + px(28.0), px(48.0));
@@ -760,15 +705,8 @@ impl RelationsView {
             self.hits.push((seg, Hit::Kinds(kind)));
             self.tip(Hit::Kinds(kind), seg, tip, None);
         }
-        let color = if waiting > 0 { p.terminal_ansi[3] } else { p.text_muted };
-        let r = text_button(
-            Pen { layer, text, ds },
-            back.max_x() - px(8.0),
-            mid,
-            &found,
-            if self.list_open { p.accent } else { color },
-            self.hover == Some(Hit::Found),
-        );
+        let r = soft_rect(text, ds, &found_spec, back.max_x() - px(8.0), mid);
+        ds::button(layer, text, icons, ds, r, found_spec);
         self.hits.push((r, Hit::Found));
         self.tip(Hit::Found, r, "relations.tip_found", None);
     }
@@ -780,6 +718,7 @@ impl RelationsView {
         ds: &Ctx<'_>,
         text: &mut TextSystem,
         scene: &mut render_api::Scene,
+        icons: &icons::Icons,
         area: Rect,
     ) {
         let p = ds.palette;
@@ -805,14 +744,14 @@ impl RelationsView {
             ds::optical_baseline(head.min_y(), head.size.height, &title_font),
             p.text,
         );
-        let close = text_button(
-            Pen { layer, text, ds },
-            head.max_x() - pad,
-            head.min_y() + head.size.height / 2.0,
-            "×",
-            p.text_muted,
-            self.hover == Some(Hit::Found),
+        let close = ds::square_button(
+            ds,
+            (head.max_x() - pad - px(button_size::MEDIUM), head.min_y() + head.size.height / 2.0),
+            button_size::MEDIUM,
         );
+        let spec =
+            ButtonSpec::new(ButtonKind::Ghost).icon("x").hovered(self.hover == Some(Hit::Found));
+        ds::button(layer, text, icons, ds, close, spec);
         self.hits.push((close, Hit::Found));
         self.tip(Hit::Found, close, "relations.tip_close_list", None);
         ds::divider(layer, ds, panel.min_x(), panel.max_x(), head.max_y());
@@ -891,34 +830,33 @@ impl RelationsView {
             };
             let table = graph.as_ref().and_then(|g| g.find(&key.table));
             let row_hit = table.map(Hit::ListRow);
-            if row_hit.is_some() && self.hover == row_hit {
-                rows.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(radius::SM)));
-            }
+            ds::RowHighlight::new(false, row_hit.is_some() && self.hover == row_hit)
+                .hover(ds::HoverFill::Faint(ROW_HOVER))
+                .radius(radius::SM)
+                .paint(rows, ds, r);
             // Its buttons first (the label gives way to them).
             let mid = r.min_y() + r.size.height / 2.0;
             let mut right = r.max_x() - px(8.0);
-            let buttons: Vec<(String, Rgba, Hit)> = match kind {
+            let buttons: Vec<(String, Tone, Hit)> = match kind {
                 Kind::Waiting(i) => vec![
-                    (t("relations.ignore"), p.text_muted, Hit::Ignore(i)),
-                    (t("relations.accept"), p.accent, Hit::Accept(i)),
+                    (t("relations.ignore"), Tone::Neutral, Hit::Ignore(i)),
+                    (t("relations.accept"), Tone::Accent, Hit::Accept(i)),
                 ],
                 Kind::Accepted(i) => {
-                    vec![(t("relations.undo_accept"), p.text_muted, Hit::Unaccept(i))]
+                    vec![(t("relations.undo_accept"), Tone::Neutral, Hit::Unaccept(i))]
                 }
                 Kind::Ignored(i) => {
-                    vec![(t("relations.undo_ignore"), p.text_muted, Hit::Unignore(i))]
+                    vec![(t("relations.undo_ignore"), Tone::Neutral, Hit::Unignore(i))]
                 }
             };
             let mut button_hits = Vec::new();
-            for (label, color, hit) in buttons {
-                let b = text_button(
-                    Pen { layer: rows, text, ds },
-                    right,
-                    mid,
-                    &label,
-                    color,
-                    self.hover == Some(hit),
-                );
+            for (label, tone, hit) in buttons {
+                let spec = ButtonSpec::new(ButtonKind::Soft)
+                    .label(&label)
+                    .tone(tone)
+                    .hovered(self.hover == Some(hit));
+                let b = soft_rect(text, ds, &spec, right, mid);
+                ds::button(rows, text, icons, ds, b, spec);
                 right = b.min_x() - px(6.0);
                 button_hits.push((b, hit));
             }
@@ -1021,16 +959,23 @@ fn cardinality(
 fn label(pen: Pen<'_, '_>, r: Rect, label: &str, font: &Font, color: Rgba, strong: bool) {
     let Pen { layer, text, ds } = pen;
     let p = ds.palette;
-    let shaped = text.shape_line(label, font);
-    let h = r.size.height;
-    layer.quad(
-        Quad::filled(r, p.popup_background)
-            .rounded(h / 2.0)
-            .bordered(ds.line(), color.with_alpha(if strong { 0.9 } else { 0.5 })),
-    );
-    let at = (r.min_x() + (r.size.width - shaped.width) / 2.0).round();
-    draw_text(layer, &shaped, at, ds::optical_baseline(r.min_y(), h, font), p.text);
+    // The pill is the place found for it: its sizes given back in logical pixels.
+    let logical = |v: f32| v / ds.scale;
+    ds::Badge::new(label)
+        .font(font)
+        .color(p.text)
+        .fill(p.popup_background)
+        .border(color.with_alpha(if strong { LABEL_BORDER_STRONG } else { LABEL_BORDER }))
+        .size(ds::BadgeSize::Custom(logical(r.size.height)))
+        .min_width(logical(r.size.width))
+        .pad(0.0)
+        .centered()
+        .paint(layer, text, ds, r.min_x(), r.min_y() + r.size.height / 2.0);
 }
+
+/// A line's label's outline: its alpha of the line's color, and the line asked for's.
+const LABEL_BORDER: f32 = 0.5;
+const LABEL_BORDER_STRONG: f32 = 0.9;
 
 /// A line's label in a word: the columns and what they point to (`user_id → users.id`);
 /// the table it starts from is where it starts.
@@ -1068,12 +1013,6 @@ fn kind_note(origin: Origin, p: &Palette) -> (String, Rgba) {
     }
 }
 
-/// A [`text_button`]'s width for `label`.
-fn text_button_width(text: &mut TextSystem, ds: &Ctx<'_>, label: &str) -> f32 {
-    let font = ds.ui_font(-1.5).with_weight(ds::BUTTON_WEIGHT);
-    (text.shape_line(label, &font).width + ds.px(16.0)).round()
-}
-
 impl RelationsView {
     /// A line's popover: what it joins, its kind, what can be decided about it (accept,
     /// set aside, undo), and its two tables to go to. Under where it was clicked (over it
@@ -1084,6 +1023,7 @@ impl RelationsView {
         ds: &Ctx<'_>,
         text: &mut TextSystem,
         scene: &mut render_api::Scene,
+        icons: &icons::Icons,
         area: Rect,
     ) {
         let Some((key, at)) = self.popover.clone() else { return };
@@ -1108,12 +1048,12 @@ impl RelationsView {
         let (note, note_color) = kind_note(link.origin, p);
         let title_font = ds.code_font(-1.0);
         let note_font = ds.ui_font(-2.0);
-        let decisions: Vec<(String, Rgba, Hit)> = match link.origin {
+        let decisions: Vec<(String, Tone, Hit)> = match link.origin {
             Origin::Inferred(_) => vec![
-                (t("relations.accept"), p.accent, Hit::PopAccept),
-                (t("relations.ignore"), p.text_muted, Hit::PopIgnore),
+                (t("relations.accept"), Tone::Accent, Hit::PopAccept),
+                (t("relations.ignore"), Tone::Neutral, Hit::PopIgnore),
             ],
-            Origin::Virtual => vec![(t("relations.undo_decision"), p.text_muted, Hit::PopUndo)],
+            Origin::Virtual => vec![(t("relations.undo_decision"), Tone::Neutral, Hit::PopUndo)],
             Origin::Real => Vec::new(),
         };
         let name = |t: usize| graph.tables.get(t).map(|t| t.table().name.clone());
@@ -1127,8 +1067,12 @@ impl RelationsView {
             .collect();
         let pad = px(14.0);
         let gap = px(6.0);
+        let button_h = px(button_size::MEDIUM);
+        let soft_w = |text: &mut TextSystem, label: &str| {
+            ds::button_width(text, ds, &ButtonSpec::new(ButtonKind::Soft).label(label), button_h)
+        };
         let row_w = |text: &mut TextSystem, labels: &[&str]| {
-            labels.iter().map(|l| text_button_width(text, ds, l)).sum::<f32>()
+            labels.iter().map(|l| soft_w(text, l)).sum::<f32>()
                 + gap * labels.len().saturating_sub(1) as f32
         };
         let decision_labels: Vec<&str> = decisions.iter().map(|d| d.0.as_str()).collect();
@@ -1142,7 +1086,6 @@ impl RelationsView {
         let w = (content + 2.0 * pad).max(px(240.0)).min(area.size.width - px(16.0)).round();
         let title_h = px(22.0);
         let note_h = px(18.0);
-        let button_h = px(24.0);
         let mut h = pad + title_h + note_h + px(10.0) + button_h + pad;
         if !decisions.is_empty() {
             h += button_h + px(8.0);
@@ -1178,19 +1121,16 @@ impl RelationsView {
         let shaped = text.shape_line(&shown, &note_font);
         draw_text(layer, &shaped, x, ds::optical_baseline(y, note_h, &note_font), note_color);
         y += note_h + px(10.0);
-        let mut row = |text: &mut TextSystem, items: Vec<(String, Rgba, Hit)>, y: f32| {
+        let mut row = |text: &mut TextSystem, items: Vec<(String, Tone, Hit)>, y: f32| {
             let mut left = x;
-            for (label, color, hit) in items {
-                let w = text_button_width(text, ds, &label);
-                let pen = Pen { layer: &mut *layer, text, ds };
-                let b = text_button(
-                    pen,
-                    left + w,
-                    y + button_h / 2.0,
-                    &label,
-                    color,
-                    self.hover == Some(hit),
-                );
+            for (label, tone, hit) in items {
+                let spec = ButtonSpec::new(ButtonKind::Soft)
+                    .label(&label)
+                    .tone(tone)
+                    .hovered(self.hover == Some(hit));
+                let w = ds::button_width(text, ds, &spec, button_h);
+                let b = soft_rect(text, ds, &spec, left + w, y + button_h / 2.0);
+                ds::button(layer, text, icons, ds, b, spec);
                 self.hits.push((b, hit));
                 left = b.max_x() + gap;
             }
@@ -1199,7 +1139,7 @@ impl RelationsView {
             row(text, decisions, y);
             y += button_h + px(8.0);
         }
-        let goes = goes.into_iter().map(|(l, h)| (l, p.accent, h)).collect();
+        let goes = goes.into_iter().map(|(l, h)| (l, Tone::Accent, h)).collect();
         row(text, goes, y);
     }
 }

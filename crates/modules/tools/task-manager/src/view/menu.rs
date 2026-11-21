@@ -5,7 +5,7 @@
 //! one; a column chosen keeps the chooser open (several are chosen in a row).
 
 use kernel::Rect;
-use render_api::{Quad, Scene};
+use render_api::Scene;
 use text_layout::{Font, TextSystem};
 use ui_components::columns::Choice;
 use ui_components::ds::{self, Ctx, Elevation, radius};
@@ -16,6 +16,9 @@ use super::{Hit, MenuAction, Popover, TaskManager, column_of};
 use crate::layout::{ColumnId, PageLayout, Tool, present};
 use crate::model::{Column, Grouping};
 use crate::settings::{HISTORIES, INTERVALS};
+
+/// The room kept after a menu row's label, before its note (logical pixels).
+const LABEL_END: f32 = 10.0;
 
 /// The sorting columns offered by "Sort by…".
 const SORTS: [Column; 7] = [
@@ -200,33 +203,15 @@ impl TaskManager {
             let hit = Hit::Menu(action);
             self.hits.push((row, hit));
             let (label, checked, note) = self.menu_label(action, page);
-            if self.hover == Some(hit) || self.menu_at == Some(i) {
-                layer.quad(Quad::filled(row, p.hover_background).rounded(px(radius::SM)));
-            }
-            if checked == Some(true)
-                && let Some(id) = icons.id("check")
-            {
-                let s = px(14.0);
-                ui_kit::draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(row.min_x() + px(8.0), row.min_y() + (row_h - s) / 2.0, s, s),
-                    p.accent,
-                );
-            }
-            let base = ds::optical_baseline(row.min_y(), row_h, &font);
             let note_w = note.map_or(0.0, |n| text.shape_line(n, &note_font).width + px(10.0));
-            let room = (row.size.width - px(40.0) - note_w).max(0.0);
-            ds::draw_ellipsized(
-                layer,
-                text,
-                label,
-                &font,
-                (row.min_x() + px(30.0), base),
-                room,
-                p.text,
-            );
+            let spec = ds::CheckRowSpec::new(label, checked == Some(true), self.hover == Some(hit))
+                .active(self.menu_at == Some(i))
+                .untinted()
+                .plain_label()
+                .radius(radius::SM)
+                .hover_fill(p.hover_background)
+                .trailing(LABEL_END + note_w / ds.scale);
+            ds::check_row(layer, text, icons, ds, row, spec);
             if let Some(note) = note {
                 let nb = ds::optical_baseline(row.min_y(), row_h, &note_font);
                 super::table::right_text(

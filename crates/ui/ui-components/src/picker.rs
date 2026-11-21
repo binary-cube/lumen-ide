@@ -16,10 +16,12 @@
 use kernel::{Point, Rect};
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
-use ui_kit::{TextInput, draw_text, paint_key_hints};
+use ui_kit::{draw_text, paint_key_hints};
 
+use crate::control::{Control, Press};
 use crate::ds::{self, Ctx, Elevation, radius};
 use crate::scrollbar::EdgeScrollbar;
+use crate::search_field::SearchField;
 use crate::{KeyReach, ViewerKey};
 
 /// A row.
@@ -254,6 +256,8 @@ pub enum PickerEvent {
 const ROWS: usize = 6;
 /// As the git log's filter lists (one look for every list to choose from).
 const ROW_H: f32 = 28.0;
+/// The row under the keys or the mouse: the text's alpha it's lit with.
+const ROW_LIT: f32 = 0.06;
 const SEARCH_H: f32 = 46.0;
 /// Its search field's height (as the other filters').
 const FIELD_H: f32 = 30.0;
@@ -268,7 +272,8 @@ pub struct Picker {
     /// The chosen ones (several when `many`).
     chosen: Vec<usize>,
     many: bool,
-    query: TextInput,
+    /// Its search (the app's search field: ×, ⌘A; it has the keys while the list is open).
+    query: SearchField,
     /// The items the search keeps (their indices), and the one under the keys (in it).
     shown: Vec<usize>,
     highlight: usize,
@@ -278,9 +283,6 @@ pub struct Picker {
     /// Where it went (the last paint): all of it, its search field, the rows' area, each row.
     area: Rect,
     search: Rect,
-    /// The search's × (once something is typed), and whether the mouse is on it.
-    clear: Option<Rect>,
-    clear_hover: bool,
     list: Rect,
     rows: Vec<(Rect, usize)>,
     hover: Option<usize>,
@@ -449,8 +451,7 @@ impl Picker {
         if !self.open || !self.searches() {
             return false;
         }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        self.query.insert(&typed);
+        Control::text(&mut self.query, typed);
         self.filter();
         true
     }
@@ -482,18 +483,14 @@ impl Picker {
             ViewerKey::Up if len > 0 => self.highlight = (self.highlight + len - 1) % len,
             ViewerKey::PageDown if len > 0 => self.highlight = (self.highlight + page).min(len - 1),
             ViewerKey::PageUp => self.highlight = self.highlight.saturating_sub(page),
-            ViewerKey::Backspace if self.searches() => {
-                self.query.backspace(reach.word);
+            // The field's editing keys (what's typed changes: the rows filtered again).
+            ViewerKey::Backspace | ViewerKey::Delete if self.searches() => {
+                Control::key(&mut self.query, key, reach);
                 self.filter();
             }
-            ViewerKey::Delete if self.searches() => {
-                self.query.delete();
-                self.filter();
+            ViewerKey::Left | ViewerKey::Right | ViewerKey::Home | ViewerKey::End => {
+                Control::key(&mut self.query, key, reach);
             }
-            ViewerKey::Left => self.query.move_left(reach.word, reach.extend),
-            ViewerKey::Right => self.query.move_right(reach.word, reach.extend),
-            ViewerKey::Home => self.query.home(reach.extend),
-            ViewerKey::End => self.query.end(reach.extend),
             _ => {}
         }
         self.reveal = true;
@@ -506,20 +503,11 @@ impl Picker {
         if !self.open || !self.searches() {
             return false;
         }
-        let changed = match id {
-            "select_all" => {
-                self.query.select_all();
-                return true;
-            }
-            "cut" if !self.query.selected_text().is_empty() => {
-                self.query.insert("");
-                true
-            }
-            "undo" => self.query.undo(),
-            "redo" => self.query.redo(),
-            _ => return false,
-        };
-        if changed {
+        if !matches!(id, "select_all" | "cut" | "undo" | "redo") {
+            return false;
+        }
+        // What's typed changed (a cut, an undo): the rows filtered again.
+        if Control::command(&mut self.query, id) && id != "select_all" {
             self.filter();
         }
         true
@@ -539,8 +527,7 @@ impl Picker {
         if !self.selecting {
             return false;
         }
-        self.query.extend_to(p.x);
-        true
+        Control::drag(&mut self.query, p)
     }
 
     /// The mouse let go (the thumb, a selection in the search).
@@ -556,8 +543,7 @@ impl Picker {
 
     /// What's selected in the search (copied).
     pub fn selected_text(&self) -> Option<String> {
-        let selected = self.query.selected_text();
-        (self.open && !selected.is_empty()).then(|| selected.to_owned())
+        self.open.then(|| Control::selected_text(&self.query)).flatten()
     }
 
     /// A press: a row chosen, outside closes it, elsewhere on it nothing.
@@ -581,14 +567,13 @@ impl Picker {
             self.scroll = offset;
             return None;
         }
-        if self.clear.is_some_and(|c| c.contains(p)) {
-            self.query.set_text("");
-            self.filter();
-            return None;
-        }
+        // Its search: × empties it (all the rows back), else the caret put, a drag selecting.
         if self.search.contains(p) {
-            self.query.press(p.x, clicks);
-            self.selecting = true;
+            if Control::press(&mut self.query, p, clicks) == Press::Held {
+                self.selecting = true;
+            } else if self.query.take_cleared() {
+                self.filter();
+            }
             return None;
         }
         let (_, i) = self.rows.iter().find(|(r, _)| r.contains(p))?;
@@ -628,10 +613,8 @@ impl Picker {
         if !self.contains(p) {
             return None;
         }
-        Some(if self.clear.is_some_and(|c| c.contains(p)) {
-            crate::ViewerCursor::Pointer
-        } else if self.search.contains(p) {
-            crate::ViewerCursor::Text
+        Some(if self.search.contains(p) {
+            Control::cursor(&self.query, p).unwrap_or(crate::ViewerCursor::Text)
         } else if self.rows.iter().any(|(r, _)| r.contains(p)) {
             crate::ViewerCursor::Pointer
         } else {
@@ -644,9 +627,8 @@ impl Picker {
         let hover = self.rows.iter().find(|(r, _)| r.contains(p)).map(|(_, i)| *i);
         let changed = hover != self.hover;
         self.hover = hover;
-        let clear = self.clear.is_some_and(|c| c.contains(p));
-        let clear_changed = clear != self.clear_hover;
-        self.clear_hover = clear;
+        let on_search = self.search.contains(p).then_some(p);
+        let clear_changed = Control::hover(&mut self.query, on_search);
         changed | clear_changed | self.bar.hover(p)
     }
 
@@ -682,7 +664,6 @@ impl Picker {
     ) {
         self.rows.clear();
         self.search = Rect::default();
-        self.clear = None;
         if !self.open {
             return;
         }
@@ -719,18 +700,9 @@ impl Picker {
                 r.size.width - px(16.0),
                 px(FIELD_H),
             );
-            ds::search_input(
-                &mut crate::LayerPainter::new(layer, text, icons, *ctx),
-                field,
-                &self.query,
-                true,
-                placeholder,
-            );
+            // The list open is its focus: the caret always in its field.
+            self.query.paint(layer, text, icons, ctx, (field, true), placeholder);
             self.search = field;
-            if !self.query.text().is_empty() {
-                let (cx, mid) = (field.max_x() - px(16.0), field.min_y() + field.size.height / 2.0);
-                self.clear = Some(ds::clear_button(layer, icons, ctx, cx, mid, self.clear_hover));
-            }
             ds::divider(layer, ctx, r.min_x(), r.max_x(), r.min_y() + search_h);
         }
         // The keys, at the bottom.
@@ -809,9 +781,9 @@ impl Picker {
             );
             let lit = at == self.highlight && (!self.suggest || self.moved);
             // As the git log's lists: the row under the keys (or the mouse) a shade darker.
-            if lit || self.hover == Some(at) {
-                rows.quad(Quad::filled(row, p.text.with_alpha(0.06)).rounded(px(radius::MD)));
-            }
+            ds::RowHighlight::new(false, lit || self.hover == Some(at))
+                .hover(ds::HoverFill::Faint(ROW_LIT))
+                .paint(rows, ctx, row);
             let mid = top + self.row_h / 2.0;
             // On the right: the check on the chosen one, `↵` on the one under the keys.
             if self.chosen.contains(&i)
@@ -862,8 +834,7 @@ impl crate::control::Control for Picker {
         self.open
     }
 
-    fn press(&mut self, p: Point, clicks: u32) -> crate::control::Press {
-        use crate::control::Press;
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
         let was_held = self.dragging();
         self.event = self.press_with(p, clicks);
         if self.dragging() && !was_held || self.selecting { Press::Held } else { Press::Took }

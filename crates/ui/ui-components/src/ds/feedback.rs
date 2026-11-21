@@ -107,6 +107,10 @@ pub struct FooterButton<'a> {
     pub keyless: bool,
 }
 
+/// The room around a footer's plain button's label, both sides together (logical pixels):
+/// narrower than a main one's, which keeps the 96 of [`primary_width`].
+const FOOTER_LABEL_ROOM: f32 = 30.0;
+
 /// A modal footer's buttons, right to left from `right` (the first given the rightmost),
 /// centered on `mid`: the main one with its key, the others bordered. Returns each one's
 /// area (in the order given) and where the room left of them ends.
@@ -118,7 +122,6 @@ pub fn footer_buttons(
     mid: f32,
     buttons: &[FooterButton<'_>],
 ) -> (Vec<Rect>, f32) {
-    let p = ctx.palette;
     let px = |v: f32| ctx.px(v);
     let h = px(34.0);
     let font = button_font(ctx);
@@ -163,19 +166,9 @@ pub fn footer_buttons(
             };
             primary_button_with_key(layer, text, ctx, spec)
         } else {
-            let shaped = text.shape_line(b.label, &font);
-            let w = (shaped.width + px(30.0)).round();
+            let w = (text.shape_line(b.label, &font).width + px(FOOTER_LABEL_ROOM)).round();
             let rect = Rect::new(left - w, (mid - h / 2.0).round(), w, h);
-            let fill =
-                if b.hovered && b.enabled { p.text.with_alpha(0.06) } else { p.popup_background };
-            layer.quad(
-                Quad::filled(rect, fill)
-                    .rounded(px(radius::MD))
-                    .bordered(ctx.line(), p.card_border),
-            );
-            let color = if b.enabled { p.text } else { p.text_muted };
-            let x = rect.min_x() + (w - shaped.width) / 2.0;
-            draw_text(layer, &shaped, x, optical_baseline(rect.min_y(), h, &font), color);
+            super::secondary_button(layer, text, ctx, rect, b.label, b.enabled, b.hovered);
             rect
         };
         if b.focused {
@@ -200,18 +193,39 @@ pub struct Loader<'a> {
     pub color: Option<Rgba>,
     /// The text's color (default: muted).
     pub text_color: Option<Rgba>,
+    /// How long it has turned (the caller's clock: a notification's age); `None`: the
+    /// wall clock.
+    pub elapsed: Option<std::time::Duration>,
 }
 
 impl Default for Loader<'_> {
     fn default() -> Self {
-        Self { text: None, spinner: true, size: 16.0, color: None, text_color: None }
+        Self { text: None, spinner: true, size: 16.0, color: None, text_color: None, elapsed: None }
     }
 }
+
+/// The spinner's dots, and one step of their turn.
+const SPINNER_DOTS: usize = 8;
+pub const SPINNER_STEP: std::time::Duration = std::time::Duration::from_millis(90);
 
 impl<'a> Loader<'a> {
     /// A spinner and `text` beside it.
     pub fn with_text(text: &'a str) -> Self {
         Self { text: Some(text), ..Self::default() }
+    }
+
+    /// Turned by the caller's clock: `elapsed` since it started.
+    pub fn elapsed(mut self, elapsed: std::time::Duration) -> Self {
+        self.elapsed = Some(elapsed);
+        self
+    }
+
+    /// The spinner's lit dot now (0..8).
+    pub fn step(&self) -> usize {
+        let elapsed = self.elapsed.unwrap_or_else(|| {
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default()
+        });
+        (elapsed.as_millis() / SPINNER_STEP.as_millis()) as usize % SPINNER_DOTS
     }
 
     /// Its width, to place it.
@@ -236,27 +250,7 @@ pub fn loader(
     let size = ctx.px(loader.size);
     let mut right = x;
     if loader.spinner {
-        // Eight dots on a circle, the brightest one turning (one step every 90 ms).
-        const DOTS: usize = 8;
-        let step = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis())
-            / 90) as usize
-            % DOTS;
-        let color = loader.color.unwrap_or(p.accent);
-        let (cx, cy) = (x + size / 2.0, mid);
-        let radius = size * 0.38;
-        let dot = (size * 0.2).max(2.0);
-        for i in 0..DOTS {
-            let angle = i as f32 / DOTS as f32 * std::f32::consts::TAU;
-            let (dx, dy) = (angle.cos() * radius, angle.sin() * radius);
-            let age = (step + DOTS - i) % DOTS;
-            let alpha = 1.0 - age as f32 / DOTS as f32 * 0.85;
-            let r = Rect::new(cx + dx - dot / 2.0, cy + dy - dot / 2.0, dot, dot);
-            layer.quad(
-                Quad::filled(r, ctx.fade(color.with_alpha(color.a * alpha))).rounded(dot / 2.0),
-            );
-        }
+        loader_spinner(layer, ctx, (x, mid), loader);
         right += size;
     }
     if let Some(label) = loader.text {
@@ -276,6 +270,26 @@ pub fn loader(
         right += shaped.width;
     }
     Rect::new(x, mid - size / 2.0, right - x, size)
+}
+
+/// Only a loader's spinner, from `x`, centered on `mid` (no text, no text system needed).
+pub fn loader_spinner(layer: &mut Layer, ctx: &Ctx<'_>, (x, mid): (f32, f32), loader: &Loader<'_>) {
+    // Eight dots on a circle, the brightest one turning (one step every 90 ms).
+    const DOTS: usize = SPINNER_DOTS;
+    let size = ctx.px(loader.size);
+    let step = loader.step();
+    let color = loader.color.unwrap_or(ctx.palette.accent);
+    let (cx, cy) = (x + size / 2.0, mid);
+    let radius = size * 0.38;
+    let dot = (size * 0.2).max(2.0);
+    for i in 0..DOTS {
+        let angle = i as f32 / DOTS as f32 * std::f32::consts::TAU;
+        let (dx, dy) = (angle.cos() * radius, angle.sin() * radius);
+        let age = (step + DOTS - i) % DOTS;
+        let alpha = 1.0 - age as f32 / DOTS as f32 * 0.85;
+        let r = Rect::new(cx + dx - dot / 2.0, cy + dy - dot / 2.0, dot, dot);
+        layer.quad(Quad::filled(r, ctx.fade(color.with_alpha(color.a * alpha))).rounded(dot / 2.0));
+    }
 }
 
 /// An empty state: a title (and optionally an explanation), centered in `rect`.
@@ -425,16 +439,10 @@ pub fn tooltip(
             key.width + ctx.px(10.0),
             kh,
         );
-        layer.quad(
-            Quad::filled(kr, ctx.fade(ctx.palette.text.with_alpha(0.06))).rounded(ctx.px(4.0)),
-        );
-        draw_text(
-            layer,
-            &key,
-            kr.min_x() + ctx.px(5.0),
-            optical_baseline(kr.min_y(), kh, &key_font),
-            ctx.fade(ctx.palette.text_muted),
-        );
+        let back = ctx.palette.text.with_alpha(KEY_BACK);
+        let look = inline_key_look(ctx, back, ctx.palette.text_muted);
+        let at = (kr.min_x() + ctx.px(5.0), optical_baseline(kr.min_y(), kh, &key_font));
+        ui_kit::paint_keycap(layer, kr, &key, at, &look);
     }
     rect
 }

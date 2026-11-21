@@ -41,9 +41,44 @@ fn the_open_search_has_the_keys() {
     let mut canvas = Canvas { search: Some(search::Search::default()), ..Canvas::default() };
     assert!(canvas.wants_text());
     assert!(canvas.text_input("x"));
-    assert_eq!(canvas.search.as_ref().map(|s| s.query.as_str()), Some("x"));
+    assert_eq!(canvas.search.as_ref().map(search::Search::query), Some("x"));
+    assert!(canvas.command("select_all"), "⌘A: the search's");
+    assert_eq!(canvas.selected_text().as_deref(), Some("x"));
+    assert!(canvas.paste("ab\ncd"));
+    assert_eq!(canvas.search.as_ref().map(search::Search::query), Some("ab cd"), "one line");
     assert!(canvas.edit_key(ViewerKey::Escape));
     assert!(canvas.search.is_none());
     assert!(!canvas.edit_key(ViewerKey::Escape) && !canvas.text_input("y"));
     assert!(!canvas.command("select_all"));
+}
+
+/// The search's field keeps the ⌘K key on its right, open or closed, with or without text:
+/// × (once there's text) sits left of the key's room.
+#[test]
+fn the_search_field_keeps_its_key_with_the_clear_button_left_of_it() {
+    let palette = ui_components::palette::Palette::dark();
+    let ds = Ctx::new(&palette, 1.0);
+    let (mut text, icons) = (TextSystem::new(), icons::Icons::builtin());
+    let field = Rect::new(0.0, 0.0, 340.0, 40.0);
+    let key = if cfg!(target_os = "macos") { "⌘K" } else { "Ctrl K" };
+    let key_w = text.shape_line(key, &ds.ui_font(-2.0)).width;
+    let mut canvas = Canvas::default();
+    for typed in [None, Some(""), Some("user")] {
+        canvas.search = typed.map(|q| {
+            let mut search = search::Search::default();
+            search.field.set_text(q);
+            search
+        });
+        let mut layer = render_api::Layer::default();
+        canvas.paint_search_field(
+            Pen { layer: &mut layer, text: &mut text, ds: &ds },
+            &icons,
+            field,
+        );
+        let clear = canvas.search.as_ref().and_then(|s| s.field.clear_area());
+        assert_eq!(clear.is_some(), typed == Some("user"), "× only with text");
+        if let Some(clear) = clear {
+            assert!(clear.max_x() <= field.max_x() - key_w, "× left of the key");
+        }
+    }
 }

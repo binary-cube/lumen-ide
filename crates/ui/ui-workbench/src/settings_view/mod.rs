@@ -9,7 +9,8 @@ use icons::Icons;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 use text_layout::TextSystem;
-use ui_components::control::{Control, Controls, Thumb};
+use ui_components::control::{Control, Controls, Shown, Thumb};
+use ui_components::search_field::SearchField;
 use ui_kit::{KeyHint, draw_text};
 use workbench_model::{SettingsGroup, SettingsPage, SettingsRow};
 
@@ -337,6 +338,10 @@ struct Dropdown {
     current: i64,
 }
 
+/// The two search fields' places among the settings' controls (see `with_controls`).
+const QUERY: usize = 3;
+const FILTER: usize = 4;
+
 #[derive(Debug, Default)]
 pub struct SettingsView {
     modal: Modal,
@@ -347,13 +352,6 @@ pub struct SettingsView {
     /// mouse last was (the wheel scrolls what's under it: the navigation or the content).
     bar: ui_components::EdgeScrollbar,
     mouse: Option<Point>,
-    /// The search field's × button (with text) and its hover.
-    clear: Option<Rect>,
-    /// The search field (from the last paint) and whether it has focus: a click on it or
-    /// typing focuses it; any other click in the settings takes the focus away.
-    field: Rect,
-    query_focused: bool,
-    clear_hover: bool,
     section: Option<&'static str>,
     cards: Vec<(Rect, String)>,
     /// The themes shown (All / Dark / Light), its segments (from the last paint) and the
@@ -419,7 +417,8 @@ pub struct SettingsView {
     content_height: f32,
     content: Rect,
     /// Settings search: the text, the results (indices into entries), the selection, their areas.
-    query: ui_kit::TextInput,
+    /// The settings' search (the app's search field: ×, ⌘A; its focus the controls').
+    query: SearchField,
     results: Vec<usize>,
     selected: usize,
     result_rects: Vec<Rect>,
@@ -542,7 +541,8 @@ impl SettingsView {
         self.modal.open();
         self.advanced_open.clear();
         self.hover = None;
-        self.query_focused = false;
+        // Opened: no field has the keys yet (typing searches the settings).
+        self.controls = Controls::default();
         self.editing = None;
     }
 
@@ -621,45 +621,82 @@ impl SettingsView {
         !self.query.text().trim().is_empty()
     }
 
-    pub fn type_text(&mut self, typed: &str) {
-        if self.shortcuts.filter_focused() {
-            self.shortcuts.type_text(typed);
-            return;
+    /// The search field with the keys: the shortcuts' while it has them, else the settings'
+    /// (typing anywhere in the settings searches them).
+    fn keys_field(&mut self) -> usize {
+        let field = self.field_with_keys();
+        self.with_controls(|c, parts| c.focus(parts, Some(field)));
+        field
+    }
+
+    /// The search field the keys reach, without moving the focus: the shortcuts' while it
+    /// has the focus and its page shows, else the settings'.
+    fn field_with_keys(&self) -> usize {
+        match self.controls.focused() {
+            Some(FILTER) if self.on_keymap() => FILTER,
+            _ => QUERY,
         }
+    }
+
+    /// The keymap's page shows (its shortcuts' search with it).
+    fn on_keymap(&self) -> bool {
+        !self.has_query() && self.active() == KEYMAP
+    }
+
+    pub fn type_text(&mut self, typed: &str) {
         if let Some(editing) = &mut self.editing {
             editing.input.insert(typed);
             return;
         }
-        self.query_focused = true;
-        self.query.insert(typed);
-        self.selected = 0;
+        let field = self.keys_field();
+        self.with_controls(|c, parts| c.text(parts, typed));
+        if field == QUERY {
+            self.selected = 0;
+        }
     }
 
     pub fn backspace(&mut self, word: bool) {
-        if self.shortcuts.filter_focused() {
-            self.shortcuts.backspace(word);
-            return;
-        }
         if let Some(editing) = &mut self.editing {
             editing.input.backspace(word);
             return;
         }
-        self.query.backspace(word);
-        self.selected = 0;
+        let field = self.keys_field();
+        let reach = ui_components::KeyReach { word, extend: false };
+        self.with_controls(|c, parts| c.key(parts, ui_components::ViewerKey::Backspace, reach));
+        if field == QUERY {
+            self.selected = 0;
+        }
     }
 
     /// The field with the keys (for clipboard / select-all routing): a block's text field
-    /// being written, else the search.
+    /// being written, else the search field with the focus.
     pub fn query_input(&self) -> &ui_kit::TextInput {
-        self.editing.as_ref().map_or(&self.query, |e| &e.input)
+        if let Some(editing) = &self.editing {
+            return &editing.input;
+        }
+        match self.field_with_keys() {
+            FILTER => &self.shortcuts.filter.input,
+            _ => &self.query.input,
+        }
     }
 
+    /// The same field as `query_input`, to edit: asking never moves the focus from one
+    /// field to another (with none focused, the settings' search takes it).
     pub fn query_input_mut(&mut self) -> &mut ui_kit::TextInput {
-        if let Some(editing) = &mut self.editing {
-            return &mut editing.input;
+        if self.editing.is_some() {
+            return match &mut self.editing {
+                Some(editing) => &mut editing.input,
+                None => &mut self.query.input,
+            };
         }
-        self.query_focused = true;
-        &mut self.query
+        let field = self.field_with_keys();
+        if self.controls.focused().is_none() {
+            self.with_controls(|c, parts| c.focus(parts, Some(field)));
+        }
+        match field {
+            FILTER => &mut self.shortcuts.filter.input,
+            _ => &mut self.query.input,
+        }
     }
 
     /// A block's text field is being written.
@@ -676,7 +713,15 @@ impl SettingsView {
     /// Esc: the change given up (a field being written, a shortcut being recorded or its
     /// conflict, the shortcuts' search). `false` if there was none.
     pub fn cancel_text(&mut self) -> bool {
-        self.editing.take().is_some() || self.shortcuts.cancel()
+        if self.editing.take().is_some() || self.shortcuts.cancel() {
+            return true;
+        }
+        // The shortcuts' search left (its caret gone; typing searches the settings again).
+        let leaving = self.controls.focused() == Some(FILTER);
+        if leaving {
+            self.with_controls(|c, parts| c.focus(parts, None));
+        }
+        leaving
     }
 
     /// Settings → Shortcuts: `command` opened, recording its next keys.
@@ -697,7 +742,7 @@ impl SettingsView {
 
     /// The shortcuts' search or a recording has the keys (as a field being written does).
     pub fn shortcuts_have_keys(&self) -> bool {
-        self.shortcuts.filter_focused() || self.shortcuts.recording()
+        self.controls.focused() == Some(FILTER) || self.shortcuts.recording()
     }
 
     pub fn clear_query(&mut self) {
@@ -750,8 +795,13 @@ impl SettingsView {
     pub fn hit(&mut self, p: Point) -> Option<SettingsAction> {
         // Its controls first: an open dropdown list takes the click (a choice, or closed by
         // one outside), a scrollbar's thumb is held or jumped to (nothing under it reached).
-        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+        if let Some((part, _)) = self.with_controls(|c, parts| c.press(parts, p, 1)) {
             self.limit_scroll();
+            // A search field's × emptied it: the results with it.
+            if part == QUERY && self.query.take_cleared() {
+                self.clear_query();
+            }
+            self.shortcuts.filter.take_cleared();
             let event = self.picker.take_event();
             return self.picked(event);
         }
@@ -781,10 +831,8 @@ impl SettingsView {
         let in_content = at == Some(ModalHit::Content);
         // The shortcuts' editor: its search, its commands, their buttons.
         if in_content && self.shortcuts.over(p) {
-            self.query_focused = false;
             return self.shortcuts.click(p).map(SettingsAction::Shortcuts);
         }
-        self.shortcuts.blur();
         // A block's text field: a click on it starts writing it; while one is written, a
         // click elsewhere saves it (and does nothing else).
         let field = self.text_fields.iter().find(|(r, ..)| in_content && r.contains(p)).cloned();
@@ -801,16 +849,10 @@ impl SettingsView {
             input.set_masked(secret);
             input.select_all();
             self.editing = Some(Editing { block, key, input });
-            self.query_focused = false;
             return None;
         }
-        self.query_focused = self.field.contains(p);
         if let Some(i) = self.filter_rects.iter().position(|r| in_content && r.contains(p)) {
             self.theme_filter = ThemeFilter::ALL[i];
-            return None;
-        }
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            self.clear_query();
             return None;
         }
         if let Some(i) = self.result_rects.iter().position(|r| in_content && r.contains(p)) {
@@ -906,13 +948,10 @@ impl SettingsView {
             Some(ModalHit::Content) => self.content_hit(p),
             _ => None,
         };
-        let clear = self.clear.is_some_and(|r| r.contains(p));
         let filter = self.filter_rects.iter().position(|r| r.contains(p));
-        let changed =
-            hover != self.hover || clear != self.clear_hover || filter != self.filter_hover;
+        let changed = hover != self.hover || filter != self.filter_hover;
         self.filter_hover = filter;
         self.hover = hover;
-        self.clear_hover = clear;
         frame || changed || bar
     }
 
@@ -953,7 +992,7 @@ impl SettingsView {
                     || self.shortcuts.over(p)
                     || self.result_rects.iter().any(|r| r.contains(p))
                     || self.filter_rects.iter().any(|r| r.contains(p))))
-            || self.clear.is_some_and(|r| r.contains(p))
+            || Control::cursor(&self.query, p) == Some(ui_components::ViewerCursor::Pointer)
     }
 
     /// Opens the result chosen with the mouse (the `OpenResult` action).
@@ -1151,9 +1190,12 @@ impl SettingsView {
         &mut self,
         f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
     ) -> R {
+        let keymap = self.on_keymap();
         let mut content = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
         let mut nav = self.modal.nav_grab();
-        let mut parts: [&mut dyn Control; 3] = [&mut self.picker, &mut nav, &mut content];
+        let mut filter = Shown { part: &mut self.shortcuts.filter, shown: keymap };
+        let mut parts: [&mut dyn Control; 5] =
+            [&mut self.picker, &mut nav, &mut content, &mut self.query, &mut filter];
         f(&mut self.controls, &mut parts)
     }
 

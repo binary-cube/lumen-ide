@@ -58,7 +58,7 @@ impl Workbench {
         // effects stand still meanwhile, if it says so.
         let emphasis = self.emphasis_request();
         self.chrome.decorations.paused = emphasis.is_some_and(|e| e.pause_effects);
-        let keyboard_in_overlay = self.paint_frame(scene);
+        let keyboard_in_overlay = self.paint_frame(text, scene);
         self.paint_phases.mark("frame");
         if self.tabs.is_empty() && self.editors.groups.len() <= 1 {
             self.paint_empty_state(text, scene);
@@ -140,7 +140,7 @@ impl Workbench {
 
     /// The window's frame: the tint, the tool strips and the editor's card. Returns whether
     /// a modal / an overlay's field has the keyboard.
-    fn paint_frame(&mut self, scene: &mut Scene) -> bool {
+    fn paint_frame(&mut self, text: &mut TextSystem, scene: &mut Scene) -> bool {
         let window = Rect::new(0.0, 0.0, self.size.width as f32, self.size.height as f32);
         let name = self
             .project
@@ -162,14 +162,14 @@ impl Workbench {
         buttons.extend(
             self.docked(ui_workbench::Dock::Bottom).iter().map(|t| self.tool_button_of(t, true)),
         );
-        self.tools.strip.paint(&buttons, &self.icons, palette, scene);
+        self.tools.strip.paint(&buttons, &self.icons, text, palette, scene);
         // The right strip: its top group, then those asking for its bottom (the Task Manager).
         let panels: Vec<ToolButton> = self
             .docked(ui_workbench::Dock::Right)
             .iter()
             .map(|t| self.tool_button_of(t, t.strip_end()))
             .collect();
-        self.tools.right_strip.paint(&panels, &self.icons, palette, scene);
+        self.tools.right_strip.paint(&panels, &self.icons, text, palette, scene);
         let keyboard_in_overlay = self.keyboard_in_overlay();
         let card = scene.push_layer(None);
         let line = self.scale.round().max(1.0);

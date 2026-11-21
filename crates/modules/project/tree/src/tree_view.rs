@@ -12,7 +12,17 @@ use workspace::marks::{PathMark, PathMarks};
 use workspace::{FileTree, Mark, NodeId, NodeKind, VisibleRow};
 
 use ui_components::Palette;
+use ui_components::ds;
 use ui_components::tree::{self as tree_row, TreeList};
+
+/// A folder a drag would drop into: its highlight's corners and its outline's width
+/// (logical pixels).
+const DROP_RADIUS: f32 = 6.0;
+const DROP_OUTLINE: f32 = 1.5;
+/// The name field of a new entry, in its row: its corners and the room before its text
+/// (logical pixels).
+const FIELD_RADIUS: f32 = 5.0;
+const FIELD_PADDING: f32 = 6.0;
 
 /// The panel's appearance.
 #[derive(Debug, Clone, PartialEq)]
@@ -436,7 +446,7 @@ impl ProjectTreeView {
         let row_height = self.row_height();
         let inset = px(8.0);
         let font = Font::new(s.font_family.clone(), px(s.font_size));
-        let line = self.scale.round().max(1.0);
+        let ctx = ds::Ctx::new(&self.palette, self.scale);
         let frame = Frame {
             scale: self.scale,
             layout: tree_row::EntryLayout::new(self.scale, s.row_height, s.indent),
@@ -474,11 +484,12 @@ impl ProjectTreeView {
         pills.quad(Quad::filled(b, s.background));
         for (i, row) in visible.iter().enumerate() {
             if self.drop_target == Some(row.id) {
-                pills.quad(
-                    Quad::filled(pill_at(i), s.selection)
-                        .rounded(px(6.0))
-                        .bordered(line.max(px(1.5)), s.input_border),
-                );
+                ds::RowHighlight::new(true, false)
+                    .selected_fill(s.selection)
+                    .radius(DROP_RADIUS)
+                    .outline(s.input_border)
+                    .outline_width(DROP_OUTLINE)
+                    .paint(pills, &ctx, pill_at(i));
             } else if self.is_selected(row.id) {
                 tree_row::highlight(pills, pill_at(i), s.selection, frame.layout.pill_radius());
             } else if self.hovered == Some(row.id) {
@@ -701,26 +712,12 @@ impl ProjectTreeView {
             (content_clip.max_x() - icon_rect.max_x() - px(10.0)).max(px(40.0)),
             row_height - px(6.0),
         );
-        let border = if pending.error { s.error } else { s.input_border };
-        layer.quad(
-            Quad::filled(field, s.input_background)
-                .rounded(px(5.0))
-                .bordered(f.layout.line, border),
-        );
+        // The shared field, fitted to a row: smaller corners, less room before the text.
+        let ctx = ds::Ctx::new(&self.palette, self.scale);
         let style = TextInputStyle {
-            font: f.font.clone(),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: s.foreground,
-            placeholder: s.muted,
-            selection: s.text_selection,
-            caret: s.caret,
-            radius: 0.0,
-            border_width: 0.0,
-            padding: px(6.0),
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
+            radius: px(FIELD_RADIUS),
+            padding: px(FIELD_PADDING),
+            ..ds::field_style(&ctx, f.font.clone(), pending.error)
         };
         let placeholder =
             i18n::t(if pending.is_dir { "files.new_folder" } else { "files.new_file" });

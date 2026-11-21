@@ -246,7 +246,7 @@ impl super::PropertiesView {
         use i18n::t;
         use kernel::Rect;
         use text_layout::Font;
-        use ui_components::ds::{self, Tone};
+        use ui_components::ds::{self, ButtonKind, ButtonSpec, Tone, button_size};
         use ui_kit::draw_text;
 
         use super::{Hit, LABEL_W, Pick, ROW_H};
@@ -301,21 +301,13 @@ impl super::PropertiesView {
             // On the right: the copy button, how it compares.
             let mut right = x1;
             if let Sum::Done { local, .. } = &sum {
-                let s = px(26.0);
+                let s = px(button_size::MEDIUM);
                 let copy = Rect::new(right - s, top, s, s);
-                if self.hover == Some(Hit::Copy(i)) {
-                    ds::row_highlight(layer, ds, copy, false, true);
-                }
-                if let Some(id) = icons.id("copy") {
-                    let is = px(15.0);
-                    let at = Rect::new(
-                        copy.min_x() + (s - is) / 2.0,
-                        copy.min_y() + (s - is) / 2.0,
-                        is,
-                        is,
-                    );
-                    ui_kit::draw_icon(layer, icons, id, at, p.text_muted);
-                }
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon("copy")
+                    .rest_tone(Tone::Neutral)
+                    .hovered(self.hover == Some(Hit::Copy(i)));
+                ds::button(layer, text, icons, ds, copy, spec);
                 self.hits.push((copy, Hit::Copy(i)));
                 right = copy.min_x() - px(8.0);
                 let (key, tone) = match local {

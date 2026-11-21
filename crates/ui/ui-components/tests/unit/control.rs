@@ -167,11 +167,17 @@ fn an_embedded_view_is_a_control() {
     #[derive(Default)]
     struct Inner {
         typed: String,
+        asked: Option<(Rect, Vec<ViewMenuEntry>)>,
     }
     impl crate::Viewer for Inner {
         fn paint(&mut self, _ctx: crate::ViewerPaint<'_>) {}
-        fn press(&mut self, _p: Point, _clicks: u32) -> Option<crate::ViewerAction> {
+        fn press(&mut self, p: Point, _clicks: u32) -> Option<crate::ViewerAction> {
+            self.asked =
+                Some((Rect::new(p.x, p.y, 10.0, 10.0), vec![ViewMenuEntry::item("a", "A")]));
             Some(crate::ViewerAction::Close)
+        }
+        fn take_menu(&mut self) -> Option<(Rect, Vec<ViewMenuEntry>)> {
+            self.asked.take()
         }
         fn wants_text(&self) -> bool {
             true
@@ -183,12 +189,14 @@ fn an_embedded_view_is_a_control() {
     }
     let mut inner = Inner::default();
     let mut action = None;
+    let mut menu = None;
     let mut c = Controls::default();
     {
         let mut part = Embedded {
             view: &mut inner,
             area: Rect::new(0.0, 0.0, 50.0, 50.0),
             action: &mut action,
+            menu: &mut menu,
         };
         let mut parts: [&mut dyn Control; 1] = [&mut part];
         assert!(c.press(&mut parts, Point::new(5.0, 5.0), 1).is_some());
@@ -197,6 +205,11 @@ fn an_embedded_view_is_a_control() {
     }
     assert!(matches!(action, Some(crate::ViewerAction::Close)));
     assert_eq!(inner.typed, "x");
+    // The menu it asked for under its button: kept for the owner to give the app.
+    let (anchor, rows) = menu.expect("the asked menu kept for its owner");
+    assert_eq!(anchor.origin, Point::new(5.0, 5.0));
+    assert_eq!(rows.len(), 1);
+    assert!(inner.asked.is_none(), "taken from the view");
 }
 
 /// What a view asks without its parts (from `&self`) is answered from the last hover and

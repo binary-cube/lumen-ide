@@ -19,11 +19,11 @@ use ui_components::diagram::{
     self, CardFonts, CardLook, Dir, EdgeStyle, Head, Header, Release, Viewport,
     layered::{self, Direction, EdgeSpec, Options},
 };
-use ui_components::ds::{self, Ctx, Pen};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Pen, button_size};
 use ui_components::{
     Viewer, ViewerAction, ViewerCursor, ViewerKind, ViewerPaint, ViewerProvider, WithHost,
 };
-use ui_kit::{draw_icon, draw_text};
+use ui_kit::draw_text;
 
 use crate::pending::Pending;
 use crate::runs::{RunState, Runs};
@@ -488,35 +488,21 @@ impl Viewer for ChainView {
         let x = diagram::toolbar_title(text, layer, &ds, bar, bar.min_x() + px(14.0), &title)
             + px(16.0);
         self.hits.clear();
-        let size = px(28.0);
         let mut x = x;
         let running = self.running();
-        for (tool, icon, tint) in [
-            (Tool::Play, "play", p.vcs_added),
-            (Tool::Stop, "square", p.danger),
-            (Tool::Fit, "maximize-2", p.text),
+        let mid = bar.min_y() + bar.size.height / 2.0;
+        for (tool, icon, tone) in [
+            (Tool::Play, "play", Some(ds::Tone::Success)),
+            (Tool::Stop, "square", Some(ds::Tone::Danger)),
+            (Tool::Fit, "maximize-2", None),
         ] {
-            let r = Rect::new(x, bar.min_y() + (bar.size.height - size) / 2.0, size, size);
-            let enabled = tool != Tool::Stop || running;
-            if enabled && self.hover_tool == Some(tool) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(6.0)));
-            }
-            if let Some(id) = icons.id(icon) {
-                let s = px(15.0);
-                let ir = Rect::new(
-                    (r.min_x() + (size - s) / 2.0).round(),
-                    (r.min_y() + (size - s) / 2.0).round(),
-                    s,
-                    s,
-                );
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    ir,
-                    if enabled { tint } else { p.text_muted.with_alpha(0.4) },
-                );
-            }
+            let r = ds::square_button(&ds, (x, mid), button_size::LARGE);
+            let mut spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon(icon)
+                .enabled(tool != Tool::Stop || running)
+                .hovered(self.hover_tool == Some(tool));
+            spec.tone = tone;
+            ds::button(layer, text, icons, &ds, r, spec);
             self.hits.push((r, tool));
             x = r.max_x() + px(4.0);
         }

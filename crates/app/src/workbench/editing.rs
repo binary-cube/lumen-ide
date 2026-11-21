@@ -742,7 +742,7 @@ impl Workbench {
     pub(super) fn active_input(&self) -> Option<&ui_kit::TextInput> {
         Some(match self.input_owner()? {
             InputOwner::Overlay(o) => o.slot().input(self)?,
-            InputOwner::Home => &self.home.picker.query,
+            InputOwner::Home => &self.home.picker.query.input,
             InputOwner::Find => self.tabs.get(self.active)?.find_bar.focused_input_ref(),
         })
     }
@@ -756,7 +756,7 @@ impl Workbench {
     pub(super) fn active_input_mut(&mut self) -> Option<&mut ui_kit::TextInput> {
         Some(match self.input_owner()? {
             InputOwner::Overlay(o) => o.slot().input_mut(self)?,
-            InputOwner::Home => &mut self.home.picker.query,
+            InputOwner::Home => &mut self.home.picker.query.input,
             InputOwner::Find => self.tabs.get_mut(self.active)?.find_bar.focused_input(),
         })
     }

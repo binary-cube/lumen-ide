@@ -6,18 +6,22 @@
 
 use std::time::Duration;
 
-use icons::Icons;
 use kernel::{Point, Rect, Rgba};
-use render_api::{Layer, Quad, Scene};
+use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
-use ui_kit::{KeyHint, TextInput, TextInputStyle, draw_text};
+use ui_kit::{KeyHint, draw_text};
 
-use crate::Painter;
 use crate::anim::Tween;
+use crate::control::{Control, Press};
 use crate::ds::{self, Ctx, Elevation, radius};
+use crate::search_field::SearchField;
+use crate::{KeyReach, Painter, ViewerCursor, ViewerKey};
 
 /// The extension of the picker's popover view (`open_overlay`, given [`LevelChoices`]).
 pub const LEVEL_PICKER_EXTENSION: &str = "view-level-picker";
+
+/// The scope's segmented control: its height (logical pixels).
+const SCOPE_H: f32 = 34.0;
 
 /// What the popover shows, and the status bar item it opens above.
 #[derive(Debug, Clone, PartialEq)]
@@ -69,7 +73,6 @@ pub enum LevelClick {
 enum Hit {
     Scope(LevelScope),
     Chip(usize),
-    Clear,
 }
 
 #[derive(Debug, Default)]
@@ -79,7 +82,8 @@ pub struct LevelPicker {
     viewport: Rect,
     scale: f32,
     scope: Option<LevelScope>,
-    pub query: TextInput,
+    /// Its filter (the app's search field: ×, ⌘A; the popover's one field, the caret its).
+    pub query: SearchField,
     selected: usize,
     /// The pills from the last paint: (area, level; `None` = Auto / same as the project).
     chips: Vec<(Rect, Option<String>)>,
@@ -149,33 +153,83 @@ impl LevelPicker {
                 LevelClick::Inside
             }
             Some(Hit::Chip(i)) => self.pick(i).map_or(LevelClick::Inside, LevelClick::Pick),
-            Some(Hit::Clear) => {
-                self.query.set_text("");
+            None => {
+                self.press_field(p, 1);
                 LevelClick::Inside
             }
-            None => LevelClick::Inside,
         }
+    }
+
+    /// A press on the filter (`clicks`-th of a series): × empties it, else the caret put
+    /// (two a word, three all of it). `true` if it was on the field.
+    pub fn press_field(&mut self, p: Point, clicks: u32) -> bool {
+        if !self.query.hit(p) {
+            return false;
+        }
+        let press = Control::press(&mut self.query, p, clicks);
+        if press == Press::Took && self.query.take_cleared() {
+            self.selected = 0;
+        }
+        true
+    }
+
+    /// The mouse dragged after a press on the filter: what it covers selected.
+    pub fn drag(&mut self, p: Point) -> bool {
+        self.open && Control::drag(&mut self.query, p)
+    }
+
+    /// One of the filter's editing keys (Backspace, Delete, Home, End; ← → are the pills',
+    /// the view chooses): `true` if the field used it.
+    pub fn field_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let taken = Control::key(&mut self.query, key, reach);
+        if taken && matches!(key, ViewerKey::Backspace | ViewerKey::Delete) {
+            self.selected = 0;
+        }
+        taken
+    }
+
+    /// An edit command on the filter (`select_all`, `cut`, `undo`, `redo`).
+    pub fn command(&mut self, id: &str) -> bool {
+        let taken = self.open && Control::command(&mut self.query, id);
+        if taken && id != "select_all" {
+            self.selected = 0;
+        }
+        taken
+    }
+
+    /// What's selected in the filter (copied).
+    pub fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&self.query)
+    }
+
+    /// The cursor at `p`: a hand on a pill, a scope or ×, the text's in the filter.
+    pub fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        if self.hits.iter().any(|(r, _)| r.contains(p)) {
+            return Some(ViewerCursor::Pointer);
+        }
+        self.query.hit(p).then(|| Control::cursor(&self.query, p)).flatten()
     }
 
     pub fn hover(&mut self, p: Point) -> bool {
         let hover = self.hits.iter().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        let clear = Control::hover(&mut self.query, Some(p));
+        changed | clear
     }
 
+    /// `p` is on a pill, a scope or the filter's ×.
     pub fn over_clickable(&self, p: Point) -> bool {
-        self.hits.iter().any(|(r, _)| r.contains(p))
+        self.cursor_at(p) == Some(ViewerCursor::Pointer)
     }
 
     pub fn type_text(&mut self, typed: &str) {
-        self.query.insert(typed);
+        Control::text(&mut self.query, typed);
         self.selected = 0;
     }
 
     pub fn backspace(&mut self) {
-        self.query.backspace(false);
-        self.selected = 0;
+        self.field_key(ViewerKey::Backspace, KeyReach::default());
     }
 
     /// ← → (one step) and ↑ ↓ (one row), wrapping from the end to the start.
@@ -256,10 +310,17 @@ impl LevelPicker {
         paint_header(choices, &frame, text, layer, &ctx);
         let mut y = panel.min_y() + header_h;
         if let Some(file) = &choices.file_name {
-            y = self.paint_scope(file, y, &frame, text, layer, &ctx);
+            y = self.paint_scope(file, y, &frame, (text, icons), layer, &ctx);
         }
-        let input = self.paint_field(y, &frame, icons, layer, &ctx);
-        self.paint_query(input, text, scene, &ctx);
+        // The filter: the popover's one field, so its caret always shows.
+        let field = Rect::new(
+            panel.min_x() + frame.pad,
+            y,
+            panel.size.width - 2.0 * frame.pad,
+            frame.field_h,
+        );
+        let placeholder = i18n::t("level.filter");
+        self.query.paint(layer, text, icons, &ctx, (field, true), &placeholder);
         let y = y + field_h + px(12.0);
 
         let layer = scene.push_layer(Some(panel));
@@ -273,112 +334,35 @@ impl LevelPicker {
         file: &str,
         y: f32,
         frame: &Frame,
-        text: &mut TextSystem,
+        (text, icons): (&mut TextSystem, &icons::Icons),
         layer: &mut Layer,
         ctx: &Ctx<'_>,
     ) -> f32 {
         let px = |v: f32| ctx.px(v);
-        let p = ctx.palette;
         let (panel, pad) = (frame.panel, frame.pad);
-        let seg = Rect::new(panel.min_x() + pad, y, panel.size.width - 2.0 * pad, px(34.0));
-        layer.quad(Quad::filled(seg, ctx.fade(p.text.with_alpha(0.05))).rounded(px(radius::MD)));
-        let half = ((seg.size.width - px(4.0)) / 2.0).floor();
-        let font = ctx.ui_font(-1.0);
-        for (i, (label, s)) in [
-            (i18n::t("level.project"), LevelScope::Project),
-            (i18n::tr!("level.only_file", name = file), LevelScope::File),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let r = Rect::new(
-                seg.min_x() + px(2.0) + i as f32 * half,
-                seg.min_y() + px(2.0),
-                half,
-                seg.size.height - px(4.0),
-            );
-            let on = frame.scope == s;
-            if on {
-                layer.quad(
-                    Quad::filled(r, ctx.fade(p.popup_background))
-                        .rounded(px(radius::SM + 1.0))
-                        .bordered(ctx.line(), ctx.fade(p.border)),
-                );
-            } else if self.hover == Some(Hit::Scope(s)) {
-                layer.quad(
-                    Quad::filled(r, ctx.fade(p.text.with_alpha(0.05)))
-                        .rounded(px(radius::SM + 1.0)),
-                );
-            }
-            let label = ds::ellipsize(text, &label, &font, r.size.width - px(16.0));
-            let shaped = text.shape_line(&label, &font);
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                ds::optical_baseline(r.min_y(), r.size.height, &font),
-                ctx.fade(if on { p.text } else { p.text_muted }),
-            );
-            self.hits.push((r, Hit::Scope(s)));
-        }
-        seg.max_y() + px(12.0)
-    }
-
-    /// The filter's box at `y` (with × when it has text); returns where its text goes.
-    fn paint_field(
-        &mut self,
-        y: f32,
-        frame: &Frame,
-        icons: &Icons,
-        layer: &mut Layer,
-        ctx: &Ctx<'_>,
-    ) -> Rect {
-        let px = |v: f32| ctx.px(v);
-        let (panel, pad) = (frame.panel, frame.pad);
-        let field = Rect::new(panel.min_x() + pad, y, panel.size.width - 2.0 * pad, frame.field_h);
-        let mut input = ds::search_field(layer, icons, ctx, field, true);
-        if !self.query.text().is_empty() {
-            let mid = field.min_y() + field.size.height / 2.0;
-            let r = ds::clear_button(
-                layer,
-                icons,
-                ctx,
-                field.max_x() - px(17.0),
-                mid,
-                self.hover == Some(Hit::Clear),
-            );
-            input.size.width = (r.min_x() - px(6.0) - input.min_x()).max(0.0);
-            self.hits.push((r, Hit::Clear));
-        }
-        input
-    }
-
-    /// The filter's text, on its own layer clipped to `input`.
-    fn paint_query(
-        &mut self,
-        input: Rect,
-        text: &mut TextSystem,
-        scene: &mut Scene,
-        ctx: &Ctx<'_>,
-    ) {
-        let p = ctx.palette;
-        let style = TextInputStyle {
-            font: ctx.ui_font(-0.5),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: ctx.fade(p.text),
-            placeholder: ctx.fade(p.text_muted),
-            selection: ctx.fade(p.selection),
-            caret: ctx.fade(p.caret),
-            radius: 0.0,
-            border_width: 0.0,
-            padding: 0.0,
-            caret_width: ctx.px(1.5).max(1.0),
-            lead: 0.0,
+        let width = panel.size.width - 2.0 * pad;
+        let scopes = [LevelScope::Project, LevelScope::File];
+        let project = i18n::t("level.project");
+        let only = i18n::tr!("level.only_file", name = file);
+        let labels = [project.as_str(), only.as_str()];
+        let hovered = scopes.iter().position(|s| self.hover == Some(Hit::Scope(*s)));
+        let spec = ds::SegmentedSpec {
+            right: 0.0,
+            mid: y + px(SCOPE_H) / 2.0,
+            labels: &labels,
+            selected: scopes.iter().position(|s| *s == frame.scope).unwrap_or_default(),
+            hovered,
         };
-        let input_layer = scene.push_layer(Some(input));
-        self.query.paint(input_layer, text, input, true, &i18n::t("level.filter"), &style);
+        let look = ds::SegmentedLook {
+            height: SCOPE_H,
+            place: ds::SegmentPlace::Fill { x: panel.min_x() + pad, width },
+            ..Default::default()
+        };
+        let hits = &mut self.hits;
+        ds::segmented_styled(layer, text, icons, ctx, (spec, look), |i, r| {
+            hits.push((r, Hit::Scope(scopes[i])));
+        });
+        y + px(SCOPE_H) + px(12.0)
     }
 
     /// The pills, in rows from `y` (or "nothing found").
@@ -567,3 +551,7 @@ fn paint_footer(
     );
     ui_kit::paint_key_hints(layer, text, &hints, row, &ctx.palette.key_hints(ctx.scale));
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/level_picker.rs"]
+mod tests;

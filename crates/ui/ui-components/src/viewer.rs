@@ -617,12 +617,14 @@ pub enum ViewMenuEntry {
 
 /// How a menu's row stands, beside what it says: greyed out (shown, never run: what isn't
 /// offered here yet), checked (a ✓ at its end: the choice made), a color drawn as a dot in
-/// its icon's place (`0xRRGGBB`: a label's color).
+/// its icon's place (`0xRRGGBB`: a label's color), in the danger color (what can't be
+/// undone: a removal).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RowLook {
     pub disabled: bool,
     pub checked: bool,
     pub swatch: Option<u32>,
+    pub danger: bool,
 }
 
 impl ViewMenuEntry {
@@ -648,6 +650,14 @@ impl ViewMenuEntry {
     pub fn checked_if(mut self, checked: bool) -> Self {
         if let Self::Item { look, .. } = &mut self {
             look.checked = checked;
+        }
+        self
+    }
+
+    /// The same row in the danger color when `danger` (what can't be undone: a removal).
+    pub fn danger_if(mut self, danger: bool) -> Self {
+        if let Self::Item { look, .. } = &mut self {
+            look.danger = danger;
         }
         self
     }
@@ -734,6 +744,12 @@ pub trait Viewer: Send {
     /// A right click at `p`: the menu to show there (`None`: none of its own). The chosen
     /// row's id comes back as a [`Self::command`].
     fn context_menu(&mut self, _p: Point) -> Option<Vec<ViewMenuEntry>> {
+        None
+    }
+    /// A menu it asked for under a button of its own (a row's "⋮", "Export ▾"), taken by
+    /// the app after a press or a command: shown under `anchor` as its right-click menu is,
+    /// the row chosen coming back as a [`Self::command`]. `None`: none asked.
+    fn take_menu(&mut self) -> Option<(Rect, Vec<ViewMenuEntry>)> {
         None
     }
     /// ⌘A in it (when it takes no text): `true` if it selected everything it shows.

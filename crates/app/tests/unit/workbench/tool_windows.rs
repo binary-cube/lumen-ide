@@ -1169,3 +1169,44 @@ fn a_bottom_window_s_view_tells_its_tooltips() {
     let inside = Point::new(area.min_x() + 20.0, area.min_y() + 20.0);
     assert_eq!(wb.tooltip_at(inside).map(|t| t.label), Some("Expand all".to_owned()));
 }
+
+/// A view that asks for a menu under its button when pressed, counting the presses it was
+/// told were let go.
+struct MenuAsking {
+    asked: Option<(Rect, Vec<ui_workbench::ViewMenuEntry>)>,
+    released: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ui_workbench::Viewer for MenuAsking {
+    fn paint(&mut self, _: ui_workbench::ViewerPaint<'_>) {}
+    fn click(&mut self, p: Point) -> Option<ui_workbench::ViewerAction> {
+        let rows = vec![ui_workbench::ViewMenuEntry::item("export", "Export")];
+        self.asked = Some((Rect::new(p.x, p.y, 40.0, 20.0), rows));
+        None
+    }
+    fn take_menu(&mut self) -> Option<(Rect, Vec<ui_workbench::ViewMenuEntry>)> {
+        self.asked.take()
+    }
+    fn release(&mut self) -> bool {
+        self.released.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        false
+    }
+}
+
+/// A press in a bottom view that opens the menu it asked for is still let go in the view:
+/// a part holding the pointer from that press lets it go.
+#[test]
+fn a_press_opening_a_bottom_view_s_menu_is_released_in_it() {
+    let (mut wb, mut text) = git_tabs(&["Log"]);
+    let released = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let view = MenuAsking { asked: None, released: Arc::clone(&released) };
+    wb.tools.window_mut().unwrap().groups[0].views[0].viewer = Box::new(view);
+    wb.paint(&mut text, &mut Scene::default());
+    let area = view_of(&wb, 0);
+    let inside = Point::new(area.min_x() + 40.0, area.min_y() + 40.0);
+    wb.mouse_down(&mut text, inside, false, false, false, 1);
+    assert!(wb.context_menu.is_open(), "the app's menu");
+    wb.mouse_up(&mut text);
+    assert_eq!(released.load(std::sync::atomic::Ordering::SeqCst), 1, "its release");
+    assert!(!wb.tools.panel_dragging, "nothing held after");
+}

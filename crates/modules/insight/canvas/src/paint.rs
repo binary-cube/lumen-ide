@@ -4,31 +4,6 @@
 use super::*;
 
 impl Canvas {
-    /// The search field's caret: a thin bar at `x`, centered in `field`.
-    pub(crate) fn search_caret(
-        &self,
-        x: f32,
-        field: Rect,
-        height: f32,
-        thickness: f32,
-        color: Rgba,
-    ) -> ui_kit::caret::CaretPaint {
-        ui_kit::caret::CaretPaint {
-            id: (std::ptr::from_ref(self) as u64) ^ 1,
-            cell: Rect::new(
-                x,
-                (field.min_y() + (field.size.height - height) / 2.0).round(),
-                thickness,
-                height,
-            ),
-            color,
-            scale: self.scale,
-            shape: Some(theming::caret::CaretShape::Bar),
-            thickness: Some(thickness),
-            steady: false,
-        }
-    }
-
     /// One of its actions ([`ACTIONS`]); `None`: not one.
     pub(crate) fn action(&mut self, id: &str) -> Option<bool> {
         let mode = match id {
@@ -138,7 +113,7 @@ impl Canvas {
                     let pen = Pen { layer: content, text, ds };
                     self.paint_file_card(pen, card, r, f, *focus, hovered_hit.as_ref());
                     let hit = if *focus { Hit::FocusHeader } else { Hit::File(*file) };
-                    self.nav_button(content, icons, ds, r, hit);
+                    self.nav_button(Pen { layer: content, text, ds }, icons, r, hit);
                 }
                 CardKind::Code { symbol } => {
                     let f = &graph.files[graph.focus];
@@ -146,7 +121,12 @@ impl Canvas {
                     self.paint_code_card(pen, card, r, f, *symbol, graph);
                     if card.selected {
                         let line = f.symbols[*symbol].line;
-                        self.nav_button(content, icons, ds, r, Hit::Open { line });
+                        self.nav_button(
+                            Pen { layer: content, text, ds },
+                            icons,
+                            r,
+                            Hit::Open { line },
+                        );
                     }
                 }
             }
@@ -255,20 +235,16 @@ impl Canvas {
             Font::new(p.code_font.clone(), font_px(10.5, k)).with_weight(Font::SEMIBOLD);
         let name_font = Font::new(p.ui_font.clone(), font_px(14.0, k)).with_weight(Font::SEMIBOLD);
         let badge = language_badge(&file.language);
-        let shaped = text.shape_line(badge, &badge_font);
-        let bx = r.min_x() + z(16.0);
-        let bh = z(18.0);
-        let by = r.min_y() + (header_h - bh) / 2.0;
-        let br = Rect::new(bx, by.round(), shaped.width + z(10.0), bh);
         let badge_color = if badge == "JS" { Rgba::rgb(0xb7791f) } else { p.accent };
-        layer.quad(Quad::filled(br, badge_color.with_alpha(0.10)).rounded(z(4.0)));
-        draw_text(
-            layer,
-            &shaped,
-            br.min_x() + z(5.0),
-            ds::optical_baseline(br.min_y(), bh, &badge_font),
-            badge_color,
-        );
+        let br = ds::Badge::new(badge)
+            .color(badge_color)
+            .fill_alpha(LANGUAGE_FILL)
+            .size(ds::BadgeSize::Custom(LANGUAGE_H))
+            .pad(LANGUAGE_PAD)
+            .radius(LANGUAGE_RADIUS)
+            .font(&badge_font)
+            .zoom(self.zoom)
+            .paint(layer, text, ds, r.min_x() + z(16.0), r.min_y() + header_h / 2.0);
         let name = file
             .path
             .file_name()
@@ -297,10 +273,7 @@ impl Canvas {
                 );
             }
         }
-        layer.quad(Quad::filled(
-            Rect::new(r.min_x(), r.min_y() + header_h, r.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, ds, r.min_x(), r.max_x(), r.min_y() + header_h);
     }
 
     /// A function's row in a file card at `y`: `ƒ`, its signature, `private`. Returns its
@@ -567,44 +540,31 @@ impl Canvas {
             return;
         }
         let foot_y = r.max_y() - z(layout::FOOTER);
-        layer.quad(Quad::filled(
-            Rect::new(r.min_x(), foot_y, r.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, ds, r.min_x(), r.max_x(), foot_y);
         let chip_font = Font::new(p.ui_font.clone(), font_px(12.0, k));
         let mut x = r.min_x() + z(16.0);
         let h = z(24.0);
         let cy = foot_y + (z(layout::FOOTER) - h) / 2.0;
         for caller in callers {
-            let shaped = text.shape_line(&caller, &chip_font);
-            let w = shaped.width + z(20.0);
+            let chip = ds::Badge::new(&caller)
+                .fill_alpha(CHIP_FILL)
+                .size(ds::BadgeSize::Custom(CHIP_H))
+                .pad(CHIP_PAD)
+                .font(&chip_font)
+                .zoom(self.zoom);
+            let w = chip.width(text, ds);
             if x + w > r.max_x() - z(12.0) {
                 break;
             }
-            let chip = Rect::new(x, cy.round(), w, h);
-            layer.quad(Quad::filled(chip, p.text.with_alpha(0.06)).rounded(h / 2.0));
-            draw_text(
-                layer,
-                &shaped,
-                x + z(10.0),
-                ds::optical_baseline(chip.min_y(), h, &chip_font),
-                p.text_muted,
-            );
+            chip.paint(layer, text, ds, x, cy + h / 2.0);
             x += w + z(8.0);
         }
     }
 
     /// The ↗ button on the right of a card header (opens / centers on the card); the rest
     /// of the card is for dragging.
-    pub(crate) fn nav_button(
-        &mut self,
-        layer: &mut Layer,
-        icons: &icons::Icons,
-        ds: &Ctx<'_>,
-        r: Rect,
-        hit: Hit,
-    ) {
-        let p = ds.palette;
+    pub(crate) fn nav_button(&mut self, pen: Pen<'_, '_>, icons: &icons::Icons, r: Rect, hit: Hit) {
+        let Pen { layer, text, ds } = pen;
         let k = self.zoom * self.scale;
         let z = |v: f32| (v * k).round();
         let size = z(NAV);
@@ -615,28 +575,21 @@ impl Canvas {
             size,
             size,
         );
-        let hovered = self.hover.as_ref() == Some(&hit);
-        layer.quad(
-            Quad::filled(b, if hovered { p.accent.with_alpha(0.14) } else { p.tab_hover })
-                .rounded(z(7.0)),
-        );
-        if let Some(id) = icons.id("arrow-up-right") {
-            let i = z(14.0);
-            let ir = Rect::new(
-                (b.min_x() + (size - i) / 2.0).round(),
-                (b.min_y() + (size - i) / 2.0).round(),
-                i,
-                i,
-            );
-            let color = if hovered { p.accent } else { p.text_muted };
-            ui_kit::draw_icon(layer, icons, id, ir, color);
-        }
+        let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+            .icon("arrow-up-right")
+            .rest_tone(ds::Tone::Neutral)
+            .hovered(self.hover.as_ref() == Some(&hit));
+        ds::button(layer, text, icons, ds, b, spec);
         self.hits.push((b, hit));
     }
 
     /// Bottom bar: modes and zoom, as a dark pill.
-    pub(crate) fn paint_toolbar(&mut self, ds: &Ctx<'_>, text: &mut TextSystem, layer: &mut Layer) {
-        let p = ds.palette;
+    pub(crate) fn paint_toolbar(
+        &mut self,
+        ds: &Ctx<'_>,
+        (text, icons): (&mut TextSystem, &icons::Icons),
+        layer: &mut Layer,
+    ) {
         let px = |v: f32| ds.px(v);
         let font = ds.ui_font(0.0);
         let modes = [
@@ -645,13 +598,12 @@ impl Canvas {
             (Mode::Code, t("canvas.code")),
         ];
         let shaped: Vec<_> = modes.iter().map(|(_, l)| text.shape_line(l, &font)).collect();
-        let zoom_label = text.shape_line(&format!("{}%", (self.zoom * 100.0).round()), &font);
-        let minus = text.shape_line("−", &font);
-        let plus = text.shape_line("+", &font);
+        let zoom_text = format!("{}%", (self.zoom * 100.0).round());
+        let zoom_label = text.shape_line(&zoom_text, &font);
         let h = px(44.0);
         let seg_pad = px(16.0);
         let widths: Vec<f32> = shaped.iter().map(|s| s.width + 2.0 * seg_pad).collect();
-        let zoom_w = px(30.0) + zoom_label.width + px(16.0) + px(30.0);
+        let zoom_w = px(ZOOM_STEP_W) + zoom_label.width + px(16.0) + px(ZOOM_STEP_W);
         let w = px(6.0) + widths.iter().sum::<f32>() + px(17.0) + zoom_w + px(6.0);
         let b = self.bounds;
         let bar = Rect::new(
@@ -670,53 +622,58 @@ impl Canvas {
         let mut x = bar.min_x() + px(6.0);
         let inner_h = h - px(12.0);
         let top = bar.min_y() + px(6.0);
-        for (i, (mode, _)) in modes.iter().enumerate() {
+        for (i, (mode, label)) in modes.iter().enumerate() {
             let r = Rect::new(x, top, widths[i], inner_h);
-            let active = *mode == self.mode;
-            let hovered = self.hover == Some(Hit::Mode(*mode));
-            if active {
-                layer.quad(Quad::filled(r, p.accent).rounded(px(8.0)));
-            } else if hovered {
-                layer.quad(Quad::filled(r, Rgba::WHITE.with_alpha(0.08)).rounded(px(8.0)));
-            }
-            draw_text(
-                layer,
-                &shaped[i],
-                x + seg_pad,
-                ds::optical_baseline(top, inner_h, &font),
-                Rgba::WHITE.with_alpha(if active { 1.0 } else { 0.85 }),
-            );
+            // The mode shown filled in the accent; the others light on the dark bar.
+            let kind =
+                if *mode == self.mode { ds::ButtonKind::Primary } else { ds::ButtonKind::Ghost };
+            let spec = ds::ButtonSpec::new(kind)
+                .label(label)
+                .strong()
+                .corner(TOOLBAR_CORNER)
+                .on_surface(dark)
+                .hovered(self.hover == Some(Hit::Mode(*mode)));
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, Hit::Mode(*mode)));
             x += widths[i];
         }
         x += px(8.0);
-        layer.quad(Quad::filled(
-            Rect::new(x, top + px(8.0), ds.line(), inner_h - px(16.0)),
-            Rgba::WHITE.with_alpha(0.18),
-        ));
+        let (y0, y1) = (top + px(8.0), top + inner_h - px(8.0));
+        ds::divider_vertical_in(layer, ds, (x, y0, y1), Rgba::WHITE.with_alpha(0.18));
         x += px(9.0);
-        let base = ds::optical_baseline(top, inner_h, &font);
-        for (shaped, hit, width) in [
-            (&minus, Hit::ZoomOut, px(30.0)),
-            (&zoom_label, Hit::Fit, zoom_label.width + px(16.0)),
-            (&plus, Hit::ZoomIn, px(30.0)),
+        for (label, hit, width) in [
+            ("−", Hit::ZoomOut, px(ZOOM_STEP_W)),
+            (zoom_text.as_str(), Hit::Fit, zoom_label.width + px(16.0)),
+            ("+", Hit::ZoomIn, px(ZOOM_STEP_W)),
         ] {
             let r = Rect::new(x, top, width, inner_h);
-            if self.hover.as_ref() == Some(&hit) {
-                layer.quad(Quad::filled(r, Rgba::WHITE.with_alpha(0.08)).rounded(px(8.0)));
-            }
-            draw_text(
-                layer,
-                shaped,
-                (x + (width - shaped.width) / 2.0).round(),
-                base,
-                Rgba::WHITE.with_alpha(0.9),
-            );
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .label(label)
+                .strong()
+                .corner(TOOLBAR_CORNER)
+                .on_surface(dark)
+                .hovered(self.hover.as_ref() == Some(&hit));
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, hit));
             x += width;
         }
     }
 }
+
+/// The bottom bar's buttons: their corners, a zoom step's width (logical pixels).
+const TOOLBAR_CORNER: f32 = 8.0;
+/// A file card's language badge (logical pixels, times the zoom): its height, the room on
+/// each side of its label, its corners, and its fill's alpha of its color.
+const LANGUAGE_H: f32 = 18.0;
+const LANGUAGE_PAD: f32 = 5.0;
+const LANGUAGE_RADIUS: f32 = 4.0;
+const LANGUAGE_FILL: f32 = 0.10;
+/// A caller's chip under a function card (logical pixels, times the zoom): its height, the
+/// room on each side of its label, and its fill's alpha of the text.
+const CHIP_H: f32 = 24.0;
+const CHIP_PAD: f32 = 10.0;
+const CHIP_FILL: f32 = 0.06;
+const ZOOM_STEP_W: f32 = 30.0;
 
 /// Top part of a rectangle, for the header background rounded only at the top.
 pub(crate) fn scale_rect_top(header: Rect, radius: f32) -> Rect {

@@ -5,10 +5,10 @@
 use kernel::Point;
 use ui_components::control::{Control, Press};
 use ui_components::date_range::RangePart;
+use ui_components::search_field::SearchField;
 use ui_components::{KeyReach, Splitter, ViewerCursor, ViewerKey};
-use ui_kit::TextInput;
 
-use super::filters::{Field, Popup};
+use super::filters::Field;
 
 /// What the bar's field did that the view follows (its filters, its lists).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,9 +32,10 @@ pub(super) enum FieldAnswer {
 /// is. What the view follows is written to `answer`.
 pub(super) struct BarField<'a> {
     pub(super) focus: &'a mut Option<Field>,
-    pub(super) text: &'a mut TextInput,
-    pub(super) branches: &'a mut TextInput,
-    pub(super) popup: &'a mut Option<Popup>,
+    pub(super) text: &'a mut SearchField,
+    pub(super) branches: &'a mut SearchField,
+    /// The open list's search (`None`: no list open).
+    pub(super) query: Option<&'a mut SearchField>,
     /// The Date picker is open: it has the keys, over the field.
     pub(super) picker_open: bool,
     /// The files' search has the text typed (their tree has the focus and searches).
@@ -44,11 +45,11 @@ pub(super) struct BarField<'a> {
 
 impl BarField<'_> {
     /// The field typed in (`None`: none, or the list's search with no list).
-    fn input(&mut self) -> Option<&mut TextInput> {
+    fn input(&mut self) -> Option<&mut SearchField> {
         match (*self.focus)? {
             Field::Text => Some(&mut *self.text),
             Field::Branches => Some(&mut *self.branches),
-            Field::Query => self.popup.as_mut().map(|popup| &mut popup.query),
+            Field::Query => self.query.as_deref_mut(),
         }
     }
 }
@@ -63,10 +64,10 @@ impl Control for BarField<'_> {
     /// field moves while it's typed in).
     fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         let Some(field) = *self.focus else { return false };
-        let in_list = field == Field::Query && self.popup.is_some();
+        let in_list = field == Field::Query && self.query.is_some();
         match key {
             ViewerKey::Escape => {
-                if self.popup.is_some() {
+                if self.query.is_some() {
                     *self.answer = Some(FieldAnswer::Closed);
                 } else {
                     *self.focus = None;
@@ -85,72 +86,36 @@ impl Control for BarField<'_> {
             _ => {}
         }
         let Some(input) = self.input() else { return false };
-        let edited = match key {
-            ViewerKey::Left => {
-                input.move_left(reach.word, reach.extend);
-                false
-            }
-            ViewerKey::Right => {
-                input.move_right(reach.word, reach.extend);
-                false
-            }
-            ViewerKey::Home => {
-                input.home(reach.extend);
-                false
-            }
-            ViewerKey::End => {
-                input.end(reach.extend);
-                false
-            }
-            ViewerKey::Backspace => {
-                input.backspace(reach.word);
-                true
-            }
-            ViewerKey::Delete => {
-                input.delete();
-                true
-            }
-            _ => return true,
-        };
-        if edited {
+        Control::key(input, key, reach);
+        if input.take_edited() {
             *self.answer = Some(FieldAnswer::Typed(field));
         }
         true
     }
 
+    /// Text typed, on one line (the search field's own way), unless the files' search has it.
     fn text(&mut self, typed: &str) -> bool {
         let Some(field) = *self.focus else { return false };
         if self.text_elsewhere {
             return false;
         }
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
         let Some(input) = self.input() else { return false };
-        input.insert(&typed);
-        *self.answer = Some(FieldAnswer::Typed(field));
-        true
+        let took = Control::text(input, typed);
+        if input.take_edited() {
+            *self.answer = Some(FieldAnswer::Typed(field));
+        }
+        took
     }
 
-    /// The app's ⌘A, ⌘X, ⌘Z, ⇧⌘Z for the field typed in.
+    /// The app's ⌘A, ⌘X, ⌘Z, ⇧⌘Z for the field typed in (taken even with nothing to undo).
     fn command(&mut self, id: &str) -> bool {
         let Some(field) = *self.focus else { return false };
         let Some(input) = self.input() else { return false };
-        let edited = match id {
-            "select_all" => {
-                input.select_all();
-                false
-            }
-            "cut" => {
-                input.insert("");
-                true
-            }
-            "undo" => input.undo(),
-            "redo" => input.redo(),
-            _ => return false,
-        };
-        if edited {
+        Control::command(input, id);
+        if input.take_edited() {
             *self.answer = Some(FieldAnswer::Typed(field));
         }
-        true
+        matches!(id, "select_all" | "cut" | "undo" | "redo")
     }
 }
 

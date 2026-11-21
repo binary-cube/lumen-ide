@@ -20,7 +20,7 @@ fn the_recordings_are_listed_newest_first_and_filtered() {
     assert_eq!(rows[0].when, when_made("profile-20261120-140000.json"), "in the user's zone");
     let mut view = RecordingsView::new();
     view.rows = Some(rows);
-    view.filter.insert("2026-11-19");
+    view.filter.set_text("2026-11-19");
     assert_eq!(view.shown().len(), 1);
     view.drawn = vec![(Rect::new(0.0, 100.0, 400.0, 30.0), 0)];
     match view.click(Point::new(10.0, 110.0)) {
@@ -86,13 +86,25 @@ fn the_page_s_thumb_dragged_scrolls_it() {
     assert!(!view.drag(Point::new(thumb.x, 300.0)), "let go: the moves don't reach it");
 }
 
+/// Paints the filter where the page draws it (a known place for the presses).
+fn paint_filter(view: &mut RecordingsView) {
+    let palette = ui_components::palette::Palette::dark();
+    let ctx = ds::Ctx::new(&palette, 1.0);
+    let mut layer = render_api::Layer::default();
+    let mut text = text_layout::TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let focused = view.typing();
+    let field = Rect::new(0.0, 0.0, 300.0, 34.0);
+    view.filter.paint(&mut layer, &mut text, &icons, &ctx, (field, focused), "");
+}
+
 /// The filter is a part: a press on it gives it the keys (typed text goes in, one line, the
-/// list back at its top), its clear button empties it and keeps them; Esc empties it, then
-/// gives them up; Tab does nothing; a press elsewhere takes them away.
+/// list back at its top), its × empties it and keeps them; Esc empties it, then gives them
+/// up; Tab does nothing; a press elsewhere takes them away.
 #[test]
 fn the_filter_has_the_keys_after_a_press_on_it() {
     let mut view = RecordingsView::new();
-    view.field = Rect::new(0.0, 0.0, 300.0, 34.0);
+    paint_filter(&mut view);
     let on = Point::new(20.0, 10.0);
     assert!(!view.wants_text());
     assert!(!view.text_input("x"), "no part has the keys");
@@ -102,16 +114,30 @@ fn the_filter_has_the_keys_after_a_press_on_it() {
     assert_eq!(view.cursor_at(on), Some(ViewerCursor::Text));
     view.scroll = 50.0;
     assert!(view.text_input("20\n26"));
-    assert_eq!((view.filter.text(), view.scroll), ("2026", 0.0));
+    assert_eq!((view.filter.text(), view.scroll), ("20 26", 0.0), "a line break: a space");
     assert!(view.edit_key_with(ViewerKey::Backspace, KeyReach::default()));
+    assert!(view.edit_key_with(ViewerKey::Backspace, KeyReach::default()));
+    assert!(view.edit_key_with(ViewerKey::Backspace, KeyReach::default()));
+    assert!(view.text_input("2"));
     assert_eq!(view.filter.text(), "202");
     assert!(!view.edit_key_with(ViewerKey::Tab, KeyReach::default()), "Tab isn't its");
     assert!(view.wants_text(), "nor does it move the keys");
-    view.clear = Some(Rect::new(280.0, 8.0, 16.0, 16.0));
-    assert!(view.click(Point::new(288.0, 16.0)).is_none());
-    assert_eq!(view.filter.text(), "", "cleared");
+    // ⌘A selects it (⌘C copies it), ⌘X cuts it, ⌘Z brings it back.
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("202"));
+    assert!(view.command("cut") && view.filter.text().is_empty());
+    assert!(view.command("undo"));
+    assert_eq!(view.filter.text(), "202");
+    // With text, × shows at its right end (the shared field's room for it): it empties it.
+    paint_filter(&mut view);
+    let clear = Point::new(300.0 - 17.0, 17.0);
+    view.hover(clear);
+    assert_eq!(view.cursor_at(clear), Some(ViewerCursor::Pointer), "a hand on ×");
+    view.scroll = 50.0;
+    assert!(view.click(clear).is_none());
+    assert_eq!((view.filter.text(), view.scroll), ("", 0.0), "cleared, from the top");
     assert!(view.wants_text(), "still typing");
-    view.clear = None;
+    paint_filter(&mut view);
     view.text_input("a");
     assert!(view.edit_key_with(ViewerKey::Escape, KeyReach::default()));
     assert_eq!(view.filter.text(), "");
@@ -122,4 +148,5 @@ fn the_filter_has_the_keys_after_a_press_on_it() {
     assert!(view.wants_text());
     view.click(Point::new(20.0, 200.0));
     assert!(!view.wants_text(), "a press elsewhere takes them away");
+    assert!(!view.command("select_all"), "⌘A no longer its");
 }

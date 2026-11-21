@@ -7,11 +7,13 @@
 use i18n::t;
 use kernel::{Point, Rect};
 use render_api::Quad;
-use ui_components::control::Control;
+use ui_components::control::{Control, NOWHERE, Press};
 use ui_components::ds::{self, Ctx};
+use ui_components::search_field::SearchField;
 use ui_components::tooltip::Tip;
-use ui_components::{KeyReach, LayerPainter, ViewerKey};
-use ui_kit::{TextInput, draw_text};
+use ui_components::tree;
+use ui_components::{EdgeScrollbar, KeyReach, ViewerCursor, ViewerKey};
+use ui_kit::draw_text;
 
 use super::DiagramView;
 use super::gesture::Gesture;
@@ -35,12 +37,15 @@ enum Hit {
 /// The palette's state.
 pub(super) struct Palette {
     /// The sections open (the first, General, at first).
-    open: Vec<bool>,
-    pub(super) search: TextInput,
-    /// Its field has the keys.
+    pub(super) open: Vec<bool>,
+    /// The search (the app's search field: ×, ⌘A, a drag selecting).
+    pub(super) search: SearchField,
+    /// Its field is open for typing (its caret shows while the view's focus is on it).
     pub(super) searching: bool,
-    scroll: f32,
+    pub(super) scroll: f32,
     content_h: f32,
+    /// The sections' scrollbar, along the palette's right edge.
+    bar: EdgeScrollbar,
     hits: Vec<(Rect, Hit)>,
     pub(super) thumbs: Thumbnails,
 }
@@ -51,10 +56,11 @@ impl Default for Palette {
         open[0] = true;
         Self {
             open,
-            search: TextInput::new(""),
+            search: SearchField::new(),
             searching: false,
             scroll: 0.0,
             content_h: 0.0,
+            bar: EdgeScrollbar::default(),
             hits: Vec::new(),
             thumbs: Thumbnails::default(),
         }
@@ -82,18 +88,16 @@ impl DiagramView {
         self.palette.hits.iter().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
 
-    /// A press on the palette: its field, a section folded, a shape picked up. `true`: it
-    /// was on the palette.
-    pub(super) fn press_palette(&mut self, p: Point, clicks: u32) -> bool {
+    /// A press on the palette: a section folded, a shape picked up (its search's press is
+    /// its part's). `true`: it was on the palette.
+    pub(super) fn press_palette(&mut self, p: Point) -> bool {
         if !self.palette_area().contains(p) {
             self.palette.searching = false;
             return false;
         }
         match self.palette_hit(p) {
-            Some(Hit::Search) => {
-                self.palette.searching = true;
-                self.palette.search.press(p.x, clicks);
-            }
+            // Its field's press is its part's (see [`PalettePart`]).
+            Some(Hit::Search) => {}
             Some(Hit::Section(s)) => {
                 self.palette.open[s] = !self.palette.open[s];
                 self.palette.searching = false;
@@ -211,15 +215,8 @@ impl DiagramView {
         let px = |v: f32| ds.px(v);
         let layer = ctx.scene.push_layer(Some(area));
         layer.quad(Quad::filled(area, p.sidebar_background));
-        layer.quad(Quad::filled(
-            Rect::new(
-                area.max_x() - ctx.scale.max(1.0),
-                area.min_y(),
-                ctx.scale.max(1.0),
-                area.size.height,
-            ),
-            p.border,
-        ));
+        let edge = area.max_x() - ds.line();
+        ds::divider_vertical(layer, &ds, edge, area.min_y(), area.max_y());
         self.palette.hits.clear();
         let field = Rect::new(
             area.min_x() + px(8.0),
@@ -227,13 +224,11 @@ impl DiagramView {
             area.size.width - px(16.0),
             px(SEARCH_H),
         );
-        ds::search_input(
-            &mut LayerPainter::new(layer, ctx.text, ctx.icons, ds),
-            field,
-            &self.palette.search,
-            self.palette.searching,
-            &t("diagram_editor.search_shapes"),
-        );
+        // Its caret only while the view's focus is on it (a number typed may have it).
+        let focused =
+            self.palette.searching && self.controls.focused() == Some(super::parts::PALETTE);
+        let placeholder = t("diagram_editor.search_shapes");
+        self.palette.search.paint(layer, ctx.text, ctx.icons, &ds, (field, focused), &placeholder);
         self.palette.hits.push((field, Hit::Search));
         let list = Rect::new(
             area.min_x(),
@@ -259,16 +254,13 @@ impl DiagramView {
             if let Some(s) = section {
                 let header = Rect::new(list.min_x(), y, list.size.width, px(HEADER_H));
                 let open = self.palette.open[s];
-                let chevron = ctx.icons.id(if open { "chevron-down" } else { "chevron-right" });
                 let icon = Rect::new(
                     header.min_x() + px(8.0),
                     header.center().y - px(7.0),
                     px(14.0),
                     px(14.0),
                 );
-                if let Some(id) = chevron {
-                    ui_kit::draw_icon(layer, ctx.icons, id, icon, p.text_muted);
-                }
+                tree::chevron(layer, ctx.icons, icon, open, p.text_muted);
                 let label = t(&format!("diagram_editor.section_{}", SECTIONS[s].id));
                 let shaped = ctx.text.shape_line(&label, &font);
                 draw_text(
@@ -311,6 +303,11 @@ impl DiagramView {
             y += px(CELL.1) * entries.len().div_ceil(cols) as f32 + px(4.0);
         }
         self.palette.content_h = y + self.palette.scroll - list.min_y();
+        // The sections' bar, inside the palette's edge.
+        let lane =
+            Rect::new(list.min_x(), list.min_y(), list.size.width - ds.line(), list.size.height);
+        let (content, offset) = (self.palette.content_h, self.palette.scroll);
+        self.palette.bar.paint(ctx.scene, p, ctx.scale, lane, content, offset);
         // A shape dragged over the sheet: its outline where it would land.
         if let Some(Gesture::Place { section, entry, to, .. }) = &self.gesture
             && self.sheet().contains(*to)
@@ -367,10 +364,11 @@ impl DiagramView {
 }
 
 /// The palette as a control, where it's shown (`area`): the wheel over it scrolls its
-/// sections (never the sheet under it); a shape's title is its tooltip; a press never
-/// reaches it (its buttons are the view's). While its search has the keys (Tab included) it takes them, the typing (one
-/// line) and the edit commands: Esc empties it, then lets it go; ↵ asks the view to add
-/// the first shape found.
+/// sections (never the sheet under it); a shape's title is its tooltip; a press reaches it
+/// only on its search (the app's search field: the caret put, a drag selecting, × emptying
+/// it), its buttons being the view's. While its search has the keys (Tab included) it takes
+/// them, the typing (one line) and the edit commands: Esc empties it, then lets it go; ↵
+/// asks the view to add the first shape found.
 pub(super) struct PalettePart<'a> {
     pub(super) palette: &'a mut Palette,
     pub(super) area: Option<Rect>,
@@ -379,9 +377,57 @@ pub(super) struct PalettePart<'a> {
     pub(super) asked: &'a mut Option<Asked>,
 }
 
+impl PalettePart<'_> {
+    /// `p` is on its search's field, shown.
+    fn on_search(&self, p: Point) -> bool {
+        self.area.is_some() && self.palette.search.area().contains(p)
+    }
+}
+
 impl Control for PalettePart<'_> {
     fn area(&self) -> Option<Rect> {
         self.area
+    }
+
+    /// On its bar: the sections scrolled by its thumb. On its search: the field opened for
+    /// typing, its press.
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        if let Some(offset) = self.area.and_then(|_| self.palette.bar.press(p)) {
+            self.palette.scroll = offset;
+            return Press::Held;
+        }
+        if !self.on_search(p) {
+            return Press::Ignored;
+        }
+        self.palette.searching = true;
+        let press = Control::press(&mut self.palette.search, p, clicks);
+        // × emptied it: the sections again, from the top.
+        if self.palette.search.take_cleared() {
+            self.palette.scroll = 0.0;
+        }
+        press
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        if !self.palette.bar.is_dragging() {
+            return Control::drag(&mut self.palette.search, p);
+        }
+        let Some(offset) = self.palette.bar.drag(p) else { return false };
+        std::mem::replace(&mut self.palette.scroll, offset) != offset
+    }
+
+    fn release(&mut self) -> bool {
+        self.palette.bar.release()
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        let bar = self.palette.bar.hover(p.unwrap_or(NOWHERE));
+        Control::hover(&mut self.palette.search, p) | bar
+    }
+
+    /// Its search's (the text's, a hand on ×); elsewhere the view's.
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.on_search(p).then(|| Control::cursor(&self.palette.search, p)).flatten()
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -421,7 +467,8 @@ impl Control for PalettePart<'_> {
         if !self.palette.searching {
             return false;
         }
-        self.palette.search.insert(typed.lines().next().unwrap_or_default());
+        self.palette.search.input.insert(typed.lines().next().unwrap_or_default());
+        self.palette.scroll = 0.0;
         true
     }
 
@@ -430,7 +477,11 @@ impl Control for PalettePart<'_> {
     }
 
     fn command(&mut self, id: &str) -> bool {
-        self.palette.searching && Control::command(&mut self.palette.search, id)
+        let used = self.palette.searching && Control::command(&mut self.palette.search, id);
+        if used {
+            self.palette.scroll = 0.0;
+        }
+        used
     }
 
     fn tooltip(&self, p: Point) -> Option<Tip> {

@@ -13,11 +13,12 @@
 use std::time::{Duration, Instant};
 
 use icons::Icons;
-use kernel::{Point, Rect, Rgba};
+use kernel::{Point, Rect};
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
+use ui_components::search_field::SearchField;
 use ui_components::{BackdropRole, EdgeScrollbar, ScrollState};
-use ui_kit::{KeyHint, TextInput, TextInputStyle, draw_icon, draw_text};
+use ui_kit::{KeyHint, draw_icon, draw_text};
 
 use crate::anim::{Appear, Tween};
 use crate::context_menu::MenuEntry;
@@ -75,8 +76,9 @@ enum Under {
 #[derive(Debug)]
 pub struct MenuDrawer {
     nav: DrawerNav,
-    /// The filter's field (it has the keyboard while the drawer is open).
-    pub query: TextInput,
+    /// The filter's field (the app's search field: ×, ⌘A; it has the keyboard while the
+    /// drawer is open, a part of its controls).
+    pub query: SearchField,
     /// The filter the lists were last made with.
     filtered_by: String,
     intent: HoverIntent,
@@ -140,7 +142,7 @@ impl MenuDrawer {
     pub fn new(menus: Vec<DrawerMenu>) -> Self {
         let mut drawer = Self {
             nav: DrawerNav::new(Vec::new()),
-            query: TextInput::new(""),
+            query: SearchField::new(),
             filtered_by: String::new(),
             intent: HoverIntent::default(),
             open: false,
@@ -290,17 +292,17 @@ impl MenuDrawer {
     }
 
     pub fn type_text(&mut self, typed: &str) {
-        self.query.insert(typed);
+        ui_components::control::Control::text(&mut self.query, typed);
         self.sync_query();
     }
 
     pub fn backspace(&mut self, word: bool) {
-        self.query.backspace(word);
+        self.query.input.backspace(word);
         self.sync_query();
     }
 
     pub fn delete(&mut self) {
-        self.query.delete();
+        self.query.input.delete();
         self.sync_query();
     }
 

@@ -2,18 +2,31 @@
 //! bar.
 
 use super::*;
-use ui_components::control::{Control, Controls, ScrollThumb};
+use ui_components::control::{Control, Controls, Press, ScrollThumb};
 
 impl MenuDrawer {
     /// What a press at `p` does.
     pub fn hit(&mut self, p: Point) -> DrawerAction {
+        self.hit_with(p, 1)
+    }
+
+    /// [`Self::hit`] as the `clicks`-th press of a quick series (in the filter: two a word,
+    /// three all of it).
+    pub fn hit_with(&mut self, p: Point, clicks: u32) -> DrawerAction {
         // Its menu button (where the bar's is) closes it, as the bar's does.
         if !self.open || self.button.contains(p) {
             return DrawerAction::Close;
         }
-        // A part that holds the mouse (a list's thumb, or its track: the list jumps there).
-        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
-            return DrawerAction::Drag;
+        // A part that holds the mouse (a list's thumb, or its track: the list jumps there; the
+        // filter, a drag selecting in it), or its filter's × (emptied: every menu back).
+        if let Some((_, press)) = self.with_controls(|c, parts| c.press(parts, p, clicks)) {
+            if self.query.take_cleared() {
+                self.sync_query();
+            }
+            return match press {
+                Press::Held => DrawerAction::Drag,
+                _ => DrawerAction::Inside,
+            };
         }
         if !self.panel.contains(p) {
             return DrawerAction::Close;
@@ -133,6 +146,9 @@ impl MenuDrawer {
 
     /// Something clickable under `p` (the pointer).
     pub fn over_clickable(&self, p: Point) -> bool {
+        if self.query.hit(p) {
+            return self.query.cursor(p) == Some(ui_components::ViewerCursor::Pointer);
+        }
         self.row_at(p).is_some_and(|u| match u {
             Under::Item(i) => self.nav.item_command(i).is_some() || self.nav.item_is_submenu(i),
             Under::SubItem(j) => self.nav.sub_item_command(j).is_some(),
@@ -152,7 +168,7 @@ impl MenuDrawer {
         }
     }
 
-    /// Its parts that take the mouse (each list's thumb), with their state of use: pressed,
+    /// Its parts that take the mouse (each list's thumb, the filter), with their state of use: pressed,
     /// held, hovered alike (`ui_components::control`).
     fn with_controls<R>(
         &mut self,
@@ -161,7 +177,7 @@ impl MenuDrawer {
         let mut menus = ScrollThumb { bar: &mut self.menus_bar, scroll: &mut self.menus_scroll };
         let mut items = ScrollThumb { bar: &mut self.items_bar, scroll: &mut self.items_scroll };
         let mut sub = ScrollThumb { bar: &mut self.sub_bar, scroll: &mut self.sub_scroll };
-        let mut parts: [&mut dyn Control; 3] = [&mut menus, &mut items, &mut sub];
+        let mut parts: [&mut dyn Control; 4] = [&mut menus, &mut items, &mut sub, &mut self.query];
         f(&mut self.parts, &mut parts)
     }
 

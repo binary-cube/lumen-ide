@@ -367,3 +367,29 @@ fn the_categories_scroll_by_their_thumb() {
     assert!(!drawer.scrollbar_held());
     assert!(!drawer.drag_scrollbar(Point::new(lane.x, lane.y)), "let go: nothing follows");
 }
+
+/// Its filter is the app's search field among its parts: typed into, ⌘A selects it, a
+/// press and a drag select in it, its caret while the drawer is open, × (a hand over it)
+/// empties it and every menu comes back.
+#[test]
+fn its_filter_is_the_shared_field_with_its_clear_button() {
+    let mut drawer = drawer(3, 600.0);
+    drawer.type_text("m2.");
+    ui_components::control::Control::command(&mut drawer.query, "select_all");
+    assert_eq!(drawer.query.input.selected_text(), "m2.");
+    paint(&mut drawer);
+    assert!(drawer.query.shows_caret(), "open: its one field has the caret");
+    let field = drawer.query.area();
+    let start = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
+    assert_eq!(drawer.hit_with(start, 1), DrawerAction::Drag, "a press in it holds the mouse");
+    assert!(drawer.scrollbar_held());
+    assert!(drawer.drag_scrollbar(Point::new(field.min_x() + 2.0, start.y)));
+    assert!(drawer.release());
+    let clear = drawer.query.clear_area().expect("× shown with text");
+    let on = Point::new(clear.min_x() + 2.0, clear.min_y() + 2.0);
+    assert!(drawer.over_clickable(on));
+    assert_eq!(drawer.hit(on), DrawerAction::Inside);
+    assert!(!drawer.has_query(), "× emptied it");
+    paint(&mut drawer);
+    assert_eq!(drawer.menu_rows.len(), 3, "every menu back");
+}

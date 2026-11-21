@@ -230,7 +230,8 @@ impl SettingsView {
         self.clear_query();
     }
 
-    /// The search field, in the header left of `esc` (with × when it has text).
+    /// The search field, in the header left of `esc` (the app's: × when it has text, its
+    /// caret while it has the focus).
     pub(super) fn paint_search_field(
         &mut self,
         icons: &Icons,
@@ -238,44 +239,11 @@ impl SettingsView {
         scene: &mut Scene,
         ctx: &Ctx<'_>,
     ) {
-        let palette = ctx.palette;
         let field = self.modal.header_field();
         let layer = scene.push_layer(Some(field));
-        self.field = field;
-        let mut input_rect = ds::search_field(layer, icons, ctx, field, self.query_focused);
-        // With text: the × button on the right clears the field.
-        self.clear = self.has_query().then(|| {
-            let mid = field.min_y() + field.size.height / 2.0;
-            let cx = field.max_x() - ctx.px(8.0) - ctx.px(9.0);
-            ds::clear_button(layer, icons, ctx, cx, mid, self.clear_hover)
-        });
-        if let Some(clear) = self.clear {
-            input_rect.size.width = (clear.min_x() - ctx.px(6.0) - input_rect.min_x()).max(0.0);
-        }
-        let style = ui_kit::TextInputStyle {
-            font: ctx.ui_font(-0.5),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: ctx.fade(palette.text),
-            placeholder: ctx.fade(palette.text_muted),
-            selection: ctx.fade(palette.selection),
-            caret: ctx.fade(palette.caret),
-            radius: 0.0,
-            border_width: 0.0,
-            padding: 0.0,
-            caret_width: ctx.px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        let input_layer = scene.push_layer(Some(input_rect));
-        self.query.paint(
-            input_layer,
-            text,
-            input_rect,
-            self.query_focused,
-            &i18n::t("settings.search_placeholder"),
-            &style,
-        );
+        let focused = self.controls.focused() == Some(super::QUERY);
+        let placeholder = i18n::t("settings.search_placeholder");
+        self.query.paint(layer, text, icons, ctx, (field, focused), &placeholder);
     }
 
     /// The settings search results: the section (icon), the title and the description.

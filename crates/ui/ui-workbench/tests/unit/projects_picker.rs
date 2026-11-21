@@ -410,3 +410,32 @@ fn arrows_fold_a_past_session_and_its_windows() {
     picker.selected = picker.items.iter().position(|i| matches!(i, Item::Action { .. })).unwrap();
     assert!(!picker.fold_selected_session(true), "not a session: the key goes on");
 }
+
+/// Its filter is the app's search field: typed into, ⌘A selects it, a press and a drag
+/// select in it (nothing dragged in the list), its caret only while it has the keys, × (a
+/// hand over it) empties it and the whole list comes back.
+#[test]
+fn its_filter_is_the_shared_field_with_its_clear_button() {
+    let (recent, _, _) = sample();
+    let mut picker = ProjectsPicker { focused: true, ..Default::default() };
+    picker.type_text("inner");
+    picker.select_all();
+    assert_eq!(picker.query.input.selected_text(), "inner");
+    paint(&mut picker, &recent);
+    assert!(picker.query.shows_caret(), "it has the keys: its caret");
+    let field = picker.query.area();
+    let start = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
+    assert_eq!(picker.hit(start), None);
+    assert!(picker.pressed(), "a press in it: a drag selects");
+    assert!(picker.drag(Point::new(field.min_x() + 400.0, start.y)));
+    assert_eq!(picker.release(), None, "nothing chosen in the list");
+    let clear = picker.query.clear_area().expect("× shown with text");
+    let on = Point::new(clear.min_x() + 2.0, clear.min_y() + 2.0);
+    assert!(picker.over_clickable(on));
+    assert_eq!(picker.hit(on), None);
+    assert!(!picker.has_query(), "× emptied it");
+    picker.focused = false;
+    paint(&mut picker, &recent);
+    assert!(!picker.query.shows_caret(), "another field has the keys: no caret here");
+    assert!(picker.items.iter().any(|i| matches!(i, Item::Group { .. })), "the whole list back");
+}

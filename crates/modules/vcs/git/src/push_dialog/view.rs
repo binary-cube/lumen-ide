@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use i18n::{t, tr};
 use kernel::{Point, Rect};
-use render_api::{Layer, Quad};
+use render_api::Layer;
 use text_layout::TextSystem;
 use ui_components::control::{Control, Controls, OneClick, Thumb};
 use ui_components::ds::{self, Check, Ctx};
@@ -253,7 +253,7 @@ impl PushDialog {
             draw_text(layer, &shaped, *x, ds::optical_baseline(y, px(24.0), &small), p.text_muted);
         }
         y += px(24.0);
-        layer.quad(Quad::filled(Rect::new(left, y, width, ds.line()), p.border));
+        ds::divider(layer, ds, left, left + width, y);
         // The rows a little below the line (a field never touches it).
         y += px(TABLE_TOP);
         let table = Rect::new(left, y, width, self.row_h * ROWS_SHOWN as f32);

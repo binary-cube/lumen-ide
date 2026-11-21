@@ -237,14 +237,12 @@ impl<S: GridSource> DataGrid<S> {
                 _ => false,
             };
             let enabled = self.tool_enabled(tool);
-            let r = icon_button(
-                layer,
-                icons,
-                ds,
-                (x, mid),
-                icon,
-                Look { enabled, hovered: self.hover == Some(hit), on },
-            );
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon(icon)
+                .enabled(enabled)
+                .hovered(self.hover == Some(hit))
+                .on(on);
+            let r = grid_button(layer, text, icons, ds, (x, mid), spec);
             if enabled {
                 self.hits.push((r, hit));
             } else {
@@ -441,7 +439,7 @@ impl<S: GridSource> DataGrid<S> {
         // Right to left: ↑ ↓ × at the end, the count before them (a room of its own, so the
         // field doesn't jump while it changes), the field taking all that remains.
         let font = ds.ui_font(-1.0);
-        let count = if self.find.input.text().trim().is_empty() {
+        let count = if self.find.search.input.text().trim().is_empty() {
             String::new()
         } else if self.find.matches.is_empty() {
             i18n::t("grid.find_none")
@@ -459,23 +457,13 @@ impl<S: GridSource> DataGrid<S> {
         let w =
             (buttons_x - px(8.0) - count_w - px(10.0) - (row.min_x() + px(10.0))).max(px(120.0));
         let r = Rect::new(row.min_x() + px(10.0), (mid - px(14.0)).round(), w, px(28.0));
-        let mut style = field_style(ds, false);
-        style.font = ds.ui_font(-0.5);
-        style.lead = px(22.0);
-        style.radius = r.size.height / 2.0;
         let focused = self.field == Some(Field::Find);
-        self.find.input.paint(layer, text, r, focused, &i18n::t("grid.find_hint"), &style);
-        if let Some(id) = icons.id("search") {
-            let s = px(13.0);
-            ui_kit::draw_icon(
-                layer,
-                icons,
-                id,
-                Rect::new(r.min_x() + px(11.0), (mid - s / 2.0).round(), s, s),
-                p.text_muted,
-            );
-        }
+        let placeholder = i18n::t("grid.find_hint");
+        self.find.search.paint(layer, text, icons, ds, (r, focused), &placeholder);
         self.hits.push((r, Hit::Find));
+        if let Some(clear) = self.find.search.clear_area() {
+            self.hits.push((clear, Hit::ClearFind));
+        }
         if let Some(shaped) = shaped {
             let color = if self.find.matches.is_empty() { p.danger } else { p.text_muted };
             draw_text(
@@ -493,14 +481,11 @@ impl<S: GridSource> DataGrid<S> {
             ("chevron-down", Hit::FindNext, any),
             ("x", Hit::FindClose, true),
         ] {
-            let r = icon_button(
-                layer,
-                icons,
-                ds,
-                (x, mid),
-                icon,
-                Look { enabled, hovered: self.hover == Some(hit), on: false },
-            );
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon(icon)
+                .enabled(enabled)
+                .hovered(self.hover == Some(hit));
+            let r = grid_button(layer, text, icons, ds, (x, mid), spec);
             if enabled {
                 self.hits.push((r, hit));
             }

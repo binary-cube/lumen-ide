@@ -289,17 +289,20 @@ fn the_filter_keeps_the_keys_through_its_controls() {
     let icons = icons::Icons::builtin();
     let mut text = text_layout::TextSystem::new();
     let mut scene = render_api::Scene::default();
-    view.paint(ViewerPaint {
-        bounds: Rect::new(0.0, 0.0, 1200.0, 900.0),
-        scale: 1.0,
-        text: &mut text,
-        scene: &mut scene,
-        palette: &palette,
-        icons: &icons,
-        focused: true,
-        waker: None,
-    });
-    let field = view.field;
+    let mut paint = |view: &mut JumpView| {
+        view.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 1200.0, 900.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut view);
+    let field = view.filter.area();
     let on_field = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
     view.hover(on_field);
     assert_eq!(view.cursor_at(on_field), Some(ViewerCursor::Text));
@@ -310,6 +313,17 @@ fn the_filter_keeps_the_keys_through_its_controls() {
     assert!(view.found_names().is_empty());
     assert!(view.edit_key(ViewerKey::Backspace));
     assert_eq!(view.found_names(), ["console"]);
+    // ⌘A selects it all; its × empties it and filters again.
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("orders"));
+    paint(&mut view);
+    let x = Point::new(field.max_x() - 17.0, on_field.y);
+    view.hover(x);
+    assert_eq!(view.cursor_at(x), Some(ViewerCursor::Pointer), "a hand on ×");
+    assert_eq!(Viewer::press(&mut view, x, 1), None);
+    assert_eq!(view.filter.text(), "");
+    assert!(view.found_names().len() > 1, "× filtered again");
+    assert!(view.text_input("orders"));
     // A row clicked: the filter still types.
     let row = view.hits.iter().find(|(_, h)| *h == Hit::Row(0)).map(|(r, _)| *r).unwrap();
     view.click(Point::new(row.min_x() + 4.0, row.min_y() + 4.0));

@@ -51,22 +51,27 @@ const ACTION_PAD: f32 = 12.0;
 /// The ring's steps for a whole turn (it's drawn again at each one).
 pub const RING_STEPS: u16 = crate::progress_ring::STEPS;
 /// A spinner's step (its next dot lit).
-pub const SPINNER_STEP: std::time::Duration = std::time::Duration::from_millis(90);
+pub const SPINNER_STEP: std::time::Duration = ds::SPINNER_STEP;
 /// Frames for the stack never come faster than this (about 30 a second): its rings.
 pub const MIN_FRAME: std::time::Duration = std::time::Duration::from_millis(33);
 /// A progress bar sweeping (work in progress): about 60 a second, smooth to the eye — only
 /// while it shows.
 pub const PROGRESS_FRAME: std::time::Duration = std::time::Duration::from_millis(16);
 
+/// The tone of a kind: its color as a [`ds::Tone`] (what a button tinted by it takes).
+pub fn kind_tone(kind: NotificationKind) -> ds::Tone {
+    match kind {
+        NotificationKind::Success => ds::Tone::Success,
+        NotificationKind::Info | NotificationKind::Progress => ds::Tone::Accent,
+        NotificationKind::Warning => ds::Tone::Warning,
+        NotificationKind::Error => ds::Tone::Danger,
+    }
+}
+
 /// A kind's color, as the palette has it (green from the named colors, in the shade that
 /// reads on the theme).
 pub fn kind_color(kind: NotificationKind, p: &Palette) -> Rgba {
-    match kind {
-        NotificationKind::Success => crate::tag_colors::named("green", p).unwrap_or(p.vcs_added),
-        NotificationKind::Info | NotificationKind::Progress => p.accent,
-        NotificationKind::Warning => p.warning,
-        NotificationKind::Error => p.danger,
-    }
+    kind_tone(kind).color(p)
 }
 
 /// A kind's icon (work in progress has a spinner instead).
@@ -97,9 +102,9 @@ pub struct CardLayout {
     pub count: Option<Arc<ShapedLine>>,
     /// At most two lines, the last cut with "…".
     pub detail: Vec<Arc<ShapedLine>>,
-    /// Each action's label, its button's offset from the text's left edge and width, and
-    /// its command.
-    pub actions: Vec<(Arc<ShapedLine>, f32, f32, CommandId)>,
+    /// Each action's label (cut to fit), its button's offset from the text's left edge and
+    /// width, and its command.
+    pub actions: Vec<(String, f32, f32, CommandId)>,
     /// Where the text starts, and how wide it may be.
     pub text_x: f32,
     pub text_width: f32,
@@ -158,11 +163,10 @@ pub fn layout_card(text: &mut TextSystem, ctx: &Ctx<'_>, toast: &Toast, width: f
                 &action_font,
                 text_width / 2.0 - px(ACTION_PAD * 2.0),
             );
-            let shaped = text.shape_line(&label, &action_font);
-            let w = (shaped.width + px(ACTION_PAD * 2.0)).round();
+            let w = (text.shape_line(&label, &action_font).width + px(ACTION_PAD * 2.0)).round();
             let at = x;
             x += w + px(8.0);
-            (shaped, at, w, a.command)
+            (label, at, w, a.command)
         })
         .collect::<Vec<_>>();
     let body = px(TITLE_LINE) * title.len().max(1) as f32
@@ -349,7 +353,8 @@ impl ToastStack {
                 };
                 (&mut self.rings[at].1, steps)
             });
-            let placed = paint_card(layer, icons, &ctx, (card, toast), rect, self.hover, ring);
+            let placed =
+                paint_card(layer, text, icons, &ctx, (card, toast), rect, self.hover, ring);
             self.placed.push(placed);
         }
         // The rings of cards gone (or no longer counting).
@@ -446,8 +451,10 @@ impl<'a> SmallRev<'a> {
 }
 
 /// One card at `rect`.
+#[allow(clippy::too_many_arguments)]
 fn paint_card(
     layer: &mut Layer,
+    text: &mut TextSystem,
     icons: &icons::Icons,
     ctx: &Ctx<'_>,
     (card, toast): (&CardLayout, &Toast),
@@ -487,7 +494,7 @@ fn paint_card(
     }
     // The texts: the title centered on the icon when it's alone.
     let tx = rect.min_x() + card.text_x;
-    let (title_font, detail_font, count_font, action_font) = fonts(ctx);
+    let (title_font, detail_font, count_font, _) = fonts(ctx);
     let lone = card.detail.is_empty() && card.title.len() <= 1;
     let title_top = if lone {
         icon_box.min_y() + (icon_box.size.height - px(TITLE_LINE)) / 2.0
@@ -531,24 +538,13 @@ fn paint_card(
     for (i, (label, at, w, command)) in card.actions.iter().enumerate().take(2) {
         let r = Rect::new(tx + at, actions_top, *w, px(ACTION_HEIGHT));
         let hovered = hover == Some(ToastHit::Action(card.id, *command));
-        let (fill, text_color, border) = if i == 0 {
-            (color.with_alpha(if hovered { 0.24 } else { 0.15 }), color, None)
+        // The first tinted in the kind's color, the other bordered.
+        let spec = if i == 0 {
+            ds::ButtonSpec::new(ds::ButtonKind::Ghost).tone(kind_tone(card.kind)).tinted().strong()
         } else {
-            (p.text.with_alpha(if hovered { 0.08 } else { 0.0 }), p.text, Some(p.border))
+            ds::ButtonSpec::new(ds::ButtonKind::Secondary)
         };
-        let mut quad = Quad::filled(r, ctx.fade(fill)).rounded(px(radius::SM));
-        if let Some(border) = border {
-            quad = quad.bordered(ctx.line(), ctx.fade(border));
-        }
-        layer.quad(quad);
-        let base = ds::optical_baseline(r.min_y(), r.size.height, &action_font);
-        draw_text(
-            layer,
-            label,
-            (r.min_x() + (w - label.width) / 2.0).round(),
-            base,
-            ctx.fade(text_color),
-        );
+        ds::button(layer, text, icons, ctx, r, spec.label(label).hovered(hovered));
         actions[i] = Some((r, *command));
     }
     // ×, the time left as a ring around it.
@@ -558,24 +554,14 @@ fn paint_card(
         px(CLOSE),
         px(CLOSE),
     );
-    let over_close = hover == Some(ToastHit::Close(card.id));
-    if over_close {
-        layer.quad(
-            Quad::filled(close, ctx.fade(p.text.with_alpha(0.10))).rounded(close.size.width / 2.0),
-        );
-    }
+    let close_button = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+        .icon("x")
+        .round()
+        .rest_tone(ds::Tone::Neutral)
+        .hovered(hover == Some(ToastHit::Close(card.id)));
+    ds::button(layer, text, icons, ctx, close, close_button);
     if let Some((cache, steps)) = ring {
         time_left(layer, ctx, cache, close, color, steps);
-    }
-    if let Some(id) = icons.id("x") {
-        let s = px(12.0);
-        let at = Rect::new(
-            close.min_x() + (close.size.width - s) / 2.0,
-            close.min_y() + (close.size.height - s) / 2.0,
-            s,
-            s,
-        );
-        draw_icon(layer, icons, id, at, ctx.fade(if over_close { p.text } else { p.text_muted }));
     }
     Placed { id: card.id, card: rect, close, actions }
 }
@@ -621,27 +607,18 @@ fn time_left(
     cache.paint(layer, center, &spec, (0.0, sweep), ctx.opacity);
 }
 
-/// Work going on: eight dots turning in `rect`, one step every 90 ms of `age`.
+/// Work going on: the shared loader's dots turning in the middle of `rect`, one step every
+/// [`SPINNER_STEP`] of `age`.
 fn spinner(layer: &mut Layer, ctx: &Ctx<'_>, rect: Rect, color: Rgba, age: std::time::Duration) {
-    const DOTS: usize = 8;
-    let step = (age.as_millis() / SPINNER_STEP.as_millis()) as usize % DOTS;
-    let size = ctx.px(16.0);
+    let size = ctx.px(SPINNER_SIZE);
     let (cx, cy) = (rect.min_x() + rect.size.width / 2.0, rect.min_y() + rect.size.height / 2.0);
-    let radius = size * 0.38;
-    let dot = (size * 0.2).max(2.0);
-    for i in 0..DOTS {
-        let angle = i as f32 / DOTS as f32 * std::f32::consts::TAU;
-        let age = (step + DOTS - i) % DOTS;
-        let alpha = 1.0 - age as f32 / DOTS as f32 * 0.85;
-        let r = Rect::new(
-            cx + angle.cos() * radius - dot / 2.0,
-            cy + angle.sin() * radius - dot / 2.0,
-            dot,
-            dot,
-        );
-        layer.quad(Quad::filled(r, ctx.fade(color.with_alpha(color.a * alpha))).rounded(dot / 2.0));
-    }
+    let dots =
+        ds::Loader { size: SPINNER_SIZE, color: Some(color), ..ds::Loader::default() }.elapsed(age);
+    ds::loader_spinner(layer, ctx, (cx - size / 2.0, cy), &dots);
 }
+
+/// The spinner's diameter (logical pixels).
+const SPINNER_SIZE: f32 = 16.0;
 
 #[cfg(test)]
 #[path = "../tests/unit/toast.rs"]

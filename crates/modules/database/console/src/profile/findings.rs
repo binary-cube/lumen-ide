@@ -11,10 +11,10 @@
 
 use database::profile::derive::ProfileReport;
 use database::profile::rules::Finding;
-use kernel::{Memo, Point, Rect, Rgba};
+use kernel::{Memo, Point, Rect};
 use render_api::{Quad, Scene};
 use text_layout::{Font, TextSystem};
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size, radius};
 use ui_components::{EdgeScrollbar, Palette};
 use ui_kit::{draw_icon, draw_text};
 
@@ -58,8 +58,11 @@ const PAD: f32 = 12.0;
 const GAP: f32 = 8.0;
 const TITLE_H: f32 = 22.0;
 const LINE_H: f32 = 17.0;
+/// A card's share: its pill's alpha of the heat and the room beside its figure.
+const SHARE_FILL: f32 = 0.22;
+const SHARE_PAD: f32 = 6.0;
 const CODE_H: f32 = 16.0;
-const BUTTONS_H: f32 = 26.0;
+const BUTTONS_H: f32 = button_size::MEDIUM;
 
 /// The findings' list (see the module's doc).
 #[derive(Debug, Default)]
@@ -267,24 +270,19 @@ impl FindingsList {
                 );
             }
             let share = figures::share(f.impact);
-            let share_shaped = text.shape_line(&share, &small);
-            let pill_w = share_shaped.width + px(12.0);
-            let pill = Rect::new(
-                (right - pill_w).round(),
-                (y + px(3.0)).round(),
-                pill_w.round(),
-                px(16.0),
-            );
-            layer.quad(
-                Quad::filled(pill, p.heat(f.impact as f32).with_alpha(0.22)).rounded(px(8.0)),
-            );
-            draw_text(
-                layer,
-                &share_shaped,
-                (pill.min_x() + px(6.0)).round(),
-                ds::optical_baseline(pill.min_y(), pill.size.height, &small),
-                p.text,
-            );
+            let pill = ds::Badge::new(&share)
+                .color(p.text)
+                .fill(p.heat(f.impact as f32).with_alpha(SHARE_FILL))
+                .size(ds::BadgeSize::Small)
+                .pad(SHARE_PAD)
+                .font(&small)
+                .paint_right(
+                    layer,
+                    text,
+                    &ds,
+                    right,
+                    y + px(3.0) + px(ds::BadgeSize::Small.height()) / 2.0,
+                );
             let tx = x + px(22.0);
             let title = ds::ellipsize(
                 text,
@@ -415,13 +413,14 @@ impl FindingsList {
                         can_insert,
                     ),
                 ] {
-                    let r = text_button(
-                        &mut ui_components::LayerPainter::new(layer, text, icons, ds),
-                        bx,
-                        row,
-                        (icon, &label),
-                        ui_components::ds::Press::new(enabled, self.hover == Some(hit)),
-                    );
+                    let spec = ButtonSpec::new(ButtonKind::Soft)
+                        .icon(icon)
+                        .label(&label)
+                        .enabled(enabled)
+                        .hovered(self.hover == Some(hit));
+                    let w = ds::button_width(text, &ds, &spec, row.size.height);
+                    let r = Rect::new(bx.round(), row.min_y().round(), w, row.size.height.round());
+                    ds::button(layer, text, icons, &ds, r, spec);
                     if enabled {
                         self.hits.push((r, hit));
                     }
@@ -437,17 +436,16 @@ impl FindingsList {
             // Ignore (a problem's rule, for this console): an icon at the right.
             if f.is_problem() {
                 let ignore = FindingHit::Ignore(card.finding);
-                let ir =
-                    Rect::new((right - px(26.0)).round(), row.min_y(), px(26.0), row.size.height);
-                crate::bar::icon_button(
-                    layer,
-                    icons,
-                    &ds,
-                    ir,
-                    "eye-off",
-                    None,
-                    ui_components::ds::Press::new(true, self.hover == Some(ignore)),
+                let ir = Rect::new(
+                    (right - row.size.height).round(),
+                    row.min_y(),
+                    row.size.height,
+                    row.size.height,
                 );
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon("eye-off")
+                    .hovered(self.hover == Some(ignore));
+                ds::button(layer, text, icons, &ds, ir, spec);
                 self.hits.push((ir, ignore));
                 self.tips.push((ir, i18n::t("profile.view.ignore")));
             }
@@ -455,67 +453,17 @@ impl FindingsList {
         if ignored > 0 {
             let y = area.min_y() + px(PAD) + cards.height - self.scroll + px(4.0);
             let label = i18n::tr!("profile.view.show_ignored", count = ignored as i64);
-            let shaped = text.shape_line(&label, &small);
-            let r = Rect::new(left, y, shaped.width + px(8.0), px(22.0));
-            let c =
-                if self.hover == Some(FindingHit::ShowIgnored) { p.accent } else { p.text_muted };
-            draw_text(
-                layer,
-                &shaped,
-                (left + px(4.0)).round(),
-                ds::optical_baseline(r.min_y(), r.size.height, &small),
-                c,
-            );
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .label(&label)
+                .rest_tone(Tone::Neutral)
+                .hovered(self.hover == Some(FindingHit::ShowIgnored));
+            let h = px(button_size::SMALL);
+            let r = Rect::new(left, y, ds::button_width(text, &ds, &spec, h), h);
+            ds::button(layer, text, icons, &ds, r, spec);
             self.hits.push((r, FindingHit::ShowIgnored));
         }
         self.bar.paint(scene, p, scale, area, self.content, self.scroll);
     }
-}
-
-/// A small button with an icon and a label, from `x` in `row`; its rectangle.
-pub fn text_button(
-    pen: &mut ui_components::LayerPainter<'_>,
-    x: f32,
-    row: Rect,
-    (icon, label): (&str, &str),
-    press: ui_components::ds::Press,
-) -> Rect {
-    let (layer, text, icons, ds) = (&mut *pen.layer, &mut *pen.text, pen.icons, &pen.ds);
-    let ui_components::ds::Press { enabled, hovered } = press;
-    let p = ds.palette;
-    let px = |v: f32| ds.px(v);
-    let font = ds.ui_font(-1.5);
-    let shaped = text.shape_line(label, &font);
-    let w = (shaped.width + px(32.0)).round();
-    let r = Rect::new(x.round(), row.min_y().round(), w, row.size.height.round());
-    let fill = if hovered && enabled { p.text.with_alpha(0.09) } else { p.text.with_alpha(0.045) };
-    layer.quad(
-        Quad::filled(r, fill).rounded(px(radius::SM)).bordered(ds.line(), p.border.with_alpha(0.7)),
-    );
-    let color: Rgba = if enabled { p.text } else { p.text_muted.with_alpha(0.5) };
-    if let Some(id) = icons.id(icon) {
-        let s = px(12.0);
-        draw_icon(
-            layer,
-            icons,
-            id,
-            Rect::new(
-                (r.min_x() + px(8.0)).round(),
-                (r.min_y() + (r.size.height - s) / 2.0).round(),
-                s,
-                s,
-            ),
-            color,
-        );
-    }
-    draw_text(
-        layer,
-        &shaped,
-        (r.min_x() + px(24.0)).round(),
-        ds::optical_baseline(r.min_y(), r.size.height, &font),
-        color,
-    );
-    r
 }
 
 /// The cards of `findings` for `width` (physical pixels): their lines wrapped.

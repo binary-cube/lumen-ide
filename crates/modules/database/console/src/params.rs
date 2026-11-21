@@ -299,6 +299,8 @@ const ROW_H: f32 = 46.0;
 const SOURCE_H: f32 = 42.0;
 const HEAD_H: f32 = 26.0;
 const FOOTER_H: f32 = 64.0;
+/// The focused parameter's row: its fill's alpha of the accent.
+const FOCUS_FILL: f32 = 0.06;
 /// The statements' box: its lines, their height (logical pixels).
 pub const CODE_LINES: std::ops::RangeInclusive<usize> = 1..=8;
 const CODE_ROW: f32 = 21.0;
@@ -736,20 +738,15 @@ impl Viewer for ParamsView {
                     continue;
                 }
                 let mid = (top + px(ROW_H) / 2.0).round();
-                if focus == Some(i) {
-                    rows.quad(
-                        Quad::filled(
-                            Rect::new(
-                                left - px(8.0),
-                                top + px(3.0),
-                                right - left + px(16.0),
-                                px(ROW_H - 6.0),
-                            ),
-                            p.accent.with_alpha(0.06),
-                        )
-                        .rounded(px(radius::MD)),
-                    );
-                }
+                let lit = Rect::new(
+                    left - px(8.0),
+                    top + px(3.0),
+                    right - left + px(16.0),
+                    px(ROW_H - 6.0),
+                );
+                ds::RowHighlight::new(focus == Some(i), false)
+                    .selected_alpha(FOCUS_FILL)
+                    .paint(rows, &ds, lit);
                 // Its name as written, and how many places use it.
                 let shown_name = ds::ellipsize(text, &entry.label, &name_font, name_w - px(44.0));
                 let shaped = text.shape_line(&shown_name, &name_font);

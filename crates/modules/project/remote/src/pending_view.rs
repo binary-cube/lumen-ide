@@ -568,10 +568,7 @@ impl PendingList {
         draw_text(layer, &label, label_x, label_base, if lit { p.text } else { p.text_muted });
         let switch = Rect::new(label_x, b.min_y(), toggle.max_x() - label_x, header_h);
         self.buttons.push((switch, Button::Switch));
-        layer.quad(Quad::filled(
-            Rect::new(b.min_x(), b.min_y() + header_h, b.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, &ds, b.min_x(), b.max_x(), b.min_y() + header_h);
         let list =
             Rect::new(b.min_x(), b.min_y() + header_h, b.size.width, b.size.height - header_h);
         if self.rows.is_empty() {

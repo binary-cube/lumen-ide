@@ -13,7 +13,7 @@ use kernel::{Point, Rect};
 use render_api::Quad;
 use ui_components::control::{Control, Controls, NOWHERE};
 use ui_components::data_grid::{DataGrid, GridPaint};
-use ui_components::ds::{self, Ctx};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, button_size};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{PressMods, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint};
 use ui_kit::draw_text;
@@ -24,6 +24,11 @@ mod parts;
 
 /// The bar's height (logical pixels).
 const BAR_H: f32 = 44.0;
+/// The bar's live / paused dot (logical pixels).
+const STATE_DOT: f32 = 7.0;
+/// How far in from the details' right edge their × is centered (logical pixels): 16 of
+/// room, then half its 14-pixel icon.
+const CLOSE_CENTER: f32 = 23.0;
 /// Its parts' places (see [`LogFileView::with_controls`]): the bar's buttons, the details.
 const BUTTONS: usize = 0;
 const DETAILS: usize = 1;
@@ -179,10 +184,7 @@ impl LogFileView {
         {
             let layer = ctx.scene.push_layer(Some(area));
             layer.quad(Quad::filled(area, p.editor_background));
-            layer.quad(Quad::filled(
-                Rect::new(area.min_x(), area.min_y(), area.size.width, ds.line()),
-                p.border,
-            ));
+            ds::divider(layer, &ds, area.min_x(), area.max_x(), area.min_y());
             let font = ds.ui_font(-1.0).with_weight(text_layout::Font::SEMIBOLD);
             let title = ctx.text.shape_line(&t("log_viewer.details"), &font);
             draw_text(
@@ -192,17 +194,18 @@ impl LogFileView {
                 ds::optical_baseline(head.min_y(), head.size.height, &font),
                 p.text_muted,
             );
-            let size = px(14.0);
-            self.details_close = Rect::new(
-                area.max_x() - px(16.0) - size,
-                (head.min_y() + (head.size.height - size) / 2.0).round(),
-                size,
-                size,
+            let size = px(button_size::SMALL);
+            let center = area.max_x() - px(CLOSE_CENTER);
+            self.details_close = ds::square_button(
+                &ds,
+                (center - size / 2.0, head.min_y() + head.size.height / 2.0),
+                button_size::SMALL,
             );
-            if let Some(id) = ctx.icons.id("x") {
-                let color = if self.close_hover { p.text } else { p.text_muted };
-                ui_kit::draw_icon(layer, ctx.icons, id, self.details_close, color);
-            }
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon("x")
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(self.close_hover);
+            ds::button(layer, ctx.text, ctx.icons, &ds, self.details_close, spec);
         }
         let body = Rect::new(
             area.min_x() + px(8.0),
@@ -238,10 +241,7 @@ impl LogFileView {
         let px = |v: f32| ds.px(v);
         let p = ctx.palette;
         let layer = ctx.scene.push_layer(Some(bar));
-        layer.quad(Quad::filled(
-            Rect::new(bar.min_x(), bar.max_y() - ds.line(), bar.size.width, ds.line()),
-            p.border,
-        ));
+        ds::divider(layer, &ds, bar.min_x(), bar.max_x(), bar.max_y() - ds.line());
         let (paused, shown, latest, older, newer) = match &self.grid {
             Some(grid) => {
                 let source = grid.source();
@@ -301,12 +301,9 @@ impl LogFileView {
         let small = ds.ui_font(-1.0);
         let x = left + shaped.width + px(14.0);
         // A dot: live (green) or paused (the warning color).
-        let dot = px(7.0);
+        let dot = px(STATE_DOT);
         let color = if paused { p.warning } else { ds::Tone::Success.color(p) };
-        layer.quad(
-            Quad::filled(Rect::new(x, (mid - dot / 2.0).round(), dot, dot), color)
-                .rounded(dot / 2.0),
-        );
+        ds::dot(layer, &ds, Point::new(x + dot / 2.0, mid), STATE_DOT, color);
         let room = (right - x - dot - px(8.0)).max(0.0);
         ds::draw_ellipsized(
             layer,

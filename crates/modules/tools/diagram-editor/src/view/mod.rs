@@ -14,6 +14,7 @@ use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
 use text_layout::TextSystem;
 use ui_components::ds::{self, Ctx};
+use ui_components::tab_strip::{self, PillTab};
 use ui_components::{PressMods, ViewMemory, Viewer, ViewerAction, ViewerCursor, ViewerPaint};
 use ui_kit::draw_text;
 
@@ -56,6 +57,8 @@ const LAID_STEPS: usize = 3;
 
 /// The page tabs' bar's height (logical pixels).
 const TABS_H: f32 = 30.0;
+/// The room before the first page's tab (logical pixels).
+const TABS_INSET: f32 = 8.0;
 
 /// A `.drawio` file's view.
 pub struct DiagramView {
@@ -449,44 +452,25 @@ impl DiagramView {
         crate::texts::draw(layer, lines, *line_h, t, area.origin, (kq, k / kq));
     }
 
+    /// The pages' tabs: pills along the bottom bar (the one shown in force), a line over
+    /// them.
     fn paint_tabs(&mut self, ctx: &mut ViewerPaint<'_>, area: Rect) {
         let ds = Ctx::new(ctx.palette, ctx.scale);
         let p = ctx.palette;
         let layer = ctx.scene.push_layer(Some(area));
         layer.quad(Quad::filled(area, p.tab_bar_background));
-        layer.quad(Quad::filled(
-            Rect::new(area.min_x(), area.min_y(), area.size.width, ctx.scale.max(1.0)),
-            p.border,
-        ));
-        let font = ds.ui_font(-1.0);
-        let pad = ds.px(12.0);
-        let mut x = area.min_x() + ds.px(8.0);
+        ds::divider(layer, &ds, area.min_x(), area.max_x(), area.min_y());
+        let mid = area.min_y() + area.size.height / 2.0;
+        let mut x = area.min_x() + ds.px(TABS_INSET);
         self.tabs.clear();
-        for (i, name) in self.page_names().into_iter().enumerate() {
-            let shaped = ctx.text.shape_line(&name, &font);
-            let r = Rect::new(
-                x,
-                area.min_y() + ds.px(3.0),
-                shaped.width + 2.0 * pad,
-                area.size.height - ds.px(6.0),
-            );
-            if r.min_x() > area.max_x() {
+        for (i, name) in self.page_names().iter().enumerate() {
+            if x > area.max_x() {
                 break;
             }
-            let on = i == self.page;
-            if on {
-                layer.quad(Quad::filled(r, p.tab_active_background).rounded(ds.px(6.0)));
-            }
-            let color = if on { p.text } else { p.text_muted };
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + pad).round(),
-                (r.center().y + font.size * 0.35).round(),
-                color,
-            );
-            self.tabs.push((r, i));
-            x = r.max_x() + ds.px(4.0);
+            let tab = PillTab::new(name).on(i == self.page, false);
+            let drawn = tab_strip::pill_tab(layer, ctx.text, ctx.icons, &ds, (x, mid), &tab);
+            self.tabs.push((drawn.pill, i));
+            x = drawn.pill.max_x() + ds.px(tab_strip::TAB_GAP);
         }
     }
 }
@@ -515,9 +499,14 @@ impl DiagramView {
                 self.press_quick(p);
                 return None;
             }
+            // The palette's search pressed: it has the keys, the number typed let go.
+            Some(parts::PALETTE) => {
+                self.end_typing(false);
+                return None;
+            }
             Some(parts::PALETTE_BUTTONS) => {
                 self.end_typing(false);
-                self.press_palette(p, clicks);
+                self.press_palette(p);
                 return None;
             }
             Some(parts::TABS) => {
@@ -654,8 +643,8 @@ impl Viewer for DiagramView {
         }
         let layer = ctx.scene.push_layer(Some(sheet));
         self.paint_editing(layer, ctx.palette);
-        self.paint_connections(layer, ctx.palette, ctx.icons);
-        self.paint_quick(ctx.scene, &Ctx::new(ctx.palette, ctx.scale), ctx.icons);
+        self.paint_connections(layer, ctx.text, ctx.palette, ctx.icons);
+        self.paint_quick(ctx.scene, ctx.text, &Ctx::new(ctx.palette, ctx.scale), ctx.icons);
         if self.editing.is_some() {
             let ds = Ctx::new(ctx.palette, ctx.scale);
             self.paint_text_field(ctx.scene, ctx.text, &ds);

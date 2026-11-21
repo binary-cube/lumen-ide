@@ -1,50 +1,30 @@
 //! Canvas search (⌘K): jump to a file or a declaration in the project.
 
 use code_intelligence::{CatalogEntry, fuzzy_score};
+use ui_components::search_field::SearchField;
 
 /// How many results are shown.
 pub const RESULTS: usize = 8;
 
 #[derive(Debug, Default)]
 pub struct Search {
-    pub query: String,
+    /// What's typed: the app's search field (its caret, selection, ×, editing keys).
+    pub field: SearchField,
     /// Indices into the catalog, best matches first.
     pub results: Vec<usize>,
     pub selected: usize,
-    /// All text is selected (⌘A): the next key replaces / deletes it.
-    pub all: bool,
 }
 
 impl Search {
-    /// Typed text (replaces the selection if all text is selected).
-    pub fn insert(&mut self, typed: &str, catalog: &[CatalogEntry]) {
-        if std::mem::take(&mut self.all) {
-            self.query.clear();
-        }
-        self.query.push_str(typed);
-        self.refresh(catalog);
-    }
-
-    /// Backspace: one character, or all text if selected.
-    pub fn backspace(&mut self, catalog: &[CatalogEntry]) {
-        if std::mem::take(&mut self.all) {
-            self.query.clear();
-        } else {
-            self.query.pop();
-        }
-        self.refresh(catalog);
-    }
-
-    pub fn clear(&mut self) {
-        self.query.clear();
-        self.all = false;
-        self.results.clear();
-        self.selected = 0;
+    /// What's typed.
+    pub fn query(&self) -> &str {
+        self.field.text()
     }
 
     pub fn refresh(&mut self, catalog: &[CatalogEntry]) {
         self.selected = 0;
-        if self.query.trim().is_empty() {
+        let query = self.field.text();
+        if query.trim().is_empty() {
             self.results.clear();
             return;
         }
@@ -52,8 +32,8 @@ impl Search {
             .iter()
             .enumerate()
             .filter_map(|(i, e)| {
-                let label = fuzzy_score(&self.query, &e.label).map(|s| s + 20);
-                let detail = fuzzy_score(&self.query, &e.detail);
+                let label = fuzzy_score(query, &e.label).map(|s| s + 20);
+                let detail = fuzzy_score(query, &e.detail);
                 label.max(detail).map(|s| (s, i))
             })
             .collect();

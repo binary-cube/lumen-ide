@@ -583,3 +583,92 @@ fn the_cursor_and_the_tooltip_follow_the_mouse() {
     assert_eq!(view.cursor_at(away), None);
     assert!(view.tooltip_at(away).is_none());
 }
+
+/// Paints the view in a window-sized area.
+fn repainted(view: &mut SearchView) {
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, 1200.0, 800.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+}
+
+/// The search is the app's search field: a line break typed or pasted is a space; its
+/// replacement's button, options and folder's button sit in the room it keeps on its
+/// right, its × left of them (a hand over it, the text's cursor over the text); × pressed
+/// empties it.
+#[test]
+fn the_search_is_the_shared_field_with_its_buttons_inside() {
+    let mut view = painted_with_many();
+    view.panel.input.set_text("");
+    assert!(view.paste("ne\nedle"));
+    assert_eq!(view.panel.input.text(), "ne edle", "one line: a space");
+    repainted(&mut view);
+    let field = view.panel.input.area();
+    let clear = view.panel.input.clear_area().expect("× shown with text");
+    let (replace, folder) = (view.panel.replace_button(), view.panel.scope_button());
+    assert!(field.contains(replace.center()) && field.contains(folder.center()));
+    assert!(clear.max_x() <= replace.min_x(), "× left of the buttons");
+    let option = Point::new((replace.max_x() + folder.min_x()) / 2.0, folder.center().y);
+    assert!(view.panel.option_at(option).is_some(), "the options between them");
+    view.hover(clear.center());
+    assert_eq!(view.cursor_at(clear.center()), Some(ViewerCursor::Pointer));
+    let on_text = Point::new(field.min_x() + 40.0, field.center().y);
+    view.hover(on_text);
+    assert_eq!(view.cursor_at(on_text), Some(ViewerCursor::Text));
+    view.press(clear.center(), 1);
+    assert_eq!(view.panel.input.text(), "", "× empties it");
+    assert!(view.panel.showing_recent(), "searched again: the recent searches");
+}
+
+/// An option turned on shows on its button (the shared one, its back in the accent), and
+/// only there: off, none of the field's buttons has one.
+#[test]
+fn an_option_turned_on_is_lit_on_its_button() {
+    let palette = ui_components::Palette::dark();
+    let accent = palette.accent;
+    let backs = |view: &mut SearchView| {
+        let mut text = text_layout::TextSystem::new();
+        let icons = icons::Icons::builtin();
+        let mut scene = render_api::Scene::default();
+        view.paint(ViewerPaint {
+            bounds: kernel::Rect::new(0.0, 0.0, 1200.0, 800.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+        let field = view.panel.input.area();
+        scene
+            .layers()
+            .iter()
+            .flat_map(|l| &l.quads)
+            .filter(|q| {
+                let c = q.color;
+                (c.r, c.g, c.b) == (accent.r, accent.g, accent.b)
+                    && c.a > 0.0
+                    && c.a < 1.0
+                    && field.contains(q.bounds.center())
+            })
+            .map(|q| q.bounds)
+            .collect::<Vec<_>>()
+    };
+    let mut view = opened(kernel::ProjectId::new(), "/r", None);
+    assert!(backs(&mut view).is_empty(), "every option off");
+    view.act(ProjectSearchAction::Toggle(crate::search_panel::SearchOption::Case));
+    let on = backs(&mut view);
+    let (replace, folder) = (view.panel.replace_button(), view.panel.scope_button());
+    assert_eq!(on.len(), 1, "the one turned on");
+    assert!(on[0].min_x() >= replace.max_x() && on[0].max_x() <= folder.min_x());
+}

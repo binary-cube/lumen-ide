@@ -280,3 +280,47 @@ fn a_popover_done_without_an_action_is_closed() {
     wb.click_modal_view(&mut text, Point::new(5.0, 5.0), 1);
     assert!(!wb.has_modal_view(), "a click outside: done, closed");
 }
+
+/// A window's view asking for a menu under a button of its own: a press opens the app's
+/// menu (nothing else done), its row chosen goes back to the window's view.
+#[test]
+fn a_window_s_view_asked_menu_opens_and_comes_back_to_it() {
+    struct Asking {
+        asked: Option<(Rect, Vec<ui_workbench::ViewMenuEntry>)>,
+        chosen: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+    impl ui_workbench::Viewer for Asking {
+        fn paint(&mut self, _ctx: ui_workbench::ViewerPaint<'_>) {}
+        fn press(&mut self, p: Point, _clicks: u32) -> Option<ui_workbench::ViewerAction> {
+            let rows = vec![ui_workbench::ViewMenuEntry::item("export", "Export")];
+            self.asked = Some((Rect::new(p.x, p.y, 40.0, 20.0), rows));
+            None
+        }
+        fn take_menu(&mut self) -> Option<(Rect, Vec<ui_workbench::ViewMenuEntry>)> {
+            self.asked.take()
+        }
+        fn command(&mut self, id: &str) -> bool {
+            self.chosen.lock().unwrap().push(id.to_owned());
+            true
+        }
+    }
+    let (support, _) = crate::modules::load(&extensions::ModuleSelection::default());
+    let mut wb = Workbench::new(Arc::new(support), Ports::local());
+    wb.forget_projects();
+    wb.resize(PhysicalSize::new(1200, 800), 1.0);
+    let mut text = TextSystem::new();
+    let chosen = Arc::default();
+    wb.modal_view = Some(ModalView {
+        viewer: Box::new(Asking { asked: None, chosen: Arc::clone(&chosen) }),
+        frame: None,
+        popover: true,
+        dragging: false,
+        extension: "view-test-asking".into(),
+    });
+    wb.click_modal_view(&mut text, Point::new(50.0, 50.0), 1);
+    assert!(wb.context_menu.is_open(), "the app's menu, over the window");
+    assert!(wb.has_modal_view());
+    wb.context_menu.close();
+    assert!(wb.run_view_menu(&mut text, "export"));
+    assert_eq!(*chosen.lock().unwrap(), ["export"]);
+}

@@ -8,13 +8,20 @@ use kernel::Rect;
 use render_api::{Quad, Scene};
 use text_layout::TextSystem;
 use ui_components::LayerPainter;
-use ui_components::ds::{self, Ctx, SegmentedSpec, radius};
-use ui_kit::{TextInputStyle, draw_text};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, SegmentedSpec, button_size};
+use ui_kit::draw_text;
 
-use super::table::icon_button;
+use super::table::quiet_icon;
 use super::{Focus, Hit, Popover, TaskManager};
 use crate::layout::{PageLayout, Tool};
 use crate::model::Grouping;
+
+/// The room on the filter's right kept for its × (logical pixels): its count stops before it.
+const CLEAR_ROOM: f32 = 26.0;
+
+/// How far from the filter's right edge its own × (closing it empty) is centered (logical
+/// pixels).
+const CLOSE_INSET: f32 = 15.0;
 
 /// The groupings offered, in their order (by project only in every project's view).
 pub(super) fn groupings(all: bool) -> &'static [Grouping] {
@@ -88,8 +95,9 @@ impl TaskManager {
                 Tool::Filter if page.filter_icon => {
                     let hit = Hit::FilterIcon;
                     let on = !self.filter.text().is_empty();
-                    let drawn =
-                        icon_button(layer, icons, ds, rect, "search", self.hover == Some(hit), on);
+                    let drawn = ds::square_button(ds, (rect.min_x(), mid), button_size::LARGE);
+                    let spec = quiet_icon("search").hovered(self.hover == Some(hit)).on(on);
+                    ds::button(layer, text, icons, ds, drawn, spec);
                     self.hits.push((rect, hit));
                     self.stops.push((drawn, Focus::Tool(tool)));
                 }
@@ -100,15 +108,10 @@ impl TaskManager {
                 }
                 Tool::Pause => {
                     let icon = if self.paused { "play" } else { "pause" };
-                    let drawn = icon_button(
-                        layer,
-                        icons,
-                        ds,
-                        rect,
-                        icon,
-                        self.hover == Some(Hit::Pause),
-                        self.paused,
-                    );
+                    let drawn = ds::square_button(ds, (rect.min_x(), mid), button_size::LARGE);
+                    let spec =
+                        quiet_icon(icon).hovered(self.hover == Some(Hit::Pause)).on(self.paused);
+                    ds::button(layer, text, icons, ds, drawn, spec);
                     self.hits.push((rect, Hit::Pause));
                     self.stops.push((drawn, Focus::Tool(tool)));
                 }
@@ -129,15 +132,9 @@ impl TaskManager {
             let rect = Rect::new(x, bar.min_y(), w, bar.size.height);
             let hit = Hit::Open(Popover::More);
             let open = self.popover.is_some_and(|(p, _)| p == Popover::More);
-            let drawn = icon_button(
-                layer,
-                icons,
-                ds,
-                rect,
-                "more-horizontal",
-                self.hover == Some(hit),
-                open,
-            );
+            let drawn = ds::square_button(ds, (rect.min_x(), mid), button_size::LARGE);
+            let spec = quiet_icon("more-horizontal").hovered(self.hover == Some(hit)).on(open);
+            ds::button(layer, text, icons, ds, drawn, spec);
             self.hits.push((rect, hit));
             self.stops.push((drawn, Focus::More));
         }
@@ -167,66 +164,32 @@ impl TaskManager {
         }
     }
 
-    /// The filter field: the magnifier, what's typed (or its hint), how many it finds and
-    /// its ×.
+    /// The filter field: the app's search field (the magnifier, what's typed or its hint,
+    /// × once there is text, the caret while it has the keys), how many it finds left of
+    /// its ×, and a narrow page's own × closing it while it's open empty.
     fn paint_filter(&mut self, pen: &mut LayerPainter<'_>, field: Rect) {
         let ds = pen.ds;
         let ds = &ds;
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let typed = !self.filter.text().is_empty();
-        let clear_w = if typed || self.filter_open { px(26.0) } else { 0.0 };
-        let small = ds.ui_font(-1.5);
-        let count_w = if typed {
-            pen.text.shape_line(&self.texts.matches, &small).width + px(8.0)
-        } else {
-            0.0
-        };
-        let style = TextInputStyle {
-            font: ds.ui_font(-0.5),
-            background: p.search_field_background,
-            border: p.search_field_border,
-            border_focused: p.search_field_border_focused,
-            text: p.text,
-            placeholder: p.text_muted,
-            selection: p.selection,
-            caret: p.caret,
-            radius: field.size.height / 2.0,
-            border_width: ds.line(),
-            padding: px(12.0),
-            caret_width: px(1.5).max(1.0),
-            lead: px(20.0),
-        };
-        let focused = self.focused
-            && (typed
-                || self.filter_open
-                || self.hover == Some(Hit::Filter)
-                || self.focus == Focus::Tool(Tool::Filter));
-        let input = Rect::new(field.min_x(), field.min_y(), field.size.width, field.size.height);
+        let focused = self.focused && self.filter_has_keys();
         self.filter.paint(
             pen.layer,
             pen.text,
-            input,
-            focused || typed,
+            pen.icons,
+            ds,
+            (field, focused),
             &self.texts.labels.filter,
-            &style,
         );
-        if let Some(id) = pen.icons.id("search") {
-            let s = px(14.0);
-            let at = Rect::new(
-                field.min_x() + px(11.0),
-                field.min_y() + (field.size.height - s) / 2.0,
-                s,
-                s,
-            );
-            ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.text_muted);
-        }
         self.hits.push((field, Hit::Filter));
         let mid = field.min_y() + field.size.height / 2.0;
         if typed {
+            let small = ds.ui_font(-1.5);
+            let count_w = pen.text.shape_line(&self.texts.matches, &small).width + px(8.0);
             let base = ds::optical_baseline(field.min_y(), field.size.height, &small);
-            let cx = field.max_x() - clear_w - count_w;
-            // Its background under the count (the typed pen.text stops before it).
+            let cx = field.max_x() - px(CLEAR_ROOM) - count_w;
+            // Its background under the count (the typed text stops before it).
             pen.layer.quad(Quad::filled(
                 Rect::new(
                     cx - px(2.0),
@@ -243,12 +206,18 @@ impl TaskManager {
                 base,
                 p.text_muted,
             );
-        }
-        if clear_w > 0.0 {
+        } else if self.filter_open {
             let hovered = self.hover == Some(Hit::FilterClear);
-            let r =
-                ds::clear_button(pen.layer, pen.icons, ds, field.max_x() - px(15.0), mid, hovered);
+            let r = ds::clear_button(
+                pen.layer,
+                pen.icons,
+                ds,
+                field.max_x() - px(CLOSE_INSET),
+                mid,
+                hovered,
+            );
             self.hits.push((r, Hit::FilterClear));
+            self.filter_close = Some(r);
         }
     }
 
@@ -262,35 +231,19 @@ impl TaskManager {
     ) -> Rect {
         let ds = pen.ds;
         let ds = &ds;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
         let hit = Hit::Open(popover);
         let open = self.popover.is_some_and(|(o, _)| o == popover);
-        let pill = Rect::new(rect.min_x(), mid - px(14.0), rect.size.width, px(28.0));
-        let fill = if open {
-            p.accent.with_alpha(0.12)
-        } else if self.hover == Some(hit) {
-            p.text.with_alpha(0.07)
-        } else {
-            p.text.with_alpha(0.03)
-        };
-        pen.layer
-            .quad(Quad::filled(pill, fill).rounded(px(radius::SM)).bordered(ds.line(), p.border));
+        let h = ds.px(button_size::LARGE);
+        let pill = Rect::new(rect.min_x(), mid - h / 2.0, rect.size.width, h);
         let label = match popover {
             Popover::Sort => &self.texts.sort_pill,
             _ => &self.texts.interval_pill,
         };
-        let font = ds.ui_font(-1.0);
-        let base = ds::optical_baseline(pill.min_y(), pill.size.height, &font);
-        ds::draw_ellipsized(
-            pen.layer,
-            pen.text,
-            label,
-            &font,
-            (pill.min_x() + px(12.0), base),
-            pill.size.width - px(20.0),
-            if open { p.accent } else { p.text },
-        );
+        let spec = ButtonSpec::new(ButtonKind::Soft)
+            .label(label)
+            .hovered(self.hover == Some(hit))
+            .on(open);
+        ds::button(pen.layer, pen.text, pen.icons, ds, pill, spec);
         self.hits.push((pill, hit));
         pill
     }

@@ -17,7 +17,7 @@ use i18n::{t, tr};
 use kernel::{Point, Rect, Rgba};
 use render_api::{ImageData, Quad};
 use text_layout::Font;
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, button_size, radius};
 use ui_components::{Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint};
 use ui_kit::{draw_icon, draw_text};
 
@@ -40,6 +40,11 @@ pub struct SizesData {
 const SLICES: usize = 8;
 const ROW_H: f32 = 34.0;
 const RING: f32 = 220.0;
+/// A row's bar: its height, its track's alpha of the text and the least a share shows
+/// (logical pixels).
+const BAR_H: f32 = 6.0;
+const BAR_TRACK: f32 = 0.07;
+const BAR_MIN: f32 = 2.0;
 
 /// A measure going on.
 struct Measuring {
@@ -480,16 +485,14 @@ impl Viewer for SizesView {
         let label = t("sizes.refresh");
         let bw = ds::toolbar_button_width(ctx.text, &ds, &label);
         let button = Rect::new(x0 + width - bw, y, bw, px(ds::TOOLBAR_BUTTON_H));
-        let spec = ds::ToolbarButton {
-            label: &label,
-            icon: "refresh",
-            accent: false,
-            hovered: self.hover == Some(Hit::Refresh),
-        };
-        if self.measuring.is_some() {
-            ds::busy_toolbar_button(layer, ctx.text, ctx.icons, &ds, button, spec);
-        } else {
-            ds::toolbar_button(layer, ctx.text, ctx.icons, &ds, button, spec);
+        let measuring = self.measuring.is_some();
+        let spec = ButtonSpec::new(ButtonKind::Toolbar)
+            .label(&label)
+            .icon("refresh")
+            .busy(measuring)
+            .hovered(self.hover == Some(Hit::Refresh));
+        ds::button(layer, ctx.text, ctx.icons, &ds, button, spec);
+        if !measuring {
             self.hits.push((button, Hit::Refresh));
         }
         y += px(46.0);
@@ -542,34 +545,29 @@ impl Viewer for SizesView {
         let mut cx = x0;
         for (depth, name) in names.iter().enumerate() {
             if depth > 0 {
-                if let Some(id) = ctx.icons.id("chevron-right") {
-                    draw_icon(
-                        layer,
-                        ctx.icons,
-                        id,
-                        Rect::new(cx, y + px(4.0), px(12.0), px(12.0)),
-                        p.text_muted,
-                    );
-                }
+                let at = Rect::new(cx, y + px(4.0), px(12.0), px(12.0));
+                ui_components::tree::chevron(layer, ctx.icons, at, false, p.text_muted);
                 cx += px(18.0);
             }
             let shaped = ctx.text.shape_line(name, &crumb_font);
             let r = Rect::new(cx - px(4.0), y - px(2.0), shaped.width + px(8.0), px(24.0));
-            let last = depth + 1 == names.len();
-            if !last {
-                if self.hover == Some(Hit::Crumb(depth)) {
-                    layer.quad(Quad::filled(r, p.tree_hover).rounded(px(6.0)));
-                }
+            if depth + 1 < names.len() {
+                // A folder gone through: a link back to it.
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .label(name)
+                    .tone(ds::Tone::Accent)
+                    .hovered(self.hover == Some(Hit::Crumb(depth)));
+                ds::button(layer, ctx.text, ctx.icons, &ds, r, spec);
                 self.hits.push((r, Hit::Crumb(depth)));
+            } else {
+                draw_text(
+                    layer,
+                    &shaped,
+                    cx,
+                    ds::optical_baseline(y - px(2.0), px(24.0), &crumb_font),
+                    p.text,
+                );
             }
-            let color = if last { p.text } else { p.accent };
-            draw_text(
-                layer,
-                &shaped,
-                cx,
-                ds::optical_baseline(y - px(2.0), px(24.0), &crumb_font),
-                color,
-            );
             cx += shaped.width + px(6.0);
         }
         y += px(40.0);
@@ -636,9 +634,11 @@ impl Viewer for SizesView {
             let row = Rect::new(lx, top, lw, self.row_h);
             let enterable = child.dir && !child.other && !child.children.is_empty();
             let hovered = matches!(self.hover, Some(Hit::Row(h) | Hit::Locate(h)) if h == i);
-            if hovered || (lit == Some(self.slice_of(i)) && i < SLICES) {
-                rows.quad(Quad::filled(row, p.tree_hover).rounded(px(6.0)));
-            }
+            let shown = hovered || (lit == Some(self.slice_of(i)) && i < SLICES);
+            ds::RowHighlight::new(false, shown)
+                .hover(ds::HoverFill::Tree)
+                .radius(radius::SM)
+                .paint(rows, &ds, row);
             if let Some(shown) = row.intersect(&self.list) {
                 self.hits.push((shown, Hit::Row(i)));
             }
@@ -692,38 +692,29 @@ impl Viewer for SizesView {
                 if enterable { p.text } else { p.text_muted },
             );
             // On hover: its button to its place in the project's tree.
-            let locate = Rect::new(
-                lx + px(50.0) + name_w + px(6.0),
-                top + (self.row_h - px(24.0)) / 2.0,
-                px(24.0),
-                px(24.0),
+            let locate = ds::square_button(
+                &ds,
+                (lx + px(50.0) + name_w + px(6.0), top + self.row_h / 2.0),
+                button_size::SMALL,
             );
-            if hovered
-                && !child.other
-                && let Some(id) = ctx.icons.id("crosshair")
-            {
-                if self.hover == Some(Hit::Locate(i)) {
-                    rows.quad(Quad::filled(locate, p.text.with_alpha(0.08)).rounded(px(6.0)));
-                }
-                let icon = Rect::new(
-                    locate.min_x() + px(4.0),
-                    locate.min_y() + px(4.0),
-                    px(16.0),
-                    px(16.0),
-                );
-                draw_icon(rows, ctx.icons, id, icon, p.accent);
+            if hovered && !child.other {
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon("crosshair")
+                    .tone(ds::Tone::Accent)
+                    .hovered(self.hover == Some(Hit::Locate(i)));
+                ds::button(rows, ctx.text, ctx.icons, &ds, locate, spec);
                 self.hits.push((locate, Hit::Locate(i)));
             }
             // Its bar, beside its size and its share.
             let bar_x = lx + px(50.0) + name_w + px(38.0);
             let bar_w = (lw - (bar_x - lx) - px(150.0)).max(0.0);
-            let track = Rect::new(bar_x, top + (self.row_h - px(6.0)) / 2.0, bar_w, px(6.0));
-            rows.quad(Quad::filled(track, p.text.with_alpha(0.07)).rounded(px(3.0)));
-            let fill = (child.size as f32 / biggest as f32).clamp(0.0, 1.0) * bar_w;
-            rows.quad(
-                Quad::filled(Rect::new(bar_x, track.min_y(), fill.max(px(2.0)), px(6.0)), swatch)
-                    .rounded(px(3.0)),
-            );
+            let bar_h = px(BAR_H);
+            let track = Rect::new(bar_x, top + (self.row_h - bar_h) / 2.0, bar_w, bar_h);
+            ds::ProgressBar::of(child.size as f32 / biggest as f32)
+                .color(swatch)
+                .track(ds::ProgressTrack::Faint(BAR_TRACK))
+                .min_fill(BAR_MIN)
+                .paint_bar(rows, &ds, track);
             let share =
                 if node.size > 0 { child.size as f64 * 100.0 / node.size as f64 } else { 0.0 };
             let size_text = ctx.text.shape_line(&i18n::bytes(child.size), &font);

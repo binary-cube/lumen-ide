@@ -77,6 +77,9 @@ const GRAPH_W: f32 = 110.0;
 const HEADER_H: f32 = 26.0;
 const ICON: f32 = 15.0;
 const ICON_GAP: f32 = 8.0;
+/// The pin's icon in a pinned window's pill and in a window's header (logical pixels).
+const PILL_PIN_ICON: f32 = 13.0;
+const HEADER_PIN_ICON: f32 = 15.0;
 /// The figures a window of graphs keeps room for (in the code font: digits as wide).
 const FIGURES_ROOM: &str = "99 · 9999 MB";
 /// The room each pill's figure keeps (so the pills don't move as values change).
@@ -303,18 +306,13 @@ impl StatusPopover {
         let pin = Rect::new(x.round(), top, pin_w, h);
         face(layer, pin);
         self.shapes.push((pin, h / 2.0));
-        let lit = palette.accent.with_alpha(if self.hover_pin { 0.26 } else { 0.18 });
-        layer.quad(Quad::filled(pin, ctx.fade(lit)).rounded(h / 2.0));
-        if let Some(id) = icons.id("pin") {
-            let s = px(13.0);
-            let at = Rect::new(
-                (pin.min_x() + (pin_w - s) / 2.0).round(),
-                (top + (h - s) / 2.0).round(),
-                s,
-                s,
-            );
-            draw_icon(layer, icons, id, at, ctx.fade(palette.accent));
-        }
+        let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+            .icon("pin")
+            .icon_size(PILL_PIN_ICON)
+            .round()
+            .on(true)
+            .hovered(self.hover_pin);
+        ds::button(layer, text, icons, &ctx, pin, spec);
         self.pin = Some(pin);
     }
 
@@ -416,31 +414,18 @@ impl StatusPopover {
                 let baseline = ds::optical_baseline(top, header, &bold);
                 draw_text(layer, &shaped, left, baseline, ctx.fade(palette.text));
             }
-            if pinnable && let Some(id) = icons.id("pin") {
-                let size = px(15.0);
-                let button = Rect::new(
-                    right - px(22.0) + px(3.5),
-                    top + (header - px(22.0)) / 2.0,
-                    px(22.0),
-                    px(22.0),
-                );
+            if pinnable {
+                let side = px(ds::button_size::SMALL);
+                let button =
+                    Rect::new(right - side + px(3.5), top + (header - side) / 2.0, side, side);
                 // Pinned: lit in the accent (as a pressed button), plain otherwise.
-                if self.pinned {
-                    let lit = palette.accent.with_alpha(if self.hover_pin { 0.26 } else { 0.18 });
-                    layer.quad(Quad::filled(button, ctx.fade(lit)).rounded(px(radius::SM)));
-                } else if self.hover_pin {
-                    layer.quad(
-                        Quad::filled(button, ctx.fade(palette.tab_hover)).rounded(px(radius::SM)),
-                    );
-                }
-                let color = if self.pinned { palette.accent } else { palette.text_muted };
-                let at = Rect::new(
-                    (button.min_x() + (button.size.width - size) / 2.0).round(),
-                    (button.min_y() + (button.size.height - size) / 2.0).round(),
-                    size,
-                    size,
-                );
-                draw_icon(layer, icons, id, at, ctx.fade(color));
+                let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                    .icon("pin")
+                    .icon_size(HEADER_PIN_ICON)
+                    .rest_tone(ds::Tone::Neutral)
+                    .on(self.pinned)
+                    .hovered(self.hover_pin);
+                ds::button(layer, text, icons, &ctx, button, spec);
                 self.pin = Some(button);
             }
             top += header;

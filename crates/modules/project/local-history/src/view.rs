@@ -14,9 +14,15 @@ use kernel::{Point, Rect};
 use render_api::Quad;
 use text_layout::Font;
 use ui_components::control::{Control, Controls, Thumb};
-use ui_components::ds::{self, Ctx, Tone, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size, radius};
 use ui_components::{Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint};
 use ui_kit::draw_text;
+
+/// A revision's row: the chosen one's accent alpha; the text's alpha under the mouse and at
+/// rest (every row a faint card).
+const ROW_CHOSEN: f32 = 0.14;
+const ROW_HOVER: f32 = 0.05;
+const ROW_REST: f32 = 0.02;
 
 /// The extension of the view's virtual tab.
 pub const EXTENSION: &str = "view-local-history";
@@ -447,14 +453,12 @@ impl HistoryView {
             let row = Rect::new(x0, top, width, self.row_h - px(4.0));
             let hovered = matches!(self.hover, Some(Hit::Row(h) | Hit::Revert(h)) if h == i);
             let selected = self.selected == Some(i);
-            let fill = if selected {
-                p.accent.with_alpha(0.14)
-            } else if hovered {
-                p.text.with_alpha(0.05)
-            } else {
-                p.text.with_alpha(0.02)
-            };
-            rows.quad(Quad::filled(row, fill).rounded(px(radius::MD)));
+            // Every row a faint card, brighter under the mouse.
+            let rest = if hovered { ROW_HOVER } else { ROW_REST };
+            ds::RowHighlight::new(selected, true)
+                .selected_alpha(ROW_CHOSEN)
+                .hover(ds::HoverFill::Faint(rest))
+                .paint(rows, &ds, row);
             // Only the visible part: a row under the header must not take its clicks.
             if let Some(hit) = row.intersect(&self.list) {
                 self.hits.push((hit, Hit::Row(i)));
@@ -502,19 +506,13 @@ impl HistoryView {
                 let label = t("history.revert");
                 let shaped = ctx.text.shape_line(&label, &small);
                 let w = shaped.width + px(22.0);
-                let r =
-                    Rect::new((right - w).round(), (mid - px(13.0)).round(), w.round(), px(26.0));
-                let on = self.hover == Some(Hit::Revert(i));
-                let bg = if on { p.accent } else { p.accent.with_alpha(0.14) };
-                rows.quad(Quad::filled(r, bg).rounded(px(radius::MD)));
-                let color = if on { kernel::Rgba::WHITE } else { p.accent };
-                draw_text(
-                    rows,
-                    &shaped,
-                    (r.min_x() + px(11.0)).round(),
-                    ds::optical_baseline(r.min_y(), r.size.height, &small),
-                    color,
-                );
+                let h = px(button_size::MEDIUM);
+                let r = Rect::new((right - w).round(), (mid - h / 2.0).round(), w.round(), h);
+                let spec = ButtonSpec::new(ButtonKind::Soft)
+                    .label(&label)
+                    .tone(Tone::Accent)
+                    .hovered(self.hover == Some(Hit::Revert(i)));
+                ds::button(rows, ctx.text, ctx.icons, &ds, r, spec);
                 if let Some(hit) = r.intersect(&self.list) {
                     self.hits.push((hit, Hit::Revert(i)));
                 }

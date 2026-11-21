@@ -355,3 +355,966 @@ fn a_badge_s_sign_reads_on_its_color() {
     assert_eq!(sign_on(kernel::Rgba::rgb(0x5d4b8c)), kernel::Rgba::WHITE);
     assert_eq!(sign_on(Palette::dark().vcs_badges.deleted), kernel::Rgba::WHITE);
 }
+
+/// The one button: a ghost icon toggle is lit only when on or under the mouse; a soft one
+/// always has its back; the dialogs' kinds draw as they always did; a label's width counts
+/// its icon.
+#[test]
+fn the_one_button_draws_every_kind() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let draw = |spec: ButtonSpec<'_>, text: &mut TextSystem| {
+        let mut layer = Layer::default();
+        button(&mut layer, text, &icons, &ctx, r, spec);
+        layer.quads.len()
+    };
+    let ghost = ButtonSpec::new(ButtonKind::Ghost).icon("search");
+    assert_eq!(draw(ghost, &mut text), 0, "at rest: no back");
+    assert_eq!(draw(ghost.hovered(true), &mut text), 1, "lit under the mouse");
+    assert_eq!(draw(ghost.on(true), &mut text), 1, "on: its back in the accent");
+    assert_eq!(draw(ghost.hovered(true).enabled(false), &mut text), 0, "disabled: never lit");
+    assert_eq!(draw(ButtonSpec::new(ButtonKind::Soft).label("Add"), &mut text), 1);
+    assert_eq!(draw(ButtonSpec::new(ButtonKind::Primary).label("Run"), &mut text), 1);
+    let plain =
+        button_width(&mut text, &ctx, &ButtonSpec::new(ButtonKind::Ghost).label("Add"), 26.0);
+    let with_icon = button_width(
+        &mut text,
+        &ctx,
+        &ButtonSpec::new(ButtonKind::Ghost).label("Add").icon("plus"),
+        26.0,
+    );
+    assert!(with_icon > plain, "the icon's room counted");
+    assert_eq!(button_width(&mut text, &ctx, &ghost, 28.0), 28.0, "an icon alone: square");
+}
+
+/// A quiet icon (`rest_tone`) is muted at rest, in the text color under the mouse and in the
+/// accent while on.
+#[test]
+fn a_quiet_button_is_muted_only_at_rest() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::MEDIUM);
+    let color = |spec: ButtonSpec<'_>, text: &mut TextSystem| {
+        let mut layer = Layer::default();
+        button(&mut layer, text, &icons, &ctx, r, spec);
+        layer.glyphs.first().map(|g| g.color)
+    };
+    let quiet = ButtonSpec::new(ButtonKind::Ghost).icon("search").rest_tone(Tone::Neutral);
+    assert_eq!(color(quiet, &mut text), Some(palette.text_muted));
+    assert_eq!(color(quiet.hovered(true), &mut text), Some(palette.text));
+    assert_eq!(color(quiet.on(true), &mut text), Some(palette.accent));
+}
+
+/// A footer's plain button is the shared secondary one: lit under the mouse, never while
+/// disabled.
+#[test]
+fn a_footer_plain_button_is_the_secondary_one() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let fill = |enabled: bool, text: &mut TextSystem| {
+        let mut layer = Layer::default();
+        let b = FooterButton { label: "Cancel", enabled, hovered: true, ..Default::default() };
+        footer_buttons(&mut layer, text, &ctx, 400.0, 20.0, &[b]);
+        layer.quads.first().map(|q| q.color.a)
+    };
+    assert!(fill(true, &mut text).is_some_and(|a| a > 0.0), "lit");
+    assert_eq!(fill(false, &mut text), Some(0.0), "disabled: not lit");
+}
+
+/// A menu button has its chevron after its content, counted in its width, in every kind.
+#[test]
+fn a_menu_button_has_its_chevron() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    for kind in [ButtonKind::Ghost, ButtonKind::Soft, ButtonKind::Secondary, ButtonKind::Toolbar] {
+        let plain = ButtonSpec::new(kind).label("Export").icon("download");
+        let menu = plain.menu(true);
+        let h = button_size::MEDIUM;
+        let (w, w_menu) =
+            (button_width(&mut text, &ctx, &plain, h), button_width(&mut text, &ctx, &menu, h));
+        assert!(w_menu > w, "{kind:?}: the chevron's room counted");
+        let icon_count = |spec: ButtonSpec<'_>, text: &mut TextSystem| {
+            let mut layer = Layer::default();
+            let r = Rect::new(0.0, 0.0, w_menu, h);
+            button(&mut layer, text, &icons, &ctx, r, spec);
+            let glyphs = layer.glyphs.iter().filter(|g| icons::is_icon(g.key)).count();
+            let right = layer.glyphs.iter().map(|g| g.origin.x).fold(0.0_f32, f32::max);
+            (glyphs, right)
+        };
+        let (n, _) = icon_count(plain, &mut text);
+        let (n_menu, right) = icon_count(menu.on(true), &mut text);
+        assert_eq!(n_menu, n + 1, "{kind:?}: one more icon, the chevron");
+        assert!(right < w_menu, "{kind:?}: inside the button");
+    }
+}
+
+/// A segmented control filling a width: equal segments across it; a disabled one isn't
+/// handed out (nor lit); from the left it starts where it's told.
+#[test]
+fn a_styled_segmented_fills_starts_left_and_disables() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let labels = ["One", "A much longer label than fits", "Three"];
+    let spec =
+        SegmentedSpec { right: 0.0, mid: 20.0, labels: &labels, selected: 0, hovered: Some(2) };
+    let look = SegmentedLook {
+        height: 28.0,
+        place: SegmentPlace::Fill { x: 10.0, width: 306.0 },
+        disabled: &[2],
+        icons: &["", "", "x"],
+    };
+    let mut layer = Layer::default();
+    let mut out = Vec::new();
+    segmented_styled(&mut layer, &mut text, &icons, &ctx, (spec, look), |i, r| out.push((i, r)));
+    assert_eq!(out.iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 1], "the disabled one out");
+    assert_eq!(out[0].1.size.width, out[1].1.size.width, "equal");
+    assert_eq!(out[0].1.size.height, 28.0 - 6.0, "its height");
+    assert!(layer.glyphs.iter().any(|g| icons::is_icon(g.key)), "the icon drawn");
+    assert_eq!(layer.quads.len(), 2, "the track and the selected one: the disabled one not lit");
+    let look = SegmentedLook { place: SegmentPlace::Left(50.0), ..Default::default() };
+    let mut first = None;
+    segmented_styled(&mut Layer::default(), &mut text, &icons, &ctx, (spec, look), |i, r| {
+        if i == 0 {
+            first = Some(r);
+        }
+    });
+    assert_eq!(first.map(|r| r.min_x()), Some(53.0), "from the left, inside the track");
+}
+
+/// A styled dropdown shows its dot and its muted prefix before the value, and is as wide as
+/// they need.
+#[test]
+fn a_styled_dropdown_has_its_prefix_and_dot() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let spec = DropdownSpec {
+        value: "Auto",
+        open: false,
+        hovered: false,
+        enabled: true,
+        note: None,
+        placeholder: None,
+    };
+    let look = DropdownLook {
+        prefix: Some("Tx:"),
+        dot: Some(palette.accent),
+        compact: true,
+        ..DropdownLook::default()
+    };
+    let plain = dropdown_width(&mut text, &ctx, (spec, DropdownLook::default()));
+    let wide = dropdown_width(&mut text, &ctx, (spec, look));
+    assert!(wide > plain, "{wide} > {plain}");
+    let mut layer = Layer::default();
+    dropdown_styled(
+        &mut layer,
+        &mut text,
+        &icons,
+        &ctx,
+        Rect::new(0.0, 0.0, wide, 24.0),
+        (spec, look),
+    );
+    assert!(layer.quads.iter().any(|q| q.color == palette.accent), "the dot");
+    assert!(layer.glyphs.iter().any(|g| g.color == palette.text_muted && !icons::is_icon(g.key)));
+    assert!(layer.glyphs.iter().all(|g| g.origin.x < wide), "inside its width");
+}
+
+/// Draws `spec` in `r` on a fresh layer.
+fn drawn(spec: ButtonSpec<'_>, r: Rect, ctx: &Ctx<'_>, text: &mut TextSystem) -> Layer {
+    let icons = icons::Icons::builtin();
+    let mut layer = Layer::default();
+    button(&mut layer, text, &icons, ctx, r, spec);
+    layer
+}
+
+/// A key cap on any kind: counted in its width, drawn after its label (its tile and key).
+#[test]
+fn a_button_s_key_is_counted_and_drawn() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    for kind in [ButtonKind::Primary, ButtonKind::Secondary, ButtonKind::Ghost, ButtonKind::Soft] {
+        let plain = ButtonSpec::new(kind).label("Delete");
+        let keyed = plain.key("↵");
+        let h = 32.0;
+        let (w, wk) =
+            (button_width(&mut text, &ctx, &plain, h), button_width(&mut text, &ctx, &keyed, h));
+        assert!(wk > w, "{kind:?}: the key's room counted");
+        let r = Rect::new(0.0, 0.0, wk, h);
+        let (a, b) = (drawn(plain, r, &ctx, &mut text), drawn(keyed, r, &ctx, &mut text));
+        assert_eq!(b.quads.len(), a.quads.len() + 1, "{kind:?}: the key's tile");
+        assert!(b.glyphs.len() > a.glyphs.len(), "{kind:?}: the key's glyph");
+        assert!(b.glyphs.iter().all(|g| g.origin.x < wk), "{kind:?}: inside");
+    }
+}
+
+/// A hover tone fills the back under the mouse: solid with white content (a close ×), or
+/// faint keeping its content's color; nothing at rest.
+#[test]
+fn a_hover_tone_fills_the_back_under_the_mouse() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let close = ButtonSpec::new(ButtonKind::Ghost).icon("x").hover_tone(Tone::Danger);
+    assert!(drawn(close, r, &ctx, &mut text).quads.is_empty(), "at rest: no back");
+    let lit = drawn(close.hovered(true), r, &ctx, &mut text);
+    assert_eq!(lit.quads.first().map(|q| q.color), Some(palette.danger), "solid");
+    assert_eq!(lit.glyphs.first().map(|g| g.color), Some(sign_on(palette.danger)));
+    let link = ButtonSpec::new(ButtonKind::Ghost)
+        .label("Delete")
+        .tone(Tone::Danger)
+        .hover_tint(Tone::Danger)
+        .hovered(true);
+    let faint = drawn(link, r, &ctx, &mut text);
+    assert!(faint.quads.first().is_some_and(|q| q.color.a < 0.2 && q.color.r > 0.5));
+    assert!(faint.glyphs.iter().all(|g| g.color == palette.danger), "its color kept");
+}
+
+/// `on` still lights under the mouse: a stronger fill than at rest.
+#[test]
+fn an_on_button_lights_under_the_mouse() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::SMALL);
+    let pin = ButtonSpec::new(ButtonKind::Ghost).icon("pin").on(true);
+    let alpha = |spec, text: &mut TextSystem| drawn(spec, r, &ctx, text).quads[0].color.a;
+    assert!(alpha(pin.hovered(true), &mut text) > alpha(pin, &mut text));
+}
+
+/// A fractional hover lights the back as far as it goes; the content turns at half.
+#[test]
+fn a_fractional_hover_lights_by_its_amount() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let menu = ButtonSpec::new(ButtonKind::Ghost).icon("menu").rest_tone(Tone::Neutral);
+    let alpha = |spec, text: &mut TextSystem| {
+        drawn(spec, r, &ctx, text).quads.first().map_or(0.0, |q| q.color.a)
+    };
+    let (none, half, full) = (
+        alpha(menu.hover_amount(0.0), &mut text),
+        alpha(menu.hover_amount(0.25), &mut text),
+        alpha(menu.hover_amount(1.0), &mut text),
+    );
+    assert!(none == 0.0 && half > 0.0 && full > half, "{none} {half} {full}");
+    assert_eq!(full, alpha(menu.hovered(true), &mut text), "1: as hovered");
+    let color = |spec, text: &mut TextSystem| drawn(spec, r, &ctx, text).glyphs[0].color;
+    assert_eq!(color(menu.hover_amount(0.25), &mut text), palette.text_muted);
+    assert_eq!(color(menu.hover_amount(0.75), &mut text), palette.text);
+}
+
+/// An icon's own color tints only the icon; its label keeps the kind's.
+#[test]
+fn an_icon_keeps_its_own_color() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let tint = kernel::Rgba::rgb(0x33aa55);
+    let spec = ButtonSpec::new(ButtonKind::Ghost).icon("folder").label("src").icon_color(tint);
+    let w = button_width(&mut text, &ctx, &spec, 22.0);
+    let layer = drawn(spec, Rect::new(0.0, 0.0, w, 22.0), &ctx, &mut text);
+    let icon = layer.glyphs.iter().find(|g| icons::is_icon(g.key)).map(|g| g.color);
+    assert_eq!(icon, Some(tint));
+    assert!(
+        layer.glyphs.iter().filter(|g| !icons::is_icon(g.key)).all(|g| g.color == palette.text)
+    );
+}
+
+/// A tinted button has a faint back in its tone at rest, stronger under the mouse, its
+/// content in the tone.
+#[test]
+fn a_tinted_button_is_filled_in_its_tone() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = Rect::new(0.0, 0.0, 80.0, 26.0);
+    let spec = ButtonSpec::new(ButtonKind::Ghost).label("Open").tone(Tone::Warning).tinted();
+    let rest = drawn(spec, r, &ctx, &mut text).quads[0].color;
+    let lit = drawn(spec.hovered(true), r, &ctx, &mut text).quads[0].color;
+    assert_eq!(rest.with_alpha(1.0), palette.warning.with_alpha(1.0));
+    assert!(lit.a > rest.a);
+}
+
+/// A theme's own colors replace the kind's: its icon at rest, its hover, its solid on.
+#[test]
+fn a_button_takes_a_theme_s_colors() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::SPACIOUS);
+    let colors = ButtonColors {
+        icon: kernel::Rgba::rgb(0x112233),
+        hover: kernel::Rgba::rgb(0x445566).with_alpha(0.5),
+        on_back: kernel::Rgba::rgb(0x778899),
+        on_icon: kernel::Rgba::WHITE,
+    };
+    let spec = ButtonSpec::new(ButtonKind::Ghost).icon("search").colors(colors).icon_size(18.0);
+    let rest = drawn(spec, r, &ctx, &mut text);
+    assert!(rest.quads.is_empty());
+    assert_eq!(rest.glyphs[0].color, colors.icon);
+    assert_eq!(drawn(spec.hovered(true), r, &ctx, &mut text).quads[0].color, colors.hover);
+    let on = drawn(spec.on(true), r, &ctx, &mut text);
+    assert_eq!((on.quads[0].color, on.glyphs[0].color), (colors.on_back, colors.on_icon));
+}
+
+/// On a fixed surface its content reads on it, whatever the theme.
+#[test]
+fn a_button_on_a_dark_surface_is_light() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let dark = kernel::Rgba::rgb(0x202020);
+    let spec = ButtonSpec::new(ButtonKind::Ghost).icon("search").on_surface(dark);
+    assert_eq!(drawn(spec, r, &ctx, &mut text).glyphs[0].color, kernel::Rgba::WHITE);
+    let lit = drawn(spec.hovered(true), r, &ctx, &mut text);
+    assert_eq!(lit.quads[0].color.with_alpha(1.0), kernel::Rgba::WHITE);
+}
+
+/// A raised button floats: a shadow and a surface under its content, more than a soft one.
+#[test]
+fn a_raised_button_floats() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let raised = drawn(ButtonSpec::new(ButtonKind::Raised).icon("copy"), r, &ctx, &mut text);
+    assert!(raised.quads.len() > 1, "shadow and surface");
+    assert!(raised.quads.iter().any(|q| q.color == palette.popup_background));
+}
+
+/// A round primary is a filled circle with its icon in white.
+#[test]
+fn a_round_primary_is_a_filled_circle() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::ROOMY);
+    let layer =
+        drawn(ButtonSpec::new(ButtonKind::Primary).icon("arrow-up").round(), r, &ctx, &mut text);
+    assert_eq!(layer.quads.len(), 1);
+    assert_eq!(layer.quads[0].color, palette.accent);
+    assert_eq!(layer.glyphs.first().map(|g| g.color), Some(kernel::Rgba::WHITE));
+}
+
+/// A chip has its body and a × of its own, side by side inside it.
+#[test]
+fn a_chip_has_its_clear_part() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let spec = chip_spec("Author: me", true, false, true);
+    let w = button_width(&mut text, &ctx, &spec, 24.0);
+    let plain = button_width(&mut text, &ctx, &spec.menu(false), 24.0);
+    assert!(w > plain);
+    let r = Rect::new(10.0, 0.0, w, 24.0);
+    let mut layer = Layer::default();
+    let parts = chip(&mut layer, &mut text, &icons, &ctx, r, spec);
+    assert!(parts.body.max_x() <= parts.clear.min_x(), "{parts:?}");
+    assert!(parts.clear.max_x() <= r.max_x() && parts.body.min_x() == r.min_x());
+    let glyphs = layer.glyphs.iter().filter(|g| icons::is_icon(g.key)).count();
+    assert_eq!(glyphs, 2, "the chevron and the ×");
+    assert!(layer.glyphs.iter().all(|g| g.origin.x < r.max_x()));
+}
+
+/// The named sizes are the ones views use.
+#[test]
+fn the_button_sizes_are_named() {
+    assert_eq!(
+        [
+            button_size::SMALL,
+            button_size::COMPACT,
+            button_size::MEDIUM,
+            button_size::LARGE,
+            button_size::ROOMY,
+            button_size::SPACIOUS
+        ],
+        [22.0, 24.0, 26.0, 28.0, 30.0, 32.0]
+    );
+}
+
+/// A check row: the chosen one tinted with its ✓, the one under the mouse lit, the rest bare.
+#[test]
+fn a_check_row_shows_its_choice() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let r = Rect::new(0.0, 0.0, 160.0, 30.0);
+    let row = |checked, hovered, text: &mut TextSystem| {
+        let mut layer = Layer::default();
+        check_row(&mut layer, text, &icons, &ctx, r, CheckRowSpec::new("Today", checked, hovered));
+        layer
+    };
+    let on = row(true, false, &mut text);
+    assert_eq!(on.quads.len(), 1);
+    assert!(on.glyphs.iter().any(|g| icons::is_icon(g.key) && g.color == palette.accent));
+    assert_eq!(row(false, true, &mut text).quads.len(), 1);
+    let bare = row(false, false, &mut text);
+    assert!(bare.quads.is_empty() && !bare.glyphs.iter().any(|g| icons::is_icon(g.key)));
+}
+
+/// A fractional busy: its spinner grows in its icon's place, the mouse's light fades out.
+#[test]
+fn a_fractional_busy_grows_its_spinner() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let upload = ButtonSpec::new(ButtonKind::Ghost).icon("upload").hovered(true);
+    let back = |spec, text: &mut TextSystem| {
+        drawn(spec, r, &ctx, text).quads.first().map_or(0.0, |q| q.color.a)
+    };
+    assert!(back(upload.busy_amount(0.5), &mut text) < back(upload, &mut text));
+    let at = |amount: f32, text: &mut TextSystem| drawn(upload.busy_amount(amount), r, &ctx, text);
+    assert!(at(0.0, &mut text).glyphs.iter().any(|g| icons::is_icon(g.key)), "its icon");
+    let full = at(1.0, &mut text);
+    assert!(!full.glyphs.iter().any(|g| icons::is_icon(g.key)), "the spinner instead");
+    let primary = ButtonSpec::new(ButtonKind::Primary).label("Run");
+    let w = button_width(&mut text, &ctx, &primary, 34.0);
+    let r = Rect::new(0.0, 0.0, w + 18.0, 34.0);
+    let (idle, busy) =
+        (drawn(primary, r, &ctx, &mut text), drawn(primary.busy_amount(1.0), r, &ctx, &mut text));
+    assert!(busy.quads.len() > idle.quads.len(), "the primary's spinner");
+}
+
+/// A lit tone: its content in the tone only under the mouse, its back as its kind's.
+#[test]
+fn a_hover_content_tone_shows_only_under_the_mouse() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::SMALL);
+    let delete = ButtonSpec::new(ButtonKind::Ghost)
+        .icon("x")
+        .rest_tone(Tone::Neutral)
+        .hover_content_tone(Tone::Danger);
+    assert_eq!(drawn(delete, r, &ctx, &mut text).glyphs[0].color, palette.text_muted);
+    let lit = drawn(delete.hovered(true), r, &ctx, &mut text);
+    assert_eq!(lit.glyphs[0].color, palette.danger);
+    assert_eq!(lit.quads[0].color, palette.text.with_alpha(0.08), "the ghost's back");
+}
+
+/// A choice may have a dot before its label, counted in its width.
+#[test]
+fn a_choice_may_have_its_dot() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let spec = ChoiceSpec { x: 0.0, mid: 20.0, label: "Slow", selected: false, hovered: false };
+    let dot = palette.warning;
+    let mut layer = Layer::default();
+    let r = choice_with_dot(&mut layer, &mut text, &ctx, spec, dot);
+    assert_eq!(r.size.width, choice_width_with_dot(&mut text, &ctx, "Slow"));
+    assert!(r.size.width > choice_width(&mut text, &ctx, "Slow"));
+    assert!(layer.quads.iter().any(|q| q.color == dot));
+    let mut plain = Layer::default();
+    choice(&mut plain, &mut text, &ctx, spec);
+    assert_eq!(plain.quads.len(), 1, "no dot by default");
+}
+
+/// A dropdown with a leading icon: drawn, its room counted.
+#[test]
+fn a_dropdown_may_lead_with_an_icon() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let spec = DropdownSpec {
+        value: "local",
+        open: false,
+        hovered: false,
+        enabled: true,
+        note: None,
+        placeholder: None,
+    };
+    let look = DropdownLook::default();
+    let plain = dropdown_width(&mut text, &ctx, (spec, look));
+    let wide = dropdown_width_with_icon(&mut text, &ctx, (spec, look));
+    assert!(wide > plain);
+    let count = |icon: Option<&str>, text: &mut TextSystem| {
+        let mut layer = Layer::default();
+        let r = Rect::new(0.0, 0.0, wide, 30.0);
+        match icon {
+            Some(icon) => dropdown_with_icon(&mut layer, text, &icons, &ctx, r, (spec, look), icon),
+            None => dropdown_styled(&mut layer, text, &icons, &ctx, r, (spec, look)),
+        }
+        layer.glyphs.iter().filter(|g| icons::is_icon(g.key)).count()
+    };
+    assert_eq!(count(Some("database"), &mut text), count(None, &mut text) + 1);
+}
+
+/// A segmented control as low as a row's (22): its segments inside the track.
+#[test]
+fn a_low_segmented_keeps_its_segments_inside() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let labels = ["Left", "Right"];
+    let spec =
+        SegmentedSpec { right: 200.0, mid: 11.0, labels: &labels, selected: 0, hovered: None };
+    for height in [22.0, 24.0] {
+        let look = SegmentedLook { height, ..Default::default() };
+        let mut layer = Layer::default();
+        let mut segs = Vec::new();
+        segmented_styled(&mut layer, &mut text, &icons, &ctx, (spec, look), |_, r| segs.push(r));
+        let track = layer.quads[0].bounds;
+        assert_eq!(track.size.height, height);
+        assert!(segs.iter().all(|s| s.min_y() >= track.min_y() && s.max_y() <= track.max_y()));
+        assert!(layer.glyphs.iter().all(|g| g.origin.y <= track.max_y()), "{height}: text inside");
+    }
+}
+
+/// A compact dropdown with an icon, as wide as [`dropdown_width_with_icon`] says, shows its
+/// whole value at every scale (never cut to "…" by the rounding of its own width).
+#[test]
+fn a_dropdown_at_its_width_shows_its_whole_value() {
+    let palette = Palette::dark();
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let spec = DropdownSpec {
+        value: "shop",
+        open: false,
+        hovered: false,
+        enabled: true,
+        note: None,
+        placeholder: None,
+    };
+    let look = DropdownLook { compact: true, ..DropdownLook::default() };
+    for scale in [1.0, 1.25, 1.5, 2.0, 3.0] {
+        let ctx = Ctx::new(&palette, scale);
+        let w = dropdown_width_with_icon(&mut text, &ctx, (spec, look));
+        let mut layer = Layer::default();
+        let r = Rect::new(0.0, 0.0, w, 26.0 * scale);
+        dropdown_with_icon(&mut layer, &mut text, &icons, &ctx, r, (spec, look), "database");
+        let want: Vec<_> =
+            text.shape_line("shop", &ctx.ui_font(-1.0)).glyphs.iter().map(|g| g.key).collect();
+        let drawn: Vec<_> =
+            layer.glyphs.iter().filter(|g| !icons::is_icon(g.key)).map(|g| g.key).collect();
+        assert_eq!(drawn, want, "at scale {scale}");
+    }
+}
+
+/// A tone given as a color wins over the named tone: a palette of its own (the severities')
+/// keeps its colors on the shared button.
+#[test]
+fn a_tone_color_wins_over_the_named_tone() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let own = Rgba::rgb(0x1ACC4D);
+    let mut layer = Layer::default();
+    let spec =
+        ButtonSpec::new(ButtonKind::Soft).label("2").tinted().tone(Tone::Danger).tone_color(own);
+    button(&mut layer, &mut text, &icons, &ctx, r, spec);
+    let back = layer.quads.first().map(|q| q.color);
+    assert!(
+        back.is_some_and(|c| (c.g - own.g).abs() < 0.01 && (c.r - own.r).abs() < 0.01),
+        "{back:?}"
+    );
+}
+
+fn quads_of(draw: impl FnOnce(&mut Layer, &mut TextSystem, &Ctx<'_>)) -> Vec<render_api::Quad> {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 2.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    draw(&mut layer, &mut text, &ctx);
+    layer.quads
+}
+
+/// The badge's defaults are [`badge`]'s; its options change its height, room, corners,
+/// fill and where its label sits.
+#[test]
+fn a_badge_is_configured_by_its_builder() {
+    let palette = Palette::dark();
+    let old = quads_of(|l, t, c| {
+        let spec = BadgeSpec {
+            label: "semantic",
+            x: 100.0,
+            mid: 50.0,
+            align_right: true,
+            tone: Tone::Accent,
+        };
+        badge(l, t, c, spec);
+    });
+    let new = quads_of(|l, t, c| {
+        Badge::new("semantic").tone(Tone::Accent).paint_right(l, t, c, 100.0, 50.0);
+    });
+    assert_eq!(old, new, "the same badge");
+    assert_eq!(new[0].bounds.size.height, 40.0, "20 at scale 2");
+    assert_eq!(new[0].color, palette.accent.with_alpha(0.12));
+    let count = quads_of(|l, t, c| {
+        Badge::new("3")
+            .color(Rgba::WHITE)
+            .fill_alpha(0.14)
+            .size(BadgeSize::Medium)
+            .pad(5.0)
+            .min_width(18.0)
+            .centered()
+            .radius(4.0)
+            .paint(l, t, c, 10.0, 50.0);
+    });
+    assert_eq!(count[0].bounds, Rect::new(10.0, 32.0, 36.0, 36.0), "a round count");
+    assert_eq!(count[0].color, Rgba::WHITE.with_alpha(0.14));
+    assert_eq!(count[0].corner_radius, 8.0);
+    assert_eq!(
+        [BadgeSize::Tiny, BadgeSize::Small, BadgeSize::Medium].map(BadgeSize::height),
+        [15.0, 16.0, 18.0]
+    );
+    let zoomed = quads_of(|l, t, c| {
+        Badge::new("x").zoom(1.5).size(BadgeSize::Small).paint(l, t, c, 0.0, 50.0);
+    });
+    assert_eq!(zoomed[0].bounds.size.height, 48.0, "16 × 1.5 at scale 2");
+    let mut text = TextSystem::new();
+    let ctx = Ctx::new(&palette, 2.0);
+    let b = Badge::new("semantic");
+    assert_eq!(b.width(&mut text, &ctx), new[0].bounds.size.width);
+}
+
+/// A badge has no outline by default; asked, one a line wide in its color.
+#[test]
+fn a_badge_may_be_outlined() {
+    let palette = Palette::dark();
+    let plain = quads_of(|l, t, c| {
+        Badge::new("x").paint(l, t, c, 0.0, 50.0);
+    });
+    assert_eq!(plain[0].border_width, 0.0);
+    let outlined = quads_of(|l, t, c| {
+        Badge::new("x").border(palette.card_border).paint(l, t, c, 0.0, 50.0);
+    });
+    assert_eq!(outlined[0].border_width, 2.0, "a line at scale 2");
+    assert_eq!(outlined[0].border_color, palette.card_border);
+    assert_eq!(outlined[0].bounds, plain[0].bounds);
+}
+
+/// A badge's label on the caller's baseline (a pill among a row's words).
+#[test]
+fn a_badge_label_sits_on_a_given_baseline() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    Badge::new("tag")
+        .baseline(BadgeBaseline::At(77.0))
+        .bold()
+        .paint(&mut layer, &mut text, &ctx, 0.0, 70.0);
+    assert!(layer.glyphs.iter().all(|g| (g.origin.y - 77.0).abs() < 20.0));
+}
+
+/// A key cap's width is the one it's drawn at; it may be anchored on its left; a small one.
+#[test]
+fn a_keycap_is_measured_and_placed_from_either_side() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 2.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    let right = keycap(&mut layer, &mut text, &ctx, "⌘K", 300.0, 50.0, false);
+    let w = keycap_width(&mut text, &ctx, "⌘K");
+    assert_eq!(right.size.width, w.round());
+    let left = Keycap::new("⌘K").paint(&mut layer, &mut text, &ctx, 40.0, 50.0);
+    assert_eq!((left.min_x(), left.size.width), (40.0, right.size.width));
+    let small =
+        Keycap::new("K").size(KeycapSize::Small).paint(&mut layer, &mut text, &ctx, 0.0, 50.0);
+    assert_eq!((small.size.height, small.size.width), (40.0, 44.0));
+    let lit = Keycap::new("esc").hovered(true).look(&ctx);
+    assert_eq!(lit.background, palette.text.with_alpha(0.06));
+    assert_eq!(lit.relief, None);
+}
+
+/// A loader turned by the caller's clock: its lit dot by the time given.
+#[test]
+fn a_loader_turns_by_the_callers_clock() {
+    let at = |ms: u64| Loader::default().elapsed(std::time::Duration::from_millis(ms)).step();
+    assert_eq!((at(0), at(90), at(3 * 90 + 10), at(8 * 90)), (0, 1, 3, 0));
+    let quads = quads_of(|l, _, c| loader_spinner(l, c, (0.0, 20.0), &Loader::default()));
+    assert_eq!(quads.len(), 8, "eight dots");
+}
+
+/// A check row's options: untinted (the hover over the chosen one), its hover's fill, the
+/// row under the keys lit, its corners.
+#[test]
+fn a_check_row_takes_its_lists_look() {
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let row = |spec: CheckRowSpec<'_>| {
+        quads_of(|l, t, c| check_row(l, t, &icons, c, Rect::new(0.0, 0.0, 200.0, 60.0), spec))
+    };
+    assert!(row(CheckRowSpec::new("All", true, false).untinted()).is_empty(), "no tint");
+    let lit =
+        row(CheckRowSpec::new("All", true, true).untinted().hover_fill(Rgba::BLACK).radius(6.0));
+    assert_eq!((lit[0].color, lit[0].corner_radius), (Rgba::BLACK, 12.0));
+    let keys = row(CheckRowSpec::new("All", false, false).active(true));
+    assert_eq!(keys[0].color, palette.text.with_alpha(0.06));
+    assert_eq!(CheckRowSpec::new("All", false, false).icon(13.0).icon, 13.0);
+}
+
+/// A check row's label: the chosen one's in the accent by default, in the text's color when
+/// plain; ellipsized before the room kept at its right.
+#[test]
+fn a_check_row_label_can_be_plain_and_cut() {
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let glyphs = |spec: CheckRowSpec<'_>| {
+        let ctx = Ctx::new(&palette, 1.0);
+        let mut text = TextSystem::new();
+        let mut layer = Layer::default();
+        check_row(&mut layer, &mut text, &icons, &ctx, Rect::new(0.0, 0.0, 120.0, 30.0), spec);
+        layer.glyphs
+    };
+    let label = "A rather long label that never fits its row";
+    // The ✓ stays in the accent either way; the label's letters follow it or not.
+    let in_text = |glyphs: &[render_api::GlyphInstance]| {
+        glyphs.iter().filter(|g| g.color == palette.text).count()
+    };
+    let tinted = glyphs(CheckRowSpec::new(label, true, false));
+    assert_eq!(in_text(&tinted), 0);
+    let plain = glyphs(CheckRowSpec::new(label, true, false).plain_label());
+    assert!(in_text(&plain) > 0);
+    assert_eq!(plain.len(), tinted.len());
+    let cut = glyphs(CheckRowSpec::new(label, true, false).trailing(20.0));
+    assert!(cut.len() < tinted.len(), "ellipsized");
+    assert_eq!(CheckRowSpec::new(label, false, false).trailing, None, "whole by default");
+}
+
+/// A row's highlight: the defaults are [`row_highlight`]'s; an inactive selection grey; the
+/// hover by a token; its corners and alpha.
+#[test]
+fn a_row_highlight_is_configured_by_its_spec() {
+    let p = Palette::dark();
+    let r = Rect::new(0.0, 0.0, 100.0, 20.0);
+    let old = quads_of(|l, _, c| row_highlight(l, c, r, true, false));
+    let new = quads_of(|l, _, c| RowHighlight::new(true, false).paint(l, c, r));
+    assert_eq!(old, new);
+    assert_eq!(new[0].color, p.accent.with_alpha(ROW_SELECTED));
+    assert_eq!(
+        RowHighlight::new(true, true).inactive(true).fill(&p),
+        Some(p.text.with_alpha(ROW_INACTIVE))
+    );
+    assert_eq!(RowHighlight::new(false, true).hover(HoverFill::Tree).fill(&p), Some(p.tree_hover));
+    assert_eq!(
+        RowHighlight::new(false, true).hover(HoverFill::Background).fill(&p),
+        Some(p.hover_background)
+    );
+    assert_eq!(
+        RowHighlight::new(true, false).selected_alpha(0.2).fill(&p),
+        Some(p.accent.with_alpha(0.2))
+    );
+    assert_eq!(RowHighlight::new(false, false).fill(&p), None);
+    let round =
+        quads_of(|l, _, c| RowHighlight::new(false, true).radius(radius::SM).paint(l, c, r));
+    assert_eq!(round[0].corner_radius, 12.0);
+    assert_eq!(round[0].border_width, 0.0, "no outline by default");
+}
+
+/// A row's highlight in a fill of its own (a tree's selection), outlined (a drop target).
+#[test]
+fn a_row_highlight_may_take_its_own_fill_and_an_outline() {
+    let p = Palette::dark();
+    let r = Rect::new(0.0, 0.0, 100.0, 20.0);
+    let own = RowHighlight::new(true, false).selected_fill(p.tree_selection);
+    assert_eq!(own.fill(&p), Some(p.tree_selection));
+    assert_eq!(own.inactive(true).fill(&p), Some(p.text.with_alpha(ROW_INACTIVE)));
+    let tinted = RowHighlight::new(false, true).hover(HoverFill::Color(p.warning));
+    assert_eq!(tinted.fill(&p), Some(p.warning));
+    let target = quads_of(|l, _, c| {
+        RowHighlight::new(true, false).outline(p.accent).paint(l, c, r);
+    });
+    assert_eq!((target[0].border_width, target[0].border_color), (2.0, p.accent));
+    let none = quads_of(|l, _, c| RowHighlight::new(false, false).outline(p.accent).paint(l, c, r));
+    assert!(none.is_empty(), "nothing lit, nothing drawn");
+}
+
+/// A switch off limits: dimmed, deaf to the mouse; enabled, the usual one.
+#[test]
+fn a_switch_off_limits_is_dimmed() {
+    let p = Palette::dark();
+    let usual = quads_of(|l, _, c| {
+        switch(l, c, 0.0, 20.0, true, false);
+    });
+    let enabled = quads_of(|l, _, c| {
+        switch_enabled(l, c, (0.0, 20.0), true, false, true);
+    });
+    assert_eq!(usual, enabled);
+    let off = quads_of(|l, _, c| {
+        switch_enabled(l, c, (0.0, 20.0), false, true, false);
+    });
+    assert_eq!(off[0].color, p.text.with_alpha(0.16 * DISABLED_ALPHA), "not lit by the hover");
+    assert_eq!(off[1].color, Rgba::WHITE.with_alpha(DISABLED_ALPHA));
+}
+
+/// A checkbox: the defaults are [`checkbox`]'s; another side; brighter under the mouse.
+#[test]
+fn a_checkbox_has_sizes_and_a_hover() {
+    let p = Palette::dark();
+    let old = quads_of(|l, t, c| {
+        checkbox(l, t, c, 0.0, 20.0, Check::Mixed, true);
+    });
+    let new = quads_of(|l, t, c| {
+        Checkbox::new(Check::Mixed).paint(l, t, c, 0.0, 20.0);
+    });
+    assert_eq!(old, new);
+    let big = quads_of(|l, t, c| {
+        Checkbox::new(Check::On).size(20.0).paint(l, t, c, 0.0, 20.0);
+    });
+    assert_eq!(big[0].bounds.size.width, 40.0);
+    let hovered = quads_of(|l, t, c| {
+        Checkbox::new(Check::Off).hovered(true).paint(l, t, c, 0.0, 20.0);
+    });
+    assert_eq!(hovered[0].border_color, p.text_muted.with_alpha(0.95));
+}
+
+/// A bare radio: chosen, a disc and its dot; else a ring, brighter under the mouse.
+#[test]
+fn a_radio_is_a_disc_or_a_ring() {
+    let p = Palette::dark();
+    let on = quads_of(|l, _, c| {
+        radio(l, c, 0.0, 20.0, Radio::new(true));
+    });
+    assert_eq!(on.len(), 2);
+    assert_eq!((on[0].bounds.size.width, on[0].color), (36.0, p.accent));
+    let ring = quads_of(|l, _, c| {
+        radio(l, c, 0.0, 20.0, Radio::new(false).hovered(true).size(14.0));
+    });
+    assert_eq!(ring.len(), 1);
+    assert_eq!(ring[0].bounds.size.width, 28.0);
+    assert_eq!(ring[0].border_color, p.text_muted.with_alpha(0.6));
+}
+
+/// A divider in the cards' border or a color of the caller's.
+#[test]
+fn a_divider_takes_a_token_or_a_color() {
+    let p = Palette::dark();
+    let card = quads_of(|l, _, c| divider_card(l, c, 0.0, 100.0, 10.0));
+    assert_eq!((card[0].color, card[0].bounds), (p.card_border, Rect::new(0.0, 10.0, 100.0, 2.0)));
+    let own = quads_of(|l, _, c| divider_in(l, c, (0.0, 50.0, 4.0), Rgba::WHITE));
+    assert_eq!(own[0].color, Rgba::WHITE);
+    let tall = quads_of(|l, _, c| divider_vertical_in(l, c, (5.0, 0.0, 30.0), Rgba::BLACK));
+    assert_eq!(tall[0].bounds, Rect::new(5.0, 0.0, 2.0, 30.0));
+}
+
+/// A dot is round, centered on its point, on whole pixels and scaled with the zoom.
+#[test]
+fn a_dot_is_round_and_centered() {
+    let quads = quads_of(|l, _, c| {
+        dot(l, c, Point::new(20.0, 10.0), 7.0, Rgba::WHITE);
+    });
+    let q = &quads[0];
+    assert_eq!(q.bounds, Rect::new(13.0, 3.0, 14.0, 14.0));
+    assert_eq!(q.corner_radius, 7.0);
+    assert_eq!(q.color, Rgba::WHITE);
+}
+
+/// A badge with an icon and a muted run before its label: wider by them, the icon drawn
+/// before the text, the muted run in the muted color.
+#[test]
+fn a_badge_may_have_an_icon_and_a_muted_run() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let icons = icons::Icons::builtin();
+    let mut text = TextSystem::new();
+    let plain = Badge::new("1 204").width(&mut text, &ctx);
+    let iconed = Badge::new("1 204").icon(&icons, "lock").width(&mut text, &ctx);
+    assert_eq!(iconed, plain + 16.0, "a 12 icon and its gap");
+    let both = Badge::new("1 204").icon(&icons, "lock").lead("rows");
+    let wide = both.width(&mut text, &ctx);
+    assert!(wide > iconed + 4.0);
+    let mut layer = Layer::default();
+    let r = both.icon_color(palette.warning).paint(&mut layer, &mut text, &ctx, 0.0, 20.0);
+    assert_eq!(r.size.width, wide);
+    let first = layer.glyphs.first().map(|g| g.color);
+    assert_eq!(first, Some(palette.warning), "the icon first, in its own color");
+    assert!(layer.glyphs.iter().any(|g| g.color == palette.text_muted), "the muted run");
+}
+
+/// A row's outline is a line wide by default; asked, wider (never under a line).
+#[test]
+fn a_row_s_outline_may_be_wider() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 2.0);
+    let r = Rect::new(0.0, 0.0, 100.0, 28.0);
+    let width = |h: RowHighlight| {
+        let mut layer = Layer::default();
+        h.paint(&mut layer, &ctx, r);
+        layer.quads[0].border_width
+    };
+    let lit = RowHighlight::new(true, false).outline(palette.accent);
+    assert_eq!(width(lit), 2.0);
+    assert_eq!(width(lit.outline_width(1.5)), 3.0);
+    assert_eq!(width(lit.outline_width(0.1)), 2.0);
+}
+
+/// A value color (a request's method) colors the value and its chevron; by default both
+/// keep the text's and the muted colors.
+#[test]
+fn a_dropdown_s_value_color_colors_its_value_and_chevron() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let spec = DropdownSpec {
+        value: "DELETE",
+        open: false,
+        hovered: false,
+        enabled: true,
+        note: None,
+        placeholder: None,
+    };
+    let r = Rect::new(0.0, 0.0, 120.0, 30.0);
+    let colors = |look: DropdownLook<'_>, text: &mut TextSystem| {
+        let mut layer = Layer::default();
+        dropdown_styled(&mut layer, text, &icons, &ctx, r, (spec, look));
+        let value: Vec<_> =
+            layer.glyphs.iter().filter(|g| !icons::is_icon(g.key)).map(|g| g.color).collect();
+        let chevron: Vec<_> =
+            layer.glyphs.iter().filter(|g| icons::is_icon(g.key)).map(|g| g.color).collect();
+        (value, chevron)
+    };
+    let own = palette.danger;
+    let (value, chevron) =
+        colors(DropdownLook { value_color: Some(own), ..DropdownLook::default() }, &mut text);
+    assert!(!value.is_empty() && value.iter().all(|c| *c == own), "{value:?}");
+    assert!(!chevron.is_empty() && chevron.iter().all(|c| *c == own), "{chevron:?}");
+    let (value, chevron) = colors(DropdownLook::default(), &mut text);
+    assert!(value.iter().all(|c| *c == palette.text));
+    assert!(chevron.iter().all(|c| *c == palette.text_muted));
+}
+
+/// A busy primary button with a key and a menu draws as one without them: its label after
+/// the spinner, nothing over it.
+#[test]
+fn a_busy_primary_button_draws_nothing_over_its_spinner() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let r = Rect::new(0.0, 0.0, 160.0, button_size::LARGE);
+    let draw = |spec: ButtonSpec<'_>, text: &mut TextSystem| {
+        let mut layer = Layer::default();
+        button(&mut layer, text, &icons, &ctx, r, spec);
+        let glyphs: Vec<(f32, f32)> =
+            layer.glyphs.iter().map(|g| (g.origin.x, g.origin.y)).collect();
+        (glyphs, layer.quads.len())
+    };
+    let plain = ButtonSpec::new(ButtonKind::Primary).label("Run").busy(true);
+    let keyed = plain.key("↵").menu(true);
+    assert_eq!(draw(keyed, &mut text), draw(plain, &mut text));
+}

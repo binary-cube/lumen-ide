@@ -99,10 +99,7 @@ impl LogView {
                     let name = current.clone().unwrap_or_else(|| "HEAD".into());
                     ("crosshair", p.accent, tr!("git.branches_head", name = name.as_str()), false)
                 }
-                BranchItem::Group { label, expanded, .. } => {
-                    let chevron = tree::chevron_icon(*expanded);
-                    (chevron, p.text_muted, label.clone(), *depth == 0)
-                }
+                BranchItem::Group { label, .. } => ("", p.text_muted, label.clone(), *depth == 0),
                 BranchItem::Ref { label, kind, name } => {
                     let is_current = *kind == RefKind::Branch && current.as_deref() == Some(name);
                     let glyph = if *kind == RefKind::Tag { "tag" } else { "git-branch" };
@@ -111,8 +108,10 @@ impl LogView {
                 }
             };
             let mid = top + row_h / 2.0;
-            if let Some(id) = icons.id(glyph) {
-                let r = Rect::new(x, (mid - icon / 2.0).round(), icon, icon);
+            let r = Rect::new(x, (mid - icon / 2.0).round(), icon, icon);
+            if let BranchItem::Group { expanded, .. } = item {
+                tree::chevron(layer, icons, r, *expanded, color);
+            } else if let Some(id) = icons.id(glyph) {
                 ui_kit::draw_icon(layer, icons, id, r, color);
             }
             x += icon + px(8.0);

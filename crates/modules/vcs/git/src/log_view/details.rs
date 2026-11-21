@@ -60,7 +60,7 @@ impl LogView {
         if self.chosen.len() > 1 {
             self.paint_several(scene, text, ds, below);
         } else {
-            self.paint_commit(scene, text, ds, below);
+            self.paint_commit(scene, (text, icons), ds, below);
         }
         // The separator between them: dragged, a double click back to the default.
         let strip = px(8.0);
@@ -107,7 +107,7 @@ impl LogView {
     fn paint_commit(
         &mut self,
         scene: &mut render_api::Scene,
-        text: &mut TextSystem,
+        (text, icons): (&mut TextSystem, &icons::Icons),
         ds: &Ctx<'_>,
         below: Rect,
     ) {
@@ -161,12 +161,13 @@ impl LogView {
         // A file's history: every file of the commit, or that one only.
         if self.path.is_some() && details.files.len() > 1 {
             let label = if self.all_files { t("git.only_this_file") } else { t("git.all_files") };
-            let shaped = text.shape_line(&label, &small);
-            let link = Rect::new(x - px(6.0), y, shaped.width + px(12.0), px(22.0));
-            if self.hover == Some(Hit::AllFiles) {
-                layer.quad(Quad::filled(link, p.accent.with_alpha(0.1)).rounded(px(radius::SM)));
-            }
-            draw_text(layer, &shaped, x, ds::optical_baseline(y, px(22.0), &small), p.accent);
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .label(&label)
+                .tone(Tone::Accent)
+                .hovered(self.hover == Some(Hit::AllFiles));
+            let h = px(button_size::SMALL);
+            let link = Rect::new(x - px(6.0), y, ds::button_width(text, ds, &spec, h), h);
+            ds::button(layer, text, icons, ds, link, spec);
             self.hits.push((link, Hit::AllFiles));
             y += px(26.0);
         }

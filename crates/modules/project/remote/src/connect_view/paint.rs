@@ -2,7 +2,33 @@
 //! tree, the footer.
 
 use super::*;
+use ui_components::ds::{ButtonKind, ButtonSpec, button_size};
 use ui_components::tree;
+
+/// A row of the lists (the folders completing a path, a folder's entries): the chosen one in
+/// the accent, the one under the mouse faint.
+fn lit_row(chosen: bool, hovered: bool) -> ds::RowHighlight {
+    ds::RowHighlight::new(chosen, hovered)
+        .selected_alpha(ROW_CHOSEN)
+        .hover(ds::HoverFill::Faint(ROW_HOVER))
+}
+
+/// The lists' rows: the chosen one's accent alpha and the hovered one's text alpha.
+const ROW_CHOSEN: f32 = 0.14;
+const ROW_HOVER: f32 = 0.05;
+/// A path's chip: its fill's alpha of the accent; the folder's chip on the form, the chosen
+/// path's in the footer (height and room on each side, logical pixels).
+const CHIP_FILL: f32 = 0.08;
+const FOLDER_CHIP_H: f32 = 28.0;
+const FOLDER_CHIP_PAD: f32 = 10.0;
+const SELECTED_CHIP_H: f32 = 26.0;
+const SELECTED_CHIP_PAD: f32 = 9.0;
+
+/// A quiet icon button beside a field or a row (the shared ghost one): muted at rest, lit
+/// under the mouse.
+fn quiet_icon(icon: &str) -> ButtonSpec<'_> {
+    ButtonSpec::new(ButtonKind::Ghost).icon(icon).rest_tone(ds::Tone::Neutral)
+}
 
 impl ConnectView {
     pub(super) fn style(&self, ds: &Ctx<'_>) -> TextInputStyle {
@@ -42,11 +68,9 @@ impl ConnectView {
                 list.size.width - px(8.0),
                 row_h,
             );
-            if self.suggested == Some(i) {
-                layer.quad(Quad::filled(r, p.accent.with_alpha(0.14)).rounded(px(radius::SM)));
-            } else if self.hover == Some(Hit::Suggestion(i)) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(radius::SM)));
-            }
+            lit_row(self.suggested == Some(i), self.hover == Some(Hit::Suggestion(i)))
+                .radius(radius::SM)
+                .paint(layer, ds, r);
             if let Some(id) = icons.id("folder") {
                 let s = px(15.0);
                 ui_kit::draw_icon(
@@ -149,51 +173,30 @@ impl ConnectView {
         self.hits.push((r, Hit::Field(f)));
         // The eye: shows / hides the secret.
         if f == Field::Secret {
-            let size = px(22.0);
+            let size = px(button_size::SMALL);
             let eye = Rect::new(
                 r.max_x() - size - px(8.0),
                 r.min_y() + (field_h - size) / 2.0,
                 size,
                 size,
             );
-            if self.hover == Some(Hit::Eye) {
-                layer.quad(Quad::filled(eye, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-            }
             let icon = if self.input(f).is_masked() { "eye" } else { "eye-off" };
-            if let Some(id) = icons.id(icon) {
-                let inner = Rect::new(
-                    eye.min_x() + px(3.0),
-                    eye.min_y() + px(3.0),
-                    size - px(6.0),
-                    size - px(6.0),
-                );
-                ui_kit::draw_icon(layer, icons, id, inner, p.text_muted);
-            }
+            let spec = quiet_icon(icon).hovered(self.hover == Some(Hit::Eye));
+            ds::button(layer, text, icons, ds, eye, spec);
             self.hits.push((eye, Hit::Eye));
         }
         // The local folder: chosen in the system's picker too.
         if f == Field::Local {
             self.completed_field = r;
-            let size = px(26.0);
+            let size = px(button_size::MEDIUM);
             let browse = Rect::new(
                 r.max_x() - size - px(6.0),
                 r.min_y() + (field_h - size) / 2.0,
                 size,
                 size,
             );
-            if self.hover == Some(Hit::Browse) {
-                layer.quad(Quad::filled(browse, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-            }
-            if let Some(id) = icons.id("folder-open") {
-                let s = px(16.0);
-                let inner = Rect::new(
-                    browse.min_x() + (size - s) / 2.0,
-                    browse.min_y() + (size - s) / 2.0,
-                    s,
-                    s,
-                );
-                ui_kit::draw_icon(layer, icons, id, inner, p.text_muted);
-            }
+            let spec = quiet_icon("folder-open").hovered(self.hover == Some(Hit::Browse));
+            ds::button(layer, text, icons, ds, browse, spec);
             self.hits.push((browse, Hit::Browse));
         }
     }
@@ -321,26 +324,9 @@ impl ConnectView {
         // "Up", and where we are (typed: gone there with ↵).
         let field_h = px(38.0);
         let up = Rect::new(x0, *y, px(38.0), field_h);
-        let fill =
-            if self.hover == Some(Hit::Up) { p.text.with_alpha(0.08) } else { Rgba::TRANSPARENT };
-        layer.quad(
-            Quad::filled(up, fill).rounded(px(radius::MD)).bordered(ds.line(), p.card_border),
-        );
-        if let Some(id) = icons.id("arrow-up") {
-            let s = px(16.0);
-            ui_kit::draw_icon(
-                layer,
-                icons,
-                id,
-                Rect::new(
-                    up.min_x() + (up.size.width - s) / 2.0,
-                    up.min_y() + (up.size.height - s) / 2.0,
-                    s,
-                    s,
-                ),
-                p.text,
-            );
-        }
+        let spec =
+            ButtonSpec::new(ButtonKind::Soft).icon("arrow-up").hovered(self.hover == Some(Hit::Up));
+        ds::button(layer, text, icons, ds, up, spec);
         self.hits.push((up, Hit::Up));
         let r = Rect::new(up.max_x() + px(8.0), *y, width - up.size.width - px(8.0), field_h);
         let style = TextInputStyle { font: mono, ..self.style(ds) };
@@ -375,11 +361,9 @@ impl ConnectView {
             }
             let row = Rect::new(x0, top, width, row_h);
             let name = entry.path.rsplit('/').next().unwrap_or(&entry.path);
-            if self.on_list && self.highlight == Some(i) {
-                layer.quad(Quad::filled(row, p.accent.with_alpha(0.14)).rounded(px(radius::MD)));
-            } else if entry.is_dir && self.hover == Some(Hit::Enter(i)) {
-                layer.quad(Quad::filled(row, p.text.with_alpha(0.05)).rounded(px(radius::MD)));
-            }
+            let chosen = self.on_list && self.highlight == Some(i);
+            lit_row(chosen, entry.is_dir && self.hover == Some(Hit::Enter(i)))
+                .paint(layer, ds, row);
             let (icon, color) = if entry.is_dir {
                 ("folder", p.folder_icon)
             } else {
@@ -406,16 +390,9 @@ impl ConnectView {
             );
             if entry.is_dir {
                 // A folder opens: a chevron says so.
-                if let Some(id) = icons.id("chevron-right") {
-                    let s = px(12.0);
-                    ui_kit::draw_icon(
-                        layer,
-                        icons,
-                        id,
-                        Rect::new(row.max_x() - px(12.0) - s, top + (row_h - s) / 2.0, s, s),
-                        p.text_muted,
-                    );
-                }
+                let s = px(12.0);
+                let at = Rect::new(row.max_x() - px(12.0) - s, top + (row_h - s) / 2.0, s, s);
+                tree::chevron(layer, icons, at, false, p.text_muted);
                 self.hits.push((row, Hit::Enter(i)));
             }
         }
@@ -463,16 +440,14 @@ impl ConnectView {
         draw_text(layer, &from, x0, ds::optical_baseline(*y, row_h, small), p.text_muted);
         let chip_x = x0 + from.width + px(12.0);
         let path = ds::ellipsize(text, &self.root, mono, (width - from.width - px(40.0)).max(0.0));
-        let shaped = text.shape_line(&path, mono);
-        let chip = Rect::new(chip_x, *y, shaped.width + px(20.0), row_h);
-        layer.quad(Quad::filled(chip, p.accent.with_alpha(0.08)).rounded(px(radius::SM)));
-        draw_text(
-            layer,
-            &shaped,
-            chip.min_x() + px(10.0),
-            ds::optical_baseline(chip.min_y(), row_h, mono),
-            p.accent,
-        );
+        ds::Badge::new(&path)
+            .color(p.accent)
+            .fill_alpha(CHIP_FILL)
+            .font(mono)
+            .size(ds::BadgeSize::Custom(FOLDER_CHIP_H))
+            .pad(FOLDER_CHIP_PAD)
+            .radius(radius::SM)
+            .paint(layer, text, ds, chip_x, *y + row_h / 2.0);
         *y += row_h + px(18.0);
     }
 
@@ -769,18 +744,8 @@ impl ConnectView {
                 size,
                 size,
             );
-            if self.hover == Some(Hit::Unexclude(i)) {
-                layer.quad(Quad::filled(close, p.text.with_alpha(0.08)).rounded(size / 2.0));
-            }
-            if let Some(id) = icons.id("x") {
-                let inner = Rect::new(
-                    close.min_x() + px(3.0),
-                    close.min_y() + px(3.0),
-                    size - px(6.0),
-                    size - px(6.0),
-                );
-                ui_kit::draw_icon(layer, icons, id, inner, p.text_muted);
-            }
+            let spec = quiet_icon("x").round().hovered(self.hover == Some(Hit::Unexclude(i)));
+            ds::button(layer, text, icons, ds, close, spec);
             self.hits.push((close, Hit::Unexclude(i)));
             *y += px(26.0);
         }
@@ -943,25 +908,15 @@ impl ConnectView {
         let path = self.value(Field::Path);
         let room = (right - x0 - label.width - px(32.0)).max(0.0);
         let path = ds::ellipsize(text, &path, &mono, room);
-        let shaped = text.shape_line(&path, &mono);
-        let chip = Rect::new(
-            x0 + label.width + px(10.0),
-            mid - px(13.0),
-            shaped.width + px(18.0),
-            px(26.0),
-        );
-        layer.quad(
-            Quad::filled(chip, p.popup_background)
-                .rounded(px(radius::SM))
-                .bordered(ds.line(), p.card_border),
-        );
-        draw_text(
-            layer,
-            &shaped,
-            chip.min_x() + px(9.0),
-            ds::optical_baseline(chip.min_y(), chip.size.height, &mono),
-            p.text,
-        );
+        ds::Badge::new(&path)
+            .color(p.text)
+            .fill(p.popup_background)
+            .border(p.card_border)
+            .font(&mono)
+            .size(ds::BadgeSize::Custom(SELECTED_CHIP_H))
+            .pad(SELECTED_CHIP_PAD)
+            .radius(radius::SM)
+            .paint(layer, text, ds, x0 + label.width + px(10.0), mid);
     }
 
     /// What's happening (a loader while working, the download's progress).

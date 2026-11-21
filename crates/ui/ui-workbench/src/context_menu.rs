@@ -438,6 +438,7 @@ impl ContextMenu {
             let selected = (self.selected == Some(i) || open_child == Some(i)) && !look.disabled;
             // A greyed-out row: its icon, label and keys faded.
             let dim = |c: kernel::Rgba| if look.disabled { c.with_alpha(c.a * 0.45) } else { c };
+            let (label_ink, icon_ink) = row_ink(look, selected, palette);
             if selected {
                 layer.quad(
                     Quad::filled(row, ctx.fade(palette.accent.with_alpha(0.14)))
@@ -466,7 +467,7 @@ impl ContextMenu {
                         size,
                         size,
                     ),
-                    ctx.fade(dim(if selected { palette.accent } else { palette.text_muted })),
+                    ctx.fade(dim(icon_ink)),
                 );
             }
             // A file's long name keeps its start, its end and its extension.
@@ -477,7 +478,7 @@ impl ContextMenu {
                 &shaped,
                 row.min_x() + icon_w,
                 ds::optical_baseline(top, row_h, &font),
-                ctx.fade(dim(palette.text)),
+                ctx.fade(dim(label_ink)),
             );
             if let Some(on) = on {
                 let x = (row.max_x() - px(10.0) - px(ds::SMALL_SWITCH_W)).round();
@@ -531,6 +532,15 @@ impl ContextMenu {
             child.paint(icons, text, scene, palette);
         }
     }
+}
+
+/// The colors of a row's label and icon: a dangerous one's both in the danger color, else
+/// the text's and a muted icon (in the accent while selected).
+fn row_ink(look: RowLook, selected: bool, palette: &Palette) -> (kernel::Rgba, kernel::Rgba) {
+    if look.danger {
+        return (palette.danger, palette.danger);
+    }
+    (palette.text, if selected { palette.accent } else { palette.text_muted })
 }
 
 #[cfg(test)]

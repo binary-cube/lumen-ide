@@ -120,13 +120,11 @@ pub(super) const CHEVRON_END: f32 = 30.0;
 /// The chevron of an expandable row `r`, at its left.
 fn paint_chevron(list: &mut ListArea<'_, '_>, r: Rect, expanded: bool) {
     let ctx = list.ctx;
-    let name = if expanded { "chevron-down" } else { "chevron-right" };
-    if let Some(id) = list.icons.id(name) {
-        let s = ctx.px(12.0);
-        let mid = r.min_y() + r.size.height / 2.0;
-        let ir = Rect::new(r.min_x() + ctx.px(12.0), mid - s / 2.0, s, s);
-        draw_icon(list.layer, list.icons, id, ir, ctx.fade(ctx.palette.text_muted));
-    }
+    let s = ctx.px(12.0);
+    let mid = r.min_y() + r.size.height / 2.0;
+    let ir = Rect::new(r.min_x() + ctx.px(12.0), mid - s / 2.0, s, s);
+    let color = ctx.fade(ctx.palette.text_muted);
+    ui_components::tree::chevron(list.layer, list.icons, ir, expanded, color);
 }
 
 /// An icon of 16 points at `x`, in the middle of row `r`.

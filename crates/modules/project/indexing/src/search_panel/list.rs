@@ -1,6 +1,7 @@
 //! The list (the sections, the rows, their scrollbar) and the footer.
 
 use super::*;
+use ui_components::ds::{ButtonKind, ButtonSpec, Tone, button_size};
 
 impl ProjectSearch {
     /// "Clear all" at the right of the recent searches' header (`top`): a quiet link,
@@ -13,7 +14,7 @@ impl ProjectSearch {
         fonts: &Fonts,
         top: f32,
     ) {
-        let (ctx, palette) = (&f.ctx, f.ctx.palette);
+        let ctx = &f.ctx;
         let px = |v: f32| ctx.px(v);
         let shaped = text.shape_line(&t("search.clear_recent"), &fonts.small);
         let right = f.panel.max_x() - px(22.0);
@@ -24,50 +25,41 @@ impl ProjectSearch {
             shaped.width + pad * 2.0,
             f.header_h - px(4.0),
         );
-        if self.clear_hover {
-            layer.quad(
-                Quad::filled(area, ctx.fade(palette.danger.with_alpha(0.10))).rounded(px(6.0)),
-            );
-        }
-        let color = if self.clear_hover { palette.danger } else { palette.text_muted };
-        draw_text(
-            layer,
-            &shaped,
-            right - shaped.width,
-            centered_baseline(top, f.header_h, &fonts.small_metrics),
-            ctx.fade(color),
-        );
+        let label = t("search.clear_recent");
+        // Forgetting them all: in the danger color under the mouse.
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .label(&label)
+            .rest_tone(Tone::Neutral)
+            .hover_content_tone(Tone::Danger)
+            .hovered(self.clear_hover);
+        ds::button(layer, text, f.icons, ctx, area, spec);
         self.clear_all = area;
     }
 
     /// The × at the right of recent search `index`'s row (`row`): forgets it.
-    fn paint_forget(&mut self, layer: &mut Layer, f: &Frame<'_>, row: Rect, index: usize) {
-        let (ctx, palette) = (&f.ctx, f.ctx.palette);
-        let px = |v: f32| ctx.px(v);
-        let side = px(26.0);
-        let button = Rect::new(
-            row.max_x() - side - px(8.0),
-            row.min_y() + (row.size.height - side) / 2.0,
-            side,
-            side,
+    fn paint_forget(
+        &mut self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        f: &Frame<'_>,
+        row: Rect,
+        index: usize,
+    ) {
+        let ctx = &f.ctx;
+        let button = ds::square_button(
+            ctx,
+            (
+                row.max_x() - ctx.px(button_size::MEDIUM) - ctx.px(8.0),
+                row.min_y() + row.size.height / 2.0,
+            ),
+            button_size::MEDIUM,
         );
-        let over = self.forget_hover == Some(index);
-        if over {
-            layer.quad(
-                Quad::filled(button, ctx.fade(palette.text.with_alpha(0.10))).rounded(side / 2.0),
-            );
-        }
-        if let Some(id) = f.icons.id("x") {
-            let s = px(12.0);
-            let at = Rect::new(
-                button.min_x() + (side - s) / 2.0,
-                button.min_y() + (side - s) / 2.0,
-                s,
-                s,
-            );
-            let color = if over { palette.text } else { palette.text_muted };
-            draw_icon(layer, f.icons, id, at, ctx.fade(color));
-        }
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("x")
+            .round()
+            .rest_tone(Tone::Neutral)
+            .hovered(self.forget_hover == Some(index));
+        ds::button(layer, text, f.icons, ctx, button, spec);
         self.forget_buttons.push((button, index));
     }
 
@@ -137,7 +129,7 @@ impl ProjectSearch {
             if recent {
                 paint_recent_row(layer, text, f, fonts, rect, &self.recent[index]);
                 if index == self.selected || self.hover == Some(index) {
-                    self.paint_forget(layer, f, rect, index);
+                    self.paint_forget(layer, text, f, rect, index);
                 }
             } else if index < folders {
                 let (item, icon) = if index < named {

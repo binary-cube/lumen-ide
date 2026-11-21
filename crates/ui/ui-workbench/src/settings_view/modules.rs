@@ -138,9 +138,7 @@ impl SettingsView {
         let locked = row.enabled && !row.required_by.is_empty();
         let toggle = SettingsAction::ToggleModule(row.id.clone());
         let row_hovered = self.hover.as_ref() == Some(&toggle);
-        if row_hovered {
-            layer.quad(Quad::filled(r, ctx.fade(palette.text.with_alpha(0.04))).rounded(px(10.0)));
-        }
+        row_hover(layer, ctx, r, row_hovered);
         let mid = r.min_y() + r.size.height / 2.0;
         let switch = ds::switch(layer, ctx, rows.x0 + px(12.0), mid, row.enabled, row_hovered);
         // Its icon, then its name.
@@ -328,11 +326,10 @@ impl SettingsView {
         let px = |v: f32| ctx.px(v);
         let (layer, text, small) = (&mut *rows.layer, &mut *rows.text, &rows.small);
         let hovered = self.hover == Some(SettingsAction::ToggleFramework(row.id.clone()));
-        if hovered {
-            layer.quad(Quad::filled(r, ctx.fade(palette.text.with_alpha(0.04))).rounded(px(10.0)));
-        }
+        row_hover(layer, ctx, r, hovered);
         let mid = r.min_y() + r.size.height / 2.0;
-        let switch = ds::switch(layer, ctx, rows.x0 + px(12.0), mid, row.on, hovered && enabled);
+        let switch =
+            ds::switch_enabled(layer, ctx, (rows.x0 + px(12.0), mid), row.on, hovered, enabled);
         let tx = switch.max_x() + px(14.0);
         let name = text.shape_line(&row.name, &rows.strong);
         draw_text(layer, &name, tx, (mid - px(2.0)).round(), ctx.fade(palette.text));
@@ -442,3 +439,15 @@ pub(super) fn paint_module_summary(model: &SettingsModel, area: SectionArea<'_, 
     }
     band.max_y()
 }
+
+/// A module's or a framework's row under the mouse: the text faint, the card's corners.
+fn row_hover(layer: &mut render_api::Layer, ctx: &ds::Ctx<'_>, r: Rect, hovered: bool) {
+    ds::RowHighlight::new(false, hovered)
+        .radius(ROW_RADIUS)
+        .hover(ds::HoverFill::Faint(ROW_HOVER))
+        .paint(layer, ctx, r);
+}
+
+/// A row's corners (logical pixels) and its hover's alpha of the text.
+const ROW_RADIUS: f32 = 10.0;
+const ROW_HOVER: f32 = 0.04;

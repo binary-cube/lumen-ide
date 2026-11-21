@@ -478,7 +478,7 @@ impl Viewer for ConflictsList {
             }
         }
         let mut top = b.min_y() + header_h;
-        layer.quad(Quad::filled(Rect::new(b.min_x(), top, b.size.width, ds.line()), p.card_border));
+        ds::divider_card(layer, &ds, b.min_x(), b.max_x(), top);
         // The last action's failure, on its own line.
         if let Some(failure) = &self.failure {
             let line_h = px(28.0);

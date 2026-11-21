@@ -889,3 +889,90 @@ fn a_page_s_corners_follow_its_card_s() {
     let inside = Rect::new(card.min_x() + 50.0, card.min_y() + 50.0, 100.0, 100.0);
     assert_eq!(wb.page_corners(inside), (0.0, 0));
 }
+
+/// A view that asks for a menu under its button when pressed (and on its "more" command),
+/// keeping the rows it's sent.
+struct Asking {
+    asked: Option<(Rect, Vec<ui_workbench::ViewMenuEntry>)>,
+    chosen: Arc<std::sync::Mutex<Vec<String>>>,
+    /// The presses it was told were let go.
+    released: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// The button an [`Asking`] view asks its menu under (its "Export ▾").
+fn asking_button(at: Point) -> Rect {
+    Rect::new(at.x - 10.0, at.y - 10.0, 40.0, 20.0)
+}
+
+impl ui_workbench::Viewer for Asking {
+    fn paint(&mut self, _: ui_workbench::ViewerPaint<'_>) {}
+    fn click(&mut self, p: Point) -> Option<ui_workbench::ViewerAction> {
+        let rows = vec![ui_workbench::ViewMenuEntry::item("export", "Export")];
+        self.asked = Some((asking_button(p), rows));
+        None
+    }
+    fn take_menu(&mut self) -> Option<(Rect, Vec<ui_workbench::ViewMenuEntry>)> {
+        self.asked.take()
+    }
+    fn release(&mut self) -> bool {
+        self.released.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        false
+    }
+    fn command(&mut self, id: &str) -> bool {
+        if id == "more" {
+            let rows = vec![ui_workbench::ViewMenuEntry::item("export", "Export")];
+            self.asked = Some((asking_button(Point::new(100.0, 100.0)), rows));
+        } else {
+            self.chosen.lock().unwrap().push(id.to_owned());
+        }
+        true
+    }
+}
+
+/// A view's menu asked for under its own button: a press opens the app's menu under that
+/// button (nothing else done), its row chosen goes back to the view; a command asking for
+/// it opens it too.
+#[test]
+fn a_view_s_asked_menu_opens_under_its_button() {
+    let mut wb = workbench();
+    let chosen = Arc::default();
+    let released = Arc::default();
+    let view = Asking { asked: None, chosen: Arc::clone(&chosen), released: Arc::clone(&released) };
+    let mut doc = Document::new("");
+    doc.mark_saved(PathBuf::from("/virtual/asking"));
+    let mut tab = Tab::new(doc, wb.code_font.clone(), None, LanguageId::PLAIN_TEXT);
+    tab.viewer = Some(TabViewer::new(
+        Box::new(view),
+        "test",
+        ui_workbench::ViewerKind::Replace,
+        ViewMode::Preview,
+    ));
+    wb.push_tab(tab);
+    paint(&mut wb);
+    let bounds = wb.tabs[wb.active].viewer.as_ref().unwrap().bounds;
+    let mut text = TextSystem::new();
+    let at = middle(bounds);
+    assert!(matches!(wb.mouse_down(&mut text, at, false, false, false, 1), MouseResult::Redraw));
+    assert!(wb.context_menu.is_open(), "the app's menu");
+    // The press is let go: the view hears it (a part it held lets the pointer go).
+    wb.mouse_up(&mut text);
+    assert_eq!(released.load(std::sync::atomic::Ordering::SeqCst), 1, "its release");
+    assert!(!wb.viewer_drag, "nothing held after");
+    // Its row is under the button, at its left edge.
+    paint(&mut wb);
+    let top = menu_under(asking_button(at), wb.scale);
+    let row = (1..80).map(|dy| Point::new(top.x + 12.0, top.y + dy as f32)).find_map(|p| match wb
+        .context_menu
+        .hit(p)
+    {
+        Some(ui_workbench::ContextAction::Run(id)) => Some(id),
+        _ => None,
+    });
+    assert_eq!(row.as_deref(), Some("view-menu:export"), "a row just under the button");
+    wb.context_menu.close();
+    assert!(wb.run_view_menu(&mut text, "export"));
+    assert_eq!(*chosen.lock().unwrap(), ["export"]);
+    // Asked for by a command (its keys, the palette).
+    assert!(workbench_model::WorkbenchHost::view_command(&mut wb, "more"));
+    assert!(wb.context_menu.is_open(), "opened after the command");
+}

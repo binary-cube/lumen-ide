@@ -13,8 +13,7 @@ use std::sync::Arc;
 
 use database::DataSourceId;
 use kernel::{Point, Rect, Rgba};
-use render_api::Quad;
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx};
 use ui_components::editor_toolbar::{
     EditorState, EditorToolbar, StatementMark, ToolbarAction, ToolbarPaint,
 };
@@ -24,6 +23,9 @@ use workbench_model::Notification;
 
 use crate::bar::{ConsoleBar, HEIGHT};
 use crate::consoles::Consoles;
+
+/// The Attach button's height, and the line of text beside it (logical pixels).
+const ATTACH_H: f32 = 26.0;
 
 /// A project's SQL file's bar (see the module's doc).
 pub struct SqlFileBar {
@@ -161,35 +163,21 @@ impl SqlFileBar {
         }
         x += s + px(8.0);
         let label = text.shape_line(&i18n::t("console.no_source"), &font);
-        let base = ds::optical_baseline(mid - px(13.0), px(26.0), &font);
+        let base = ds::optical_baseline(mid - px(ATTACH_H) / 2.0, px(ATTACH_H), &font);
         draw_text(layer, &label, x.round(), base, p.text_muted);
         x += label.width + px(12.0);
-        // "Attach Data Source… ▾", a pill as the console bar's.
-        let shaped = text.shape_line(&i18n::t("console.attach"), &font);
-        let (pad, chevron) = (px(10.0), px(12.0));
-        let w = (pad * 2.0 + px(18.0) + shaped.width + chevron + px(4.0)).round();
-        let r = Rect::new(x.round(), (mid - px(13.0)).round(), w, px(26.0));
-        let fill = if state.hover { p.accent.with_alpha(0.16) } else { p.accent.with_alpha(0.10) };
-        layer.quad(
-            Quad::filled(r, fill)
-                .rounded(px(radius::SM))
-                .bordered(ds.line(), p.accent.with_alpha(0.45)),
-        );
-        let s = px(13.0);
-        if let Some(id) = icons.id("link") {
-            let ir = Rect::new((r.min_x() + pad).round(), (mid - s / 2.0).round(), s, s);
-            draw_icon(layer, icons, id, ir, p.accent);
-        }
-        draw_text(layer, &shaped, (r.min_x() + pad + px(18.0)).round(), base, p.text);
-        if let Some(id) = icons.id("chevron-down") {
-            let ir = Rect::new(
-                (r.max_x() - pad - chevron + px(3.0)).round(),
-                (mid - chevron / 2.0).round(),
-                chevron,
-                chevron,
-            );
-            draw_icon(layer, icons, id, ir, p.text_muted);
-        }
+        // "Attach Data Source… ▾", the bar's call to act: in the accent, opening its menu.
+        let label = i18n::t("console.attach");
+        let h = px(ATTACH_H);
+        let spec = ButtonSpec::new(ButtonKind::Toolbar)
+            .icon("link")
+            .label(&label)
+            .menu(true)
+            .on(true)
+            .hovered(state.hover);
+        let w = ds::button_width(text, &ds, &spec, h);
+        let r = Rect::new(x.round(), (mid - h / 2.0).round(), w, h);
+        ds::button(layer, text, icons, &ds, r, spec);
         state.attach = Some(r);
     }
 }

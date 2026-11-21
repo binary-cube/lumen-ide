@@ -3,6 +3,7 @@
 use super::*;
 use ui_components::AutoHide;
 use ui_components::control::{Control, Controls, NOWHERE, Press};
+use ui_components::scrollbar::LaneLook;
 
 /// One of the editor's bars as a control: its thumb held (or the text jumps where its
 /// track is pressed), the offsets kept whole pixels; let go, it stays a moment, then fades.
@@ -266,18 +267,8 @@ impl EditorView {
         // The lane: the editor's background (no text under it), a light tint, and the part in
         // view (lighter on hover, more while held).
         let layer = scene.push_layer(Some(vtrack));
-        layer.quad(Quad::filled(vtrack, palette.editor_background));
-        layer.quad(Quad::filled(vtrack, palette.text.with_alpha(0.025)));
-        if let Some(thumb) = self.vbar.thumb_rect(v) {
-            let alpha = if self.vbar.is_dragging() {
-                0.14
-            } else if self.vbar.is_hovered() {
-                0.10
-            } else {
-                0.06
-            };
-            layer.quad(Quad::filled(thumb, palette.text.with_alpha(alpha)));
-        }
+        let lane = LaneLook::new(palette, palette.editor_background);
+        self.vbar.paint_lane(layer, v, &lane);
         self.hbar.paint(scene, h);
         (vtrack, w)
     }

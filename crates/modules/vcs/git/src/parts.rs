@@ -1,6 +1,7 @@
 //! A shared control used the way one git view needs it ([`Tune`]): Tab kept by a list
 //! that answers it itself, the wheel kept by a list over everything. What it doesn't tune
-//! is the part's own (a press taken as one click is the shared `OneClick`).
+//! is the part's own (a press taken as one click is the shared `OneClick`). Its search
+//! fields' edits are told apart here too ([`edited`]).
 
 use std::time::Instant;
 

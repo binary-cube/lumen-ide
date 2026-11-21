@@ -1,56 +1,53 @@
 //! The search's field (its buttons: the replacement, the options, the folder) and the rows under it: the replacement's, the folder's and its suggestions.
 
 use super::*;
+use ui_components::ds::{ButtonKind, ButtonSpec, Tone, button_size};
+use ui_components::search_field::SearchExtras;
+
+/// The field row's margin from the panel's edges (logical pixels).
+const EDGE: f32 = 18.0;
+/// The search field's height in its row (logical pixels).
+const QUERY_H: f32 = 40.0;
+/// A button in the search field: the replacement's, an option's, the folder's (logical
+/// pixels, square).
+const BUTTON: f32 = button_size::ROOMY;
+/// The room those five buttons take on the field's right, with the gaps between them
+/// (logical pixels).
+const TOOLS_W: f32 = BUTTON * 5.0 + space::XS * 4.0;
 
 impl ProjectSearch {
-    /// The field: the magnifier, the text (larger), a separator and the `esc` key.
+    /// The field row: the app's search field (its magnifier, the text, × once there's
+    /// text) with the replacement's button, the options and the folder's in the room it
+    /// keeps on its right (× left of them), then a separator and the `esc` key.
     pub(super) fn paint_field(&mut self, text: &mut TextSystem, scene: &mut Scene, f: &Frame<'_>) {
-        let (ctx, p, palette, icons) = (&f.ctx, f.panel, f.ctx.palette, f.icons);
+        let (ctx, p, icons) = (&f.ctx, f.panel, f.icons);
         let px = |v: f32| ctx.px(v);
         let layer = scene.push_layer(Some(p));
         let mid = p.min_y() + f.field_h / 2.0;
-        let icon = px(19.0);
-        if let Some(id) = icons.id("search") {
-            draw_icon(
-                layer,
-                icons,
-                id,
-                Rect::new(p.min_x() + px(22.0), (mid - icon / 2.0).round(), icon, icon),
-                palette.text_muted,
-            );
-        }
-        let esc = ds::keycap(layer, text, ctx, "esc", p.max_x() - px(18.0), mid, self.esc_hover);
+        let esc = ds::keycap(layer, text, ctx, "esc", p.max_x() - px(EDGE), mid, self.esc_hover);
         self.esc = esc;
         let line_x = esc.min_x() - px(space::LG);
         ds::divider_vertical(layer, ctx, line_x, mid - px(12.0), mid + px(12.0));
-        // The folder's button: lit while a folder is set.
-        let side = px(30.0);
-        let button =
-            Rect::new(line_x - px(space::SM) - side, (mid - side / 2.0).round(), side, side);
-        let set = self.narrowed();
-        let fill = if set {
-            palette.accent.with_alpha(0.14)
-        } else if self.scope_hover || self.scope_open {
-            palette.text.with_alpha(0.06)
-        } else {
-            Rgba::TRANSPARENT
-        };
-        layer.quad(Quad::filled(button, ctx.fade(fill)).rounded(px(radius::SM)));
-        if let Some(id) = icons.id("folder") {
-            let s = px(16.0);
-            let at = Rect::new(
-                button.min_x() + (side - s) / 2.0,
-                button.min_y() + (side - s) / 2.0,
-                s,
-                s,
-            );
-            let color = if set { palette.accent } else { palette.text_muted };
-            draw_icon(layer, icons, id, at, ctx.fade(color));
-        }
+        let left = p.min_x() + px(EDGE);
+        let h = px(QUERY_H);
+        let field = Rect::new(left, (mid - h / 2.0).round(), line_x - px(space::SM) - left, h);
+        self.query_field = field;
+        let layer = scene.push_layer(Some(field));
+        let focused = !self.in_scope && !self.in_replace && !self.in_mask;
+        let placeholder = t("search.placeholder");
+        let extras = SearchExtras { trailing: TOOLS_W, invalid: false };
+        let room =
+            self.input.paint_with(layer, text, icons, ctx, (field, focused), &placeholder, extras);
+        // In its room, from the right: the folder's button (lit while a folder is set), the
+        // options (lit while on), the replacement's.
+        let side = px(BUTTON);
+        let button = Rect::new(room.max_x() - side, (mid - side / 2.0).round(), side, side);
+        let quiet = ButtonSpec::new(ButtonKind::Ghost).rest_tone(Tone::Neutral);
+        let folder =
+            quiet.icon("folder").on(self.narrowed()).hovered(self.scope_hover || self.scope_open);
+        ds::button(layer, text, icons, ctx, button, folder);
         self.scope_button = button;
-        // Before it, the options: lit while on; then the replacement's button.
         let mut x = button.min_x() - px(space::XS);
-        let code = ctx.code_font(-1.0).with_weight(Font::SEMIBOLD);
         for (option, label) in SearchOption::ALL.iter().rev() {
             let on = match option {
                 SearchOption::Case => self.options.case,
@@ -58,73 +55,18 @@ impl ProjectSearch {
                 SearchOption::Regex => self.options.regex,
             };
             let r = Rect::new(x - side, button.min_y(), side, side);
-            let fill = if on {
-                palette.accent.with_alpha(0.14)
-            } else if self.option_hover == Some(*option) {
-                palette.text.with_alpha(0.06)
-            } else {
-                Rgba::TRANSPARENT
-            };
-            layer.quad(Quad::filled(r, ctx.fade(fill)).rounded(px(radius::SM)));
-            let shaped = text.shape_line(label, &code);
-            let color = if on { palette.accent } else { palette.text_muted };
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + (side - shaped.width) / 2.0).round(),
-                ds::optical_baseline(r.min_y(), side, &code),
-                ctx.fade(color),
-            );
+            let spec = quiet.label(label).on(on).hovered(self.option_hover == Some(*option));
+            ds::button(layer, text, icons, ctx, r, spec);
             self.option_buttons.push((r, *option));
             x = r.min_x() - px(space::XS);
         }
         let replace = Rect::new(x - side, button.min_y(), side, side);
-        let fill = if self.replace_open {
-            palette.accent.with_alpha(0.14)
-        } else if self.option_hover.is_none() && self.hover_replace {
-            palette.text.with_alpha(0.06)
-        } else {
-            Rgba::TRANSPARENT
-        };
-        layer.quad(Quad::filled(replace, ctx.fade(fill)).rounded(px(radius::SM)));
-        if let Some(id) = icons.id("replace") {
-            let s = px(16.0);
-            let at = Rect::new(
-                replace.min_x() + (side - s) / 2.0,
-                replace.min_y() + (side - s) / 2.0,
-                s,
-                s,
-            );
-            let color = if self.replace_open { palette.accent } else { palette.text_muted };
-            draw_icon(layer, icons, id, at, ctx.fade(color));
-        }
+        let spec = quiet
+            .icon("replace")
+            .on(self.replace_open)
+            .hovered(self.option_hover.is_none() && self.hover_replace);
+        ds::button(layer, text, icons, ctx, replace, spec);
         self.replace_button = replace;
-        x = replace.min_x() - px(space::XS);
-        let field = Rect::new(
-            p.min_x() + px(54.0),
-            p.min_y(),
-            x - px(space::SM) - p.min_x() - px(54.0),
-            f.field_h,
-        );
-        self.query_field = field;
-        let style = TextInputStyle {
-            font: ctx.ui_font(3.0),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: ctx.fade(palette.text),
-            placeholder: ctx.fade(palette.text_muted),
-            selection: ctx.fade(palette.selection),
-            caret: ctx.fade(palette.caret),
-            radius: 0.0,
-            border_width: 0.0,
-            padding: px(2.0),
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        let input_layer = scene.push_layer(Some(field));
-        let focused = !self.in_scope && !self.in_replace && !self.in_mask;
-        self.input.paint(input_layer, text, field, focused, &t("search.placeholder"), &style);
     }
 
     /// The replacement's row under the field: "With", its field, Replace All (pressable once
@@ -160,7 +102,11 @@ impl ProjectSearch {
             button_h,
         );
         let hovered = self.hover_replace_all;
-        ds::primary_button(layer, text, ctx, button, &all, self.can_replace, hovered);
+        let spec = ButtonSpec::new(ButtonKind::Primary)
+            .label(&all)
+            .enabled(self.can_replace)
+            .hovered(hovered);
+        ds::button(layer, text, icons, ctx, button, spec);
         self.replace_all = button;
         let x = p.min_x() + px(54.0);
         let field =

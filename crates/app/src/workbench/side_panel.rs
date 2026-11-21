@@ -444,7 +444,7 @@ impl Workbench {
             ui_workbench::ToolPanelAction::MenuUnder { anchor, entries } => {
                 let side = self.tools.sides.iter().find(|s| s.content.contains(anchor.origin));
                 if let Some(tool) = side.map(|s| s.id) {
-                    let at = Point::new(anchor.min_x(), anchor.max_y() + 4.0 * self.scale);
+                    let at = super::viewers::menu_under(anchor, self.scale);
                     self.open_panel_menu(tool, entries, at);
                 }
             }

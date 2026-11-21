@@ -283,6 +283,10 @@ impl Workbench {
         modal.dragging = true;
         // A press with its clicks in a row (a double click, a drag that starts there).
         let action = modal.viewer.press(p, clicks.max(1));
+        // A menu of a button of its own: opened under it, nothing else done.
+        if self.open_asked_view_menu() {
+            return Some(MouseResult::Redraw);
+        }
         Some(match action {
             Some(action) => self.modal_action(text, action),
             None => {

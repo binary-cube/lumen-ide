@@ -165,15 +165,15 @@ fn the_source_s_pill_shows_its_whole_name() {
         let font = ui_components::ds::Ctx::new(&palette, scale).ui_font(-1.0);
         let want: Vec<_> =
             text.shape_line(&b.source_label(), &font).glyphs.iter().map(|g| g.key).collect();
-        // The name's glyphs: past its icon (10 + 18), before its chevron (10 + 12 + 4).
+        // The name's glyphs: past its icon (8 + 12 + 6), before its chevron (8 + 12).
         let drawn: Vec<_> = scene
             .layers()
             .iter()
             .flat_map(|l| l.glyphs.iter())
             .filter(|g| {
                 pill.contains(g.origin)
-                    && g.origin.x >= pill.min_x() + 27.0 * scale
-                    && g.origin.x < pill.max_x() - 22.0 * scale
+                    && g.origin.x >= pill.min_x() + 25.0 * scale
+                    && g.origin.x < pill.max_x() - 20.0 * scale
             })
             .map(|g| g.key)
             .collect();
@@ -199,4 +199,19 @@ fn it_follows_its_file() {
     let txt = to.with_extension("txt");
     assert!(!plain.moved(&txt), "no SQL file now: asked again");
     assert!(plain.moved(&to.with_file_name("x.sql")), "another SQL file of the project");
+}
+
+/// The Attach button is a menu button: its chevron, at its right end, is part of its hit and
+/// opens the same menu; past it, nothing.
+#[test]
+fn the_attach_button_s_chevron_opens_its_menu() {
+    let s = setup("file-bar-chevron");
+    let mut bar = file_bar(&s);
+    paint(&mut bar, 900.0);
+    let State::Detached(state) = &bar.state else { panic!("attached") };
+    let r = state.attach.expect("drawn");
+    let chevron = Point::new(r.max_x() - 4.0, r.min_y() + r.size.height / 2.0);
+    assert!(matches!(bar.pointer_down(chevron), Some(ToolbarAction::Menu { .. })));
+    let past = Point::new(r.max_x() + 4.0, chevron.y);
+    assert!(bar.pointer_down(past).is_none());
 }

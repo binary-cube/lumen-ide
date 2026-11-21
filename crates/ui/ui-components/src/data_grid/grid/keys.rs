@@ -23,7 +23,7 @@ impl<S: GridSource> DataGrid<S> {
             Some(Field::Where) => self.where_input.insert(typed),
             Some(Field::Order) => self.order_input.insert(typed),
             Some(Field::Find) => {
-                self.find.input.insert(typed);
+                self.find.search.input.insert(typed);
                 self.find.stale = true;
                 self.find.current = 0;
             }
@@ -36,7 +36,7 @@ impl<S: GridSource> DataGrid<S> {
         match field {
             Field::Where => &mut self.where_input,
             Field::Order => &mut self.order_input,
-            Field::Find => &mut self.find.input,
+            Field::Find => &mut self.find.search.input,
         }
     }
 

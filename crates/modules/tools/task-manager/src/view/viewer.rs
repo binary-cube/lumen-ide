@@ -13,7 +13,7 @@ use ui_components::control::{Control, Controls, Divider, NOWHERE, Scrolled};
 use ui_components::tooltip::Tip;
 use ui_components::{KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint};
 
-use super::filter::{FilterField, typed_line};
+use super::filter::{FilterField, types};
 use super::summary::metrics;
 use super::texts::value;
 use super::{Focus, Hit, Popover, TaskManager};
@@ -21,11 +21,12 @@ use crate::collector::Metric;
 use crate::layout::Tool;
 use crate::model::{Item, ViewModel};
 
-/// The detail's separator, first among its parts (see [`TaskManager::with_controls`]).
-const DIVIDER: usize = 0;
+/// The filter's field, first among its parts (see [`TaskManager::with_controls`]): over
+/// the list, whose wheel area is everywhere.
+const FILTER: usize = 0;
 
-/// The filter's field, last among its parts (never hit: it only takes the keys).
-const FILTER: usize = 3;
+/// The detail's separator, after the filter.
+const DIVIDER: usize = 1;
 
 /// Everywhere a point can be (the list's wheel area: the wheel anywhere the detail isn't is
 /// its, even before the mouse is first seen).
@@ -33,9 +34,10 @@ const EVERYWHERE: kernel::Rect =
     kernel::Rect::new(f32::MIN, f32::MIN, f32::INFINITY, f32::INFINITY);
 
 impl TaskManager {
-    /// Its parts, the topmost first, with their state of use: the detail's separator, the
-    /// detail (while open) and the list, each scrolled by the wheel over it and by its
-    /// scrollbar's thumb; the filter's field, which has the keys while the ring is on it.
+    /// Its parts, the topmost first, with their state of use: the filter's field (pressed
+    /// while drawn with no popover over it; it has the keys while the ring is on it), the
+    /// detail's separator, the detail (while open) and the list, each scrolled by the wheel
+    /// over it and by its scrollbar's thumb.
     fn with_controls<R>(
         &mut self,
         f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
@@ -55,8 +57,9 @@ impl TaskManager {
             area: EVERYWHERE,
             max: self.max_scroll,
         };
-        let mut filter = FilterField { input: &mut self.filter };
-        let mut parts: [&mut dyn Control; 4] = [&mut divider, &mut detail, &mut list, &mut filter];
+        let shown = self.popover.is_none() && self.hits.iter().any(|(_, h)| *h == Hit::Filter);
+        let mut filter = FilterField { field: &mut self.filter, shown, close: self.filter_close };
+        let mut parts: [&mut dyn Control; 4] = [&mut filter, &mut divider, &mut detail, &mut list];
         f(&mut self.controls, &mut parts)
     }
 
@@ -88,6 +91,16 @@ impl TaskManager {
     pub(super) fn erase_in_filter(&mut self, key: ViewerKey, reach: KeyReach) {
         self.with_controls(|_, parts| parts[FILTER].key(key, reach));
         self.filtered();
+    }
+
+    /// `p` is on the filter's own × (it has text).
+    fn on_filter_clear(&self, p: Point) -> bool {
+        self.hover_filter(p) && Control::cursor(&self.filter, p) == Some(ViewerCursor::Pointer)
+    }
+
+    /// `p` is on the filter's field drawn this frame.
+    fn hover_filter(&self, p: Point) -> bool {
+        self.hit(p) == Some(Hit::Filter)
     }
 
     /// Over the detail (its own scroll) or the list.
@@ -189,7 +202,7 @@ impl Viewer for TaskManager {
 
     /// Typing goes into the filter: it gets the keys first (nothing to type: they stay).
     fn text_input(&mut self, text: &str) -> bool {
-        if typed_line(text).is_none() {
+        if !types(text) {
             return false;
         }
         self.focus_filter();
@@ -266,8 +279,14 @@ impl Viewer for TaskManager {
             self.popover = None;
             return None;
         }
-        // Its parts: the separator held, a scrollbar's thumb held or jumped to.
-        if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+        // Its parts: the filter's caret put (or its × emptying it), the separator held, a
+        // scrollbar's thumb held or jumped to.
+        let clicks = self.clicks.max(1);
+        if self.with_controls(|c, parts| c.press(parts, p, clicks)).is_some() {
+            if self.filter.take_cleared() {
+                self.clear_filter();
+                self.filter_open = false;
+            }
             return None;
         }
         match self.hit(p) {
@@ -277,7 +296,6 @@ impl Viewer for TaskManager {
                 self.fit_pending = Some(column);
             }
             Some(Hit::Edge(column)) => self.begin_resize(column, p.x),
-            Some(Hit::Filter) => self.filter.click(p.x),
             Some(hit) => self.click_hit(hit),
             None => {}
         }
@@ -332,7 +350,7 @@ impl Viewer for TaskManager {
         }
         match self.hit(p) {
             Some(Hit::Edge(_)) => Some(ViewerCursor::ResizeHorizontal),
-            Some(Hit::Filter) => Some(ViewerCursor::Text),
+            Some(Hit::Filter) => Control::cursor(&self.filter, p),
             Some(Hit::PopoverArea | Hit::CardChart(_) | Hit::DetailChart(_)) | None => None,
             Some(_) => Some(ViewerCursor::Pointer),
         }
@@ -341,9 +359,10 @@ impl Viewer for TaskManager {
     /// Whether something clickable is under the mouse (the app redraws on every move).
     fn hover(&mut self, p: Point) -> bool {
         self.mouse = Some(p);
-        self.with_controls(|c, parts| c.hover(parts, Some(p)));
+        let part = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         self.hover = self.hit(p);
-        matches!(self.hover, Some(h) if !matches!(h, Hit::Filter | Hit::PopoverArea | Hit::CardChart(_) | Hit::DetailChart(_)))
+        part || self.on_filter_clear(p)
+            || matches!(self.hover, Some(h) if !matches!(h, Hit::Filter | Hit::PopoverArea | Hit::CardChart(_) | Hit::DetailChart(_)))
             || self.controls.hovered() == Some(DIVIDER)
     }
 
@@ -353,6 +372,8 @@ impl Viewer for TaskManager {
         let label = match hit {
             Hit::FilterIcon => labels.filter_open.clone(),
             Hit::FilterClear => labels.filter_clear.clone(),
+            // The field's own ×, once there is text.
+            Hit::Filter if self.on_filter_clear(p) => labels.filter_clear.clone(),
             Hit::Pause => {
                 if self.paused {
                     labels.resume.clone()

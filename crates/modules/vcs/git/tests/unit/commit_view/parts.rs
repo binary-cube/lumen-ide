@@ -16,15 +16,18 @@ fn the_message_keeps_its_draft_at_every_edit() {
     super::super::drafts().remove(&root);
 }
 
-/// The places' filter: edits noted, Esc empties it, then asks to leave it (as Tab does).
+/// The places' filter: edits noted, ⌘A selects its text, Esc empties it, then asks to leave
+/// it (as Tab does).
 #[test]
 fn the_places_filter_edits_then_asks_to_leave() {
-    let mut filter = TextInput::new("");
+    let mut filter = SearchField::new();
     let (mut edited, mut leave) = (false, false);
     let mut lane = PlacesLane { filter: &mut filter, edited: &mut edited, leave: &mut leave };
     assert!(lane.text("ven"));
+    assert!(lane.command("select_all"));
+    assert_eq!(lane.selected_text().as_deref(), Some("ven"));
     assert!(lane.key(ViewerKey::Escape, KeyReach::default()));
-    assert!(TextInput::text(lane.filter).is_empty());
+    assert!(SearchField::text(lane.filter).is_empty());
     assert!(lane.key(ViewerKey::Escape, KeyReach::default()));
     assert!(edited && leave);
 }
@@ -42,4 +45,19 @@ fn the_lists_answer_their_keys_and_the_text() {
     let mut lane = ListsLane { asked: &mut asked };
     assert!(lane.text("F"));
     assert_eq!(asked, Some(ListsAsked::Text("F".into())));
+}
+
+/// Only a change of the places' filter's text is an edit (the field's own `take_edited`):
+/// a caret moved isn't; Esc emptying it is.
+#[test]
+fn the_places_filter_tells_only_its_text_changed() {
+    let mut filter = SearchField::new();
+    filter.set_text("ven");
+    let (mut edited, mut leave) = (false, false);
+    let mut lane = PlacesLane { filter: &mut filter, edited: &mut edited, leave: &mut leave };
+    assert!(lane.key(ViewerKey::Left, KeyReach::default()));
+    assert!(lane.command("select_all"));
+    assert!(!*lane.edited, "nothing changed");
+    assert!(lane.key(ViewerKey::Escape, KeyReach::default()));
+    assert!(*lane.edited && !*lane.leave, "emptied: an edit, the field kept");
 }

@@ -2,10 +2,10 @@
 //! buttons (zoom, size, rotate / flip, background, save) and a tooltip on hover.
 
 use kernel::{Point, Rect};
-use render_api::Quad;
 use text_layout::Font;
 use ui_components::Painter;
-use ui_kit::{centered_baseline, draw_icon, draw_text};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Tone};
+use ui_kit::{centered_baseline, draw_text};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
@@ -69,7 +69,8 @@ impl Toolbar {
     pub fn paint(&mut self, bounds: Rect, zoom: u32, can_save: bool, s: f32, painter: Painter<'_>) {
         let Painter { text, scene, palette, icons } = painter;
         let px = |v: f32| (v * s).round();
-        let (bw, bh, pad, gap) = (px(30.0), px(28.0), px(4.0), px(10.0));
+        let (bw, bh) = (px(ds::button_size::ROOMY), px(ds::button_size::LARGE));
+        let (pad, gap) = (px(4.0), px(10.0));
         let font = Font::new(palette.ui_font.clone(), px(palette.ui_font_size - 1.0));
         let metrics = text.metrics(&font);
         let label = text.shape_line(&format!("{zoom}%"), &font);
@@ -84,10 +85,9 @@ impl Toolbar {
             width.round(),
             bh + 2.0 * pad,
         );
-        let line = s.round().max(1.0);
         let layer = scene.push_layer(Some(bounds));
-        let ctx = ui_components::ds::Ctx::new(palette, s);
-        ui_components::ds::surface(layer, &ctx, bar, ui_components::ds::Elevation::Low, 10.0);
+        let ctx = ds::Ctx::new(palette, s);
+        ds::surface(layer, &ctx, bar, ds::Elevation::Low, 10.0);
         self.buttons.clear();
         let mut x = bar.min_x() + pad;
         let top = bar.min_y() + pad;
@@ -99,37 +99,27 @@ impl Toolbar {
                 x += label_w;
             } else if g > 1 {
                 x += gap / 2.0;
-                layer.quad(Quad::filled(
-                    Rect::new(x, top + px(6.0), line, bh - px(12.0)),
-                    palette.border,
-                ));
+                ds::divider_vertical(layer, &ctx, x, top + px(6.0), top + bh - px(6.0));
                 x += gap / 2.0 + px(1.0);
             }
             for &(tool, icon, label, command) in *group {
                 let r = Rect::new(x, top, bw, bh);
                 let enabled = tool != Tool::Save || can_save;
-                let hovered = self.hover == Some(tool);
-                if hovered && enabled {
-                    layer.quad(Quad::filled(r, palette.tab_hover).rounded(px(7.0)));
+                let mut spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon(icon)
+                    .enabled(enabled)
+                    .hovered(self.hover == Some(tool));
+                if tool == Tool::Save {
+                    spec = spec.tone(Tone::Accent);
                 }
-                let color = match (tool, enabled) {
-                    (Tool::Save, true) => palette.accent,
-                    (_, true) => palette.text,
-                    (_, false) => palette.text_muted.with_alpha(0.45),
-                };
-                if let Some(id) = icons.id(icon) {
-                    let size = px(16.0);
-                    let ir = Rect::new(
-                        r.min_x() + (bw - size) / 2.0,
-                        r.min_y() + (bh - size) / 2.0,
-                        size,
-                        size,
-                    );
-                    draw_icon(layer, icons, id, ir, color);
-                }
+                ds::button(layer, text, icons, &ctx, r, spec);
                 self.buttons.push((r, tool, label, command, enabled));
                 x += bw;
             }
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/toolbar.rs"]
+mod tests;

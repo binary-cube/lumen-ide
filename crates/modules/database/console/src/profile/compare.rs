@@ -23,7 +23,7 @@ use database::profile::rules::Finding;
 use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
 use text_layout::Font;
-use ui_components::ds::{self, Ctx, Tone, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, button_size, radius};
 use ui_components::{
     Ink, Level, Palette, Span, SpanStyle, TableCell, TableColumn, TablePaint, TableRow, Tip,
     TreeTable, ViewerKey,
@@ -95,6 +95,23 @@ pub enum CCol {
     Rows,
     Buffers,
 }
+
+/// The comparison's chips: their height and the room on each side (logical pixels); a
+/// side's fill (alpha of the text: before, after); a figure's fill and its trend's icon; the
+/// main change's pill (its height, its icon, its fill's and outline's alpha of its color); a
+/// kind of findings' fill (alpha of its color: some, none).
+const CHIP_H: f32 = 22.0;
+const CHIP_PAD: f32 = 8.0;
+const SIDE_FILL: f32 = 0.04;
+const SIDE_FILL_AFTER: f32 = 0.07;
+const FIGURE_FILL: f32 = 0.05;
+const FIGURE_ICON: f32 = 11.0;
+const TREND_H: f32 = 24.0;
+const TREND_ICON: f32 = 13.0;
+const TREND_FILL: f32 = 0.13;
+const TREND_BORDER: f32 = 0.5;
+const GROUP_FILL: f32 = 0.12;
+const GROUP_FILL_NONE: f32 = 0.04;
 
 impl CCol {
     fn key(self) -> &'static str {
@@ -516,18 +533,17 @@ impl CompareView {
         for (i, side) in [&self.before, &self.after].into_iter().enumerate() {
             let word =
                 i18n::t(if i == 0 { "profile.compare.before" } else { "profile.compare.after" });
-            let ws = text.shape_line(&word, &small);
-            let ls = text.shape_line(&side.label, &font);
-            let w = ws.width + ls.width + px(22.0);
-            let chip = Rect::new(x.round(), (mid1 - px(11.0)).round(), w.round(), px(22.0));
-            layer.quad(
-                Quad::filled(chip, p.text.with_alpha(if i == 0 { 0.04 } else { 0.07 }))
-                    .rounded(px(radius::SM))
-                    .bordered(ds.line(), p.border),
-            );
-            let base = ds::optical_baseline(chip.min_y(), chip.size.height, &font);
-            draw_text(layer, &ws, (chip.min_x() + px(8.0)).round(), base, p.text_muted);
-            draw_text(layer, &ls, (chip.min_x() + px(14.0) + ws.width).round(), base, p.text);
+            let chip = ds::Badge::new(&side.label)
+                .font(&font)
+                .lead(&word)
+                .lead_font(&small)
+                .color(p.text)
+                .fill(p.text.with_alpha(if i == 0 { SIDE_FILL } else { SIDE_FILL_AFTER }))
+                .border(p.border)
+                .size(ds::BadgeSize::Custom(CHIP_H))
+                .pad(CHIP_PAD)
+                .radius(radius::SM)
+                .paint(layer, text, ds, x.round(), mid1);
             let own = (i == 1) == self.shown_after;
             let tip = if own {
                 i18n::t("profile.compare.this_tip")
@@ -556,16 +572,11 @@ impl CompareView {
             (CHit::Close, "x", i18n::t("profile.compare.close")),
             (CHit::Swap, "rotate-ccw", i18n::t("profile.compare.swap")),
         ] {
-            let b = Rect::new(right - px(26.0), mid1 - px(12.0), px(26.0), px(24.0));
-            crate::bar::icon_button(
-                layer,
-                icons,
-                ds,
-                b,
-                icon,
-                None,
-                ui_components::ds::Press::new(true, self.hover == Some(hit)),
-            );
+            let b =
+                ds::square_button(ds, (right - px(button_size::MEDIUM), mid1), button_size::MEDIUM);
+            let spec =
+                ButtonSpec::new(ButtonKind::Ghost).icon(icon).hovered(self.hover == Some(hit));
+            ds::button(layer, text, icons, ds, b, spec);
             self.hits.push((b, hit, Some(tip)));
             right = b.min_x() - px(4.0);
         }
@@ -642,34 +653,18 @@ impl CompareView {
             } else {
                 format!("{label} · {}", i18n::t("profile.compare.cost_word"))
             };
-            let ls = text.shape_line(&label, &strong);
-            let w = ls.width + px(if trend == Trend::Even { 16.0 } else { 34.0 });
-            let pill = Rect::new(x.round(), (mid2 - px(12.0)).round(), w.round(), px(24.0));
             let c = trend_ink(trend).map_or(p.text_muted, |i| i.color(p));
-            layer.quad(
-                Quad::filled(pill, c.with_alpha(0.13))
-                    .rounded(px(12.0))
-                    .bordered(ds.line(), c.with_alpha(0.5)),
-            );
-            let mut tx = pill.min_x() + px(8.0);
-            if let Some(id) = trend_icon(trend).and_then(|i| icons.id(i)) {
-                let sz = px(13.0);
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(tx.round(), (mid2 - sz / 2.0).round(), sz, sz),
-                    c,
-                );
-                tx += sz + px(5.0);
+            let mut badge = ds::Badge::new(&label)
+                .font(&strong)
+                .color(c)
+                .fill_alpha(TREND_FILL)
+                .border(c.with_alpha(TREND_BORDER))
+                .size(ds::BadgeSize::Custom(TREND_H))
+                .pad(CHIP_PAD);
+            if let Some(icon) = trend_icon(trend) {
+                badge = badge.icon(icons, icon).icon_size(TREND_ICON);
             }
-            draw_text(
-                layer,
-                &ls,
-                tx.round(),
-                ds::optical_baseline(pill.min_y(), pill.size.height, &strong),
-                c,
-            );
+            let pill = badge.paint(layer, text, ds, x.round(), mid2);
             self.hits.push((pill, CHit::Info, Some(delta_tip(&main, time))));
             x = pill.max_x() + px(14.0);
         }
@@ -689,32 +684,24 @@ impl CompareView {
                 continue;
             }
             let trend = if lower { d.trend(true) } else { Trend::Even };
-            let ls = text.shape_line(&label, &small);
             let value = format!("{} → {}", write(a), write(b));
-            let vs = text.shape_line(&value, &font);
-            let icon_w = if trend == Trend::Even { 0.0 } else { px(16.0) };
-            let w = ls.width + vs.width + icon_w + px(22.0);
-            if x + w > r.max_x() - px(10.0) {
+            let c = trend_ink(trend).map_or(p.text, |i| i.color(p));
+            let mut badge = ds::Badge::new(&value)
+                .font(&font)
+                .lead(&label)
+                .lead_font(&small)
+                .color(c)
+                .fill(p.text.with_alpha(FIGURE_FILL))
+                .size(ds::BadgeSize::Custom(CHIP_H))
+                .pad(CHIP_PAD)
+                .radius(radius::SM);
+            if let Some(icon) = trend_icon(trend) {
+                badge = badge.icon(icons, icon).icon_size(FIGURE_ICON);
+            }
+            if x + badge.width(text, ds) > r.max_x() - px(10.0) {
                 break;
             }
-            let chip = Rect::new(x.round(), (mid2 - px(11.0)).round(), w.round(), px(22.0));
-            layer.quad(Quad::filled(chip, p.text.with_alpha(0.05)).rounded(px(radius::SM)));
-            let base = ds::optical_baseline(chip.min_y(), chip.size.height, &font);
-            draw_text(layer, &ls, (chip.min_x() + px(8.0)).round(), base, p.text_muted);
-            let mut vx = chip.min_x() + px(14.0) + ls.width;
-            let c = trend_ink(trend).map_or(p.text, |i| i.color(p));
-            if let Some(id) = trend_icon(trend).and_then(|i| icons.id(i)) {
-                let sz = px(11.0);
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(vx.round(), (mid2 - sz / 2.0).round(), sz, sz),
-                    c,
-                );
-                vx += px(16.0);
-            }
-            draw_text(layer, &vs, vx.round(), base, c);
+            let chip = badge.paint(layer, text, ds, x.round(), mid2);
             self.hits.push((
                 chip,
                 CHit::Info,
@@ -785,31 +772,19 @@ impl CompareView {
         for (key, icon, count, ink, tip) in groups {
             let c = ink.map_or(p.text_muted, |i| i.color(p));
             let label = i18n::tr!(key, count = count as i64);
-            let shaped = text.shape_line(&label, &font);
-            let w = shaped.width + px(32.0);
-            if x + w > r.max_x() - px(10.0) {
+            let alpha = if count > 0 { GROUP_FILL } else { GROUP_FILL_NONE };
+            let badge = ds::Badge::new(&label)
+                .font(&font)
+                .color(if count > 0 { c } else { p.text_muted })
+                .fill(c.with_alpha(alpha))
+                .icon(icons, icon)
+                .icon_color(c)
+                .size(ds::BadgeSize::Custom(CHIP_H))
+                .pad(CHIP_PAD);
+            if x + badge.width(text, ds) > r.max_x() - px(10.0) {
                 break;
             }
-            let chip = Rect::new(x.round(), (mid - px(11.0)).round(), w.round(), px(22.0));
-            let alpha = if count > 0 { 0.12 } else { 0.04 };
-            layer.quad(Quad::filled(chip, c.with_alpha(alpha)).rounded(px(11.0)));
-            if let Some(id) = icons.id(icon) {
-                let sz = px(12.0);
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new((chip.min_x() + px(8.0)).round(), (mid - sz / 2.0).round(), sz, sz),
-                    c,
-                );
-            }
-            draw_text(
-                layer,
-                &shaped,
-                (chip.min_x() + px(24.0)).round(),
-                ds::optical_baseline(chip.min_y(), chip.size.height, &font),
-                if count > 0 { c } else { p.text_muted },
-            );
+            let chip = badge.paint(layer, text, ds, x.round(), mid);
             let tip = if tip.is_empty() { i18n::t("profile.compare.none") } else { tip };
             self.hits.push((chip, CHit::Info, Some(tip)));
             x = chip.max_x() + px(6.0);
@@ -946,11 +921,11 @@ impl CompareView {
                     break;
                 }
                 let row = Rect::new(area.min_x() + px(6.0), y, area.size.width - px(12.0), row_h);
-                if let Some(i) = own
-                    && self.hover == Some(CHit::Finding(i))
-                {
-                    layer.quad(Quad::filled(row, p.tree_hover).rounded(px(radius::SM)));
-                }
+                let hovered = own.is_some_and(|i| self.hover == Some(CHit::Finding(i)));
+                ds::RowHighlight::new(false, hovered)
+                    .hover(ds::HoverFill::Tree)
+                    .radius(radius::SM)
+                    .paint(layer, ds, row);
                 let l = level(finding.severity);
                 if let Some(id) = icons.id(l.icon()) {
                     let s = px(12.0);

@@ -3,6 +3,7 @@
 
 use super::*;
 use ui_components::KeyReach;
+use ui_components::control::Control;
 
 impl Viewer for Canvas {
     fn set_data(&mut self, data: &dyn std::any::Any) {
@@ -49,9 +50,39 @@ impl Viewer for Canvas {
 
     /// The search's keys while it's open, else the edited code's.
     fn edit_key(&mut self, key: ViewerKey) -> bool {
-        let used = self.with_controls(|c, parts| c.key(parts, key, KeyReach::default()));
+        self.edit_key_with(key, KeyReach::default())
+    }
+
+    /// The search's keys by word or extending (⌥⌫, ⇧←).
+    fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let used = self.with_controls(|c, parts| c.key(parts, key, reach));
         self.follow_keys();
         used.is_some()
+    }
+
+    /// Pasted into the open search (on one line), found again.
+    fn paste(&mut self, text: &str) -> bool {
+        let took = self.with_controls(|c, parts| c.paste(parts, text));
+        self.follow_keys();
+        took.is_some()
+    }
+
+    /// ⌘C: what's selected in the open search.
+    fn selected_text(&self) -> Option<String> {
+        self.search.as_ref().and_then(|s| Control::selected_text(&s.field))
+    }
+
+    /// A press, `clicks` in a row (two select a word in the search, three all of it).
+    fn pointer_down(
+        &mut self,
+        p: Point,
+        clicks: u32,
+        _mods: ui_components::PressMods,
+    ) -> Option<ViewerAction> {
+        self.clicks = clicks;
+        let action = self.click(p);
+        self.clicks = 1;
+        action
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -123,7 +154,7 @@ impl Viewer for Canvas {
         let Some(layout) = self.layout.take() else { return };
         self.paint_graph(&graph, &layout, &ds, ctx.text, ctx.scene, ctx.icons);
         self.layout = Some(layout);
-        self.paint_toolbar(&ds, ctx.text, ctx.scene.push_layer(Some(b)));
+        self.paint_toolbar(&ds, (ctx.text, ctx.icons), ctx.scene.push_layer(Some(b)));
         self.paint_search(&graph, &ds, ctx.text, ctx.scene, ctx.icons);
     }
 
@@ -150,9 +181,7 @@ impl Viewer for Canvas {
         let graph = self.graph.clone()?;
         let hit = self.hit(p);
         // A click outside the search closes it; outside the edited code, it ends editing.
-        if self.search.is_some()
-            && !matches!(hit, Some(Hit::SearchField | Hit::SearchClear | Hit::SearchResult(_)))
-        {
+        if self.search.is_some() && !matches!(hit, Some(Hit::SearchField | Hit::SearchResult(_))) {
             self.search = None;
         }
         if self.editing.is_some() && hit != Some(Hit::Edit) {
@@ -184,18 +213,15 @@ impl Viewer for Canvas {
                 }
                 None
             }
+            // Closed: it opens. Open: its field's press (the caret put, a selection begun,
+            // × emptying it).
             Hit::SearchField => {
-                match &mut self.search {
-                    Some(search) => search.all = false,
-                    None => self.search = Some(search::Search::default()),
+                if self.search.is_none() {
+                    self.search = Some(search::Search::default());
+                    return None;
                 }
-                None
-            }
-            Hit::SearchClear => {
-                match &mut self.search {
-                    Some(search) => search.clear(),
-                    None => self.search = Some(search::Search::default()),
-                }
+                let clicks = self.clicks.max(1);
+                self.with_controls(|c, parts| c.press(parts, p, clicks));
                 None
             }
             Hit::SearchResult(i) => {
@@ -242,6 +268,10 @@ impl Viewer for Canvas {
     }
 
     fn drag(&mut self, p: Point) -> bool {
+        // A selection being made in the search's field.
+        if self.controls.held() {
+            return self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved);
+        }
         if let Some((kind, from, moved)) = &mut self.moving {
             let k = self.zoom * self.scale;
             let (dx, dy) = ((p.x - from.x) / k, (p.y - from.y) / k);
@@ -267,6 +297,9 @@ impl Viewer for Canvas {
     }
 
     fn release(&mut self) -> bool {
+        if self.with_controls(|c, parts| c.release(parts)).is_some() {
+            return true;
+        }
         // A click (without movement) on a declaration's code card selects it.
         if let Some((kind, _, moved)) = self.moving.take() {
             if !moved
@@ -283,6 +316,12 @@ impl Viewer for Canvas {
 
     /// A hand over a card, a row, a button.
     fn cursor_at(&self, p: Point) -> Option<ui_components::ViewerCursor> {
+        // The open search's field: the text's cursor, a hand on its ×.
+        if let Some(search) = &self.search
+            && search.field.area().contains(p)
+        {
+            return Control::cursor(&search.field, p);
+        }
         self.hit(p).map(|_| ui_components::ViewerCursor::Pointer)
     }
 
@@ -294,7 +333,9 @@ impl Viewer for Canvas {
     fn hover(&mut self, p: Point) -> bool {
         // A redraw only when what's under the mouse changed.
         let now = self.hit(p);
-        std::mem::replace(&mut self.hover, now.clone()) != now
+        // Its × lit under the mouse.
+        let clear = self.search.as_mut().is_some_and(|s| Control::hover(&mut s.field, Some(p)));
+        clear || std::mem::replace(&mut self.hover, now.clone()) != now
     }
 
     fn status(&self) -> Option<String> {

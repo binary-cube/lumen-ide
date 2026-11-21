@@ -10,6 +10,8 @@
 
 use kernel::{Point, Rect};
 use render_api::Quad;
+use text_layout::TextSystem;
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx};
 
 use super::DiagramView;
 use super::gesture::Gesture;
@@ -367,6 +369,7 @@ impl DiagramView {
     pub(super) fn paint_connections(
         &self,
         layer: &mut render_api::Layer,
+        text: &mut TextSystem,
         palette: &ui_components::Palette,
         icons: &icons::Icons,
     ) {
@@ -397,18 +400,10 @@ impl DiagramView {
         }
         // The hovered shape's arrows (a soft disc, the arrow in the accent).
         if self.gesture.is_none() {
+            let ds = Ctx::new(palette, self.scale);
             for (side, r) in self.arrows() {
-                layer.quad(Quad::filled(r, accent.with_alpha(0.16)).rounded(r.size.width / 2.0));
-                if let Some(id) = icons.id(side.icon()) {
-                    let inset = r.size.width * 0.2;
-                    let inner = Rect::new(
-                        r.min_x() + inset,
-                        r.min_y() + inset,
-                        r.size.width - 2.0 * inset,
-                        r.size.height - 2.0 * inset,
-                    );
-                    ui_kit::draw_icon(layer, icons, id, inner, accent);
-                }
+                let spec = ButtonSpec::new(ButtonKind::Ghost).icon(side.icon()).round().on(true);
+                ds::button(layer, text, icons, &ds, r, spec);
             }
         }
         let dot = |layer: &mut render_api::Layer, r: Rect, filled: bool| {

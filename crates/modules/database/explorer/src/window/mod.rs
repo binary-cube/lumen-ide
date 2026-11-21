@@ -24,11 +24,13 @@ use database::events::{DataChanged, DataSourcesChanged};
 use database::{DataSource, DataSourceId, Scope, TableKind, TableRef};
 use kernel::queue::{Batch, Coalescing};
 use kernel::{Point, ProjectId, Rect, Subscription};
+use ui_components::control::{Control, Controls};
+use ui_components::search_field::SearchField;
 use ui_components::{
     AppRequest, EdgeScrollbar, KeyReach, PanelButton, PanelContext, ToolPanel, ToolPanelAction,
     ViewMenuEntry, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
 };
-use ui_kit::{ListFilter, TextInput};
+use ui_kit::ListFilter;
 use workbench_model::ProjectView;
 
 use crate::catalog::Listed;
@@ -86,7 +88,6 @@ enum Adding {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Hover {
     Field,
-    Clear,
     Row(usize),
 }
 
@@ -107,9 +108,10 @@ pub struct DatabaseWindow {
     rows: Vec<Row>,
     /// The rows must be made again (something changed).
     stale: bool,
-    filter: TextInput,
-    /// The filter has the keys (else the rows).
-    typing: bool,
+    /// The filter (the app's search field: ×, ⌘A, ⌘Z).
+    filter: SearchField,
+    /// Its state of use: the filter has the keys while it has the focus (else the rows).
+    controls: Controls,
     selected: Option<NodeKey>,
     hover: Option<Hover>,
     scroll: f32,
@@ -128,7 +130,6 @@ pub struct DatabaseWindow {
     /// Where it was last drawn.
     bounds: Rect,
     field: Rect,
-    clear: Option<Rect>,
     list: Rect,
     scale: f32,
 }
@@ -174,8 +175,8 @@ impl DatabaseWindow {
             tree: SourceTree::default(),
             rows: Vec::new(),
             stale: true,
-            filter: TextInput::default(),
-            typing: false,
+            filter: SearchField::new(),
+            controls: Controls::default(),
             selected: None,
             hover: None,
             scroll: 0.0,
@@ -195,7 +196,6 @@ impl DatabaseWindow {
             schema_answer: None,
             bounds: Rect::default(),
             field: Rect::default(),
-            clear: None,
             list: Rect::default(),
             scale: 1.0,
         }
@@ -850,6 +850,26 @@ impl DatabaseWindow {
         true
     }
 
+    /// The filter has the keys (else the rows).
+    fn typing(&self) -> bool {
+        self.controls.focused().is_some()
+    }
+
+    /// The keys given to the filter (`true`) or back to the rows.
+    fn set_typing(&mut self, typing: bool) {
+        self.with_controls(|c, parts| c.focus(parts, typing.then_some(FILTER)));
+    }
+
+    /// Its parts (the filter), with their state of use. The rows and their scrollbar are
+    /// its own drawing.
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut parts: [&mut dyn Control; 1] = [&mut self.filter];
+        f(&mut self.controls, &mut parts)
+    }
+
     /// The filter changed: the rows made again from the top.
     fn filtered(&mut self) {
         self.stale = true;
@@ -867,9 +887,6 @@ impl DatabaseWindow {
     }
 
     fn hit(&self, p: Point) -> Option<Hover> {
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            return Some(Hover::Clear);
-        }
         if self.field.contains(p) {
             return Some(Hover::Field);
         }
@@ -884,6 +901,9 @@ impl DatabaseWindow {
         row.expandable && p.x >= x - 4.0 * self.scale && p.x <= x + 16.0 * self.scale
     }
 }
+
+/// The filter's place among the window's parts.
+const FILTER: usize = 0;
 
 /// Pushes `change` into the merging queue.
 fn push(changes: &Mutex<Coalescing<Change>>, change: Change) {

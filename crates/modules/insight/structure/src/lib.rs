@@ -116,6 +116,8 @@ impl ToolWindowProvider for Provider {
 
 /// How many usages are shown (the rest: "N more places").
 const MAX_USAGES: usize = 8;
+/// The declaration's block under the mouse: its fill's alpha of the text.
+const DECLARATION_HOVER: f32 = 0.035;
 
 /// The declaration at the cursor.
 #[derive(Debug, Default)]
@@ -589,9 +591,11 @@ impl StructurePanel {
         y += px(18.0);
         let r = Rect::new(x0 - px(6.0), start - px(2.0), width + px(12.0), y - start + px(4.0));
         let offset = at.offset;
-        if self.target(r, ToolPanelAction::Reveal(offset)) {
-            layer.quad(Quad::filled(r, p.text.with_alpha(0.035)).rounded(px(ds::radius::SM)));
-        }
+        let hovered = self.target(r, ToolPanelAction::Reveal(offset));
+        ds::RowHighlight::new(false, hovered)
+            .radius(ds::radius::SM)
+            .hover(ds::HoverFill::Faint(DECLARATION_HOVER))
+            .paint(layer, ctx, r);
         y
     }
 
@@ -754,11 +758,9 @@ impl StructurePanel {
             }
             let hovered = self.hover == Some(self.targets.len() + targets.len());
             targets.push((r, ToolPanelAction::Reveal(node.offset)));
+            ds::RowHighlight::new(node.active, hovered).radius(ds::radius::SM).paint(layer, ctx, r);
             if node.active {
-                layer.quad(Quad::filled(r, p.accent.with_alpha(0.10)).rounded(px(ds::radius::SM)));
                 active = Some(r);
-            } else if hovered {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.045)).rounded(px(ds::radius::SM)));
             }
             let x = r.min_x() + px(10.0) + node.depth as f32 * px(16.0);
             let base = ds::optical_baseline(r.min_y(), row_h, code);

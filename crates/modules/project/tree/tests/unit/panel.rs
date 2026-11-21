@@ -396,10 +396,50 @@ fn typing_on_the_rows_starts_the_search() {
     assert!(panel.text_on_rows("u"));
     assert!(panel.wants_text() && panel.keys == Keys::Search);
     assert!(panel.text_input("s"));
-    assert_eq!(panel.search.input.text(), "us");
+    assert_eq!(panel.search.query(), "us");
     assert!(!panel.text_on_rows("x"), "the field has the keys: its text_input takes it");
     panel.keys = Keys::Tree;
     assert!(panel.text_on_rows("m"));
-    assert_eq!(panel.search.input.text(), "m", "a new search");
+    assert_eq!(panel.search.query(), "m", "a new search");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// The search is the app's search field: typed into, ⌘A selects it, a drag from a press
+/// selects, its × empties it (no results, the keys kept); a new entry takes the panel's one
+/// focus, the search's caret gone.
+#[test]
+fn the_search_is_the_apps_search_field_with_the_panels_focus() {
+    let (root, mut panel) = project("search-field");
+    let paint = |panel: &mut ProjectPanel| {
+        let (mut text, mut scene) = (text_layout::TextSystem::new(), render_api::Scene::default());
+        let (icons, palette) = (icons::Icons::builtin(), Palette::dark());
+        panel.search.paint_field(true, &icons, &mut text, &mut scene, &palette);
+    };
+    panel.press(Point::new(60.0, 20.0), 1);
+    assert!(!panel.release(), "a press without a drag changes nothing");
+    assert_eq!(panel.keys, Keys::Search);
+    assert!(panel.text_input("user"));
+    assert!(panel.search.is_active());
+    assert!(panel.command("select_all"));
+    assert_eq!(panel.selected_text().as_deref(), Some("user"));
+    assert!(panel.command("cut"));
+    assert!(!panel.search.is_active(), "cut: emptied, the search with it");
+    assert!(panel.command("undo"));
+    assert_eq!(panel.search.query(), "user");
+    paint(&mut panel);
+    let field = panel.search.field.area();
+    let clear = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    assert!(panel.clickable(clear), "× is a hand");
+    assert_eq!(panel.cursor_at(Point::new(60.0, 20.0)), Some(ViewerCursor::Text));
+    panel.press(clear, 1);
+    assert_eq!(panel.search.query(), "", "× empties it");
+    assert!(!panel.search.is_active());
+    assert_eq!(panel.keys, Keys::Search, "the keys kept");
+    // A new entry: the panel's one focus goes to its name.
+    assert!(panel.text_input("x"));
+    assert!(panel.new_entry(false));
+    assert_eq!(panel.keys, Keys::NewEntry, "the search has no caret now");
+    assert!(panel.text_input("n"));
+    assert_eq!(panel.search.query(), "", "typing reaches the name, not the search");
     let _ = std::fs::remove_dir_all(root);
 }

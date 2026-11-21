@@ -114,9 +114,6 @@ enum Hit {
     Line(usize, usize),
     /// A row of the places beside the screen (docked).
     Place(usize),
-    /// The places' filter field, and its ×.
-    PlacesFilter,
-    ClearPlacesFilter,
 }
 
 /// Where the keyboard goes (which of its lanes has the focus: [`CommitView::keys`]).
@@ -223,8 +220,9 @@ pub struct CommitView {
     remotes: Vec<String>,
     folded: std::collections::HashSet<String>,
     place_rows: Vec<places::PlaceRow>,
-    /// What filters the places (their rows only those containing it).
-    places_filter: ui_kit::TextInput,
+    /// What filters the places (their rows only those containing it): the app's search
+    /// field, one of the screen's controls.
+    places_filter: ui_components::search_field::SearchField,
     places_area: Rect,
     places_scroll: f32,
     /// Its parts' state of use (see [`CommitView::with_controls`]).
@@ -298,16 +296,6 @@ impl CommitView {
     fn lay_places(&mut self) {
         let query = self.places_filter.text();
         self.place_rows = places::rows(&self.places, self.branch.as_deref(), &self.folded, query);
-    }
-
-    /// The places' filter edited: their rows again, from the top when what it holds changed.
-    fn edit_places_filter(&mut self, edit: impl FnOnce(&mut ui_kit::TextInput)) {
-        let before = self.places_filter.text().to_owned();
-        edit(&mut self.places_filter);
-        if self.places_filter.text() != before {
-            self.places_scroll = 0.0;
-            self.lay_places();
-        }
     }
 
     /// Place `i` clicked: a section or a folder folds or opens; the history, a search, a

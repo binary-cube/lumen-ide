@@ -13,14 +13,17 @@ use http_requests::env_edit::{self, Row, Table};
 use i18n::t;
 use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
-use ui_components::control::{Control, Controls, Press};
-use ui_components::ds::{self, Check, Ctx, ToolbarButton};
+use ui_components::control::{Control, Controls, Press, Thumb};
+use ui_components::ds::{
+    self, ButtonKind, ButtonSpec, Check, Ctx, Tone, ToolbarButton, button_size,
+};
+use ui_components::tab_strip::{self, UnderlineTab};
 use ui_components::tool_panel::KeyReach;
 use ui_components::{
-    ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
-    ViewerProvider, WithHost,
+    EdgeScrollbar, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind,
+    ViewerPaint, ViewerProvider, WithHost,
 };
-use ui_kit::{TextInput, draw_icon, draw_text};
+use ui_kit::{TextInput, draw_text};
 
 use crate::pending::Pending;
 
@@ -30,6 +33,10 @@ const THREAD: &str = "http-editor";
 const SAVE_AFTER: Duration = Duration::from_millis(600);
 const BAR: f32 = 44.0;
 const ROW: f32 = 34.0;
+/// A variable's remove button: its middle this far from the table's right (logical pixels).
+const TRASH_RIGHT: f32 = 10.0;
+/// The space between two environments' tabs (logical pixels).
+const TAB_GAP: f32 = 4.0;
 
 /// What its tab is opened with: a request file (its environments' folder is found from it)
 /// and the project's root.
@@ -122,6 +129,8 @@ pub struct EnvView {
     deleting: Arc<Mutex<Option<String>>>,
     /// Its parts' state of use (see [`EnvView::with_controls`]).
     controls: Controls,
+    /// The rows' scrollbar, along the view's right edge.
+    bar: EdgeScrollbar,
 }
 
 impl std::fmt::Debug for EnvView {
@@ -387,6 +396,9 @@ impl EnvView {
             area,
         };
         let mut typed = None;
+        // The thumb moves its own copy (the cells hold the offset for the keys' moves).
+        let before = self.scroll;
+        let mut dragged = before;
         let mut cells = Cells {
             lines: self.lines.get_mut(self.tab),
             focus: &mut self.focus,
@@ -398,11 +410,15 @@ impl EnvView {
                 visible_rows: self.visible_rows,
             },
         };
-        let mut parts: [&mut dyn Control; 2] = [&mut naming, &mut cells];
+        let mut thumb = Thumb { bar: &mut self.bar, offset: &mut dragged };
+        let mut parts: [&mut dyn Control; 3] = [&mut naming, &mut cells, &mut thumb];
         let controls = &mut self.controls;
         crate::parts::keys_to_first(controls, &mut parts);
         let answer = f(controls, &mut parts);
         crate::parts::keys_to_first(controls, &mut parts);
+        if dragged != before {
+            self.scroll = dragged.clamp(0.0, self.max_scroll);
+        }
         if typed.is_some() {
             self.changed = typed;
         }
@@ -667,9 +683,8 @@ impl Viewer for EnvView {
         let mut x = tabs.min_x() + px(14.0);
         let mut style = ds::field_style(&ds, font.clone(), true);
         style.padding = px(6.0);
+        let tabs_mid = tabs.min_y() + tabs.size.height / 2.0;
         for (i, name) in self.names.iter().enumerate() {
-            let shaped = text.shape_line(name, &font);
-            let active = i == self.tab;
             // Its name being typed: a field in its place.
             if let Some((_, input)) = self.renaming.as_ref().filter(|(r, _)| *r == i) {
                 let typed = text.shape_line(input.text(), &font).width;
@@ -680,33 +695,18 @@ impl Viewer for EnvView {
                 x = field.max_x() + px(4.0);
                 continue;
             }
-            let r = Rect::new(x, tabs.min_y(), shaped.width + px(20.0), tabs.size.height);
-            draw_text(
-                layer,
-                &shaped,
-                r.min_x() + px(10.0),
-                ds::optical_baseline(r.min_y(), r.size.height, &font),
-                if active { p.text } else { p.text_muted },
-            );
-            if active {
-                layer.quad(Quad::filled(
-                    Rect::new(r.min_x(), r.max_y() - px(2.0), r.size.width, px(2.0)),
-                    p.accent,
-                ));
-            }
+            let tab = UnderlineTab::new(name).on(i == self.tab);
+            let at = (x, tabs.min_y(), tabs.size.height);
+            let r = tab_strip::underline_tab(layer, text, &ds, &font, at, &tab);
             hits.push((r, Hit::Tab(i)));
-            x = r.max_x() + px(4.0);
+            x = r.max_x() + px(TAB_GAP);
         }
-        let add = Rect::new(x, tabs.min_y() + px(7.0), px(24.0), px(24.0));
-        if let Some(id) = icons.id("plus") {
-            draw_icon(
-                layer,
-                icons,
-                id,
-                Rect::new(add.min_x() + px(5.0), add.min_y() + px(5.0), px(14.0), px(14.0)),
-                p.text_muted,
-            );
-        }
+        let add = ds::square_button(&ds, (x, tabs_mid), button_size::COMPACT);
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon("plus")
+            .rest_tone(Tone::Neutral)
+            .hovered(self.hover == Some(Hit::AddEnvironment));
+        ds::button(layer, text, icons, &ds, add, spec);
         hits.push((add, Hit::AddEnvironment));
         // Its variables.
         let area = Rect::new(
@@ -788,21 +788,23 @@ impl Viewer for EnvView {
                     Rect::new(check.min_x(), y, check.size.width + px(6.0) + label.width, row_h),
                     Hit::Private(i),
                 ));
-                let trash = Rect::new(area.max_x() - px(18.0), mid - px(8.0), px(16.0), px(16.0));
-                if let Some(id) = icons.id("trash") {
-                    draw_icon(
-                        layer,
-                        icons,
-                        id,
-                        trash,
-                        if self.hover == Some(Hit::Remove(i)) { p.danger } else { p.text_muted },
-                    );
-                }
+                // Removing it: in the danger color under the mouse.
+                let at = area.max_x() - px(TRASH_RIGHT) - px(button_size::SMALL) / 2.0;
+                let trash = ds::square_button(&ds, (at, mid), button_size::SMALL);
+                let spec = ButtonSpec::new(ButtonKind::Ghost)
+                    .icon("trash")
+                    .rest_tone(Tone::Neutral)
+                    .hover_content_tone(Tone::Danger)
+                    .hovered(self.hover == Some(Hit::Remove(i)));
+                ds::button(layer, text, icons, &ds, trash, spec);
                 hits.push((trash, Hit::Remove(i)));
                 ds::divider(layer, &ds, area.min_x(), area.max_x(), y + row_h);
             }
         }
+        let rows_r = Rect::new(b.min_x(), area.min_y(), b.size.width, visible * row_h);
+        self.bar.paint(scene, p, scale, rows_r, rows as f32 * row_h, first);
         if let Some(why) = &self.error {
+            let layer = scene.push_layer(Some(b));
             let shaped = text.shape_line(why, &ds.ui_font(-1.0));
             draw_text(layer, &shaped, area.min_x(), area.max_y() - px(8.0), p.danger);
         }
@@ -888,6 +890,15 @@ impl Viewer for EnvView {
         let before = self.scroll;
         self.scroll = (self.scroll + dy).clamp(0.0, self.max_scroll);
         self.scroll != before
+    }
+
+    /// The part pressed (the rows' thumb) follows the mouse.
+    fn drag(&mut self, p: Point) -> bool {
+        self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, changed)| changed)
+    }
+
+    fn release(&mut self) -> bool {
+        self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
     fn hover(&mut self, p: Point) -> bool {

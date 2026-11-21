@@ -20,8 +20,8 @@ use ui_components::chart::PlotCache;
 use ui_components::columns::Choice;
 use ui_components::control::Controls;
 use ui_components::ds::{self, Ctx};
+use ui_components::search_field::SearchField;
 use ui_components::{EdgeScrollbar, Orientation, Splitter, SplitterStyle};
-use ui_kit::TextInput;
 use workbench_model::ResourceSource;
 
 use crate::collector::{Frame, History, Hub, Line, Metric, Subscription, Tick};
@@ -225,9 +225,12 @@ pub struct TaskManager {
     model: Arc<ViewModel>,
     /// Its texts, written once per look.
     texts: Texts,
-    filter: TextInput,
-    /// A narrow page's filter, opened over the bar.
+    /// The filter (the app's search field: ×, ⌘A; its focus the parts').
+    filter: SearchField,
+    /// A narrow page's filter, opened over the bar, and its own × while it's empty (from
+    /// the last paint).
     filter_open: bool,
+    filter_close: Option<Rect>,
     /// The selected part (by its key), its last row (kept when it's gone), its detail open.
     selected: Option<String>,
     last_selected: Option<Arc<Line>>,
@@ -358,8 +361,9 @@ impl Default for TaskManager {
             state_generation: 1,
             model: Arc::new(ViewModel::default()),
             texts: Texts::default(),
-            filter: TextInput::default(),
+            filter: SearchField::new(),
             filter_open: false,
+            filter_close: None,
             selected: None,
             last_selected: None,
             detail_open: false,
@@ -960,6 +964,7 @@ impl TaskManager {
         let spec = self.spec(bounds, scale);
         let page = self.layouts.get(&spec);
         self.hits.clear();
+        self.filter_close = None;
         self.cut.clear();
         self.stops.clear();
         self.cursor_rect = None;

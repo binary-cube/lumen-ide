@@ -3,6 +3,10 @@
 
 use super::*;
 
+/// A commit row's highlight alphas: chosen, and under the mouse (edge to edge, square).
+const ROW_CHOSEN_ALPHA: f32 = 0.16;
+const ROW_HOVER_ALPHA: f32 = 0.04;
+
 impl LogView {
     /// The toolbar: the title and what the log shows, then its buttons on the right.
     pub(super) fn paint_toolbar(
@@ -191,11 +195,11 @@ impl LogView {
             let top = (self.list.min_y() + i as f32 * row_h - self.scroll).round();
             let row = Rect::new(self.list.min_x(), top, self.list.size.width, row_h);
             let selected = self.chosen.contains(&i);
-            if selected {
-                layer.quad(Quad::filled(row, p.accent.with_alpha(0.16)));
-            } else if self.hover == Some(Hit::Row(i)) {
-                layer.quad(Quad::filled(row, p.text.with_alpha(0.04)));
-            }
+            ds::RowHighlight::new(selected, self.hover == Some(Hit::Row(i)))
+                .radius(0.0)
+                .selected_alpha(ROW_CHOSEN_ALPHA)
+                .hover(ds::HoverFill::Faint(ROW_HOVER_ALPHA))
+                .paint(layer, ds, row);
             // Only the visible part: a row under the header must not take its clicks.
             if let Some(hit) = row.intersect(&self.list) {
                 self.hits.push((hit, Hit::Row(i)));

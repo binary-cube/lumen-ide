@@ -201,7 +201,7 @@ pub fn setting_row(
         )
     };
     let reset = spec.modified.then(|| {
-        let side = px(24.0);
+        let side = px(ds::button_size::COMPACT);
         // Over a control spread across the row, at the end of its label's line.
         let mid =
             if stacked { label_top + label_h / 2.0 } else { control.min_y() + control_h / 2.0 };
@@ -211,7 +211,7 @@ pub fn setting_row(
             side,
             side,
         );
-        reset_button(layer, ctx, icons, r, spec.reset_hovered);
+        reset_button(layer, text, ctx, icons, r, spec.reset_hovered);
         r
     });
     if spec.modified {
@@ -232,31 +232,17 @@ pub fn setting_row(
 /// "↺": puts a setting back as it was (its default, the theme it started from).
 pub fn reset_button(
     layer: &mut Layer,
+    text: &mut TextSystem,
     ctx: &Ctx<'_>,
     icons: &icons::Icons,
     r: Rect,
     hovered: bool,
 ) {
-    let p = ctx.palette;
-    if hovered {
-        layer.quad(Quad::filled(r, ctx.fade(p.text.with_alpha(0.08))).rounded(ctx.px(radius::SM)));
-    }
-    if let Some(id) = icons.id("rotate-ccw") {
-        let side = ctx.px(13.0);
-        let at = Rect::new(
-            (r.min_x() + (r.size.width - side) / 2.0).round(),
-            (r.min_y() + (r.size.height - side) / 2.0).round(),
-            side,
-            side,
-        );
-        ui_kit::draw_icon(
-            layer,
-            icons,
-            id,
-            at,
-            ctx.fade(if hovered { p.text } else { p.text_muted }),
-        );
-    }
+    let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+        .icon("rotate-ccw")
+        .rest_tone(Tone::Neutral)
+        .hovered(hovered);
+    ds::button(layer, text, icons, ctx, r, spec);
 }
 
 /// A group of rows: the card behind them (inserted under them once their height is known).
@@ -372,6 +358,16 @@ pub fn stepped(current: usize, stops: usize, delta: i32, big: bool) -> usize {
 pub const FOLD_HEAD: f32 = 56.0;
 /// A foldable section's header inside a card (logical pixels).
 pub const FOLD_SECTION: f32 = 32.0;
+/// The rule after a fold section's title: the border at this alpha.
+const FOLD_RULE: f32 = 0.6;
+/// A gallery card's tag: the room on each side of its label (logical pixels).
+const CARD_BADGE_PAD: f32 = 6.0;
+/// A side nav's row: the chosen one's accent alpha, the hovered one's text alpha; its
+/// count's fill alpha and the room on each side of it (logical pixels).
+const NAV_SELECTED: f32 = 0.12;
+const NAV_HOVER: f32 = 0.05;
+const NAV_COUNT_FILL: f32 = 0.14;
+const NAV_COUNT_PAD: f32 = 5.0;
 
 /// The parts of a foldable card's header the mouse may be over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,26 +474,18 @@ pub fn fold_card_head(
         let color = if spec.hovered == Some(FoldPart::Header) { p.text } else { p.text_muted };
         ui_kit::draw_icon(layer, icons, id, chevron_r, ctx.fade(color));
     }
-    let menu_side = px(26.0);
+    let menu_side = px(ds::button_size::MEDIUM);
     let menu = Rect::new(
         chevron_r.min_x() - px(8.0) - menu_side,
         (mid - menu_side / 2.0).round(),
         menu_side,
         menu_side,
     );
-    if spec.hovered == Some(FoldPart::Menu) {
-        layer.quad(Quad::filled(menu, ctx.fade(p.text.with_alpha(0.08))).rounded(px(radius::SM)));
-    }
-    if let Some(id) = icons.id("more-horizontal") {
-        let side = px(15.0);
-        let at = Rect::new(
-            (menu.min_x() + (menu_side - side) / 2.0).round(),
-            (menu.min_y() + (menu_side - side) / 2.0).round(),
-            side,
-            side,
-        );
-        ui_kit::draw_icon(layer, icons, id, at, ctx.fade(p.text_muted));
-    }
+    let more = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+        .icon("more-horizontal")
+        .rest_tone(Tone::Neutral)
+        .hovered(spec.hovered == Some(FoldPart::Menu));
+    ds::button(layer, text, icons, ctx, menu, more);
     let switch_x = menu.min_x() - px(10.0) - px(36.0);
     let toggle =
         ds::switch(layer, ctx, switch_x, mid, spec.enabled, spec.hovered == Some(FoldPart::Toggle));
@@ -564,26 +552,16 @@ pub fn fold_section(
     let mid = y + h / 2.0;
     let side = px(12.0);
     let color = if hovered { p.text } else { p.text_muted };
-    let icon = if expanded { "chevron-down" } else { "chevron-right" };
-    if let Some(id) = icons.id(icon) {
-        ui_kit::draw_icon(
-            layer,
-            icons,
-            id,
-            Rect::new(x, (mid - side / 2.0).round(), side, side),
-            ctx.fade(color),
-        );
-    }
+    let at = Rect::new(x, (mid - side / 2.0).round(), side, side);
+    crate::tree::chevron(layer, icons, at, expanded, ctx.fade(color));
     let font = ctx.ui_font(-1.5).with_weight(Font::SEMIBOLD);
     let shaped = text.shape_line(title, &font);
     let tx = x + side + px(8.0);
     draw_text(layer, &shaped, tx, optical_baseline(y, h, &font), ctx.fade(color));
     let line_x = (tx + shaped.width + px(10.0)).round();
     if r.max_x() > line_x {
-        layer.quad(Quad::filled(
-            Rect::new(line_x, mid.round(), r.max_x() - line_x, ctx.line()),
-            ctx.fade(p.border.with_alpha(0.6)),
-        ));
+        let line = p.border.with_alpha(FOLD_RULE);
+        crate::ds::divider_in(layer, ctx, (line_x, r.max_x(), mid.round()), line);
     }
     r
 }
@@ -679,10 +657,13 @@ pub fn gallery_card(
     let small = ctx.ui_font(-2.5);
     let mut room = r.size.width - 2.0 * pad;
     let badge = spec.badge.map(|(label, tone)| {
-        let shaped = text.shape_line(label, &small);
-        let w = (shaped.width + px(12.0)).round();
-        room -= w + px(6.0);
-        (shaped, w, tone)
+        let badge = crate::ds::Badge::new(label)
+            .color(tone.color(p))
+            .size(crate::ds::BadgeSize::Small)
+            .pad(CARD_BADGE_PAD)
+            .font(&small);
+        room -= badge.width(text, ctx) + px(6.0);
+        badge
     });
     let title = ellipsize(text, spec.title, &title_font, room.max(0.0));
     let shaped = text.shape_line(&title, &title_font);
@@ -694,18 +675,8 @@ pub fn gallery_card(
         optical_baseline(ty, px(18.0), &title_font),
         ctx.fade(if spec.selected { p.accent } else { p.text }),
     );
-    if let Some((label, w, tone)) = badge {
-        let bh = px(16.0);
-        let color = tone.color(p);
-        let br = Rect::new(r.max_x() - pad - w, (ty + (px(18.0) - bh) / 2.0).round(), w, bh);
-        layer.quad(Quad::filled(br, ctx.fade(color.with_alpha(0.12))).rounded(bh / 2.0));
-        draw_text(
-            layer,
-            &label,
-            br.min_x() + px(6.0),
-            optical_baseline(br.min_y(), bh, &small),
-            ctx.fade(color),
-        );
+    if let Some(badge) = badge {
+        badge.paint_right(layer, text, ctx, r.max_x() - pad, ty + px(18.0) / 2.0);
     }
     if let Some(detail) = spec.detail {
         let font = ctx.ui_font(-2.5);
@@ -794,12 +765,10 @@ pub fn nav_list(
     for (i, item) in items.iter().enumerate() {
         let r = Rect::new(x, top, width, h);
         let on = i == selected;
-        if on {
-            layer
-                .quad(Quad::filled(r, ctx.fade(p.accent.with_alpha(0.12))).rounded(px(radius::MD)));
-        } else if hovered == Some(i) {
-            layer.quad(Quad::filled(r, ctx.fade(p.text.with_alpha(0.05))).rounded(px(radius::MD)));
-        }
+        crate::ds::RowHighlight::new(on, hovered == Some(i))
+            .selected_alpha(NAV_SELECTED)
+            .hover(crate::ds::HoverFill::Faint(NAV_HOVER))
+            .paint(layer, ctx, r);
         let mid = top + h / 2.0;
         let side = px(16.0);
         let ix = x + px(10.0);
@@ -818,19 +787,15 @@ pub fn nav_list(
         let mut right = r.max_x() - px(10.0);
         if let Some(n) = item.count.filter(|n| *n > 0) {
             let label = n.to_string();
-            let shaped = text.shape_line(&label, &small);
-            let bw = (shaped.width + px(10.0)).max(px(18.0)).round();
-            let bh = px(18.0);
-            let br = Rect::new(right - bw, (mid - bh / 2.0).round(), bw, bh);
-            let color = if on { p.accent } else { p.text_muted };
-            layer.quad(Quad::filled(br, ctx.fade(color.with_alpha(0.14))).rounded(bh / 2.0));
-            draw_text(
-                layer,
-                &shaped,
-                (br.min_x() + (bw - shaped.width) / 2.0).round(),
-                optical_baseline(br.min_y(), bh, &small),
-                ctx.fade(color),
-            );
+            let br = crate::ds::Badge::new(&label)
+                .color(if on { p.accent } else { p.text_muted })
+                .fill_alpha(NAV_COUNT_FILL)
+                .size(crate::ds::BadgeSize::Medium)
+                .pad(NAV_COUNT_PAD)
+                .min_width(crate::ds::BadgeSize::Medium.height())
+                .centered()
+                .font(&small)
+                .paint_right(layer, text, ctx, right, mid);
             right = br.min_x() - px(6.0);
         }
         if item.dot {
@@ -922,9 +887,10 @@ pub fn nav_tabs(
         let w = tab_width(text, ctx, item, named(i));
         let r = Rect::new(tx, y, w, h);
         let on = i == selected;
-        if hovered == Some(i) && !on {
-            layer.quad(Quad::filled(r, ctx.fade(p.text.with_alpha(0.05))).rounded(px(radius::SM)));
-        }
+        crate::ds::RowHighlight::new(false, hovered == Some(i) && !on)
+            .radius(radius::SM)
+            .hover(crate::ds::HoverFill::Faint(NAV_HOVER))
+            .paint(layer, ctx, r);
         let color = if on { p.text } else { p.text_muted };
         let mid = y + h / 2.0;
         let side = px(16.0);
@@ -972,7 +938,7 @@ pub fn nav_tabs(
         each(i, r);
         tx += w;
     }
-    layer.quad(Quad::filled(Rect::new(x, y + h, width, ctx.line()), ctx.fade(p.border)));
+    crate::ds::divider(layer, ctx, x, x + width, y + h);
     y + h + ctx.line()
 }
 

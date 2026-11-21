@@ -267,6 +267,8 @@ const FIELDS: [Field; 3] = [Field::Name, Field::Separator, Field::Null];
 
 /// The modal's content (logical pixels).
 const HEIGHT: f32 = 470.0;
+/// The chosen format's row: its fill's alpha of the accent.
+const FORMAT_CHOSEN: f32 = 0.14;
 
 impl FormatsView {
     pub fn editor(&self) -> Option<&FormatsEditor> {
@@ -488,16 +490,11 @@ impl Viewer for FormatsView {
                 break;
             }
             let on = i == editor.selected;
-            if on {
-                layer.quad(
-                    render_api::Quad::filled(r, p.accent.with_alpha(0.14))
-                        .rounded(px(ds::radius::SM)),
-                );
-            } else if self.hover == Some(Hit::Format(i)) {
-                layer.quad(
-                    render_api::Quad::filled(r, p.hover_background).rounded(px(ds::radius::SM)),
-                );
-            }
+            ds::RowHighlight::new(on, self.hover == Some(Hit::Format(i)))
+                .selected_alpha(FORMAT_CHOSEN)
+                .hover(ds::HoverFill::Background)
+                .radius(ds::radius::SM)
+                .paint(layer, &ds, r);
             let label = ds::ellipsize(text, &f.name, &font, r.size.width - px(20.0));
             let shaped = text.shape_line(&label, &font);
             draw_text(

@@ -132,6 +132,6 @@ impl Viewer for DiagramView {
             let message = if self.missing { t("diagram.missing") } else { t("diagram.building") };
             ds::empty_state(layer, ctx.text, &ds, area, &message, None);
         }
-        self.paint_toolbar(&ds, ctx.text, ctx.scene, b);
+        self.paint_toolbar(&ds, (ctx.text, ctx.icons), ctx.scene, b);
     }
 }

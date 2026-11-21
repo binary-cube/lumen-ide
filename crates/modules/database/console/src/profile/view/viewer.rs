@@ -84,16 +84,6 @@ impl Viewer for ProfileView {
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        // An open menu: a row chosen, else it closes.
-        if let Some(menu) = &self.dropdown {
-            if menu.rect.contains(p) {
-                if let Some(Hit::MenuItem(i)) = self.hit_at(p) {
-                    self.press_hit(Hit::MenuItem(i));
-                }
-                return self.action.take();
-            }
-            self.dropdown = None;
-        }
         match self.with_controls(|c, parts| c.press(parts, p, clicks)) {
             // The splitter: twice, the panel's width back to its own.
             Some((SPLITTER, _)) => {
@@ -106,6 +96,8 @@ impl Viewer for ProfileView {
                 }
                 return None;
             }
+            // The filter: its caret put (it has the keys), its × emptying it.
+            Some((FILTER, _)) => return None,
             // A side panel: its scrollbar's thumb held, or what its list says of the press
             // (the filter lets the keys go).
             Some(_) => {
@@ -219,9 +211,9 @@ impl Viewer for ProfileView {
         let mut changed = hit != self.hover;
         self.hover = hit;
         changed |= self.with_controls(|c, parts| c.hover(parts, Some(p)));
-        let inside = self.body.contains(p) && self.dropdown.is_none();
+        let inside = self.body.contains(p);
         if let Some(compare) = self.compare.as_mut() {
-            let over = (inside || self.laid.panel.contains(p)) && self.dropdown.is_none();
+            let over = inside || self.laid.panel.contains(p);
             let body = if over { compare.hover(p) } else { compare.leave() };
             return changed || body;
         }
@@ -285,10 +277,6 @@ impl Viewer for ProfileView {
     }
 
     fn tooltip_at(&self, p: Point) -> Option<Tip> {
-        // Not over (or through) the view's own open dropdown.
-        if self.dropdown.is_some() {
-            return None;
-        }
         if let Some((r, _, tip)) = self.hits.iter().rev().find(|(r, ..)| r.contains(p)) {
             return Some(Tip::new(*r, tip.clone()?));
         }
@@ -308,6 +296,10 @@ impl Viewer for ProfileView {
             };
         }
         None
+    }
+
+    fn take_menu(&mut self) -> Option<(Rect, Vec<ViewMenuEntry>)> {
+        self.asked_menu.take()
     }
 
     fn context_menu(&mut self, p: Point) -> Option<Vec<ViewMenuEntry>> {
@@ -444,6 +436,11 @@ impl Viewer for ProfileView {
     }
 
     fn selected_text(&self) -> Option<String> {
+        if self.typing
+            && let Some(selected) = Control::selected_text(&self.filter)
+        {
+            return Some(selected);
+        }
         self.table.row_text(self.table.selected()?)
     }
 
@@ -475,42 +472,28 @@ impl Viewer for ProfileView {
                 _ => false,
             };
         }
-        let typed: String = text.chars().filter(|c| !c.is_control()).collect();
-        if typed.is_empty() {
-            return false;
-        }
-        let mut filter = self.filter.clone();
-        filter.push_str(&typed);
-        self.set_filter(filter);
-        true
+        self.with_controls(|c, parts| c.text(parts, text)).is_some()
+    }
+
+    fn paste(&mut self, text: &str) -> bool {
+        self.typing && self.with_controls(|c, parts| c.paste(parts, text)).is_some()
+    }
+
+    fn select_all(&mut self) -> bool {
+        self.typing && self.with_controls(|c, parts| c.command(parts, "select_all")).is_some()
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
-        if self.dropdown.is_some() && key == ViewerKey::Escape {
-            self.dropdown = None;
-            return true;
-        }
+        self.edit_key_with(key, KeyReach::default())
+    }
+
+    fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        // The filter's keys while it has them: what it doesn't use stays its own, but the
+        // arrows and the pages, which give the keys back to the steps.
         if self.typing {
-            match key {
-                ViewerKey::Backspace => {
-                    let mut filter = self.filter.clone();
-                    filter.pop();
-                    self.set_filter(filter);
-                    return true;
-                }
-                ViewerKey::Escape => {
-                    self.set_filter(String::new());
-                    self.typing = false;
-                    return true;
-                }
-                ViewerKey::Enter => {
-                    self.typing = false;
-                    return true;
-                }
-                ViewerKey::Up | ViewerKey::Down | ViewerKey::PageUp | ViewerKey::PageDown => {
-                    self.typing = false;
-                }
-                _ => return true,
+            let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
+            if used || self.typing {
+                return true;
             }
         }
         if let Some(compare) = self.compare.as_mut() {
@@ -531,8 +514,8 @@ impl Viewer for ProfileView {
                 self.drawer_open = false;
                 return true;
             }
-            if !self.filter.is_empty() {
-                self.set_filter(String::new());
+            if !self.filter.text().is_empty() {
+                self.set_filter("");
                 return true;
             }
             return false;
@@ -607,17 +590,14 @@ impl Viewer for ProfileView {
             }
         }
         // Typing starts the filter (the part having the keys).
-        let mut typed = None;
-        self.with_filter(&mut typed, |c, parts| c.char_key(parts, key));
-        let Some(key) = typed else { return false };
-        self.typing = true;
-        let mut filter = self.filter.clone();
-        filter.push(key);
-        self.set_filter(filter);
-        true
+        self.with_controls(|c, parts| c.char_key(parts, key)).is_some()
     }
 
     fn command(&mut self, id: &str) -> bool {
+        // The filter has the keys: the app's editing commands are its (⌘A, ⌘Z, ⌘X).
+        if self.typing && self.with_controls(|c, parts| c.command(parts, id)).is_some() {
+            return true;
+        }
         match id {
             "profile.next_problem" | "next_problem" => return self.next_problem(true),
             "profile.prev_problem" | "prev_problem" => return self.next_problem(false),
@@ -872,7 +852,6 @@ impl ProfileView {
             }
             // No splitter: nothing beside.
             self.splitter.set_bounds(Rect::default(), ctx.scale);
-            self.paint_dropdown(&mut ctx);
             return;
         }
         match self.mode {
@@ -922,7 +901,6 @@ impl ProfileView {
         // The splitter after both panes.
         self.splitter.set_bounds(laid.split, ctx.scale);
         self.splitter.paint(ctx.scene);
-        self.paint_dropdown(&mut ctx);
     }
 
     /// What a press on the findings' list hit.
@@ -981,19 +959,7 @@ impl ProfileView {
         &mut self,
         f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
     ) -> R {
-        let mut typed = None;
-        self.with_filter(&mut typed, f)
-    }
-
-    /// [`Self::with_controls`], the character a key started the filter with left in
-    /// `typed`. The filter has the keys without a press (nothing else takes them): it's
-    /// given the focus each time.
-    fn with_filter<R>(
-        &mut self,
-        typed: &mut Option<char>,
-        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
-    ) -> R {
-        let (mut findings_scrolled, mut details_scrolled) = (false, false);
+        let (mut findings_scrolled, mut details_scrolled, mut edited) = (false, false, false);
         let mut splitter = Divider { splitter: &mut self.splitter, at: &mut self.split_at };
         let mut findings = Panel {
             rows: &mut self.findings,
@@ -1007,23 +973,68 @@ impl ProfileView {
             pressed: &mut self.detail_pressed,
             scrolled: &mut details_scrolled,
         };
-        let mut filter = Filter { typed };
+        let mut filter =
+            FilterPart { field: &mut self.filter, typing: &mut self.typing, edited: &mut edited };
         let mut parts: [&mut dyn Control; 4] =
             [&mut splitter, &mut findings, &mut details, &mut filter];
+        // The filter has the keys without a press (nothing else takes them).
         self.controls.focus(&mut parts, Some(FILTER));
         let answer = f(&mut self.controls, &mut parts);
         self.panel_scrolled = findings_scrolled || details_scrolled;
+        if edited {
+            self.filtered();
+        }
         answer
     }
 }
 
-/// The steps' filter as the part having the keys: never hit (it's drawn by the view), a
-/// character typed with nothing else to take it starts it (`typed`; the view filters).
-struct Filter<'a> {
-    typed: &'a mut Option<char>,
+/// The steps' filter as the part having the keys: the app's search field (its press, drag,
+/// editing keys, ⌘A / ⌘X / ⌘Z, × emptying it) while it's `typing`; before that, a character
+/// typed with nothing else to take it starts it. Esc empties it and gives the keys back, ↵
+/// gives them back, the arrows and the pages give them back to the steps. What it changed
+/// is said back (`edited`; the view filters).
+struct FilterPart<'a> {
+    field: &'a mut SearchField,
+    typing: &'a mut bool,
+    edited: &'a mut bool,
 }
 
-impl Control for Filter<'_> {
+impl FilterPart<'_> {
+    /// Runs `edit` on the field, noting whether its text changed.
+    fn editing(&mut self, edit: impl FnOnce(&mut SearchField) -> bool) -> bool {
+        let used = edit(&mut *self.field);
+        *self.edited |= self.field.take_edited();
+        used
+    }
+}
+
+impl Control for FilterPart<'_> {
+    /// Where it was drawn as a field (none while it's an icon alone).
+    fn area(&self) -> Option<Rect> {
+        Control::area(&*self.field)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let press = Control::press(self.field, p, clicks);
+        // Its × emptied it and let the keys go; elsewhere its caret is put.
+        let cleared = self.field.take_cleared();
+        *self.typing = !cleared;
+        *self.edited |= cleared | self.field.take_edited();
+        press
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(self.field, p)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        Control::hover(self.field, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(&*self.field, p)
+    }
+
     fn focusable(&self) -> bool {
         true
     }
@@ -1033,13 +1044,52 @@ impl Control for Filter<'_> {
         false
     }
 
-    /// Any but a control character or a space.
+    /// Tab while it's typed into stays its own (nothing else to go to).
+    fn keeps_tab(&self) -> bool {
+        *self.typing
+    }
+
+    /// Any but a control character or a space starts it.
     fn char_key(&mut self, key: char) -> bool {
         if key.is_control() || key == ' ' {
             return false;
         }
-        *self.typed = Some(key);
+        *self.typing = true;
+        let mut buf = [0; 4];
+        let typed: &str = key.encode_utf8(&mut buf);
+        self.editing(|f| Control::text(f, typed))
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        if !*self.typing {
+            return false;
+        }
+        match key {
+            ViewerKey::Escape => {
+                *self.edited |= !SearchField::text(self.field).is_empty();
+                self.field.set_text("");
+                *self.typing = false;
+            }
+            ViewerKey::Enter => *self.typing = false,
+            ViewerKey::Up | ViewerKey::Down | ViewerKey::PageUp | ViewerKey::PageDown => {
+                *self.typing = false;
+                return false;
+            }
+            _ => return self.editing(|f| Control::key(f, key, reach)),
+        }
         true
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        *self.typing && self.editing(|f| Control::text(f, typed))
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&*self.field).filter(|_| *self.typing)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        *self.typing && self.editing(|f| Control::command(f, id))
     }
 }
 

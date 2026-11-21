@@ -123,7 +123,7 @@ impl Workbench {
                             self.open_panel_menu(
                                 tool,
                                 entries,
-                                Point::new(rect.min_x(), rect.max_y() + 4.0 * self.scale),
+                                crate::workbench::viewers::menu_under(rect, self.scale),
                             );
                         }
                     }
@@ -244,7 +244,14 @@ impl Workbench {
             if v.viewer_visible() && v.bounds.contains(p) {
                 self.focus = Focus::Editor;
                 let mods = ui_workbench::PressMods { shift, primary, alt };
-                return match v.viewer.pointer_down(p, clicks, mods) {
+                let action = v.viewer.pointer_down(p, clicks, mods);
+                // A menu of a button of its own: opened under it, nothing else done but
+                // the press's release, which the view still gets.
+                if self.open_asked_view_menu() {
+                    self.viewer_drag = true;
+                    return MouseResult::Redraw;
+                }
+                return match action {
                     Some(action) => self.viewer_action(text, action),
                     // No action: a drag may start (e.g. panning the canvas).
                     None => {

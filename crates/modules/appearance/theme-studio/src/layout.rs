@@ -6,6 +6,9 @@
 use super::*;
 use ui_components::form::{self, NavItem};
 
+/// The dot before "N changes" (logical pixels).
+const CHANGED_DOT: f32 = 8.0;
+
 /// Below this width (logical pixels) the preview hides behind a button.
 pub(crate) const PREVIEW_MIN: f32 = 760.0;
 /// Below this width the categories become tabs.
@@ -187,9 +190,8 @@ impl Studio {
             self.paint_scope(layer, ctx.text, ds, footer, pad, buttons);
         }
 
-        // Over the panel: the gallery of effects, an effect's menu.
+        // Over the panel: the gallery of effects.
         self.paint_gallery(ctx.scene, ctx.text, ctx.icons, &ds, draft);
-        self.paint_menu(ctx.scene, ctx.text, ctx.icons, &ds);
         // Color picker, above everything.
         self.picker.set_viewport(b, ctx.scale);
         self.picker.paint(ctx.text, ctx.scene, ctx.icons, p);
@@ -250,33 +252,15 @@ impl Studio {
         let mut right = h.max_x() - pad;
         if frame.preview.is_none() {
             let label = t("studio.preview_button");
-            let w = ds::primary_width(text, &ds, &[&label]).min(px(140.0));
-            let r = Rect::new(right - w, (mid - px(16.0)).round(), w, px(32.0));
-            if self.preview_open {
-                layer.quad(
-                    Quad::filled(r, p.accent.with_alpha(0.12))
-                        .rounded(px(radius::MD))
-                        .bordered(ds.line(), p.accent.with_alpha(0.6)),
-                );
-                let shaped = text.shape_line(&label, &ds::button_font(&ds));
-                draw_text(
-                    layer,
-                    &shaped,
-                    (r.min_x() + (w - shaped.width) / 2.0).round(),
-                    ds::optical_baseline(r.min_y(), r.size.height, &ds::button_font(&ds)),
-                    p.accent,
-                );
-            } else {
-                ds::secondary_button(
-                    layer,
-                    text,
-                    &ds,
-                    r,
-                    &label,
-                    true,
-                    self.hover == Some(Hit::PreviewOpen),
-                );
-            }
+            let w = ds::choice_width(text, &ds, &label);
+            let spec = ds::ChoiceSpec {
+                x: right - w,
+                mid,
+                label: &label,
+                selected: self.preview_open,
+                hovered: self.hover == Some(Hit::PreviewOpen),
+            };
+            let r = ds::choice(layer, text, &ds, spec);
             self.hits.push((r, Hit::PreviewOpen));
             right = r.min_x() - px(16.0);
         }
@@ -295,11 +279,8 @@ impl Studio {
             if n == 0 { p.text_muted } else { p.text },
         );
         if n > 0 {
-            let d = px(8.0);
-            layer.quad(
-                Quad::filled(Rect::new(lx - px(8.0) - d, (mid - d / 2.0).round(), d, d), p.accent)
-                    .rounded(d / 2.0),
-            );
+            let center = Point::new(lx - px(8.0 + CHANGED_DOT / 2.0), mid);
+            ds::dot(layer, &ds, center, CHANGED_DOT, p.accent);
         }
         right = lx - px(32.0);
         // The search: in the middle (as wide as there's room for, at most 360), or on its
@@ -317,34 +298,9 @@ impl Studio {
             }
         };
         if let Some(r) = place {
-            let mid = r.min_y() + r.size.height / 2.0;
-            let inner = ds::search_field(layer, icons, &ds, r, self.editing_query());
             self.hits.push((r, Hit::Search));
-            if !self.query.text().is_empty() {
-                let c = ds::clear_button(
-                    layer,
-                    icons,
-                    &ds,
-                    r.max_x() - px(18.0),
-                    mid,
-                    self.hover == Some(Hit::ClearSearch),
-                );
-                self.hits.push((c, Hit::ClearSearch));
-            }
-            let field = Rect::new(
-                inner.min_x(),
-                r.min_y(),
-                (inner.size.width - px(16.0)).max(0.0),
-                r.size.height,
-            );
-            self.query.paint(
-                scene.push_layer(Some(field)),
-                text,
-                field,
-                self.editing_query(),
-                &t("studio.search"),
-                &field_style(&ds, 0.0),
-            );
+            let focused = self.editing_query();
+            self.query.paint(layer, text, icons, &ds, (r, focused), &t("studio.search"));
         }
     }
 

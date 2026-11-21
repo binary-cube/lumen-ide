@@ -9,7 +9,7 @@ use text_layout::{Font, TextSystem};
 use ui_components::ds::{self, Ctx};
 use ui_components::tree::{self as tree_row, TreeList};
 use ui_components::{Palette, ViewerPaint};
-use ui_kit::{TextInputStyle, centered_baseline, draw_icon, draw_text};
+use ui_kit::{centered_baseline, draw_icon, draw_text};
 
 use super::{
     DatabaseWindow, FIELD_HEIGHT, FIELD_TOP, Hover, INDENT, LIST_TOP, PADDING, ROW_HEIGHT,
@@ -137,7 +137,8 @@ impl DatabaseWindow {
         self.bar.paint(ctx.scene, p, ctx.scale, self.list, content, self.scroll);
     }
 
-    /// The filter: a pill with the magnifier, its text or placeholder, × with text.
+    /// The filter: the app's search field (the magnifier, its text or placeholder, × with
+    /// text, the caret while it has the keys).
     fn paint_field(
         &mut self,
         layer: &mut Layer,
@@ -146,73 +147,13 @@ impl DatabaseWindow {
         ds: &Ctx<'_>,
         focused: bool,
     ) {
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
         let f = self.field;
         if f.size.width <= 0.0 {
             return;
         }
-        let typing = self.typing && focused;
-        let border = if typing { p.search_field_border_focused } else { p.search_field_border };
-        layer.quad(
-            Quad::filled(f, p.search_field_background)
-                .rounded(f.size.height / 2.0)
-                .bordered(ds.line(), border),
-        );
-        let icon = px(15.0);
-        let icon_x = f.min_x() + px(13.0);
-        if let Some(id) = icons.id("search") {
-            let r =
-                Rect::new(icon_x, (f.min_y() + (f.size.height - icon) / 2.0).round(), icon, icon);
-            draw_icon(layer, icons, id, r, p.text_muted);
-        }
-        let mut right = f.max_x() - px(14.0);
-        self.clear = None;
-        if !self.filter.text().is_empty() {
-            let s = px(18.0);
-            let r = Rect::new(
-                f.max_x() - px(8.0) - s,
-                (f.min_y() + (f.size.height - s) / 2.0).round(),
-                s,
-                s,
-            );
-            let hovered = self.hover == Some(Hover::Clear);
-            layer.quad(
-                Quad::filled(r, p.text.with_alpha(if hovered { 0.12 } else { 0.06 }))
-                    .rounded(s / 2.0),
-            );
-            if let Some(id) = icons.id("x") {
-                let x = px(9.0);
-                let ir = Rect::new(
-                    (r.min_x() + (s - x) / 2.0).round(),
-                    (r.min_y() + (s - x) / 2.0).round(),
-                    x,
-                    x,
-                );
-                draw_icon(layer, icons, id, ir, p.text_muted);
-            }
-            self.clear = Some(r);
-            right = r.min_x() - px(6.0);
-        }
-        let text_x = icon_x + icon + px(9.0);
-        let style = TextInputStyle {
-            font: Font::new(p.ui_font.clone(), px(p.ui_font_size)),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: p.text,
-            placeholder: p.text_muted,
-            selection: p.selection,
-            caret: p.caret,
-            radius: 0.0,
-            border_width: 0.0,
-            padding: 0.0,
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        let field = Rect::new(text_x, f.min_y(), (right - text_x).max(0.0), f.size.height);
+        let typing = self.typing() && focused;
         let placeholder = i18n::t("datasources.filter");
-        self.filter.paint(layer, text, field, typing, &placeholder, &style);
+        self.filter.paint(layer, text, icons, ds, (f, typing), &placeholder);
     }
 
     /// No rows: the lists being read, or no source yet (how to add one).

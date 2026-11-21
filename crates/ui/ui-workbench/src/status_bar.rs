@@ -354,11 +354,12 @@ impl StatusBar {
             let w = text.shape_line(&item.text, &font).width;
             item.reserve.map_or(w, |r| w.max(text.shape_line(r, &font).width))
         };
-        let (bar_w, bar_gap, bar_h) = (px(5.0), px(3.0), px(13.0));
+        let ds = crate::ds::Ctx::new(palette, s);
+        let meter = crate::ds::Meter::default();
+        let bar_h = meter.bar_height(&ds);
         let item_width = |item: &StatusItem, text: &mut TextSystem| {
             if !item.meter.is_empty() {
-                let n = item.meter.len() as f32;
-                return n * bar_w + (n - 1.0) * bar_gap;
+                return meter.width(&ds, item.meter.len());
             }
             // An icon alone (the padlock): no gap after it.
             let icon = match (item.icon.is_some(), item.text.is_empty()) {
@@ -391,15 +392,11 @@ impl StatusBar {
             }
             if !item.meter.is_empty() {
                 let bottom = (bounds.min_y() + (bounds.size.height + bar_h) / 2.0).round();
-                for (i, (_, color)) in item.meter.iter().enumerate() {
-                    let left = x + i as f32 * (bar_w + bar_gap);
-                    let track = Rect::new(left, bottom - bar_h, bar_w, bar_h);
-                    layer.quad(Quad::filled(track, color.with_alpha(0.16)).rounded(px(1.5)));
-                    let h = meter_shown.get(i).copied().unwrap_or(0.0);
-                    let h = (h * bar_h).max(px(2.0)).round();
-                    let bar = Rect::new(left, bottom - h, bar_w, h);
-                    layer.quad(Quad::filled(bar, *color).rounded(px(1.5)));
-                }
+                let levels =
+                    item.meter.iter().enumerate().map(|(i, (_, color))| {
+                        (meter_shown.get(i).copied().unwrap_or(0.0), *color)
+                    });
+                meter.paint(layer, &ds, (x, bottom), levels);
                 return x + item_width(item, text);
             }
             if let Some((icon, color)) = item.icon {
@@ -495,7 +492,6 @@ impl StatusBar {
             break;
         }
         let mut x = bounds.max_x() - padding;
-        let line = px(1.0).max(1.0);
         let line_h = px(14.0);
         let line_top = (bounds.min_y() + (bounds.size.height - line_h) / 2.0).round();
         let mut separators = Vec::new();
@@ -505,11 +501,11 @@ impl StatusBar {
             x -= gap;
             // A group's separator, in the middle of the gap before it (not before the first).
             if item.group && k > 0 {
-                separators.push(Rect::new((x + gap / 2.0).round(), line_top, line, line_h));
+                separators.push((x + gap / 2.0).round());
             }
         }
-        for rect in separators {
-            layer.quad(Quad::filled(rect, palette.border));
+        for sx in separators {
+            crate::ds::divider_vertical(layer, &ds, sx, line_top, line_top + line_h);
         }
     }
 }

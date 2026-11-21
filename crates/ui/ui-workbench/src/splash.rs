@@ -32,6 +32,9 @@ impl Splash {
     /// illustration for them (cropped to the card's aspect ratio, corners rounded in pixels).
     pub const WIDTH: f32 = 600.0;
     pub const RADIUS: f32 = 12.0;
+    /// The bar's piece: its share of the track and its passes a second of `phase`.
+    const BAR_SHARE: f32 = 0.22;
+    const BAR_PACE: f32 = 0.7;
     /// The card's aspect ratio (width / height).
     pub const ASPECT: f32 = 1.45;
 }
@@ -86,21 +89,16 @@ impl Splash {
             card.size.width - 2.0 * inset,
             track_h,
         );
-        layer.quad(Quad::filled(track, fade(Rgba::WHITE.with_alpha(0.08))).rounded(track_h / 2.0));
-        let segment = (track.size.width * 0.22).round();
-        let t = (phase * 0.7).fract();
-        let eased = t * t * (3.0 - 2.0 * t);
-        let sx = track.min_x() - segment + eased * (track.size.width + segment);
-        let visible = Rect::new(
-            sx.max(track.min_x()),
-            track.min_y(),
-            (sx + segment).min(track.max_x()) - sx.max(track.min_x()),
-            track_h,
-        );
-        if visible.size.width > 0.0 {
-            let glow = palette.accent.mix(Rgba::rgb(0x22d3ee), 0.35);
-            layer.quad(Quad::filled(visible, fade(glow)).rounded(track_h / 2.0));
-        }
+        // The piece glides across once every 1/0.7 s, a share of the track wide.
+        let ds = crate::ds::Ctx::new(palette, scale).with_opacity(opacity);
+        let glow = palette.accent.mix(Rgba::rgb(0x22d3ee), 0.35);
+        crate::ds::ProgressBar::unknown()
+            .on_dark()
+            .color(glow)
+            .min_fill(0.0)
+            .glide(Self::BAR_SHARE)
+            .sweep_at((phase * Self::BAR_PACE).fract())
+            .paint_bar(layer, &ds, track);
     }
 
     /// The shared card (splash and "About"): the shadow, the illustration, the name and the

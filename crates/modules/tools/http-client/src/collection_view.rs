@@ -116,8 +116,8 @@ impl Control for TreeSide<'_> {
     }
 
     fn command(&mut self, id: &str) -> bool {
-        matches!(id, "select_all" | "select-all")
-            && self.tree.as_deref_mut().is_some_and(RequestTree::select_all)
+        let id = if id == "select-all" { "select_all" } else { id };
+        self.tree.as_deref_mut().is_some_and(|t| t.edit_command(id))
     }
 
     fn tooltip(&self, p: Point) -> Option<ui_components::tooltip::Tip> {

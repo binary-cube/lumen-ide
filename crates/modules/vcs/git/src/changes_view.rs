@@ -405,10 +405,7 @@ impl Viewer for ChangesList {
             ds::toolbar_button(layer, ctx.text, ctx.icons, &ds, button, spec);
             self.commit = button;
         }
-        layer.quad(Quad::filled(
-            Rect::new(b.min_x(), b.min_y() + header_h, b.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, &ds, b.min_x(), b.max_x(), b.min_y() + header_h);
         let list =
             Rect::new(b.min_x(), b.min_y() + header_h, b.size.width, b.size.height - header_h);
         if self.files.is_empty() {

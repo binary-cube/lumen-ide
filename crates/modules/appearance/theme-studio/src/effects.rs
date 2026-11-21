@@ -122,6 +122,12 @@ pub(crate) fn kind_icon(kind: LayerKind) -> &'static str {
     }
 }
 
+/// What an effect costs, as a tag: its height and the room on each side of its label
+/// (logical pixels), and its fill's alpha of its tone.
+const COST_H: f32 = 22.0;
+const COST_PAD: f32 = 9.0;
+const COST_FILL: f32 = 0.14;
+
 /// What an effect costs, said.
 fn cost_label(cost: Cost) -> String {
     t(match cost {
@@ -138,6 +144,9 @@ pub(crate) enum MenuItem {
     Remove,
 }
 
+/// The prefix of an effect's menu rows' ids: `effect:<row>:<effect's index>`.
+const MENU_ID: &str = "effect:";
+
 impl MenuItem {
     const ALL: [Self; 3] = [Self::Duplicate, Self::Reset, Self::Remove];
 
@@ -147,6 +156,41 @@ impl MenuItem {
             Self::Reset => "studio.deco_reset",
             Self::Remove => "studio.deco_remove",
         })
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Duplicate => "copy",
+            Self::Reset => "rotate-ccw",
+            Self::Remove => "trash",
+        }
+    }
+
+    /// Its name in its row's id.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Duplicate => "duplicate",
+            Self::Reset => "reset",
+            Self::Remove => "remove",
+        }
+    }
+
+    /// Effect `i`'s menu, as the app shows menus: duplicate, reset, then remove apart (in
+    /// the danger color).
+    pub(crate) fn entries(i: usize) -> Vec<ViewMenuEntry> {
+        let row = |item: Self| {
+            ViewMenuEntry::item(format!("{MENU_ID}{}:{i}", item.id()), item.label())
+                .with_icon(item.icon())
+                .danger_if(item == Self::Remove)
+        };
+        vec![row(Self::Duplicate), row(Self::Reset), ViewMenuEntry::Separator, row(Self::Remove)]
+    }
+
+    /// The row and the effect a menu row's `id` names (`None`: not an effect's row).
+    pub(crate) fn parse(id: &str) -> Option<(usize, Self)> {
+        let (item, i) = id.strip_prefix(MENU_ID)?.split_once(':')?;
+        let item = Self::ALL.into_iter().find(|m| m.id() == item)?;
+        Some((i.parse().ok()?, item))
     }
 }
 
@@ -518,7 +562,6 @@ impl Studio {
 
     /// An effect's menu chose `item`.
     pub(crate) fn menu_item(&mut self, i: usize, item: MenuItem) {
-        self.menu_for = None;
         match item {
             MenuItem::Remove => {
                 self.remove_layer(i);
@@ -562,78 +605,6 @@ impl Studio {
         layer.enabled = !layer.enabled;
         draft.decorations.merge = Merge::Replace;
         self.preview();
-    }
-
-    /// The open menu of an effect, over everything in the panel.
-    pub(crate) fn paint_menu(
-        &mut self,
-        scene: &mut Scene,
-        text: &mut TextSystem,
-        icons: &icons::Icons,
-        ds: &Ctx<'_>,
-    ) {
-        let Some(i) = self.menu_for else { return };
-        let Some(anchor) = self.hits.iter().find(|(_, h)| *h == Hit::Menu(i)).map(|(r, _)| *r)
-        else {
-            return;
-        };
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-0.5);
-        let row_h = px(32.0);
-        let labels: Vec<(MenuItem, String)> =
-            MenuItem::ALL.iter().map(|m| (*m, m.label())).collect();
-        let w = labels.iter().map(|(_, l)| text.shape_line(l, &font).width).fold(0.0, f32::max)
-            + px(56.0);
-        let h = row_h * labels.len() as f32 + px(8.0);
-        let mut r = Rect::new(anchor.max_x() - w, anchor.max_y() + px(4.0), w, h);
-        if r.max_y() > self.bounds.max_y() - px(8.0) {
-            r = Rect::new(r.min_x(), anchor.min_y() - px(4.0) - h, w, h);
-        }
-        let layer = scene.push_layer(Some(self.bounds));
-        ds::surface(layer, ds, r, ds::Elevation::Medium, radius::MD);
-        for (n, (item, label)) in labels.iter().enumerate() {
-            let row = Rect::new(
-                r.min_x() + px(4.0),
-                r.min_y() + px(4.0) + n as f32 * row_h,
-                w - px(8.0),
-                row_h,
-            );
-            let hovered = self.hover == Some(Hit::MenuItem(i, *item));
-            if hovered {
-                layer.quad(Quad::filled(row, p.text.with_alpha(0.07)).rounded(px(radius::SM)));
-            }
-            let color = if *item == MenuItem::Remove { p.danger } else { p.text };
-            let icon = match item {
-                MenuItem::Duplicate => "copy",
-                MenuItem::Reset => "rotate-ccw",
-                MenuItem::Remove => "trash",
-            };
-            if let Some(id) = icons.id(icon) {
-                let side = px(14.0);
-                ui_kit::draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(
-                        row.min_x() + px(10.0),
-                        (row.min_y() + (row_h - side) / 2.0).round(),
-                        side,
-                        side,
-                    ),
-                    color,
-                );
-            }
-            let shaped = text.shape_line(label, &font);
-            draw_text(
-                layer,
-                &shaped,
-                row.min_x() + px(34.0),
-                ds::optical_baseline(row.min_y(), row_h, &font),
-                color,
-            );
-            self.hits.push((row, Hit::MenuItem(i, *item)));
-        }
     }
 
     /// "Performance and accessibility": the decorations' own settings (for every theme,
@@ -719,24 +690,16 @@ impl Studio {
             ds::optical_baseline(y + px(31.0), px(18.0), &small),
             p.text_muted,
         );
-        let tag = pen.text.shape_line(&t(key), &ds.ui_font(-1.5).with_weight(Font::SEMIBOLD));
-        let tw = tag.width + px(18.0);
-        let th = px(22.0);
-        let color = tone.color(p);
-        let r = Rect::new(
-            col.x0 + col.w - px(form::ROW_PAD) - px(form::RESET_W) - px(8.0) - tw,
-            (y + (h - th) / 2.0).round(),
-            tw,
-            th,
-        );
-        pen.layer.quad(Quad::filled(r, color.with_alpha(0.14)).rounded(th / 2.0));
-        draw_text(
-            pen.layer,
-            &tag,
-            r.min_x() + px(9.0),
-            ds::optical_baseline(r.min_y(), th, &ds.ui_font(-1.5).with_weight(Font::SEMIBOLD)),
-            color,
-        );
+        let label = t(key);
+        let font = ds.ui_font(-1.5).with_weight(Font::SEMIBOLD);
+        let right = col.x0 + col.w - px(form::ROW_PAD) - px(form::RESET_W) - px(8.0);
+        ds::Badge::new(&label)
+            .color(tone.color(p))
+            .fill_alpha(COST_FILL)
+            .size(ds::BadgeSize::Custom(COST_H))
+            .pad(COST_PAD)
+            .font(&font)
+            .paint_right(pen.layer, pen.text, &ds, right, y + h / 2.0);
         y + h
     }
 

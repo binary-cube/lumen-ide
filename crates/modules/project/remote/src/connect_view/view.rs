@@ -388,10 +388,7 @@ impl Viewer for ConnectView {
             &ds,
             ds::StepperSpec { x: x0, width, mid: y + px(12.0), labels: &labels, current },
         );
-        layer.quad(Quad::filled(
-            Rect::new(b.min_x(), y + px(38.0), b.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(layer, &ds, b.min_x(), b.max_x(), y + px(38.0));
         y += px(20.0);
         y += px(36.0);
         let footer_h = px(60.0);

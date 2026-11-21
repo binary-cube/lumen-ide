@@ -1,7 +1,7 @@
 //! The sources' window as a viewer: its modal frame, its keys, the mouse.
 
 use super::*;
-use fields::FieldPart;
+use fields::{FieldPart, FilterPart};
 use ui_components::control::Shown;
 
 impl Viewer for SourcesView {
@@ -229,8 +229,14 @@ impl Viewer for SourcesView {
         }
         let hover = self.hit(p);
         let changed = hover != self.hover;
+        // The filter's × lit under the mouse.
+        let on_filter = matches!(hover, Some(Hit::Field(Field::Filter)));
+        let clear = self
+            .editor
+            .as_mut()
+            .is_some_and(|e| Control::hover(&mut e.filter, on_filter.then_some(p)));
         self.hover = hover;
-        changed | parts
+        changed | parts | clear
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
@@ -239,6 +245,9 @@ impl Viewer for SourcesView {
             return Some(cursor);
         }
         match self.hit(p)? {
+            Hit::Field(Field::Filter) => {
+                self.editor.as_ref().and_then(|e| Control::cursor(&e.filter, p))
+            }
             Hit::Field(_) => Some(ViewerCursor::Text),
             _ => Some(ViewerCursor::Pointer),
         }
@@ -378,8 +387,11 @@ impl SourcesView {
                 c.press(&mut fields, p, 1)
             });
         }
-        // A field took it (its caret placed, the focus on it).
+        // A field took it (its caret placed, the focus on it); the filter's × emptied it.
         if pressed.is_some_and(|(part, _)| part >= FIELDS) {
+            if self.editor.as_mut().is_some_and(|e| e.filter.take_cleared()) {
+                self.edited(&Field::Filter);
+            }
             return self.action.take();
         }
         let hit = self.hit(p);
@@ -549,22 +561,36 @@ impl SourcesView {
             return f(controls, &mut parts);
         }
         let hits = &self.hits;
-        let mut inputs: Vec<FieldPart<'_, &mut ui_kit::TextInput>> = self
-            .editor
-            .as_mut()
-            .map(Editor::inputs_mut)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(field, input)| FieldPart { field, input, hits })
-            .collect();
+        let (mut filter, plain) = match self.editor.as_mut() {
+            Some(editor) => {
+                let (search, plain) = editor.inputs_mut();
+                (Some(FilterPart { search, hits }), plain)
+            }
+            None => (None, Vec::new()),
+        };
+        let mut inputs: Vec<FieldPart<'_, &mut ui_kit::TextInput>> =
+            plain.into_iter().map(|(field, input)| FieldPart { field, input, hits }).collect();
+        // The fields' order (the filter first, while there's an editor): their places from
+        // `FIELDS` on.
+        let lead = usize::from(filter.is_some());
+        let field_at = |i: usize, inputs: &[FieldPart<'_, &mut ui_kit::TextInput>]| match i {
+            0 if lead == 1 => Some(Field::Filter),
+            i => inputs.get(i.checked_sub(lead)?).map(|part| part.field.clone()),
+        };
         let at = self
             .focus
             .as_ref()
-            .and_then(|f| inputs.iter().position(|part| part.field == *f))
+            .and_then(|f| match f {
+                Field::Filter => filter.as_ref().map(|_| 0),
+                f => inputs.iter().position(|part| part.field == *f).map(|i| i + lead),
+            })
             .map(|i| FIELDS + i);
         let (out, focused) = {
-            let mut parts: Vec<&mut dyn Control> = Vec::with_capacity(FIELDS + inputs.len());
+            let mut parts: Vec<&mut dyn Control> = Vec::with_capacity(FIELDS + lead + inputs.len());
             parts.extend([&mut self.picker as &mut dyn Control, &mut list, &mut form]);
+            if let Some(filter) = &mut filter {
+                parts.push(filter);
+            }
             parts.extend(inputs.iter_mut().map(|part| part as &mut dyn Control));
             controls.focus(&mut parts, at);
             let out = f(controls, &mut parts);
@@ -573,9 +599,9 @@ impl SourcesView {
         // A field the parts' focus went to has the keys; none: none has them. The open list
         // focused leaves the field's (the keys go back to it once the list closes).
         if focused != at {
-            match focused.map(|i| i.checked_sub(FIELDS).and_then(|i| inputs.get(i))) {
+            match focused.map(|i| i.checked_sub(FIELDS).and_then(|i| field_at(i, &inputs))) {
                 None => self.focus = None,
-                Some(Some(part)) => self.focus = Some(part.field.clone()),
+                Some(Some(field)) => self.focus = Some(field),
                 Some(None) => {}
             }
         }

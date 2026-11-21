@@ -27,7 +27,7 @@ use kernel::{Memo, Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_components::diagram::{self, Dir, Edge, EdgeStyle, Flow, Gaps, Head, Release, Viewport};
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, radius};
 use ui_components::{Level, Palette, Tip, TreeTable};
 use ui_kit::{draw_icon, draw_text};
 
@@ -41,6 +41,14 @@ pub const LINE_H: f32 = 19.0;
 pub const PAD: f32 = 8.0;
 /// The heat stripe across a card's top.
 pub const STRIPE: f32 = 3.0;
+/// The pills on the cards and the edges: the room on each side of their label, a card's
+/// pill's height and fill (its color's alpha), an edge's outline (its color's alpha).
+const PILL_PAD: f32 = 5.0;
+const CARD_PILL_H: f32 = 15.0;
+const CARD_PILL_FILL: f32 = 0.2;
+const EDGE_PILL_BORDER: f32 = 0.35;
+/// The rule under a card's header: its alpha of the cards' border.
+const CARD_RULE: f32 = 0.7;
 /// A folded subtree's card.
 pub const FOLD_W: f32 = 150.0;
 pub const FOLD_H: f32 = 30.0;
@@ -674,28 +682,20 @@ impl GraphView {
                 if at.intersect(&view_rect).is_none() {
                     continue;
                 }
-                let shaped = text.shape_line(label, &label_font);
                 let r = self.view.rect_to_screen(at);
-                let w = shaped.width + 10.0 * k;
-                let pill = Rect::new(
-                    (r.min_x() + (r.size.width - w) / 2.0).round(),
-                    r.min_y(),
-                    w.round(),
-                    r.size.height,
-                );
                 let color = if info.hot { p.accent } else { p.text_muted };
-                edges_layer.quad(
-                    Quad::filled(pill, p.editor_background)
-                        .rounded(pill.size.height / 2.0)
-                        .bordered(ds.line(), color.with_alpha(0.35)),
-                );
-                draw_text(
-                    edges_layer,
-                    &shaped,
-                    (pill.min_x() + 5.0 * k).round(),
-                    ds::optical_baseline(pill.min_y(), pill.size.height, &label_font),
-                    color,
-                );
+                // Its sizes in the diagram's units, zoomed with it.
+                let pill = ds::Badge::new(label)
+                    .color(color)
+                    .fill(p.editor_background)
+                    .border(color.with_alpha(EDGE_PILL_BORDER))
+                    .font(&label_font)
+                    .size(ds::BadgeSize::Custom(at.size.height))
+                    .pad(PILL_PAD)
+                    .zoom(k / ds.scale);
+                let w = pill.width(text, &ds);
+                let left = r.min_x() + (r.size.width - w) / 2.0;
+                pill.paint(edges_layer, text, &ds, left, r.min_y() + r.size.height / 2.0);
             }
         }
         // The cards in view.
@@ -760,7 +760,6 @@ impl GraphView {
         area: Rect,
         can_center: bool,
     ) {
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let h = px(30.0);
         let font = ds.ui_font(-1.5);
@@ -779,7 +778,6 @@ impl GraphView {
         }
         ds::surface(layer, ds, r, ds::Elevation::Low, px(radius::MD));
         let mut x = r.min_x() + px(3.0);
-        let mid = r.min_y() + h / 2.0;
         let flow_icon = match self.flow {
             Flow::Down => "arrow-down",
             Flow::Right => "arrow-right",
@@ -810,37 +808,15 @@ impl GraphView {
             let bw = if icon.is_none() { pct_w } else { b };
             let br = Rect::new(x, r.min_y() + px(2.0), bw, h - px(4.0));
             let enabled = hit != GraphHit::Center || can_center;
-            if self.hover == Some(hit) && enabled {
-                layer.quad(Quad::filled(br, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-            }
-            match icon.and_then(|i| icons.id(i)) {
-                Some(id) => {
-                    let s = px(14.0);
-                    let color = if enabled { p.text } else { p.text_muted.with_alpha(0.5) };
-                    draw_icon(
-                        layer,
-                        icons,
-                        id,
-                        Rect::new(
-                            (br.min_x() + (bw - s) / 2.0).round(),
-                            (mid - s / 2.0).round(),
-                            s,
-                            s,
-                        ),
-                        color,
-                    );
-                }
-                None => {
-                    let shaped = text.shape_line(&pct, &font);
-                    draw_text(
-                        layer,
-                        &shaped,
-                        (br.min_x() + (bw - shaped.width) / 2.0).round(),
-                        ds::optical_baseline(br.min_y(), br.size.height, &font),
-                        p.text_muted,
-                    );
-                }
-            }
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .enabled(enabled)
+                .hovered(self.hover == Some(hit));
+            // The zoom's figure (a reset) reads as a label, muted; the rest are icons.
+            let spec = match icon {
+                Some(icon) => spec.icon(icon),
+                None => spec.label(&pct).tone(Tone::Neutral),
+            };
+            ds::button(layer, text, icons, ds, br, spec);
             self.controls.push((br, hit, tip));
             x += bw;
         }
@@ -1169,10 +1145,12 @@ fn paint_card(
         }
     }
     let divider_y = (r.min_y() + HEADER_H * k).round();
-    layer.quad(Quad::filled(
-        Rect::new(r.min_x() + bw, divider_y, r.size.width - 2.0 * bw, ds.line()),
-        fade(p.card_border.with_alpha(0.7)),
-    ));
+    ds::divider_in(
+        layer,
+        &ds.with_opacity(opacity),
+        (r.min_x() + bw, r.max_x() - bw, divider_y),
+        p.card_border.with_alpha(CARD_RULE),
+    );
     if k < 0.42 * ds.px(1.0) {
         return;
     }
@@ -1186,19 +1164,15 @@ fn paint_card(
         if let Some(piece) = right_piece {
             match piece {
                 Piece::Pill(label, color) => {
-                    let shaped = text.shape_line(&label, &fonts.pill);
-                    let ph = (15.0 * k).round();
-                    let w = shaped.width + 10.0 * k;
-                    let pr =
-                        Rect::new((end - w).round(), (y + (lh - ph) / 2.0).round(), w.round(), ph);
-                    layer.quad(Quad::filled(pr, fade(color.with_alpha(0.2))).rounded(ph / 2.0));
-                    draw_text(
-                        layer,
-                        &shaped,
-                        (pr.min_x() + 5.0 * k).round(),
-                        ds::optical_baseline(pr.min_y(), ph, &fonts.pill),
-                        fade(readable_on(color, p)),
-                    );
+                    // Zoomed with the card (its `k` over the screen's scale), dimmed with it.
+                    let pr = ds::Badge::new(&label)
+                        .color(readable_on(color, p))
+                        .fill(color.with_alpha(CARD_PILL_FILL))
+                        .font(&fonts.pill)
+                        .size(ds::BadgeSize::Custom(CARD_PILL_H))
+                        .pad(PILL_PAD)
+                        .zoom(k / ds.scale)
+                        .paint_right(layer, text, &ds.with_opacity(opacity), end, y + lh / 2.0);
                     end = pr.min_x() - 6.0 * k;
                 }
                 Piece::Text(label, color, _) => {

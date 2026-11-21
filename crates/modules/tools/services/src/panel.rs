@@ -12,16 +12,21 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use kernel::{EventBus, Point, ProjectId, Rect};
+use ui_components::control::{Control, Press};
+use ui_components::search_field::SearchField;
 use ui_components::{
     EdgeScrollbar, KeyReach, Orientation, PanelButton, PanelContext, PanelMemento, ProjectServices,
     ServiceId, ServiceProvider, ServiceState, ServiceTab, ServicesContext, Splitter, SplitterStyle,
     ToolPanel, ToolPanelAction, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey,
     ViewerPaint,
 };
-use ui_kit::{ListFilter, TextInput};
+use ui_kit::ListFilter;
 use workbench_model::ProjectView;
 
 use crate::tree::{self, Key, Row};
+
+/// The edit command choosing a whole field (it changes nothing filtered).
+const SELECT_ALL: &str = "select_all";
 
 /// The window's id (its button, its menu, its commands' view).
 pub const TOOL: &str = workbench_model::SERVICES_TOOL;
@@ -105,8 +110,12 @@ pub struct ServicesPanel {
     /// The contributors' generations the rows were made from (with the filter, the folds).
     rows_of: Option<Vec<u64>>,
     collapsed: HashSet<Key>,
-    pub(crate) filter: TextInput,
+    /// The filter (the app's search field: ×, ⌘A, a drag selecting), typed in while
+    /// `typing` (its caret only then, never while a view has the keys).
+    pub(crate) filter: SearchField,
     pub(crate) typing: bool,
+    /// A press in the filter holds the pointer: the moves select.
+    selecting: bool,
     pub(crate) selected: Option<Key>,
     pub(crate) hover: Option<Hover>,
     pub(crate) scroll: f32,
@@ -134,7 +143,6 @@ pub struct ServicesPanel {
     pub(crate) bounds: Rect,
     pub(crate) tree_area: Rect,
     pub(crate) field: Rect,
-    pub(crate) clear: Option<Rect>,
     pub(crate) list: Rect,
     pub(crate) tabs_bar: Rect,
     pub(crate) view_area: Rect,
@@ -170,8 +178,9 @@ impl ServicesPanel {
             rows: Vec::new(),
             rows_of: None,
             collapsed: HashSet::new(),
-            filter: TextInput::new(""),
+            filter: SearchField::new(),
             typing: false,
+            selecting: false,
             selected: None,
             hover: None,
             scroll: 0.0,
@@ -192,7 +201,6 @@ impl ServicesPanel {
             bounds: Rect::default(),
             tree_area: Rect::default(),
             field: Rect::default(),
-            clear: None,
             list: Rect::default(),
             tabs_bar: Rect::default(),
             view_area: Rect::default(),
@@ -602,11 +610,10 @@ impl ServicesPanel {
     }
 
     pub(crate) fn hit(&self, p: Point) -> Option<Hover> {
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            return Some(Hover::Clear);
-        }
         if self.field.contains(p) {
-            return Some(Hover::Field);
+            // Its × (with text) is the field's own.
+            let clear = Control::cursor(&self.filter, p) == Some(ViewerCursor::Pointer);
+            return Some(if clear { Hover::Clear } else { Hover::Field });
         }
         if let Some(hit) = self.tab_hit(p) {
             return Some(Hover::Tab(hit));
@@ -639,6 +646,18 @@ impl ServicesPanel {
             }
             other => Some(ToolPanelAction::View(other)),
         }
+    }
+
+    /// What the shown view answered a press, a key or a command with: a menu it asked for
+    /// under a button of its own goes to the app, shown under it as this panel's menu (the
+    /// row chosen comes back to the view, [`ToolPanel::menu_command`]), nothing else done;
+    /// else its action ([`Self::view_action`]).
+    fn view_answer(&mut self, action: Option<ViewerAction>) -> Option<ToolPanelAction> {
+        if let Some((anchor, entries)) = self.active_view().and_then(|v| v.take_menu()) {
+            self.menu_target = Some(MenuTarget::View);
+            return Some(ToolPanelAction::MenuUnder { anchor, entries });
+        }
+        self.view_action(action)
     }
 
     /// What a view's action does here (tests).
@@ -706,7 +725,7 @@ impl ToolPanel for ServicesPanel {
             self.in_view = true;
             if self.active_view().is_some_and(|v| v.command(id)) {
                 let action = self.active_view().and_then(|v| v.take_action());
-                self.action = self.view_action(action);
+                self.action = self.view_answer(action);
             }
         } else if let Some(PanelMemento(text)) = data.downcast_ref()
             && let Some(width) = text.strip_prefix("tree=").and_then(|w| w.parse::<f32>().ok())
@@ -819,7 +838,7 @@ impl ToolPanel for ServicesPanel {
             self.dragging_view = true;
             let action = self.active_view().and_then(|v| v.press(p, clicks));
             let action = action.or_else(|| self.active_view().and_then(|v| v.take_action()));
-            return self.view_action(action);
+            return self.view_answer(action);
         }
         self.in_view = false;
         if let Some(offset) = self.bar.press(p) {
@@ -827,14 +846,14 @@ impl ToolPanel for ServicesPanel {
             return None;
         }
         match self.hit(p) {
-            Some(Hover::Clear) => {
-                self.filter.set_text("");
-                self.filtered();
-                self.typing = false;
-            }
-            Some(Hover::Field) => {
+            // The field's press: × empties it (the keys stay in it), else the caret put and
+            // a selection begun.
+            Some(Hover::Clear | Hover::Field) => {
                 self.typing = true;
-                self.filter.press(p.x, clicks);
+                self.selecting = Control::press(&mut self.filter, p, clicks) == Press::Held;
+                if self.filter.take_cleared() {
+                    self.filtered();
+                }
             }
             Some(Hover::Tab(TabHit::Close(i))) => self.close_tab(i),
             Some(Hover::Tab(TabHit::Tab(i))) => self.show_tab(i),
@@ -871,17 +890,21 @@ impl ToolPanel for ServicesPanel {
             self.scroll = offset;
             return changed;
         }
-        if self.typing && self.field.contains(p) {
-            self.filter.extend_to(p.x);
-            return true;
+        if self.selecting {
+            return Control::drag(&mut self.filter, p);
         }
         false
     }
 
     fn release(&mut self) -> bool {
+        self.selecting = false;
         let split = self.splitter.end_drag();
-        let view = std::mem::take(&mut self.dragging_view)
-            && self.active_view().is_some_and(|v| v.release());
+        let held = std::mem::take(&mut self.dragging_view);
+        let view = held && self.active_view().is_some_and(|v| v.release());
+        // A menu its release asked for (a button decided on letting go): the app's to show.
+        if held && let Some(asked) = self.view_answer(None) {
+            self.action = Some(asked);
+        }
         split | view | self.bar.release()
     }
 
@@ -891,7 +914,9 @@ impl ToolPanel for ServicesPanel {
         let bar = self.bar.hover(p);
         let view = self.view_area.contains(p) && self.active_view().is_some_and(|v| v.hover(p));
         let hover = if self.view_area.contains(p) { None } else { self.hit(p) };
-        let changed = hover != self.hover;
+        // The filter's × lit under the mouse.
+        let clear = Control::hover(&mut self.filter, Some(p));
+        let changed = clear || hover != self.hover;
         self.hover = hover;
         changed || bar || split || view
     }
@@ -908,7 +933,10 @@ impl ToolPanel for ServicesPanel {
             let id = self.active_tab()?;
             return self.views.get(&id)?.cursor_at(p);
         }
-        (self.hit(p) == Some(Hover::Field)).then_some(ViewerCursor::Text)
+        match self.hit(p)? {
+            Hover::Field | Hover::Clear => Control::cursor(&self.filter, p),
+            _ => None,
+        }
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
@@ -949,8 +977,8 @@ impl ToolPanel for ServicesPanel {
         if self.in_view {
             return self.active_view().is_some_and(|v| v.text_input(text));
         }
-        let text: String = text.chars().filter(|c| !c.is_control()).collect();
-        self.filter.insert(&text);
+        // On one line, the field's own way (its breaks as spaces).
+        Control::text(&mut self.filter, text);
         self.filtered();
         true
     }
@@ -975,7 +1003,7 @@ impl ToolPanel for ServicesPanel {
             return false;
         }
         self.typing = true;
-        self.filter.select_all();
+        self.filter.input.select_all();
         self.text_input(text)
     }
 
@@ -983,8 +1011,7 @@ impl ToolPanel for ServicesPanel {
         if self.in_view {
             return self.active_tab().and_then(|id| self.views.get(&id))?.selected_text();
         }
-        let selected = self.filter.selected_text();
-        (self.typing && !selected.is_empty()).then(|| selected.to_owned())
+        Control::selected_text(&self.filter).filter(|_| self.typing)
     }
 
     fn edit_key(&mut self, key: ViewerKey) -> bool {
@@ -995,7 +1022,7 @@ impl ToolPanel for ServicesPanel {
         if self.in_view {
             let used = self.active_view().is_some_and(|v| v.edit_key_with(key, reach));
             let action = self.active_view().and_then(|v| v.take_action());
-            self.action = self.view_action(action);
+            self.action = self.view_answer(action);
             // Esc in a view that didn't take it: the keys back to the tree.
             if !used && key == ViewerKey::Escape {
                 self.in_view = false;
@@ -1005,29 +1032,12 @@ impl ToolPanel for ServicesPanel {
         }
         if self.typing {
             let used = match key {
-                ViewerKey::Backspace => {
-                    self.filter.backspace(reach.word);
-                    true
+                // The field's editing keys (what erases filters again).
+                ViewerKey::Backspace | ViewerKey::Delete => {
+                    Control::key(&mut self.filter, key, reach)
                 }
-                ViewerKey::Delete => {
-                    self.filter.delete();
-                    true
-                }
-                ViewerKey::Left => {
-                    self.filter.move_left(reach.word, reach.extend);
-                    return true;
-                }
-                ViewerKey::Right => {
-                    self.filter.move_right(reach.word, reach.extend);
-                    return true;
-                }
-                ViewerKey::Home => {
-                    self.filter.home(reach.extend);
-                    return true;
-                }
-                ViewerKey::End => {
-                    self.filter.end(reach.extend);
-                    return true;
+                ViewerKey::Left | ViewerKey::Right | ViewerKey::Home | ViewerKey::End => {
+                    return Control::key(&mut self.filter, key, reach);
                 }
                 ViewerKey::Escape => {
                     self.filter.set_text("");
@@ -1052,16 +1062,17 @@ impl ToolPanel for ServicesPanel {
         if self.in_view {
             let used = self.active_view().is_some_and(|v| v.command(id));
             let action = self.active_view().and_then(|v| v.take_action());
-            self.action = self.view_action(action);
+            self.action = self.view_answer(action);
             return used;
         }
-        match id {
-            "select_all" if self.typing => {
-                self.filter.select_all();
-                true
+        // The filter with the keys: the app's editing commands are its (⌘A, ⌘X, ⌘Z, ⌘⇧Z).
+        if self.typing && Control::command(&mut self.filter, id) {
+            if id != SELECT_ALL {
+                self.filtered();
             }
-            id => self.tree_command(id),
+            return true;
         }
+        self.tree_command(id)
     }
 
     fn header(&self) -> Option<Vec<PanelButton>> {
@@ -1115,7 +1126,7 @@ impl ToolPanel for ServicesPanel {
             Some(MenuTarget::View) => {
                 let used = self.active_view().is_some_and(|v| v.command(id));
                 let action = self.active_view().and_then(|v| v.take_action());
-                self.action = self.view_action(action);
+                self.action = self.view_answer(action);
                 used
             }
             Some(MenuTarget::Tab(tab)) => {

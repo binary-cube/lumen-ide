@@ -249,6 +249,13 @@ impl<S: GridSource> DataGrid<S> {
                 self.order_input.set_text("");
                 self.apply_field(Field::Order);
             }
+            // The find's ×: emptied, its keys kept (the matches looked for again).
+            Hit::ClearFind => {
+                self.find.search.set_text("");
+                self.find.stale = true;
+                self.find.current = 0;
+                self.field = Some(Field::Find);
+            }
             Hit::FindPrev => self.find_step(false),
             Hit::FindNext => self.find_step(true),
             Hit::FindClose => self.close_find(),
@@ -435,7 +442,8 @@ impl<S: GridSource> DataGrid<S> {
         let hover = self.hit(p);
         let header = if self.in_header(p) { self.column_at(p.x).map(|(pos, _)| pos) } else { None };
         let bar = self.vbar.hover(p) | self.hbar.as_mut().is_some_and(|b| b.hover(p));
-        let changed = hover != self.hover || header != self.hover_header || bar;
+        let clear = crate::control::Control::hover(&mut self.find.search, Some(p));
+        let changed = clear || hover != self.hover || header != self.hover_header || bar;
         self.hover = hover;
         self.hover_header = header;
         changed
@@ -493,7 +501,7 @@ impl<S: GridSource> DataGrid<S> {
                 Hit::Count => "grid.tip_count",
                 Hit::Where if self.field != Some(Field::Where) => "grid.tip_where",
                 Hit::Order if self.field != Some(Field::Order) => "grid.tip_order",
-                Hit::ClearWhere | Hit::ClearOrder => "grid.tip_clear",
+                Hit::ClearWhere | Hit::ClearOrder | Hit::ClearFind => "grid.tip_clear",
                 Hit::FindPrev => "grid.tip_find_prev",
                 Hit::FindNext => "grid.tip_find_next",
                 Hit::FindClose => "grid.tip_find_close",

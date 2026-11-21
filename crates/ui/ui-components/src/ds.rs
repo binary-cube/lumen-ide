@@ -18,6 +18,7 @@ use crate::palette::Palette;
 
 mod badges;
 mod brand;
+mod button;
 mod controls;
 mod dropdown;
 mod feedback;
@@ -27,6 +28,7 @@ mod scroll;
 mod text;
 pub use badges::*;
 pub use brand::*;
+pub use button::*;
 pub use controls::*;
 pub use dropdown::*;
 pub use feedback::*;
@@ -245,23 +247,160 @@ pub fn around(area: Rect, hole: Option<Rect>) -> Vec<Rect> {
     parts.into_iter().filter(|r| r.size.width > 0.0 && r.size.height > 0.0).collect()
 }
 
-/// A horizontal separator (at `y`, from `x0` to `x1`).
 /// A list row's background: the one chosen (under the keys) in an accent tint, the one under
 /// the mouse in a faint one — every list the same (the projects, a picker's).
 pub fn row_highlight(layer: &mut Layer, ctx: &Ctx<'_>, r: Rect, selected: bool, hovered: bool) {
-    let p = ctx.palette;
-    let fill = if selected {
-        p.accent.with_alpha(0.10)
-    } else if hovered {
-        p.text.with_alpha(0.045)
-    } else {
-        return;
-    };
-    layer.quad(Quad::filled(r, ctx.fade(fill)).rounded(ctx.px(radius::MD)));
+    RowHighlight::new(selected, hovered).paint(layer, ctx, r);
 }
 
+/// What a row under the mouse is lit with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HoverFill {
+    /// The text at this alpha (the usual: [`ROW_HOVER`]).
+    Faint(f32),
+    /// The theme's `hover_background`.
+    Background,
+    /// The theme's tree hover (`tree_hover`).
+    Tree,
+    /// A color of the caller's (a severity's, faint).
+    Color(Rgba),
+}
+
+/// The usual row highlight's alphas: the chosen one's accent, the hovered one's text, and the
+/// chosen one's text while its list doesn't have the keys.
+pub const ROW_SELECTED: f32 = 0.10;
+pub const ROW_HOVER: f32 = 0.045;
+pub const ROW_INACTIVE: f32 = 0.07;
+
+/// A row's highlight, as configured: chosen, under the mouse, its list without the keys
+/// (an inactive selection: grey), its corners, its fills. Defaults are [`row_highlight`]'s.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RowHighlight {
+    pub selected: bool,
+    pub hovered: bool,
+    /// The chosen one's list doesn't have the keys: grey, not the accent.
+    pub inactive: bool,
+    /// Its corners (logical pixels).
+    pub radius: f32,
+    pub hover: HoverFill,
+    /// The chosen one's accent alpha.
+    pub selected_alpha: f32,
+    /// The chosen one's own fill (a token: `tree_selection`), over the accent's.
+    pub selected_fill: Option<Rgba>,
+    /// An outline around the fill, a line wide (a drop target); `None`: none.
+    pub outline: Option<Rgba>,
+    /// The outline's width (logical pixels); `None`: a line.
+    pub outline_width: Option<f32>,
+}
+
+impl RowHighlight {
+    pub fn new(selected: bool, hovered: bool) -> Self {
+        Self {
+            selected,
+            hovered,
+            inactive: false,
+            radius: radius::MD,
+            hover: HoverFill::Faint(ROW_HOVER),
+            selected_alpha: ROW_SELECTED,
+            selected_fill: None,
+            outline: None,
+            outline_width: None,
+        }
+    }
+
+    /// Its list doesn't have the keys.
+    pub fn inactive(mut self, inactive: bool) -> Self {
+        self.inactive = inactive;
+        self
+    }
+
+    /// Its corners (logical pixels).
+    pub fn radius(mut self, radius: f32) -> Self {
+        self.radius = radius;
+        self
+    }
+
+    pub fn hover(mut self, hover: HoverFill) -> Self {
+        self.hover = hover;
+        self
+    }
+
+    pub fn selected_alpha(mut self, alpha: f32) -> Self {
+        self.selected_alpha = alpha;
+        self
+    }
+
+    /// The chosen one in `fill` (a token), over the accent's.
+    pub fn selected_fill(mut self, fill: Rgba) -> Self {
+        self.selected_fill = Some(fill);
+        self
+    }
+
+    /// Outlined in `color`, a line wide, wherever it's lit.
+    pub fn outline(mut self, color: Rgba) -> Self {
+        self.outline = Some(color);
+        self
+    }
+
+    /// Its outline `width` logical pixels wide (on whole pixels, at least a line).
+    pub fn outline_width(mut self, width: f32) -> Self {
+        self.outline_width = Some(width);
+        self
+    }
+
+    /// Its fill, if any.
+    pub fn fill(&self, p: &Palette) -> Option<Rgba> {
+        if self.selected {
+            let fill = if self.inactive {
+                p.text.with_alpha(ROW_INACTIVE)
+            } else {
+                self.selected_fill.unwrap_or(p.accent.with_alpha(self.selected_alpha))
+            };
+            return Some(fill);
+        }
+        self.hovered.then_some(match self.hover {
+            HoverFill::Faint(alpha) => p.text.with_alpha(alpha),
+            HoverFill::Background => p.hover_background,
+            HoverFill::Tree => p.tree_hover,
+            HoverFill::Color(color) => color,
+        })
+    }
+
+    /// Drawn over `r` (nothing when neither chosen nor hovered).
+    pub fn paint(&self, layer: &mut Layer, ctx: &Ctx<'_>, r: Rect) {
+        let Some(fill) = self.fill(ctx.palette) else { return };
+        let quad = Quad::filled(r, ctx.fade(fill)).rounded(ctx.px(self.radius));
+        let width = self.outline_width.map_or(ctx.line(), |w| ctx.px(w).round().max(ctx.line()));
+        layer.quad(match self.outline {
+            Some(outline) => quad.bordered(width, ctx.fade(outline)),
+            None => quad,
+        });
+    }
+}
+
+/// A horizontal separator (at `y`, from `x0` to `x1`).
 pub fn divider(layer: &mut Layer, ctx: &Ctx<'_>, x0: f32, x1: f32, y: f32) {
-    layer.quad(Quad::filled(Rect::new(x0, y, x1 - x0, ctx.line()), ctx.fade(ctx.palette.border)));
+    divider_in(layer, ctx, (x0, x1, y), ctx.palette.border);
+}
+
+/// A horizontal separator in `color` (a token: `card_border`, a faded border).
+pub fn divider_in(layer: &mut Layer, ctx: &Ctx<'_>, (x0, x1, y): (f32, f32, f32), color: Rgba) {
+    layer.quad(Quad::filled(Rect::new(x0, y, x1 - x0, ctx.line()), ctx.fade(color)));
+}
+
+/// A horizontal separator in the cards' border color (under a panel's header).
+pub fn divider_card(layer: &mut Layer, ctx: &Ctx<'_>, x0: f32, x1: f32, y: f32) {
+    divider_in(layer, ctx, (x0, x1, y), ctx.palette.card_border);
+}
+
+/// A vertical separator in `color`.
+pub fn divider_vertical_in(
+    layer: &mut Layer,
+    ctx: &Ctx<'_>,
+    (x, y0, y1): (f32, f32, f32),
+    color: Rgba,
+) {
+    layer.quad(Quad::filled(Rect::new(x, y0, ctx.line(), y1 - y0), ctx.fade(color)));
 }
 
 /// A vertical separator.

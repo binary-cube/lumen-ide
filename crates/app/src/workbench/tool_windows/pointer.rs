@@ -79,7 +79,12 @@ impl Workbench {
             return Some(self.panel_action(text, link));
         }
         let action = self.tools.panel_viewer().and_then(|v| v.press_with(p, clicks, mods));
+        // The view holds the press until it's let go (its release follows, menu or not).
         self.tools.panel_dragging = true;
+        // A menu of a button of its own: opened under it, nothing else done.
+        if self.open_asked_tool_view_menu() {
+            return Some(MouseResult::Redraw);
+        }
         Some(match action {
             Some(action) => self.panel_action(text, action),
             None => MouseResult::StartDrag,

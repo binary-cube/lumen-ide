@@ -13,7 +13,7 @@ use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_components::LayerPainter;
 use ui_components::chart::{Samples, Style, sparkline};
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, radius};
 use ui_components::tree;
 use ui_kit::draw_text;
 use workbench_model::Outcome;
@@ -43,6 +43,20 @@ pub(super) fn group_icon(group: &str) -> &'static str {
 
 /// The room kept at a row's right end (its scrollbar's) by what's written there.
 const EDGE: f32 = 16.0;
+/// A row's highlight: the chosen one's accent and edge, the hovered one's text (alphas).
+const ROW_SELECTED: f32 = 0.12;
+const ROW_EDGE: f32 = 0.55;
+const ROW_HOVER: f32 = 0.05;
+/// The cells' fine bars: their track (the text's alpha), their corners (logical pixels).
+const TRACK_ALPHA: f32 = 0.07;
+const BAR_RADIUS: f32 = 1.0;
+/// A part's CPU bar and a process's (fainter, without a track): the fill's alpha.
+const PART_CPU_ALPHA: f32 = 0.7;
+const PROCESS_CPU_ALPHA: f32 = 0.45;
+/// An operation's bar while it runs, and once it's settled: the fill's alpha.
+const RUNNING_ALPHA: f32 = 0.9;
+const SETTLED_ALPHA: f32 = 0.45;
+
 /// How near a column's edge the mouse resizes it (logical pixels, each side).
 pub(super) const GRIP: f32 = 4.0;
 
@@ -367,17 +381,10 @@ impl TaskManager {
         if let Some(chooser) = page.chooser {
             let hit = Hit::Open(Popover::Columns);
             let open = self.popover.is_some_and(|(p, _)| p == Popover::Columns);
-            let drawn = icon_button(
-                layer,
-                icons,
-                ds,
-                chooser,
-                "more-horizontal",
-                self.hover == Some(hit),
-                open,
-            );
+            let spec = quiet_icon("more-horizontal").hovered(self.hover == Some(hit)).on(open);
+            ds::button(layer, text, icons, ds, chooser, spec);
             self.hits.push((chooser, hit));
-            self.stops.push((drawn, Focus::Chooser));
+            self.stops.push((chooser, Focus::Chooser));
         }
         ui_components::table::header_rule(layer, ds, header);
     }
@@ -443,15 +450,13 @@ impl TaskManager {
     fn row_background(&self, layer: &mut Layer, ds: &Ctx<'_>, area: &RowArea, selected: bool) {
         let p = ds.palette;
         let r = inset(area.rect, ds.px(1.0));
-        if selected {
-            layer.quad(
-                Quad::filled(r, p.accent.with_alpha(0.12))
-                    .rounded(ds.px(radius::SM))
-                    .bordered(ds.line(), p.accent.with_alpha(0.55)),
-            );
-        } else if self.hover == Some(Hit::Row(area.item)) {
-            tree::highlight(layer, r, p.text.with_alpha(0.05), ds.px(radius::SM));
-        }
+        let hovered = self.hover == Some(Hit::Row(area.item));
+        let lit = ds::RowHighlight::new(selected, hovered)
+            .radius(radius::SM)
+            .selected_alpha(ROW_SELECTED)
+            .hover(ds::HoverFill::Faint(ROW_HOVER));
+        let lit = if selected { lit.outline(p.accent.with_alpha(ROW_EDGE)) } else { lit };
+        lit.paint(layer, ds, r);
     }
 
     fn paint_part(
@@ -521,24 +526,11 @@ impl TaskManager {
                         ColumnId::Cpu => {
                             // A fine bar under the number: its share of the busiest.
                             if (line.threads > 0 || !line.processes.is_empty()) && line.cpu > 0.0 {
-                                let share = (line.cpu / part.highest).clamp(0.0, 1.0);
                                 let track = Rect::new(x, top + row_h - px(6.0), w, px(2.0));
-                                pen.layer.quad(
-                                    Quad::filled(track, p.text.with_alpha(0.07)).rounded(px(1.0)),
-                                );
-                                let bar = Rect::new(
-                                    x,
-                                    top + row_h - px(6.0),
-                                    (w * share).max(ds.line()),
-                                    px(2.0),
-                                );
-                                pen.layer.quad(
-                                    Quad::filled(
-                                        bar,
-                                        summary::color(p, Metric::Cpu).with_alpha(0.7),
-                                    )
-                                    .rounded(px(1.0)),
-                                );
+                                cpu_bar(line.cpu / part.highest, p)
+                                    .fill_alpha(PART_CPU_ALPHA)
+                                    .track_alpha(TRACK_ALPHA)
+                                    .paint_bar(pen.layer, ds, track);
                             }
                             cell(pen, value(Column::Cpu), &mono, right, mbase, p, line.cpu > 80.0);
                         }
@@ -695,7 +687,7 @@ impl TaskManager {
         self.push_row_hit(area, Hit::Row(area.item));
         // A guide from its part.
         let gx = area.rect.min_x() + px(14.0);
-        pen.layer.quad(Quad::filled(Rect::new(gx, top, ds.line(), row_h), p.indent_guide));
+        tree::guides(pen.layer, 0..1, |_| gx, (top, row_h), ds.line(), p.indent_guide);
         let x = area.rect.min_x() + px(44.0);
         let font = ds.code_font(-1.5);
         let base = ds::optical_baseline(top, row_h, &font);
@@ -719,20 +711,11 @@ impl TaskManager {
                     let value = match column {
                         ColumnId::Cpu => {
                             if cpu > 0.0 {
-                                let share = (cpu / highest).clamp(0.0, 1.0);
-                                let bar = Rect::new(
-                                    cx,
-                                    top + row_h - px(6.0),
-                                    (w * share).max(ds.line()),
-                                    px(2.0),
-                                );
-                                pen.layer.quad(
-                                    Quad::filled(
-                                        bar,
-                                        summary::color(p, Metric::Cpu).with_alpha(0.45),
-                                    )
-                                    .rounded(px(1.0)),
-                                );
+                                let track = Rect::new(cx, top + row_h - px(6.0), w, px(2.0));
+                                cpu_bar(cpu / highest, p)
+                                    .fill_alpha(PROCESS_CPU_ALPHA)
+                                    .fill_only()
+                                    .paint_bar(pen.layer, ds, track);
                             }
                             &texts.cpu
                         }
@@ -858,19 +841,13 @@ impl TaskManager {
             _ => 0.0,
         };
         let track = Rect::new(name_x, top + row_h - px(4.0), (right - name_x).max(0.0), px(2.0));
-        pen.layer.quad(Quad::filled(track, p.text.with_alpha(0.07)).rounded(px(1.0)));
-        if fraction > 0.0 {
-            let fill = Rect::new(
-                track.min_x(),
-                track.min_y(),
-                track.size.width * fraction,
-                track.size.height,
-            );
-            pen.layer.quad(
-                Quad::filled(fill, color.with_alpha(if a.running() { 0.9 } else { 0.45 }))
-                    .rounded(px(1.0)),
-            );
-        }
+        ds::ProgressBar::of(fraction)
+            .color(color)
+            .fill_alpha(if a.running() { RUNNING_ALPHA } else { SETTLED_ALPHA })
+            .track_alpha(TRACK_ALPHA)
+            .min_fill(0.0)
+            .radius(BAR_RADIUS)
+            .paint_bar(pen.layer, ds, track);
     }
 }
 
@@ -886,6 +863,14 @@ struct PartRow<'a> {
     slots: usize,
     /// Its place among the rows in view (its trend's plot).
     slot: usize,
+}
+
+/// A CPU cell's fine bar: `share` of the busiest, at least a line wide.
+fn cpu_bar(share: f32, p: &ui_components::Palette) -> ds::ProgressBar<'static> {
+    ds::ProgressBar::of(share)
+        .color(summary::color(p, Metric::Cpu))
+        .min_fill(1.0)
+        .radius(BAR_RADIUS)
 }
 
 fn inset(r: Rect, by: f32) -> Rect {
@@ -924,48 +909,8 @@ fn cell(
     right_text(pen.layer, pen.text, value.unwrap_or("—"), font, right, base, color);
 }
 
-/// A small square button with an icon: lit under the mouse, tinted while `on`. Returns
-/// the button as drawn (its focus ring goes around it).
-pub(super) fn icon_button(
-    layer: &mut Layer,
-    icons: &icons::Icons,
-    ds: &Ctx<'_>,
-    rect: Rect,
-    icon: &str,
-    hovered: bool,
-    on: bool,
-) -> Rect {
-    let p = ds.palette;
-    let fill = if on {
-        p.accent.with_alpha(0.14)
-    } else if hovered {
-        p.text.with_alpha(0.07)
-    } else {
-        Rgba::TRANSPARENT
-    };
-    let r = Rect::new(
-        rect.min_x(),
-        (rect.min_y() + (rect.size.height - ds.px(28.0)) / 2.0).round(),
-        rect.size.width,
-        ds.px(28.0).min(rect.size.height),
-    );
-    layer.quad(Quad::filled(r, fill).rounded(ds.px(radius::SM)));
-    if let Some(id) = icons.id(icon) {
-        let s = ds.px(16.0);
-        let at = Rect::new(
-            (r.min_x() + (r.size.width - s) / 2.0).round(),
-            (r.min_y() + (r.size.height - s) / 2.0).round(),
-            s,
-            s,
-        );
-        let color = if on {
-            p.accent
-        } else if hovered {
-            p.text
-        } else {
-            p.text_muted
-        };
-        ui_kit::draw_icon(layer, icons, id, at, color);
-    }
-    r
+/// A bar's quiet icon button (the shared ghost one): muted at rest, lit under the mouse,
+/// in the accent while on.
+pub(super) fn quiet_icon(icon: &str) -> ButtonSpec<'_> {
+    ButtonSpec::new(ButtonKind::Ghost).icon(icon).rest_tone(Tone::Neutral)
 }

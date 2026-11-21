@@ -15,11 +15,11 @@ use kernel::{Point, Rect};
 use render_api::Quad;
 use ui_components::control::{Control, Controls, Press, Thumb};
 use ui_components::ds::{self, Ctx};
+use ui_components::search_field::SearchField;
 use ui_components::{
     AppRequest, EdgeScrollbar, KeyReach, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor,
     ViewerKey, ViewerPaint, WithHost,
 };
-use ui_kit::TextInput;
 
 use crate::view::page::{Cell, Col, Page};
 use crate::view::words;
@@ -28,6 +28,12 @@ use crate::view::words;
 pub const EXTENSION: &str = "view-profiler-recordings";
 /// The recordings listed at most (the newest).
 const MOST: usize = 500;
+/// The filter's place among its parts (see [`RecordingsView::with_controls`]).
+const FILTER: usize = 1;
+
+/// The edit command choosing a whole field (it changes nothing listed).
+const SELECT_ALL: &str = "select_all";
+
 /// The filter field's height (logical pixels).
 const FIELD_H: f32 = 34.0;
 
@@ -79,9 +85,8 @@ pub struct RecordingsView {
     copying: Option<Receiver<Option<String>>>,
     /// The recordings' count last seen written (a new one: listed again).
     seen: u64,
-    filter: TextInput,
-    field: Rect,
-    clear: Option<Rect>,
+    /// The filter (the app's search field: ×, ⌘A; its focus the parts').
+    filter: SearchField,
     /// The rows as drawn (their place in the filtered list), the one under the mouse, the
     /// one a menu was opened on.
     drawn: Vec<(Rect, usize)>,
@@ -117,9 +122,7 @@ impl RecordingsView {
             asked: None,
             copying: None,
             seen: crate::recording::written(),
-            filter: TextInput::default(),
-            field: Rect::default(),
-            clear: None,
+            filter: SearchField::new(),
             drawn: Vec::new(),
             lit: None,
             menu_on: None,
@@ -133,15 +136,15 @@ impl RecordingsView {
         }
     }
 
-    /// Its parts (the page's scrollbar with its offset, the filter), the topmost first,
+    /// Its parts (the page's scrollbar with its offset, the filter at [`FILTER`]), the
+    /// topmost first,
     /// with their state of use: the one with the focus has the keys.
     fn with_controls<R>(
         &mut self,
         f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
     ) -> R {
         let mut page = Thumb { bar: &mut self.bar, offset: &mut self.scroll };
-        let mut filter =
-            FilterField { input: &mut self.filter, field: self.field, clear: self.clear };
+        let mut filter = FilterField { field: &mut self.filter };
         let mut parts: [&mut dyn Control; 2] = [&mut page, &mut filter];
         f(&mut self.controls, &mut parts)
     }
@@ -301,31 +304,10 @@ impl Viewer for RecordingsView {
             &tr!("profiler.recordings_count", count = count.to_string().as_str()),
         );
         // The filter.
-        self.field = Rect::new(x, page.y, width.min(ds.px(420.0)), ds.px(FIELD_H));
-        {
-            let layer = page.scene.push_layer(Some(b));
-            let mut pen = ui_components::LayerPainter::new(layer, page.text, icons, ds);
-            ds::search_input(
-                &mut pen,
-                self.field,
-                &self.filter,
-                self.typing() && focused,
-                &t("profiler.filter"),
-            );
-            self.clear = None;
-            if !self.filter.text().is_empty() {
-                let mid = self.field.min_y() + self.field.size.height / 2.0;
-                let close = ds::clear_button(
-                    pen.layer,
-                    icons,
-                    &ds,
-                    self.field.max_x() - ds.px(18.0),
-                    mid,
-                    false,
-                );
-                self.clear = Some(close);
-            }
-        }
+        let field = Rect::new(x, page.y, width.min(ds.px(420.0)), ds.px(FIELD_H));
+        let layer = page.scene.push_layer(Some(b));
+        let typing = self.typing() && focused;
+        self.filter.paint(layer, page.text, icons, &ds, (field, typing), &t("profiler.filter"));
         page.y += ds.px(FIELD_H + 16.0);
         if self.rows.is_none() {
             let reading = t("profiler.reading");
@@ -388,6 +370,10 @@ impl Viewer for RecordingsView {
         // follows), the filter's caret put or the filter cleared (it has the keys then);
         // elsewhere none has them.
         if self.with_controls(|c, parts| c.press(parts, p, 1)).is_some() {
+            // × emptied the filter: the list from its top.
+            if self.filter.take_cleared() {
+                self.scroll = 0.0;
+            }
             return None;
         }
         let path = self.path_of(self.row_at(p)?)?;
@@ -425,6 +411,13 @@ impl Viewer for RecordingsView {
     }
 
     fn command(&mut self, id: &str) -> bool {
+        // The filter with the keys: the app's editing commands are its (⌘A, ⌘X, ⌘Z, ⌘⇧Z).
+        if self.with_controls(|c, parts| c.command(parts, id)).is_some() {
+            if id != SELECT_ALL {
+                self.scroll = 0.0;
+            }
+            return true;
+        }
         if !matches!(id, "open" | "summary" | "reveal" | "delete") {
             return false;
         }
@@ -442,6 +435,17 @@ impl Viewer for RecordingsView {
 
     fn wants_text(&self) -> bool {
         self.typing()
+    }
+
+    /// ⌘C: what's selected in the filter while it has the keys.
+    fn selected_text(&self) -> Option<String> {
+        let filter: &dyn Control = &self.filter;
+        self.controls.selected_text_with(|i| (i == FILTER).then_some(filter))
+    }
+
+    /// Pasted into the filter while it has the keys, as typed.
+    fn paste(&mut self, text: &str) -> bool {
+        self.text_input(text)
     }
 
     /// Typed into the part with the keys (the filter): the list back at its top.
@@ -479,35 +483,33 @@ impl Viewer for RecordingsView {
     }
 }
 
-/// The filter as a control: a press puts its caret (or, on its clear button, empties it),
-/// with the focus it takes the text typed (one line, no control characters) and its editing
-/// keys; Esc empties it. Tab is kept (it does nothing here, the focus stays).
+/// The filter as a control: the app's search field (a press puts its caret, a drag selects,
+/// × empties it; the editing keys, ⌘A / ⌘X / ⌘Z, the copy of what's selected), the text
+/// typed going in on one line (the field's own way: its breaks as spaces); Esc empties it. Tab is kept
+/// (it does nothing here, the focus stays).
 struct FilterField<'a> {
-    input: &'a mut TextInput,
-    field: Rect,
-    clear: Option<Rect>,
+    field: &'a mut SearchField,
 }
 
 impl Control for FilterField<'_> {
     fn area(&self) -> Option<Rect> {
-        Some(self.field)
-    }
-
-    fn hit(&self, p: Point) -> bool {
-        self.field.contains(p) || self.clear.is_some_and(|r| r.contains(p))
+        Control::area(&*self.field)
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Press {
-        if self.clear.is_some_and(|r| r.contains(p)) {
-            *self.input = TextInput::default();
-        } else {
-            TextInput::press(self.input, p.x, clicks);
-        }
-        Press::Took
+        Control::press(&mut *self.field, p, clicks)
     }
 
-    fn cursor(&self, _p: Point) -> Option<ViewerCursor> {
-        Some(ViewerCursor::Text)
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(&mut *self.field, p)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        Control::hover(&mut *self.field, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(&*self.field, p)
     }
 
     fn focusable(&self) -> bool {
@@ -520,18 +522,22 @@ impl Control for FilterField<'_> {
 
     fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         if key == ViewerKey::Escape {
-            if !TextInput::text(self.input).is_empty() {
-                *self.input = TextInput::default();
-            }
+            self.field.set_text("");
             return true;
         }
-        reach.edit(self.input, key)
+        Control::key(&mut *self.field, key, reach)
     }
 
     fn text(&mut self, typed: &str) -> bool {
-        let typed: String = typed.chars().filter(|c| !c.is_control()).collect();
-        TextInput::insert(self.input, &typed);
-        true
+        Control::text(&mut *self.field, typed)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&*self.field)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        Control::command(&mut *self.field, id)
     }
 }
 

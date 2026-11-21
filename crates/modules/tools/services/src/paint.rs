@@ -4,19 +4,23 @@
 //! there's nothing to show.
 
 use icons::Icons;
-use kernel::{Rect, Rgba};
+use kernel::Rect;
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_components::ds::{self, Ctx, Loader, Tone};
+use ui_components::tab_strip::{self, PillTab, TabSlot};
 use ui_components::tree::{self as tree_row, TreeList};
 use ui_components::{ServiceState, SplitterStyle, ViewerPaint};
-use ui_kit::{TextInputStyle, centered_baseline, draw_icon, draw_text};
+use ui_kit::{centered_baseline, draw_icon, draw_text};
 
 use crate::panel::{
     FIELD_HEIGHT, FIELD_TOP, GAP, Hover, INDENT, LIST_TOP, PADDING, ROW_HEIGHT, ServicesPanel,
     TABS_HEIGHT, TabHit,
 };
 use crate::tree::Key;
+
+/// The room before the first tab (logical pixels).
+const STRIP_INSET: f32 = 6.0;
 
 impl ServicesPanel {
     pub(crate) fn paint_panel(&mut self, ctx: ViewerPaint<'_>) {
@@ -32,7 +36,6 @@ impl ServicesPanel {
             // Nothing contributed yet: what shows here, said in the middle.
             self.tree_area = Rect::default();
             self.field = Rect::default();
-            self.clear = None;
             self.list = Rect::default();
             self.tabs_bar = Rect::default();
             self.view_area = Rect::default();
@@ -129,7 +132,8 @@ impl ServicesPanel {
         self.splitter.paint(scene);
     }
 
-    /// The filter: a pill with the magnifier, its text or placeholder, × with text.
+    /// The filter: the app's search field (the magnifier, its text or placeholder, × with
+    /// text, the caret while it has the keys).
     fn paint_field(
         &mut self,
         layer: &mut Layer,
@@ -138,73 +142,13 @@ impl ServicesPanel {
         ds: &Ctx<'_>,
         focused: bool,
     ) {
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
         let f = self.field;
         if f.size.width <= 0.0 {
             return;
         }
         let typing = self.typing && focused;
-        let border = if typing { p.search_field_border_focused } else { p.search_field_border };
-        layer.quad(
-            Quad::filled(f, p.search_field_background)
-                .rounded(f.size.height / 2.0)
-                .bordered(ds.line(), border),
-        );
-        let icon = px(14.0);
-        let icon_x = f.min_x() + px(12.0);
-        if let Some(id) = icons.id("search") {
-            let r =
-                Rect::new(icon_x, (f.min_y() + (f.size.height - icon) / 2.0).round(), icon, icon);
-            draw_icon(layer, icons, id, r, p.text_muted);
-        }
-        let mut right = f.max_x() - px(12.0);
-        self.clear = None;
-        if !self.filter.text().is_empty() {
-            let s = px(18.0);
-            let r = Rect::new(
-                f.max_x() - px(7.0) - s,
-                (f.min_y() + (f.size.height - s) / 2.0).round(),
-                s,
-                s,
-            );
-            let hovered = self.hover == Some(Hover::Clear);
-            layer.quad(
-                Quad::filled(r, p.text.with_alpha(if hovered { 0.12 } else { 0.06 }))
-                    .rounded(s / 2.0),
-            );
-            if let Some(id) = icons.id("x") {
-                let x = px(9.0);
-                let ir = Rect::new(
-                    (r.min_x() + (s - x) / 2.0).round(),
-                    (r.min_y() + (s - x) / 2.0).round(),
-                    x,
-                    x,
-                );
-                draw_icon(layer, icons, id, ir, p.text_muted);
-            }
-            self.clear = Some(r);
-            right = r.min_x() - px(6.0);
-        }
-        let text_x = icon_x + icon + px(8.0);
-        let style = TextInputStyle {
-            font: Font::new(p.ui_font.clone(), px(p.ui_font_size - 0.5)),
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: p.text,
-            placeholder: p.text_muted,
-            selection: p.selection,
-            caret: p.caret,
-            radius: 0.0,
-            border_width: 0.0,
-            padding: 0.0,
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
-        let field = Rect::new(text_x, f.min_y(), (right - text_x).max(0.0), f.size.height);
         let placeholder = i18n::t("services.filter");
-        self.filter.paint(layer, text, field, typing, &placeholder, &style);
+        self.filter.paint(layer, text, icons, ds, (f, typing), &placeholder);
     }
 
     /// The rows in view: highlights, then each row's guides, chevron, icon, name, detail and
@@ -339,89 +283,36 @@ impl ServicesPanel {
         icons: &Icons,
         ds: &Ctx<'_>,
     ) {
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let bar = self.tabs_bar;
         let mid = bar.min_y() + bar.size.height / 2.0;
         self.tab_hits.clear();
-        layer.quad(Quad::filled(
-            Rect::new(bar.min_x(), bar.max_y(), bar.size.width, ds.line()),
-            p.card_border,
-        ));
-        let font = ds.ui_font(-0.5);
+        tab_strip::strip_border(layer, ds, bar.min_x(), bar.max_x(), bar.max_y());
         let active = self.active_tab();
-        let mut x = bar.min_x() + px(6.0);
-        let tabs = self.tabs.clone();
-        for (i, tab) in tabs.iter().enumerate() {
-            let shaped = text.shape_line(&tab.title, &font);
-            let icon = px(14.0);
-            let close = px(14.0);
-            let ends = tab.pinned || tab.closable;
-            let w = px(10.0)
-                + icon
-                + px(6.0)
-                + shaped.width
-                + if ends { px(8.0) + close } else { 0.0 }
-                + px(8.0);
-            let pill = Rect::new(x, (mid - px(12.0)).round(), w.round(), px(24.0));
-            if pill.min_x() > bar.max_x() {
+        let mut x = bar.min_x() + px(STRIP_INSET);
+        for (i, tab) in self.tabs.iter().enumerate() {
+            if x > bar.max_x() {
                 break;
             }
             let on = active == Some(tab.id);
             let hovered =
                 matches!(self.hover, Some(Hover::Tab(TabHit::Tab(h) | TabHit::Close(h))) if h == i);
-            let fill = if on {
-                p.accent.with_alpha(0.14)
-            } else if hovered {
-                p.text.with_alpha(0.06)
-            } else {
-                Rgba::TRANSPARENT
-            };
-            layer.quad(Quad::filled(pill, fill).rounded(px(ds::radius::MD)));
-            let color = if on { p.accent } else { p.text };
-            let ix = pill.min_x() + px(10.0);
-            if let Some(id) = icons.id(tab.icon) {
-                let r = Rect::new(ix, (mid - icon / 2.0).round(), icon, icon);
-                draw_icon(layer, icons, id, r, if on { p.accent } else { p.text_muted });
-            }
-            let tx = ix + icon + px(6.0);
-            draw_text(
-                layer,
-                &shaped,
-                tx,
-                ds::optical_baseline(pill.min_y(), pill.size.height, &font),
-                color,
-            );
-            self.tab_hits.push((pill, TabHit::Tab(i)));
-            let close_rect = Rect::new(
-                pill.max_x() - close - px(6.0),
-                (mid - close / 2.0).round(),
-                close,
-                close,
-            );
-            let inner = Rect::new(
-                close_rect.min_x() + px(2.0),
-                close_rect.min_y() + px(2.0),
-                close - px(4.0),
-                close - px(4.0),
-            );
-            if tab.pinned {
-                if let Some(id) = icons.id("pin") {
-                    draw_icon(layer, icons, id, inner, p.text_muted);
-                }
-            } else if tab.closable && (on || hovered) {
+            let slot = if tab.pinned {
+                TabSlot::Pin
+            } else if tab.closable {
                 let lit = self.hover == Some(Hover::Tab(TabHit::Close(i)));
-                if lit {
-                    layer.quad(
-                        Quad::filled(close_rect, p.text.with_alpha(0.1)).rounded(close / 2.0),
-                    );
-                }
-                if let Some(id) = icons.id("x") {
-                    draw_icon(layer, icons, id, inner, if lit { p.text } else { p.text_muted });
-                }
-                self.tab_hits.push((close_rect, TabHit::Close(i)));
+                TabSlot::Close { shown: on || hovered, lit }
+            } else {
+                TabSlot::None
+            };
+            let pill =
+                PillTab::new(&tab.title).icon(tab.icon).slot(slot).on(on, true).hovered(hovered);
+            let drawn = tab_strip::pill_tab(layer, text, icons, ds, (x, mid), &pill);
+            self.tab_hits.push((drawn.pill, TabHit::Tab(i)));
+            if let Some(close) = drawn.close {
+                self.tab_hits.push((close, TabHit::Close(i)));
             }
-            x = pill.max_x() + px(4.0);
+            x = drawn.pill.max_x() + px(tab_strip::TAB_GAP);
         }
     }
 

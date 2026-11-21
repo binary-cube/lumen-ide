@@ -193,7 +193,6 @@ impl ProfileView {
         } else {
             CompareView::new(mine, other, false)
         });
-        self.dropdown = None;
         true
     }
 

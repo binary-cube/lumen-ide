@@ -2,9 +2,10 @@
 //! Each key is drawn as a small "keycap", followed by the action.
 
 use kernel::{Rect, Rgba};
-use render_api::{Layer, Quad};
+use render_api::Layer;
 use text_layout::{Font, TextSystem};
 
+use crate::keycap::{KeycapLook, keycap_label_x, paint_keycap};
 use crate::{centered_baseline, draw_text};
 
 #[derive(Debug, Clone)]
@@ -66,7 +67,7 @@ pub fn paint_key_hints(
 ) -> f32 {
     let s = style.scale;
     let px = |v: f32| (v * s).round();
-    let line = s.round().max(1.0);
+    let look = KeycapLook::hint(style);
     let metrics = text.metrics(&style.font);
     let key_metrics = text.metrics(&style.key_font);
     let cap_h = px(18.0).min(row.size.height);
@@ -81,29 +82,9 @@ pub fn paint_key_hints(
             let shaped = text.shape_line(key, &style.key_font);
             let w = (shaped.width + px(10.0)).max(cap_h);
             let cap = Rect::new(x, cap_top, w.round(), cap_h);
-            layer.quad(
-                Quad::filled(cap, style.key_background)
-                    .rounded(px(4.0))
-                    .bordered(line, style.key_border),
-            );
-            // The key's bottom shadow (subtle relief).
-            layer.quad(Quad::filled(
-                Rect::new(
-                    cap.min_x() + px(2.0),
-                    cap.max_y() - line,
-                    cap.size.width - px(4.0),
-                    line,
-                ),
-                style.key_border,
-            ));
-            let tx = (cap.min_x() + (cap.size.width - shaped.width) / 2.0).round();
-            draw_text(
-                layer,
-                &shaped,
-                tx,
-                centered_baseline(cap_top, cap_h, &key_metrics),
-                style.key_text,
-            );
+            let base = centered_baseline(cap_top, cap_h, &key_metrics);
+            let tx = keycap_label_x(cap.min_x(), cap.size.width, shaped.width);
+            paint_keycap(layer, cap, &shaped, (tx, base), &look);
             x += cap.size.width + px(4.0);
         }
         x += px(2.0);

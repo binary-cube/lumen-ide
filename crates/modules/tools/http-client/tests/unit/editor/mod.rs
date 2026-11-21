@@ -228,3 +228,41 @@ fn the_separator_is_dragged_and_an_open_list_is_over_it() {
     assert!(!editor.picker.is_open(), "a press outside the list closed it");
     assert!((editor.share - 0.7).abs() < 0.01, "the separator untouched");
 }
+
+/// The method is the shared dropdown field (its frame, its chevron) with its value and
+/// chevron in the method's color; a press on it opens the shared list, as before.
+#[test]
+fn the_method_is_the_shared_dropdown_in_its_color() {
+    let dir = scratch("method-field");
+    let (mut editor, _) = editor(&dir, "### One\nDELETE https://e.com/1\n", Some(0));
+    let (palette, icons) = (ui_components::Palette::dark(), icons::Icons::builtin());
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    editor.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1000.0, 600.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let method = editor.hits.iter().find(|(_, h)| *h == Hit::Method).map(|(r, _)| *r).unwrap();
+    let own = crate::format::method_color("DELETE", &palette);
+    let inside = |p: Point| method.contains(p);
+    let glyphs: Vec<_> =
+        scene.layers().iter().flat_map(|l| l.glyphs.iter()).filter(|g| inside(g.origin)).collect();
+    assert!(glyphs.iter().any(|g| icons::is_icon(g.key)), "its chevron");
+    assert!(glyphs.iter().all(|g| g.color == own), "the method's color");
+    let framed = scene
+        .layers()
+        .iter()
+        .flat_map(|l| l.quads.iter())
+        .any(|q| q.bounds == method && q.border_color == palette.input_border);
+    assert!(framed, "the shared field's frame");
+    editor.pointer_down(method.center(), 1, ui_components::PressMods::default());
+    editor.release();
+    assert!(editor.picker.is_open(), "its list opens");
+    let _ = std::fs::remove_dir_all(dir);
+}

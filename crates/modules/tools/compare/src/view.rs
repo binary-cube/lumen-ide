@@ -70,6 +70,7 @@ impl Viewer for Compare {
         self.paint_toolbar(
             layer,
             ctx.text,
+            ctx.icons,
             &ds,
             Rect::new(b.min_x(), b.min_y(), b.size.width, toolbar_h),
         );
@@ -177,7 +178,7 @@ impl Viewer for Compare {
             && let Some(mid) = columns.mid
         {
             let layer = ctx.scene.push_layer(Some(mid));
-            self.paint_compose(Pen { layer, text: ctx.text, ds: &ds }, mid);
+            self.paint_compose(Pen { layer, text: ctx.text, ds: &ds }, ctx.icons, mid);
         }
         if let (Some(mid), focused) = (columns.mid, ctx.focused)
             && let Some(field) = self.by_hand()

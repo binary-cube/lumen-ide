@@ -58,6 +58,14 @@ fn the_search_narrows_and_esc_clears_it() {
     assert!(!key(&mut t, ViewerKey::Escape), "nothing to clear");
 }
 
+/// A line break typed or pasted into the search is a space (the shared field's one rule).
+#[test]
+fn a_line_break_in_the_search_is_a_space() {
+    let mut t = tree("");
+    assert!(t.text_input("lo\ng"));
+    assert_eq!(t.filter.text(), "lo g");
+}
+
 #[test]
 fn the_rows_are_walked_with_the_keys() {
     let mut t = tree("");
@@ -230,4 +238,36 @@ fn a_request_made_at_the_root_shows_before_the_project_lists_it() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The search is the app's search field: ⌘A selects it, ⌘X cuts it (every row again), ⌘Z
+/// brings it back; a press on its × empties it and lists every row; a name being typed has
+/// the keys alone (the search's caret goes).
+#[test]
+fn the_search_edits_and_empties_as_the_app_s_field() {
+    let mut t = tree("");
+    assert!(t.text_input("log"));
+    assert!(t.edit_command("select_all"));
+    assert_eq!(t.selected_text().as_deref(), Some("log"), "⌘A: all of it");
+    assert!(t.edit_command("cut"));
+    assert_eq!(t.rows.len(), 5, "⌘X: every row");
+    assert!(t.edit_command("undo"));
+    assert_eq!(t.rows.len(), 3, "⌘Z: narrowed again");
+    // Drawn where its field is, its × empties it.
+    t.field = Rect::new(0.0, 0.0, 240.0, 30.0);
+    let palette = ui_components::palette::Palette::dark();
+    let ctx = ds::Ctx::new(&palette, 1.0);
+    let (mut layer, mut text) = (Layer::default(), TextSystem::new());
+    let icons = icons::Icons::builtin();
+    t.filter.paint(&mut layer, &mut text, &icons, &ctx, (t.field, true), "");
+    // × is centered this far from the field's right edge (the shared field's room for it).
+    let clear = Point::new(t.field.max_x() - 17.0, t.field.min_y() + 15.0);
+    assert_eq!(t.cursor_at(clear), Some(ViewerCursor::Pointer));
+    t.press(clear, 1);
+    assert!(t.filter.text().is_empty());
+    assert_eq!(t.rows.len(), 5, "× empties it: every row");
+    // A name typed: the search no longer has the keys.
+    t.new_collection(None);
+    assert!(!t.typing && t.naming.is_some());
+    assert!(t.edit_command("select_all"), "⌘A: the name's");
 }

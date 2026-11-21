@@ -305,11 +305,11 @@ impl DataView {
                 continue;
             }
             let selected = self.selected == Some(i);
-            if selected {
-                layer.quad(Quad::filled(r, p.tree_selection).rounded(px(radius::SM)));
-            } else if self.hover == Some(Hit::Table(i)) {
-                layer.quad(Quad::filled(r, p.tree_hover).rounded(px(radius::SM)));
-            }
+            ds::RowHighlight::new(selected, self.hover == Some(Hit::Table(i)))
+                .selected_fill(p.tree_selection)
+                .hover(ds::HoverFill::Tree)
+                .radius(radius::SM)
+                .paint(layer, ds, r);
             let icon = if info.kind == TableKind::View { "view" } else { "table" };
             let s = px(14.0);
             if let Some(id) = icons.id(icon) {
@@ -388,25 +388,13 @@ impl DataView {
         }
         // "Jump to Query Console…", before Data / Structure (a source writing SQL).
         if self.has_console() {
-            let size = px(28.0);
+            let size = px(ds::button_size::LARGE);
             let r =
                 Rect::new(left_of_tabs - px(8.0) - size, (mid - size / 2.0).round(), size, size);
-            if self.hover == Some(Hit::Console) {
-                layer.quad(
-                    render_api::Quad::filled(r, p.text.with_alpha(0.08))
-                        .rounded(px(ds::radius::SM)),
-                );
-            }
-            if let Some(id) = icons.id("console") {
-                let s = px(15.0);
-                let ir = Rect::new(
-                    (r.min_x() + (size - s) / 2.0).round(),
-                    (r.min_y() + (size - s) / 2.0).round(),
-                    s,
-                    s,
-                );
-                ui_kit::draw_icon(layer, icons, id, ir, p.text.with_alpha(0.86));
-            }
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon("console")
+                .hovered(self.hover == Some(Hit::Console));
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, Hit::Console));
             left_of_tabs = r.min_x();
         }

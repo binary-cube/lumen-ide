@@ -20,9 +20,7 @@ ui-kit.workspace = true
 text-layout.workspace = true
 render-api.workspace = true
 refactor.workspace = true
+icons.workspace = true
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-icons.workspace = true

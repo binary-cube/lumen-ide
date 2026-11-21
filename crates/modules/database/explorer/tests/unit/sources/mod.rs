@@ -348,6 +348,29 @@ fn every_icon_button_of_the_modal_has_a_tooltip() {
 
 /// The `+`'s drivers in the shared picker: ↓ ↵ adds the next one; Esc closes it first.
 #[test]
+fn the_list_s_tools_that_need_a_source_are_off_without_one() {
+    use crate::sources::modal::{Hit, Tool};
+    let p = project("tools-off");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    paint_modal(&mut view);
+    let tools: Vec<Tool> = view
+        .hits
+        .iter()
+        .filter_map(|(_, h)| match h {
+            Hit::Tool(t) => Some(*t),
+            _ => None,
+        })
+        .collect();
+    // Nothing selected: only Add and New Folder can be pressed (the rest drawn dimmed).
+    assert_eq!(tools, vec![Tool::Add, Tool::Folder]);
+    view.editor_mut().unwrap().add("server");
+    paint_modal(&mut view);
+    let tools = view.hits.iter().filter(|(_, h)| matches!(h, Hit::Tool(_))).count();
+    assert_eq!(tools, 5, "a source selected: every tool");
+    let _ = std::fs::remove_dir_all(&p.dir);
+}
+
+#[test]
 fn a_list_of_the_modal_is_the_shared_picker() {
     use crate::sources::modal::Choice;
     use ui_components::{Viewer as _, ViewerKey};
@@ -513,6 +536,43 @@ fn tab_and_the_arrows_follow_the_fields_and_the_filter_row() {
     assert_eq!(view.editor().unwrap().selected, before);
     view.type_text("zz");
     assert_eq!(view.editor().unwrap().filter.text(), "zz");
+    let _ = std::fs::remove_dir_all(&p.dir);
+}
+
+/// The list's filter is the app's search field among the modal's fields: a press gives it
+/// the keys (and takes them from another field: one caret), typing filters, ⌘A selects it
+/// all, its × empties it and the list is filtered again.
+#[test]
+fn the_filter_is_the_shared_search_field_with_one_focus() {
+    use crate::sources::modal::Hit;
+    use kernel::{Point, Rect};
+    use ui_components::{Viewer as _, ViewerCursor};
+    let p = project("search");
+    let mut view = SourcesView::open(SourcesRequest::new(Arc::clone(&p.sessions)));
+    view.editor_mut().unwrap().add("server");
+    paint_modal(&mut view);
+    let rect = |view: &SourcesView, field: Field| {
+        view.hits.iter().find(|(_, h)| *h == Hit::Field(field.clone())).map(|(r, _)| *r).unwrap()
+    };
+    let filter = rect(&view, Field::Filter);
+    let comment = rect(&view, Field::Comment);
+    let mid = |r: Rect| Point::new(r.min_x() + 30.0, r.min_y() + r.size.height / 2.0);
+    view.click(mid(comment));
+    assert_eq!(view.focus(), Some(&Field::Comment));
+    view.click(mid(filter));
+    assert_eq!(view.focus(), Some(&Field::Filter), "one focus: the filter's");
+    view.type_text("zzz");
+    assert_eq!(view.editor().unwrap().comment.text(), "", "the other field untouched");
+    assert_eq!(view.editor().unwrap().selected, None, "nothing kept by the filter");
+    assert!(view.command("select_all"));
+    assert_eq!(view.selected_text().as_deref(), Some("zzz"), "⌘A");
+    paint_modal(&mut view);
+    let x = Point::new(filter.max_x() - 17.0, filter.min_y() + filter.size.height / 2.0);
+    view.hover(x);
+    assert_eq!(view.cursor_at(x), Some(ViewerCursor::Pointer), "a hand on ×");
+    view.click(x);
+    assert_eq!(view.editor().unwrap().filter.text(), "");
+    assert!(view.editor().unwrap().selected.is_some(), "× filtered again");
     let _ = std::fs::remove_dir_all(&p.dir);
 }
 

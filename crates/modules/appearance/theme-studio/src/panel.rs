@@ -7,6 +7,7 @@
 use super::*;
 use model::{CARET, INTERFACE, SYNTAX, TokenGroup, keys_of};
 use rows::{BackdropRow, FloatingRow};
+use ui_components::ds::{ButtonKind, ButtonSpec, button_size};
 use ui_components::form::{self, RowSpec};
 
 /// A row's control.
@@ -35,6 +36,8 @@ pub(crate) enum Control {
 
 /// The pills' height and gap (logical pixels).
 const PILL_H: f32 = 30.0;
+/// A search result under the mouse: its fill's alpha of the text.
+const FOUND_HOVER: f32 = 0.04;
 const PILL_GAP: f32 = 8.0;
 /// The swatch control's width (logical pixels).
 const SWATCH_W: f32 = 168.0;
@@ -114,7 +117,7 @@ impl Studio {
                 field,
                 self.editing_name(),
                 &t("studio.default_name"),
-                &field_style(&ds, 12.0),
+                &name_style(&ds),
             );
         }
     }
@@ -311,7 +314,6 @@ impl Studio {
         control: &Control,
         r: Rect,
     ) {
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let mid = r.min_y() + r.size.height / 2.0;
         match control {
@@ -351,7 +353,11 @@ impl Studio {
                 for (i, name) in row.choices(draft).iter().enumerate() {
                     let cell = Rect::new(x, r.min_y(), side, side);
                     let hovered = self.hover == Some(Hit::Choice(*row, i));
-                    icon_pill(pen.layer, ds, pen.icons, cell, name, i == current, hovered);
+                    let spec = ButtonSpec::new(ButtonKind::Ghost)
+                        .icon(name)
+                        .on(i == current)
+                        .hovered(hovered);
+                    ds::button(pen.layer, pen.text, pen.icons, ds, cell, spec);
                     self.push_list_hit(cell, Hit::Choice(*row, i));
                     x += side + px(PILL_GAP);
                 }
@@ -384,49 +390,11 @@ impl Studio {
                 let color = draft.get(key).unwrap_or(Rgba::WHITE);
                 let editing = self.picking.as_ref().is_some_and(|(k, _)| k == key);
                 let hovered = self.hover == Some(Hit::Token(key.clone()));
-                let fill = if editing {
-                    p.accent.with_alpha(0.10)
-                } else if hovered {
-                    p.text.with_alpha(0.06)
-                } else {
-                    p.text.with_alpha(0.03)
-                };
-                let border = if editing { p.accent.with_alpha(0.7) } else { p.border };
-                pen.layer.quad(
-                    Quad::filled(r, fill).rounded(px(radius::SM)).bordered(ds.line(), border),
-                );
-                let sw = px(18.0);
-                let swatch = Rect::new(r.min_x() + px(4.0), (mid - sw / 2.0).round(), sw, sw);
-                pen.layer.quad(
-                    Quad::filled(swatch, color)
-                        .rounded(px(4.0))
-                        .bordered(ds.line(), p.text.with_alpha(0.2)),
-                );
-                let font = ds.code_font(-1.5);
-                let hex = pen.text.shape_line(&Hex.format(color, ColorFormat::Hex), &font);
-                draw_text(
-                    pen.layer,
-                    &hex,
-                    swatch.max_x() + px(10.0),
-                    ds::optical_baseline(r.min_y(), r.size.height, &font),
-                    p.text,
-                );
-                if let Some(id) = pen.icons.id("pipette") {
-                    let side = px(13.0);
-                    let at = Rect::new(
-                        r.max_x() - px(8.0) - side,
-                        (mid - side / 2.0).round(),
-                        side,
-                        side,
-                    );
-                    ui_kit::draw_icon(
-                        pen.layer,
-                        pen.icons,
-                        id,
-                        at,
-                        if hovered || editing { p.text } else { p.text_muted },
-                    );
-                }
+                let hex = Hex.format(color, ColorFormat::Hex);
+                ds::ColorField::new(color, &hex)
+                    .hovered(hovered)
+                    .editing(editing)
+                    .paint(pen.layer, pen.text, pen.icons, ds, r);
                 self.push_list_hit(r, Hit::Token(key.clone()));
             }
             Control::Swatches(i, key) => self.paint_swatches(pen, ds, draft, *i, key, r),
@@ -463,15 +431,8 @@ impl Studio {
                 }
             }
             Control::Name => {
+                // The field itself is drawn with the name (its frame the shared field's).
                 let field = r;
-                pen.layer.quad(
-                    Quad::filled(field, p.search_field_background)
-                        .rounded(px(radius::MD))
-                        .bordered(
-                            ds.line(),
-                            if self.editing_name() { p.accent.with_alpha(0.7) } else { p.border },
-                        ),
-                );
                 self.push_list_hit(field, Hit::Name);
                 self.name_field = Some(field);
             }
@@ -488,20 +449,23 @@ impl Studio {
         r: Rect,
     ) {
         let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-1.0);
         let h = px(PILL_H);
         let current = row.current(draft);
         let (mut x, mut y) = (r.min_x(), r.min_y());
         for (i, label) in row.choices(draft).iter().enumerate() {
-            let shaped = pen.text.shape_line(label, &font);
-            let w = shaped.width + px(24.0);
+            let w = ds::choice_width(pen.text, ds, label);
             if x + w > r.max_x() && x > r.min_x() {
                 x = r.min_x();
                 y += h + px(PILL_GAP);
             }
-            let cell = Rect::new(x, y, w, h);
-            let hovered = self.hover == Some(Hit::Choice(row, i));
-            pill(pen.layer, ds, cell, &shaped, &font, i == current, hovered);
+            let spec = ds::ChoiceSpec {
+                x,
+                mid: y + h / 2.0,
+                label,
+                selected: i == current,
+                hovered: self.hover == Some(Hit::Choice(row, i)),
+            };
+            let cell = ds::choice(pen.layer, pen.text, ds, spec);
             self.push_list_hit(cell, Hit::Choice(row, i));
             x += w + px(PILL_GAP);
         }
@@ -519,7 +483,6 @@ impl Studio {
     ) {
         use theming::decorations::{FieldKind, FieldValue};
         use theming::studio::layer_color_key;
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let Some(deco) = draft.decorations.layers.get(i) else { return };
         let Some(field) = deco.spec.kind().field(key) else { return };
@@ -528,7 +491,7 @@ impl Studio {
             Some(FieldValue::Colors(list)) => list,
             _ => return,
         };
-        let side = px(26.0);
+        let side = px(button_size::MEDIUM);
         let mut x = r.min_x();
         let mid = r.min_y() + r.size.height / 2.0;
         for (k, color) in colors.iter().enumerate() {
@@ -536,19 +499,14 @@ impl Studio {
             let token = layer_color_key(i, key, k);
             let editing = self.picking.as_ref().is_some_and(|(key, _)| *key == token);
             let hovered = self.hover == Some(Hit::Token(token.clone()));
-            let ring = if editing {
-                p.accent
-            } else if hovered {
-                p.text.with_alpha(0.5)
-            } else {
-                p.text.with_alpha(0.18)
-            };
-            pen.layer.quad(Quad::filled(cell, *color).rounded(px(6.0)).bordered(ds.line(), ring));
+            ds::ColorSwatch::new(*color)
+                .hovered(hovered)
+                .editing(editing)
+                .paint(pen.layer, ds, cell);
             self.push_list_hit(cell, Hit::Token(token));
             x += side + px(6.0);
         }
         if let FieldKind::Colors { min, max } = field.kind {
-            let font = ds.ui_font(0.0);
             for (sign, hit, shown) in [
                 ("+", Hit::AddColor(i, key), colors.len() < max),
                 ("−", Hit::DropColor(i, key), colors.len() > min),
@@ -557,23 +515,10 @@ impl Studio {
                     continue;
                 }
                 let cell = Rect::new(x, (mid - side / 2.0).round(), side, side);
-                let hovered = self.hover == Some(hit.clone());
-                pen.layer.quad(
-                    Quad::filled(
-                        cell,
-                        if hovered { p.text.with_alpha(0.06) } else { Rgba::TRANSPARENT },
-                    )
-                    .rounded(px(6.0))
-                    .bordered(ds.line(), p.border),
-                );
-                let shaped = pen.text.shape_line(sign, &font);
-                draw_text(
-                    pen.layer,
-                    &shaped,
-                    (cell.min_x() + (side - shaped.width) / 2.0).round(),
-                    ds::optical_baseline(cell.min_y(), side, &font),
-                    p.text,
-                );
+                let spec = ButtonSpec::new(ButtonKind::Soft)
+                    .label(sign)
+                    .hovered(self.hover == Some(hit.clone()));
+                ds::button(pen.layer, pen.text, pen.icons, ds, cell, spec);
                 self.push_list_hit(cell, hit);
                 x += side + px(6.0);
             }
@@ -923,9 +868,9 @@ impl Studio {
             .collect();
         y = self.group(pen, col, y, rows.len(), |s, pen, n, y| {
             let r = Rect::new(col.x0, y, col.w, h);
-            if s.hover == Some(Hit::Found(n)) {
-                pen.layer.quad(Quad::filled(r, p.text.with_alpha(0.04)).rounded(px(radius::MD)));
-            }
+            ds::RowHighlight::new(false, s.hover == Some(Hit::Found(n)))
+                .hover(ds::HoverFill::Faint(FOUND_HOVER))
+                .paint(pen.layer, ds, r);
             let x = col.x0 + px(form::ROW_PAD);
             let (label, place) = &rows[n];
             let shaped = pen.text.shape_line(label, &label_font);
@@ -954,10 +899,9 @@ impl Studio {
 /// How tall (physical) `labels` are as pills wrapped in `width`.
 fn pills_height(text: &mut TextSystem, ds: &Ctx<'_>, labels: &[String], width: f32) -> f32 {
     let px = |v: f32| ds.px(v);
-    let font = ds.ui_font(-1.0);
     let (mut x, mut rows) = (0.0, 1);
     for label in labels {
-        let w = text.shape_line(label, &font).width + px(24.0);
+        let w = ds::choice_width(text, ds, label);
         if x + w > width && x > 0.0 {
             x = 0.0;
             rows += 1;

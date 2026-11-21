@@ -128,7 +128,7 @@ impl ProjectSearch {
         } else if self.in_replace {
             &mut self.replace
         } else {
-            &mut self.input
+            &mut self.input.input
         }
     }
 
@@ -169,17 +169,22 @@ impl ProjectSearch {
         true
     }
 
-    /// The caret where the field at `p` was clicked.
-    pub fn place_caret(&mut self, p: Point) {
+    /// The caret where the field at `p` was clicked; `true` when it was the search's ×
+    /// (the field emptied: it's searched again).
+    pub fn place_caret(&mut self, p: Point) -> bool {
+        if self.query_field.contains(p) {
+            Control::press(&mut self.input, p, 1);
+            // A press changes the text only by ×: told by both, once.
+            return self.input.take_cleared() | self.input.take_edited();
+        }
         if self.mask_field.contains(p) {
             self.mask.click(p.x);
         } else if self.scope_field.contains(p) {
             self.scope.click(p.x);
         } else if self.replace_field.contains(p) {
             self.replace.click(p.x);
-        } else if self.query_field.contains(p) {
-            self.input.click(p.x);
         }
+        false
     }
 
     /// One of the options turned on or off.

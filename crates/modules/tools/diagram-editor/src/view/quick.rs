@@ -6,7 +6,8 @@
 
 use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
-use ui_components::ds::Ctx;
+use text_layout::TextSystem;
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx};
 
 use super::DiagramView;
 use diagram_model::{Cell, CellKind};
@@ -242,6 +243,7 @@ impl DiagramView {
     pub(super) fn paint_quick(
         &mut self,
         scene: &mut render_api::Scene,
+        text: &mut TextSystem,
         ds: &Ctx<'_>,
         icons: &icons::Icons,
     ) {
@@ -266,9 +268,6 @@ impl DiagramView {
                 Quick::EndArrow => arrow,
                 Quick::Scheme(_) => false,
             };
-            if on {
-                layer.quad(Quad::filled(r, p.tab_active_background).rounded(ds.px(5.0)));
-            }
             match quick {
                 Quick::Scheme(i) => {
                     let (fill, line) = SCHEMES[i];
@@ -292,15 +291,9 @@ impl DiagramView {
                     );
                 }
                 _ => {
-                    if let Some(id) = quick.icon().and_then(|name| icons.id(name)) {
-                        let inset = ds.px(4.0);
-                        let inner = Rect::new(
-                            r.min_x() + inset,
-                            r.min_y() + inset,
-                            r.size.width - 2.0 * inset,
-                            r.size.height - 2.0 * inset,
-                        );
-                        ui_kit::draw_icon(layer, icons, id, inner, p.text);
+                    if let Some(icon) = quick.icon() {
+                        let spec = ButtonSpec::new(ButtonKind::Ghost).icon(icon).on(on);
+                        ds::button(layer, text, icons, ds, r, spec);
                     }
                 }
             }

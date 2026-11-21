@@ -2,64 +2,51 @@
 //! toolbar, the steps and the save button.
 
 use super::*;
+use ui_components::ds::{ButtonKind, ButtonSpec, SegmentedSpec, button_size};
+
+/// The room a difference's choices leave in its row (logical pixels).
+const CHOICES_INSET: f32 = 4.0;
 
 impl Compare {
     /// Difference `change`'s choices, right-aligned on its first row in the result column:
-    /// `‹ left`, `right ›`, `both`, `none` — the chosen one filled.
-    pub(crate) fn choices(&mut self, pen: Pen<'_, '_>, mid: Rect, y: f32, change: usize) {
+    /// `‹ left`, `right ›`, `both`, `none` — the shared segmented control, the chosen one
+    /// raised.
+    pub(crate) fn choices(
+        &mut self,
+        pen: Pen<'_, '_>,
+        icons: &icons::Icons,
+        (mid, y): (Rect, f32),
+        change: usize,
+    ) {
         let Pen { layer, text, ds } = pen;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
         let pick = self.picks.get(change).copied().unwrap_or_default();
-        let small = ds.ui_font(-2.0);
         let options = [
             (format!("‹ {}", t("compare.left")), Pick::Left),
             (format!("{} ›", t("compare.right")), Pick::Right),
             (t("compare.both"), Pick::Both),
             (t("compare.none"), Pick::None),
         ];
-        let shaped: Vec<_> = options.iter().map(|(l, _)| text.shape_line(l, &small)).collect();
-        let pad = px(9.0);
-        let total: f32 = shaped.iter().map(|s| s.width + pad * 2.0).sum::<f32>() + px(4.0);
-        let h = (self.row_h - px(4.0)).max(px(16.0));
-        let container = Rect::new(
-            (mid.max_x() - px(8.0) - total).round(),
-            (y + (self.row_h - h) / 2.0).round(),
-            total.round(),
-            h,
-        );
-        let current = change == self.current;
-        layer.quad(
-            Quad::filled(container, p.popup_background)
-                .rounded(h / 2.0)
-                .bordered(ds.line(), if current { p.accent.with_alpha(0.55) } else { p.border }),
-        );
-        let mut x = container.min_x() + px(2.0);
-        for ((_, value), shaped) in options.iter().zip(&shaped) {
-            let w = shaped.width + pad * 2.0;
-            let chip = Rect::new(x, container.min_y() + px(2.0), w, h - px(4.0));
-            let on = pick == *value;
-            let hovered = self.hover == Some(Hit::Pick(change, *value));
-            let fill = if on {
-                p.accent
-            } else if hovered {
-                p.text.with_alpha(0.10)
-            } else {
-                Rgba::TRANSPARENT
-            };
-            layer.quad(Quad::filled(chip, fill).rounded(chip.size.height / 2.0));
-            draw_text(
-                layer,
-                shaped,
-                (chip.min_x() + pad).round(),
-                ds::optical_baseline(chip.min_y(), chip.size.height, &small),
-                if on { Rgba::WHITE } else { p.text_muted },
-            );
-            if let Some(hit) = chip.intersect(&self.list) {
-                self.hits.push((hit, Hit::Pick(change, *value)));
+        let labels = options.each_ref().map(|(l, _)| l.as_str());
+        // None chosen (a conflict waiting): past the last, so none raised.
+        let selected = options.iter().position(|(_, v)| *v == pick).unwrap_or(options.len());
+        let hovered = options.iter().position(|(_, v)| self.hover == Some(Hit::Pick(change, *v)));
+        let spec = SegmentedSpec {
+            right: (mid.max_x() - ds.px(8.0)).round(),
+            mid: y + self.row_h / 2.0,
+            labels: &labels,
+            selected,
+            hovered,
+        };
+        // As high as a row lets it, within the small sizes.
+        let height = (self.row_h / ds.scale.max(0.01) - CHOICES_INSET)
+            .clamp(button_size::SMALL, button_size::COMPACT);
+        let look = ds::SegmentedLook { height, ..ds::SegmentedLook::default() };
+        let (hits, list) = (&mut self.hits, self.list);
+        ds::segmented_styled(layer, text, icons, ds, (spec, look), |i, seg| {
+            if let (Some((_, value)), Some(hit)) = (options.get(i), seg.intersect(&list)) {
+                hits.push((hit, Hit::Pick(change, *value)));
             }
-            x += w;
-        }
+        });
     }
 
     /// The columns: left | (result |) right, with a gutter between them (a splitter).
@@ -217,7 +204,7 @@ impl Compare {
 
     /// The choices of the current difference and of the one under the mouse, in the result
     /// column `mid` (those scrolled out of sight skipped).
-    pub(crate) fn paint_compose(&mut self, pen: Pen<'_, '_>, mid: Rect) {
+    pub(crate) fn paint_compose(&mut self, pen: Pen<'_, '_>, icons: &icons::Icons, mid: Rect) {
         let Pen { layer, text, ds } = pen;
         let hovered = match self.hover {
             Some(Hit::Select(c) | Hit::Pick(c, _)) => Some(c),
@@ -231,7 +218,7 @@ impl Compare {
             if y + self.row_h < self.list.min_y() || y > self.list.max_y() {
                 continue;
             }
-            self.choices(Pen { layer, text, ds }, mid, y, change);
+            self.choices(Pen { layer, text, ds }, icons, (mid, y), change);
         }
     }
 
@@ -267,26 +254,25 @@ impl Compare {
         &mut self,
         layer: &mut Layer,
         text: &mut TextSystem,
+        icons: &icons::Icons,
         ds: &Ctx<'_>,
         bar: Rect,
     ) {
         ds::divider(layer, ds, bar.min_x(), bar.max_x(), bar.max_y());
         let mid = bar.min_y() + bar.size.height / 2.0;
         let x = self.paint_title(Pen { layer, text, ds }, bar);
-        self.paint_steps(Pen { layer, text, ds }, x, mid);
+        self.paint_steps(Pen { layer, text, ds }, icons, x, mid);
         // On the right: the mode, then (in "Compose") where to write and "all from…".
         let mut right = bar.max_x() - ds.px(16.0);
         // Composing: the result saved into its file (⌘S), lit once something was chosen
         // (resolving: once no conflict is left).
         if self.merge && self.writable() {
-            self.paint_save(Pen { layer, text, ds }, mid, &mut right);
+            self.paint_save(Pen { layer, text, ds }, icons, mid, &mut right);
         }
         if self.writable() && self.resolving.is_none() {
-            let items = [
-                (t("compare.diff"), Hit::Mode(false), !self.merge),
-                (t("compare.merge"), Hit::Mode(true), self.merge),
-            ];
-            self.paint_segmented(Pen { layer, text, ds }, mid, &mut right, &items);
+            let items =
+                [(t("compare.diff"), Hit::Mode(false)), (t("compare.merge"), Hit::Mode(true))];
+            self.paint_segmented(Pen { layer, text, ds }, mid, &mut right, &items, self.merge);
         }
         // With a read-only side there is only one file to write to: no choice shown.
         if self.merge && !self.read_only.contains(&true) {
@@ -294,23 +280,23 @@ impl Compare {
                 (
                     format!("{} {}", t("compare.write_to"), t("compare.left")),
                     Hit::Target(Side::Left),
-                    self.target() == Side::Left,
                 ),
-                (t("compare.right"), Hit::Target(Side::Right), self.target() == Side::Right),
+                (t("compare.right"), Hit::Target(Side::Right)),
             ];
-            self.paint_segmented(Pen { layer, text, ds }, mid, &mut right, &items);
+            let right_chosen = self.target() == Side::Right;
+            self.paint_segmented(Pen { layer, text, ds }, mid, &mut right, &items, right_chosen);
         }
         if self.resolving.is_some() {
             let writing = self.resolving.as_ref().is_some_and(|r| r.by_hand.is_some());
             let items = [(t("compare.by_hand"), Hit::ByHand, writing)];
-            self.paint_segmented(Pen { layer, text, ds }, mid, &mut right, &items);
+            self.paint_actions(Pen { layer, text, ds }, icons, mid, &mut right, &items);
         }
         if self.merge && !self.resolving.as_ref().is_some_and(|r| r.by_hand.is_some()) {
             let items = [
                 (t("compare.all_left"), Hit::AllLeft, false),
                 (t("compare.all_right"), Hit::AllRight, false),
             ];
-            self.paint_segmented(Pen { layer, text, ds }, mid, &mut right, &items);
+            self.paint_actions(Pen { layer, text, ds }, icons, mid, &mut right, &items);
         }
     }
 
@@ -361,34 +347,33 @@ impl Compare {
     }
 
     /// Previous / next difference, from `x`.
-    pub(crate) fn paint_steps(&mut self, pen: Pen<'_, '_>, mut x: f32, mid: f32) {
+    pub(crate) fn paint_steps(
+        &mut self,
+        pen: Pen<'_, '_>,
+        icons: &icons::Icons,
+        mut x: f32,
+        mid: f32,
+    ) {
         let Pen { layer, text, ds } = pen;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-0.5);
         for (label, hit) in [("↑", Hit::Prev), ("↓", Hit::Next)] {
-            let r = Rect::new(x, mid - px(13.0), px(26.0), px(26.0));
-            if self.hover == Some(hit) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.07)).rounded(px(6.0)));
-            }
-            let shaped = text.shape_line(label, &font);
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                ds::optical_baseline(r.min_y(), r.size.height, &font),
-                p.text,
-            );
+            let r = ds::square_button(ds, (x, mid), button_size::MEDIUM);
+            let spec =
+                ButtonSpec::new(ButtonKind::Ghost).label(label).hovered(self.hover == Some(hit));
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, hit));
-            x += px(28.0);
+            x += ds.px(STEP_ADVANCE);
         }
     }
 
     /// "Save to …  ⌘S", left of `right` (moved past it): lit once something was chosen.
-    pub(crate) fn paint_save(&mut self, pen: Pen<'_, '_>, mid: f32, right: &mut f32) {
+    pub(crate) fn paint_save(
+        &mut self,
+        pen: Pen<'_, '_>,
+        icons: &icons::Icons,
+        mid: f32,
+        right: &mut f32,
+    ) {
         let Pen { layer, text, ds } = pen;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
         let path = match (&self.resolving, self.target()) {
             (Some(resolving), _) => &resolving.result,
             (None, Side::Left) => &self.left_path,
@@ -396,78 +381,82 @@ impl Compare {
         };
         let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let label = format!("{}  ⌘S", tr!("compare.save_to", name = name));
-        let small = ds.ui_font(-1.0).with_weight(Font::SEMIBOLD);
-        let shaped = text.shape_line(&label, &small);
-        let h = px(28.0);
-        let button =
-            Rect::new(*right - shaped.width - px(24.0), mid - h / 2.0, shaped.width + px(24.0), h);
         let dirty = self.can_save();
-        let (fill, color) = if dirty {
-            let fill =
-                if self.hover == Some(Hit::Save) { p.accent.with_alpha(0.85) } else { p.accent };
-            (fill, Rgba::WHITE)
-        } else {
-            (p.text.with_alpha(0.05), p.text_muted)
-        };
-        layer.quad(Quad::filled(button, fill).rounded(px(8.0)));
-        draw_text(
-            layer,
-            &shaped,
-            (button.min_x() + px(12.0)).round(),
-            ds::optical_baseline(button.min_y(), h, &small),
-            color,
-        );
+        let spec = ButtonSpec::new(ButtonKind::Primary)
+            .label(&label)
+            .enabled(dirty)
+            .hovered(self.hover == Some(Hit::Save));
+        let h = ds.px(button_size::LARGE);
+        let w = ds::button_width(text, ds, &spec, h);
+        let button = Rect::new(*right - w, mid - h / 2.0, w, h);
+        ds::button(layer, text, icons, ds, button, spec);
         if dirty {
             self.hits.push((button, Hit::Save));
         }
-        *right = button.min_x() - px(12.0);
+        *right = button.min_x() - ds.px(GROUP_GAP);
     }
 
-    /// A segmented control ending at `right` (moved past it): its items (label, what a click
-    /// does, chosen).
+    /// The shared segmented control ending at `right` (moved past it): its items (label,
+    /// what a click does), the second chosen when `second`.
     pub(crate) fn paint_segmented(
         &mut self,
         pen: Pen<'_, '_>,
         mid: f32,
         right: &mut f32,
+        items: &[(String, Hit); 2],
+        second: bool,
+    ) {
+        let Pen { layer, text, ds } = pen;
+        let labels = [items[0].0.as_str(), items[1].0.as_str()];
+        let hovered = items.iter().position(|(_, hit)| self.hover == Some(*hit));
+        let spec = SegmentedSpec {
+            right: *right,
+            mid,
+            labels: &labels,
+            selected: usize::from(second),
+            hovered,
+        };
+        let width = ds::segmented_width(text, ds, &labels);
+        let hits = &mut self.hits;
+        ds::segmented_with(layer, text, ds, spec, |i, r| hits.push((r, items[i].1)));
+        *right -= width + ds.px(GROUP_GAP);
+    }
+
+    /// Soft buttons side by side ending at `right` (moved past them): their label, what a
+    /// click does, turned on.
+    pub(crate) fn paint_actions(
+        &mut self,
+        pen: Pen<'_, '_>,
+        icons: &icons::Icons,
+        mid: f32,
+        right: &mut f32,
         items: &[(String, Hit, bool)],
     ) {
         let Pen { layer, text, ds } = pen;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
-        let small = ds.ui_font(-1.0);
-        let widths: Vec<f32> =
-            items.iter().map(|(l, _, _)| text.shape_line(l, &small).width + px(20.0)).collect();
-        let total: f32 = widths.iter().sum::<f32>() + px(4.0);
-        let h = px(28.0);
-        let seg = Rect::new(*right - total, mid - h / 2.0, total, h);
-        layer.quad(Quad::filled(seg, p.text.with_alpha(0.05)).rounded(px(8.0)));
-        let mut sx = seg.min_x() + px(2.0);
-        for ((label, hit, on), w) in items.iter().zip(&widths) {
-            let r = Rect::new(sx, seg.min_y() + px(2.0), *w, h - px(4.0));
-            if *on {
-                layer.quad(
-                    Quad::filled(r, p.popup_background)
-                        .rounded(px(6.0))
-                        .bordered(ds.line(), p.border),
-                );
-            } else if self.hover == Some(*hit) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.05)).rounded(px(6.0)));
-            }
-            let shaped = text.shape_line(label, &small);
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                ds::optical_baseline(r.min_y(), r.size.height, &small),
-                if *on { p.text } else { p.text_muted },
-            );
+        let h = ds.px(button_size::LARGE);
+        let gap = ds.px(ACTION_GAP);
+        let mut x = *right;
+        for (label, hit, on) in items.iter().rev() {
+            let spec = ButtonSpec::new(ButtonKind::Soft)
+                .label(label)
+                .on(*on)
+                .hovered(self.hover == Some(*hit));
+            let w = ds::button_width(text, ds, &spec, h);
+            let r = Rect::new(x - w, mid - h / 2.0, w, h);
+            ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, *hit));
-            sx += w;
+            x = r.min_x() - gap;
         }
-        *right = seg.min_x() - px(12.0);
+        *right = x + gap - ds.px(GROUP_GAP);
     }
 }
+
+/// How far one step button is from the next (logical pixels): its 26 and a 2 apart.
+const STEP_ADVANCE: f32 = 28.0;
+/// The room between two groups of the toolbar (logical pixels).
+const GROUP_GAP: f32 = 12.0;
+/// The room between two action buttons of one group (logical pixels).
+const ACTION_GAP: f32 = 4.0;
 
 /// A cell: line number, background (difference), colored text and the changed part.
 /// `range` of line `raw` where it is once the line's tabs are four spaces (each tab before a

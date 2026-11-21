@@ -261,7 +261,7 @@ fn esc_clears_a_search_first_and_the_cursor_keys_move_in_the_field() {
             }
             _ => (
                 wb.home.projects_menu.query.text().to_owned(),
-                wb.home.projects_menu.query.cursor(),
+                wb.home.projects_menu.query.input.cursor(),
             ),
         };
         assert_eq!(field(&wb), ("tema".to_owned(), 4), "{o:?}");

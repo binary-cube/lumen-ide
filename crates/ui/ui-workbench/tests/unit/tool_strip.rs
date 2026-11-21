@@ -26,7 +26,7 @@ fn top_and_bottom_groups_are_hit_tested() {
             tone: None,
         },
     ];
-    strip.paint(&buttons, &icons, &Palette::dark(), &mut Scene::default());
+    strip.paint(&buttons, &icons, &mut TextSystem::new(), &Palette::dark(), &mut Scene::default());
     assert_eq!(strip.hit(Point::new(22.0, 20.0)), Some("project"));
     assert_eq!(strip.hit(Point::new(22.0, 580.0)), Some("terminal"));
     assert_eq!(strip.hit(Point::new(22.0, 300.0)), None);
@@ -57,7 +57,7 @@ fn a_dot_sits_on_the_icons_corner() {
             tone: None,
         };
         let mut scene = Scene::default();
-        strip.paint(&[button], &icons, &palette, &mut scene);
+        strip.paint(&[button], &icons, &mut TextSystem::new(), &palette, &mut scene);
         let layer = &scene.layers()[0];
         let dot = layer.quads.iter().find(|q| q.color == color).expect("the dot").bounds;
         assert_eq!((dot.size.width, dot.size.height), (DOT_BADGE, DOT_BADGE), "a circle");
@@ -81,7 +81,7 @@ fn a_dot_sits_on_the_icons_corner() {
         tone: None,
     };
     let mut scene = Scene::default();
-    strip.paint(&[button], &icons, &palette, &mut scene);
+    strip.paint(&[button], &icons, &mut TextSystem::new(), &palette, &mut scene);
     assert!(!scene.layers()[0].quads.iter().any(|q| q.color == palette.accent));
 }
 
@@ -104,7 +104,7 @@ fn a_lit_button_s_dot_is_ringed_in_its_color() {
         tone: None,
     };
     let mut scene = Scene::default();
-    strip.paint(&[button], &icons, &palette, &mut scene);
+    strip.paint(&[button], &icons, &mut TextSystem::new(), &palette, &mut scene);
     let quads = &scene.layers()[0].quads;
     let lit = quads[0].color;
     assert!(quads.iter().skip(1).any(|q| q.color == lit), "the ring: the button's color");
@@ -140,7 +140,7 @@ fn a_line_parts_the_groups() {
     // One group: no line, the buttons 38 apart (32 and a 6 gap).
     let mut scene = Scene::default();
     let same = [button("a", false, "code"), button("b", false, "code")];
-    strip.paint(&same, &icons, &palette, &mut scene);
+    strip.paint(&same, &icons, &mut TextSystem::new(), &palette, &mut scene);
     assert!(lines(&scene).is_empty());
     let b_at = strip.hit_rect(Point::new(22.0, 50.0)).map(|(r, _)| r.min_y());
     assert_eq!(b_at, Some(46.0));
@@ -152,7 +152,7 @@ fn a_line_parts_the_groups() {
         button("x", true, "modes"),
         button("y", true, ""),
     ];
-    strip.paint(&parted, &icons, &palette, &mut scene);
+    strip.paint(&parted, &icons, &mut TextSystem::new(), &palette, &mut scene);
     let found = lines(&scene);
     assert_eq!(found.len(), 2, "{found:?}");
     let b = strip.hit_rect(Point::new(22.0, 60.0)).expect("b").0;
@@ -163,7 +163,7 @@ fn a_line_parts_the_groups() {
     // A strip too short for the lines' room: no lines, the buttons as without groups.
     strip.set_bounds(Rect::new(0.0, 0.0, 44.0, 160.0), 1.0);
     let mut scene = Scene::default();
-    strip.paint(&parted, &icons, &palette, &mut scene);
+    strip.paint(&parted, &icons, &mut TextSystem::new(), &palette, &mut scene);
     assert!(lines(&scene).is_empty());
     let b_at = strip.hit_rect(Point::new(22.0, 50.0)).map(|(r, _)| r.min_y());
     assert_eq!(b_at, Some(46.0));

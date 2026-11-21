@@ -18,7 +18,7 @@ use render_api::{Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_kit::{draw_icon, draw_text};
 
-use crate::ds::{self, Ctx, radius};
+use crate::ds::{self, Ctx};
 use crate::palette::Palette;
 use crate::severity::contrast;
 use crate::tooltip::Tip;
@@ -32,6 +32,10 @@ pub const ROW_H: f32 = 24.0;
 pub const BAND_H: f32 = crate::tree_table::HEADER_H;
 /// The time axis under the band (logical pixels).
 pub const AXIS_H: f32 = 20.0;
+/// The height of the band's buttons (back, the crumbs), and the back's width (logical
+/// pixels).
+const BAND_BUTTON_H: f32 = 22.0;
+const BACK_W: f32 = crate::ds::button_size::COMPACT;
 
 /// A node: its parent, its value in all and its own, what it says (its label, a detail
 /// after it), its fill, an outline and a sign (a problem), its tooltip.
@@ -534,20 +538,11 @@ impl Icicle {
         let mid = band.min_y() + band.size.height / 2.0;
         let mut x = band.min_x() + px(6.0);
         if self.focus.is_some() {
-            let r = Rect::new(x, mid - px(11.0), px(24.0), px(22.0));
-            if self.hover == Some(Hit::Back) {
-                base.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-            }
-            if let Some(id) = icons.id("arrow-left") {
-                let s = px(14.0);
-                draw_icon(
-                    base,
-                    icons,
-                    id,
-                    Rect::new((r.min_x() + px(5.0)).round(), (mid - s / 2.0).round(), s, s),
-                    p.text,
-                );
-            }
+            let r = Rect::new(x, mid - px(BAND_BUTTON_H / 2.0), px(BACK_W), px(BAND_BUTTON_H));
+            let back = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .icon("arrow-left")
+                .hovered(self.hover == Some(Hit::Back));
+            ds::button(base, text, icons, &ds, r, back);
             self.crumbs.push((r, Hit::Back));
             x = r.max_x() + px(4.0);
         }
@@ -596,17 +591,27 @@ impl Icicle {
             }
             let shown = ds::ellipsize(text, &label, f, room.min(px(220.0)));
             let shaped = text.shape_line(&shown, f);
-            let r = Rect::new(x, mid - px(11.0), shaped.width + px(12.0), px(22.0));
-            if !last && self.hover == Some(Hit::Crumb(*node)) {
-                base.quad(Quad::filled(r, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-            }
-            draw_text(
-                base,
-                &shaped,
-                (r.min_x() + px(6.0)).round(),
-                ds::optical_baseline(band.min_y(), band.size.height, f),
-                if last { p.text } else { p.text_muted },
+            let r = Rect::new(
+                x,
+                mid - px(BAND_BUTTON_H / 2.0),
+                shaped.width + px(12.0),
+                px(BAND_BUTTON_H),
             );
+            if last {
+                draw_text(
+                    base,
+                    &shaped,
+                    (r.min_x() + px(6.0)).round(),
+                    ds::optical_baseline(band.min_y(), band.size.height, f),
+                    p.text,
+                );
+            } else {
+                let crumb = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                    .label(&shown)
+                    .rest_tone(ds::Tone::Neutral)
+                    .hovered(self.hover == Some(Hit::Crumb(*node)));
+                ds::button(base, text, icons, &ds, r, crumb);
+            }
             if !last {
                 self.crumbs.push((r, Hit::Crumb(*node)));
                 draw_text(

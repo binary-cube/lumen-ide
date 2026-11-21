@@ -621,12 +621,8 @@ fn every_control_has_a_tooltip_with_its_keys() {
         focused: true,
         waker: None,
     });
-    let controls = |h: &Hit| {
-        matches!(
-            h,
-            Hit::Back | Hit::Clear | Hit::Field | Hit::Depth(_) | Hit::Kinds(_) | Hit::Found
-        )
-    };
+    let controls =
+        |h: &Hit| matches!(h, Hit::Back | Hit::Field | Hit::Depth(_) | Hit::Kinds(_) | Hit::Found);
     let mut seen = Vec::new();
     for (r, hit) in v.hits.clone().iter().filter(|(_, h)| controls(h)) {
         let tip = v.tooltip_at(middle(*r)).unwrap_or_else(|| panic!("no tooltip on {hit:?}"));
@@ -641,7 +637,10 @@ fn every_control_has_a_tooltip_with_its_keys() {
         |hit: Hit| seen.iter().find(|(h, _)| *h == hit).and_then(|(_, t)| t.shortcut.clone());
     assert_eq!(keys(Hit::Back).as_deref(), Some("⌫"));
     assert_eq!(keys(Hit::Field).as_deref(), Some("⌘F"));
-    assert!(seen.iter().any(|(h, _)| *h == Hit::Clear));
+    // The filter's ×: what it does.
+    let field = v.filter.area();
+    let x = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    assert_eq!(v.tooltip_at(x).map(|t| t.label), Some(t("relations.tip_clear")));
     // The legend: what each kind of line is.
     let legend: Vec<&Tip> = v.tips.iter().filter(|(h, _)| *h == Hit::Bar).map(|(_, t)| t).collect();
     assert!(!legend.is_empty());
@@ -658,7 +657,7 @@ fn the_app_s_editing_commands_reach_the_search() {
     v.text_input("ord");
     settle(&mut v);
     assert!(v.command("select_all"));
-    assert_eq!(v.filter.selected_text(), "ord");
+    assert_eq!(v.filter.input.selected_text(), "ord");
     assert!(v.command("cut"));
     settle(&mut v);
     assert_eq!(names(&v).len(), 5, "⌘X: every table again");
@@ -691,17 +690,20 @@ fn a_press_on_the_filter_gives_it_the_keys_and_one_elsewhere_takes_them() {
     let mut scene = render_api::Scene::default();
     let palette = ui_components::Palette::dark();
     let icons = icons::Icons::builtin();
-    v.paint(ViewerPaint {
-        bounds: Rect::new(0.0, 0.0, 1800.0, 900.0),
-        scale: 1.0,
-        text: &mut text,
-        scene: &mut scene,
-        palette: &palette,
-        icons: &icons,
-        focused: true,
-        waker: None,
-    });
-    let field = v.filter_area;
+    let mut paint = |v: &mut RelationsView| {
+        v.paint(ViewerPaint {
+            bounds: Rect::new(0.0, 0.0, 1800.0, 900.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut v);
+    let field = v.filter.area();
     let on = Point::new(field.min_x() + 40.0, field.min_y() + field.size.height / 2.0);
     v.hover(on);
     assert_eq!(v.cursor_at(on), Some(ViewerCursor::Text));
@@ -712,6 +714,16 @@ fn a_press_on_the_filter_gives_it_the_keys_and_one_elsewhere_takes_them() {
     assert!(v.text_input("rd"));
     settle(&mut v);
     assert_eq!(names(&v), ["orders"]);
+    // Its ×: emptied, every table again.
+    paint(&mut v);
+    let x = Point::new(field.max_x() - 17.0, field.min_y() + field.size.height / 2.0);
+    v.hover(x);
+    assert_eq!(v.cursor_at(x), Some(ViewerCursor::Pointer));
+    v.pointer_down(x, 1, PressMods::default());
+    v.release();
+    settle(&mut v);
+    assert_eq!(v.filter.text(), "");
+    assert_eq!(names(&v).len(), 5, "× filtered again");
     // A press on the diagram: the keys back to it.
     let canvas = Point::new(field.min_x() + 40.0, field.max_y() + 400.0);
     v.pointer_down(canvas, 1, PressMods::default());

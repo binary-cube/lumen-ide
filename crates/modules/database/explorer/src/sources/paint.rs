@@ -9,7 +9,7 @@ use kernel::{Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
 use ui_components::ViewerPaint;
-use ui_components::ds::{self, Check, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Check, Ctx, button_size, radius};
 use ui_kit::{TextInputStyle, draw_text};
 
 use super::form::{Field, Item, ListRow, Place, Tab, policy_key};
@@ -30,6 +30,31 @@ const FIELD_H: f32 = 34.0;
 /// A labeled field: its label, the field, the gap after it.
 const GROUP_H: f32 = 68.0;
 const TOOLBAR_H: f32 = 40.0;
+/// The list's rows: the chosen one's accent alpha; a drop target's fill and outline (alphas
+/// of the accent).
+const ROW_CHOSEN: f32 = 0.14;
+const DROP_FILL: f32 = 0.10;
+const DROP_OUTLINE: f32 = 0.6;
+
+/// A row of the list (a source, a folder, a choice): the chosen one in the accent, the one
+/// under the mouse in the hover's background.
+fn list_row(selected: bool, hovered: bool) -> ds::RowHighlight {
+    ds::RowHighlight::new(selected, hovered)
+        .selected_alpha(ROW_CHOSEN)
+        .hover(ds::HoverFill::Background)
+        .radius(radius::SM)
+}
+
+/// Where a dragged row would land: in the accent, outlined.
+fn drop_target(p: &ui_components::Palette) -> ds::RowHighlight {
+    ds::RowHighlight::new(true, false)
+        .selected_alpha(DROP_FILL)
+        .outline(p.accent.with_alpha(DROP_OUTLINE))
+        .radius(radius::SM)
+}
+
+/// A named color's round swatch's side (logical pixels).
+const SWATCH: f32 = 20.0;
 
 impl SourcesView {
     fn style(ds: &Ctx<'_>, enabled: bool) -> TextInputStyle {
@@ -202,25 +227,14 @@ impl SourcesView {
     /// The filter and the toolbar; the rows' area between them.
     fn paint_list(&mut self, pen: &mut Pen<'_, '_>, r: Rect) -> Rect {
         let ds = pen.ds;
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
-        let Some(editor) = &self.editor else { return Rect::default() };
-        // The filter.
+        // The filter: the app's search field (× with text, the caret while it has the keys).
         let field = Rect::new(r.min_x(), r.min_y(), r.size.width, px(FIELD_H));
-        let inner =
-            ds::search_field(pen.layer, pen.icons, ds, field, self.focus == Some(Field::Filter));
-        let mut style = Self::style(ds, true);
-        style.background = Rgba::TRANSPARENT;
-        style.border_width = 0.0;
-        style.padding = 0.0;
-        editor.filter.paint(
-            pen.layer,
-            pen.text,
-            inner,
-            self.focus == Some(Field::Filter),
-            &t("datasources.filter_sources"),
-            &style,
-        );
+        let focused = self.focus == Some(Field::Filter);
+        let Some(editor) = &mut self.editor else { return Rect::default() };
+        let placeholder = t("datasources.filter_sources");
+        editor.filter.paint(pen.layer, pen.text, pen.icons, ds, (field, focused), &placeholder);
+        let Some(editor) = &self.editor else { return Rect::default() };
         self.hits.push((field, Hit::Field(Field::Filter)));
         // The rows, by list.
         let toolbar = Rect::new(r.min_x(), r.max_y() - px(TOOLBAR_H), r.size.width, px(TOOLBAR_H));
@@ -232,10 +246,7 @@ impl SourcesView {
         );
         self.list_area = list;
         // The toolbar: add, remove, duplicate, move to the other list.
-        pen.layer.quad(Quad::filled(
-            Rect::new(r.min_x(), toolbar.min_y(), r.size.width, ds.line()),
-            p.card_border,
-        ));
+        ds::divider_card(pen.layer, ds, r.min_x(), r.max_x(), toolbar.min_y());
         let has = editor.current().is_some();
         let folder = editor.current_folder().is_some();
         let move_label = match editor.scope() {
@@ -254,33 +265,16 @@ impl SourcesView {
                 has,
             ),
         ];
-        let size = px(28.0);
+        let size = px(button_size::LARGE);
         let mut x = r.min_x();
         let mid = toolbar.min_y() + px(6.0) + size / 2.0;
         for (tool, icon, tip, enabled) in tools {
             let button = Rect::new(x, (mid - size / 2.0).round(), size, size);
             let hovered = self.hover == Some(Hit::Tool(tool))
                 || (tool == Tool::Add && self.popup == Some(Choice::AddDriver));
-            if hovered && enabled {
-                pen.layer
-                    .quad(Quad::filled(button, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-            }
-            if let Some(id) = pen.icons.id(icon) {
-                let s = px(15.0);
-                let at = Rect::new(
-                    (button.min_x() + (size - s) / 2.0).round(),
-                    (button.min_y() + (size - s) / 2.0).round(),
-                    s,
-                    s,
-                );
-                ui_kit::draw_icon(
-                    pen.layer,
-                    pen.icons,
-                    id,
-                    at,
-                    if enabled { p.text } else { p.text_muted.with_alpha(0.5) },
-                );
-            }
+            let spec =
+                ButtonSpec::new(ButtonKind::Ghost).icon(icon).enabled(enabled).hovered(hovered);
+            ds::button(pen.layer, pen.text, pen.icons, ds, button, spec);
             if enabled {
                 self.hits.push((button, Hit::Tool(tool)));
             }
@@ -335,11 +329,7 @@ impl SourcesView {
                 let r = Rect::new(list.min_x(), y, list.size.width, h);
                 if y + h > list.min_y() && y < list.max_y() {
                     if drop == Some(Place::Top(scope)) {
-                        pen.layer.quad(
-                            Quad::filled(r, p.accent.with_alpha(0.10))
-                                .rounded(px(radius::SM))
-                                .bordered(ds.line(), p.accent.with_alpha(0.6)),
-                        );
+                        drop_target(p).paint(pen.layer, ds, r);
                     }
                     let label = t(match scope {
                         Scope::Project => "datasources.section_project",
@@ -384,20 +374,10 @@ impl SourcesView {
                     let target =
                         drop == Some(Place::Folder(id)) && self.dragging != Some(Item::Folder(id));
                     if target {
-                        pen.layer.quad(
-                            Quad::filled(row_rect, p.accent.with_alpha(0.10))
-                                .rounded(px(radius::SM))
-                                .bordered(ds.line(), p.accent.with_alpha(0.6)),
-                        );
-                    } else if selected {
-                        pen.layer.quad(
-                            Quad::filled(row_rect, p.accent.with_alpha(0.14))
-                                .rounded(px(radius::SM)),
-                        );
-                    } else if matches!(self.hover, Some(Hit::Folder(f, _)) if f == id) {
-                        pen.layer.quad(
-                            Quad::filled(row_rect, p.hover_background).rounded(px(radius::SM)),
-                        );
+                        drop_target(p).paint(pen.layer, ds, row_rect);
+                    } else {
+                        let hovered = matches!(self.hover, Some(Hit::Folder(f, _)) if f == id);
+                        list_row(selected, hovered).paint(pen.layer, ds, row_rect);
                     }
                     let x = row_rect.min_x() + px(6.0) + f32::from(depth) * indent;
                     let chevron = px(12.0);
@@ -469,16 +449,8 @@ impl SourcesView {
                 ListRow::Source { index: i, depth } => {
                     let e = &editor.entries[i];
                     let selected = editor.selected == Some(i);
-                    if selected {
-                        pen.layer.quad(
-                            Quad::filled(row_rect, p.accent.with_alpha(0.14))
-                                .rounded(px(radius::SM)),
-                        );
-                    } else if self.hover == Some(Hit::Row(i)) {
-                        pen.layer.quad(
-                            Quad::filled(row_rect, p.hover_background).rounded(px(radius::SM)),
-                        );
-                    }
+                    list_row(selected, self.hover == Some(Hit::Row(i)))
+                        .paint(pen.layer, ds, row_rect);
                     let shift = f32::from(depth) * indent + if depth > 0 { px(6.0) } else { 0.0 };
                     let color = editor
                         .color_of(i)
@@ -899,39 +871,14 @@ impl SourcesView {
         chosen: bool,
     ) -> Rect {
         let ds = pen.ds;
-        let p = ds.palette;
-        let px = |v: f32| ds.px(v);
-        let font = ds.ui_font(-1.0);
-        let shaped = pen.text.shape_line(&t(label), &font);
-        let dot = px(10.0);
-        let mark = means.and_then(|c| ui_components::tag_colors::named(&c.name(), p));
-        let lead = if mark.is_some() { dot + px(7.0) } else { 0.0 };
-        let h = px(28.0);
-        let r = Rect::new(x, (mid - h / 2.0).round(), (shaped.width + lead + px(24.0)).round(), h);
+        let label = t(label);
         let hovered = self.hover == Some(Hit::SourceColor(None))
             || self.hover == Some(Hit::FolderColor(None));
-        let (fill, border) = if chosen {
-            (p.accent.with_alpha(0.10), p.accent.with_alpha(0.7))
-        } else if hovered {
-            (p.text.with_alpha(0.05), p.border)
-        } else {
-            (Rgba::TRANSPARENT, p.border)
-        };
-        pen.layer.quad(Quad::filled(r, fill).rounded(h / 2.0).bordered(ds.line(), border));
-        let mut tx = r.min_x() + px(12.0);
-        if let Some(mark) = mark {
-            let d = Rect::new(tx, (mid - dot / 2.0).round(), dot, dot);
-            pen.layer.quad(Quad::filled(d, mark).rounded(dot / 2.0));
-            tx += lead;
+        let spec = ds::ChoiceSpec { x, mid, label: &label, selected: chosen, hovered };
+        match means.and_then(|c| ui_components::tag_colors::named(&c.name(), ds.palette)) {
+            Some(mark) => ds::choice_with_dot(pen.layer, pen.text, ds, spec, mark),
+            None => ds::choice(pen.layer, pen.text, ds, spec),
         }
-        draw_text(
-            pen.layer,
-            &shaped,
-            tx,
-            ds::optical_baseline(r.min_y(), h, &font),
-            if chosen { p.accent } else { p.text },
-        );
-        r
     }
 
     /// The named colors as round swatches from `x`, centered on `mid`, `now` ringed; a
@@ -947,30 +894,18 @@ impl SourcesView {
         let ds = pen.ds;
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
-        let size = px(20.0);
+        let size = px(SWATCH);
         let mut sx = x;
         for color in SourceColor::NAMED {
             let Some(fill) = ui_components::tag_colors::named(color.key(), p) else { continue };
             let r = Rect::new(sx, (mid - size / 2.0).round(), size, size);
             let hit =
                 if folder { Hit::FolderColor(Some(color)) } else { Hit::SourceColor(Some(color)) };
-            let chosen = now == Some(color);
-            if chosen || self.hover.as_ref() == Some(&hit) {
-                let ring = px(3.0);
-                let outer = Rect::new(
-                    r.min_x() - ring,
-                    r.min_y() - ring,
-                    size + 2.0 * ring,
-                    size + 2.0 * ring,
-                );
-                let edge = if chosen { fill } else { p.text_muted.with_alpha(0.5) };
-                pen.layer.quad(
-                    Quad::filled(outer, Rgba::TRANSPARENT)
-                        .rounded(outer.size.width / 2.0)
-                        .bordered(px(1.5), edge),
-                );
-            }
-            pen.layer.quad(Quad::filled(r, fill).rounded(size / 2.0));
+            ds::ColorSwatch::new(fill)
+                .radius(SWATCH / 2.0)
+                .ringed_around(now == Some(color))
+                .hovered(self.hover.as_ref() == Some(&hit))
+                .paint(pen.layer, ds, r);
             self.tips.push((r, t(&format!("datasources.color_{}", color.key()))));
             self.hits.push((r, hit));
             sx += size + px(12.0);
@@ -1038,7 +973,6 @@ impl SourcesView {
     /// The user and the password's field (masked, its eye), then where it's kept.
     fn password_row(&mut self, pen: &mut Pen<'_, '_>, x: f32, y: f32, w: f32) {
         let ds = pen.ds;
-        let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let Some(editor) = &mut self.editor else { return };
         let revealed = editor.revealed;
@@ -1065,19 +999,10 @@ impl SourcesView {
         self.input(pen, Field::Password, r, &placeholder);
         let eye =
             Rect::new(r.max_x() - px(32.0), r.min_y() + px(3.0), px(28.0), r.size.height - px(6.0));
-        if self.hover == Some(Hit::Reveal) {
-            pen.layer.quad(Quad::filled(eye, p.text.with_alpha(0.08)).rounded(px(radius::SM)));
-        }
-        if let Some(id) = pen.icons.id(if revealed { "eye-off" } else { "eye" }) {
-            let s = px(15.0);
-            let at = Rect::new(
-                (eye.min_x() + (eye.size.width - s) / 2.0).round(),
-                (eye.min_y() + (eye.size.height - s) / 2.0).round(),
-                s,
-                s,
-            );
-            ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.text_muted);
-        }
+        let spec = ButtonSpec::new(ButtonKind::Ghost)
+            .icon(if revealed { "eye-off" } else { "eye" })
+            .hovered(self.hover == Some(Hit::Reveal));
+        ds::button(pen.layer, pen.text, pen.icons, pen.ds, eye, spec);
         self.hits.push((eye, Hit::Reveal));
         self.tips.push((
             eye,
@@ -1102,7 +1027,11 @@ impl SourcesView {
         let px = |v: f32| ds.px(v);
         let mid = y + px(14.0);
         let state = if on { Check::On } else { Check::Off };
-        let check = ds::checkbox(pen.layer, pen.text, ds, x, mid, state, enabled);
+        let hovered = enabled && self.hover.as_ref() == Some(&hit);
+        let check = ds::Checkbox::new(state)
+            .enabled(enabled)
+            .hovered(hovered)
+            .paint(pen.layer, pen.text, ds, x, mid);
         let font = ds.ui_font(-0.5);
         let shaped = pen.text.shape_line(label, &font);
         let lx = check.max_x() + px(8.0);
@@ -1306,14 +1235,18 @@ impl SourcesView {
         for (i, (label, on, hit)) in rows.into_iter().enumerate() {
             let h = px(32.0);
             let row = Rect::new(x - px(4.0), *y, w + px(8.0), h);
-            if self.hover.as_ref() == Some(&hit) {
-                pen.layer
-                    .quad(Quad::filled(row, ds.palette.hover_background).rounded(px(radius::SM)));
-            }
+            let hovered = self.hover.as_ref() == Some(&hit);
+            list_row(false, hovered).paint(pen.layer, ds, row);
             let mid = *y + h / 2.0;
             let indent = if i == 0 { 0.0 } else { px(26.0) };
             let state = if on { Check::On } else { Check::Off };
-            let check = ds::checkbox(pen.layer, pen.text, ds, x + indent, mid, state, true);
+            let check = ds::Checkbox::new(state).hovered(hovered).paint(
+                pen.layer,
+                pen.text,
+                ds,
+                x + indent,
+                mid,
+            );
             let shaped = pen.text.shape_line(&label, &font);
             draw_text(
                 pen.layer,
@@ -1360,22 +1293,15 @@ impl SourcesView {
                 Rect::new(x + key_w + px(10.0), *y, value_w, px(FIELD_H)),
                 "",
             );
-            let remove = Rect::new(x + w - px(30.0), *y + px(3.0), px(28.0), px(28.0));
-            if self.hover == Some(Hit::RemoveOption(i)) {
-                pen.layer.quad(
-                    Quad::filled(remove, ds.palette.text.with_alpha(0.08)).rounded(px(radius::SM)),
-                );
-            }
-            if let Some(id) = pen.icons.id("minus") {
-                let s = px(14.0);
-                let at = Rect::new(
-                    (remove.min_x() + (remove.size.width - s) / 2.0).round(),
-                    (remove.min_y() + (remove.size.height - s) / 2.0).round(),
-                    s,
-                    s,
-                );
-                ui_kit::draw_icon(pen.layer, pen.icons, id, at, ds.palette.text_muted);
-            }
+            let remove = ds::square_button(
+                ds,
+                (x + w - px(30.0), *y + px(FIELD_H) / 2.0),
+                button_size::LARGE,
+            );
+            let spec = ButtonSpec::new(ButtonKind::Ghost)
+                .icon("minus")
+                .hovered(self.hover == Some(Hit::RemoveOption(i)));
+            ds::button(pen.layer, pen.text, pen.icons, ds, remove, spec);
             self.hits.push((remove, Hit::RemoveOption(i)));
             self.tips.push((remove, t("datasources.option_remove")));
             *y += px(FIELD_H) + px(8.0);

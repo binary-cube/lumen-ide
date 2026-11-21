@@ -10,8 +10,8 @@ use std::time::Duration;
 use code_intelligence::{ColorFormat, ColorProvider};
 use kernel::{Point, Rect, Rgba};
 use render_api::{ImageData, Layer, Quad, Scene};
-use text_layout::{Font, TextSystem};
-use ui_kit::{TextInput, TextInputStyle, draw_text};
+use text_layout::TextSystem;
+use ui_kit::{TextInput, TextInputStyle};
 
 use crate::anim::Tween;
 use crate::ds::{self, Ctx, Elevation, radius};
@@ -59,6 +59,9 @@ enum Part {
     Cancel,
     Apply,
 }
+
+/// The formats' segmented control: its height (logical pixels).
+const FORMATS_H: f32 = 28.0;
 
 const FORMATS: [(ColorFormat, &str); 3] =
     [(ColorFormat::Hex, "HEX"), (ColorFormat::Rgb, "RGBA"), (ColorFormat::Hsl, "HSLA")];
@@ -360,11 +363,11 @@ impl ColorPicker {
         let y = self.paint_square(&geo, scene, &ctx);
         let (overlay, y) = self.paint_bands(y, &geo, scene, &ctx);
         self.paint_handles(overlay, &ctx);
-        let y = self.paint_formats(y, &geo, text, overlay, &ctx);
-        let field = self.paint_field(y, &geo, icons, overlay, &ctx);
+        let y = self.paint_formats(y, &geo, (text, icons), overlay, &ctx);
+        let field = self.paint_field(y, &geo, (text, icons), overlay, &ctx);
         self.paint_input(field, text, scene, &ctx);
         let y = field.max_y() + px(14.0);
-        self.paint_buttons(y, &geo, text, scene, &ctx);
+        self.paint_buttons(y, &geo, (text, icons), scene, &ctx);
     }
 
     /// The saturation / brightness square (texture of the current hue), from the card's
@@ -473,54 +476,32 @@ impl ColorPicker {
         &mut self,
         y: f32,
         geo: &Card,
-        text: &mut TextSystem,
+        (text, icons): (&mut TextSystem, &icons::Icons),
         overlay: &mut Layer,
         ctx: &Ctx<'_>,
     ) -> f32 {
         let px = |v: f32| ctx.px(v);
-        let p = ctx.palette;
-        let seg_h = px(28.0);
-        let seg = Rect::new(geo.rect.min_x() + geo.pad, y, geo.inner_w, seg_h);
-        overlay.quad(
-            Quad::filled(seg, ctx.fade(p.text.with_alpha(0.05))).rounded(px(radius::SM + 1.0)),
-        );
-        let font = ctx.ui_font(-1.5).with_weight(Font::SEMIBOLD);
-        let cell = seg.size.width / FORMATS.len() as f32;
-        let active = FORMATS.iter().position(|(f, _)| Some(*f) == self.format);
-        for (i, (_, label)) in FORMATS.iter().enumerate() {
-            let r = Rect::new(
-                (seg.min_x() + i as f32 * cell).round(),
-                seg.min_y(),
-                cell.round(),
-                seg_h,
-            );
-            let selected = active == Some(i);
-            if selected {
-                let inner = Rect::new(
-                    r.min_x() + px(2.0),
-                    r.min_y() + px(2.0),
-                    r.size.width - px(4.0),
-                    r.size.height - px(4.0),
-                );
-                overlay.quad(
-                    Quad::filled(inner, ctx.fade(p.popup_background))
-                        .rounded(px(radius::SM))
-                        .bordered(ctx.line(), ctx.fade(p.border)),
-                );
-            }
-            let shaped = text.shape_line(label, &font);
-            let color =
-                if selected || self.hover == Some(Part::Format(i)) { p.text } else { p.text_muted };
-            draw_text(
-                overlay,
-                &shaped,
-                (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                ds::optical_baseline(r.min_y(), seg_h, &font),
-                ctx.fade(color),
-            );
-            self.parts.push((r, Part::Format(i)));
-        }
-        seg.max_y() + px(10.0)
+        let labels = FORMATS.map(|(_, label)| label);
+        let spec = ds::SegmentedSpec {
+            right: 0.0,
+            mid: y + px(FORMATS_H) / 2.0,
+            labels: &labels,
+            selected: FORMATS
+                .iter()
+                .position(|(f, _)| Some(*f) == self.format)
+                .unwrap_or(usize::MAX),
+            hovered: (0..FORMATS.len()).find(|i| self.hover == Some(Part::Format(*i))),
+        };
+        let look = ds::SegmentedLook {
+            height: FORMATS_H,
+            place: ds::SegmentPlace::Fill { x: geo.rect.min_x() + geo.pad, width: geo.inner_w },
+            ..Default::default()
+        };
+        let parts = &mut self.parts;
+        ds::segmented_styled(overlay, text, icons, ctx, (spec, look), |i, r| {
+            parts.push((r, Part::Format(i)));
+        });
+        y + px(FORMATS_H) + px(10.0)
     }
 
     /// The box of the field with the color text at `y` (and the eyedropper to its right);
@@ -529,7 +510,7 @@ impl ColorPicker {
         &mut self,
         y: f32,
         geo: &Card,
-        icons: &icons::Icons,
+        (text, icons): (&mut TextSystem, &icons::Icons),
         overlay: &mut Layer,
         ctx: &Ctx<'_>,
     ) -> Rect {
@@ -539,25 +520,17 @@ impl ColorPicker {
         let dropper_w = if eyedropper { px(40.0) } else { 0.0 };
         let field = Rect::new(geo.rect.min_x() + geo.pad, y, geo.inner_w - dropper_w, px(32.0));
         if eyedropper {
-            let b = Rect::new(field.max_x() + px(8.0), y, px(32.0), px(32.0));
-            let hovered = self.hover == Some(Part::Eyedropper);
-            let fill = if hovered { p.tab_hover } else { p.search_field_background };
-            overlay.quad(
-                Quad::filled(b, ctx.fade(fill))
-                    .rounded(px(radius::SM + 1.0))
-                    .bordered(ctx.line(), ctx.fade(p.card_border)),
+            let b = Rect::new(
+                field.max_x() + px(8.0),
+                y,
+                px(ds::button_size::SPACIOUS),
+                px(ds::button_size::SPACIOUS),
             );
-            if let Some(id) = icons.id("pipette") {
-                let size = px(16.0);
-                let r = Rect::new(
-                    (b.min_x() + (b.size.width - size) / 2.0).round(),
-                    (b.min_y() + (b.size.height - size) / 2.0).round(),
-                    size,
-                    size,
-                );
-                let color = if hovered { p.text } else { p.text_muted };
-                ui_kit::draw_icon(overlay, icons, id, r, ctx.fade(color));
-            }
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Soft)
+                .icon("pipette")
+                .rest_tone(ds::Tone::Neutral)
+                .hovered(self.hover == Some(Part::Eyedropper));
+            ds::button(overlay, text, icons, ctx, b, spec);
             self.parts.push((b, Part::Eyedropper));
         }
         self.input_rect = field;
@@ -609,49 +582,29 @@ impl ColorPicker {
         &mut self,
         y: f32,
         geo: &Card,
-        text: &mut TextSystem,
+        (text, icons): (&mut TextSystem, &icons::Icons),
         scene: &mut Scene,
         ctx: &Ctx<'_>,
     ) {
         let px = |v: f32| ctx.px(v);
-        let p = ctx.palette;
         let layer = scene.push_layer(Some(geo.rect));
         let button_h = px(30.0);
         let button_font = ds::button_font(ctx);
-        let apply_label = text.shape_line(&i18n::t("color.apply"), &button_font);
-        let cancel_label = text.shape_line(&i18n::t("dialog.cancel"), &button_font);
-        let apply_w = (apply_label.width + px(28.0)).max(px(76.0));
-        let cancel_w = (cancel_label.width + px(28.0)).max(px(76.0));
+        let apply_label = i18n::t("color.apply");
+        let cancel_label = i18n::t("dialog.cancel");
+        let apply_w = (text.shape_line(&apply_label, &button_font).width + px(28.0)).max(px(76.0));
+        let cancel_w =
+            (text.shape_line(&cancel_label, &button_font).width + px(28.0)).max(px(76.0));
         let apply = Rect::new(geo.rect.max_x() - geo.pad - apply_w, y, apply_w, button_h);
         let cancel = Rect::new(apply.min_x() - px(8.0) - cancel_w, y, cancel_w, button_h);
-        let hover_apply = self.hover == Some(Part::Apply);
-        let hover_cancel = self.hover == Some(Part::Cancel);
-        layer.quad(
-            Quad::filled(
-                apply,
-                ctx.fade(if hover_apply { p.accent.with_alpha(0.9) } else { p.accent }),
-            )
-            .rounded(px(radius::SM + 1.0)),
-        );
-        layer.quad(
-            Quad::filled(
-                cancel,
-                ctx.fade(if hover_cancel { p.text.with_alpha(0.06) } else { p.popup_background }),
-            )
-            .rounded(px(radius::SM + 1.0))
-            .bordered(ctx.line(), ctx.fade(p.border)),
-        );
-        for (r, label, color) in
-            [(apply, &apply_label, Rgba::WHITE), (cancel, &cancel_label, p.text)]
-        {
-            draw_text(
-                layer,
-                label,
-                (r.min_x() + (r.size.width - label.width) / 2.0).round(),
-                ds::optical_baseline(r.min_y(), button_h, &button_font),
-                ctx.fade(color),
-            );
-        }
+        let apply_spec = ds::ButtonSpec::new(ds::ButtonKind::Primary)
+            .label(&apply_label)
+            .hovered(self.hover == Some(Part::Apply));
+        let cancel_spec = ds::ButtonSpec::new(ds::ButtonKind::Secondary)
+            .label(&cancel_label)
+            .hovered(self.hover == Some(Part::Cancel));
+        ds::button(layer, text, icons, ctx, apply, apply_spec);
+        ds::button(layer, text, icons, ctx, cancel, cancel_spec);
         self.parts.push((apply, Part::Apply));
         self.parts.push((cancel, Part::Cancel));
     }

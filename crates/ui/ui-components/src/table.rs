@@ -24,6 +24,8 @@ const EDGE_INSET: f32 = 8.0;
 const EDGE_INSET_LIT: f32 = 4.0;
 /// A cell's padding on each side (logical pixels).
 pub const CELL_PAD: f32 = 10.0;
+/// A header under the mouse: the text's alpha it's lit with.
+const HEADER_HOVER: f32 = 0.05;
 
 /// A header's name's font (and what measures it).
 pub fn name_font(ctx: &Ctx<'_>) -> Font {
@@ -105,7 +107,10 @@ pub fn header_cell(
             (r.size.width - ctx.px(4.0)).max(0.0),
             (r.size.height - ctx.px(6.0)).max(0.0),
         );
-        layer.quad(Quad::filled(lit, p.text.with_alpha(0.05)).rounded(ctx.px(radius::SM)));
+        ds::RowHighlight::new(false, true)
+            .radius(radius::SM)
+            .hover(ds::HoverFill::Faint(HEADER_HOVER))
+            .paint(layer, ctx, lit);
     }
     let pad = cell.pad;
     let left = r.min_x() + pad + start;

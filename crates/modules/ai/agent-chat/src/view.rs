@@ -21,7 +21,7 @@ use i18n::t;
 use kernel::{Point, Rect, Rgba};
 use render_api::Quad;
 use ui_components::control::{Control, Controls, Thumb};
-use ui_components::ds::{self, Ctx, radius};
+use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, button_size, radius};
 use ui_components::{
     Asked, EdgeScrollbar, KeyReach, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint,
 };
@@ -370,57 +370,29 @@ impl ChatView {
     }
 }
 
-/// A round icon button at `r` (lit while hovered; `on`: in the accent).
-fn icon_button(
-    layer: &mut render_api::Layer,
-    icons: &icons::Icons,
-    ds: &Ctx<'_>,
-    r: Rect,
-    icon: &str,
-    (hovered, on): (bool, bool),
-) {
-    let p = ds.palette;
-    let fill = if on { p.accent } else { p.text.with_alpha(if hovered { 0.12 } else { 0.06 }) };
-    layer.quad(Quad::filled(r, fill).rounded(r.size.height / 2.0));
-    if let Some(id) = icons.id(icon) {
-        let s = ds.px(14.0);
-        let at = Rect::new(
-            r.min_x() + (r.size.width - s) / 2.0,
-            r.min_y() + (r.size.height - s) / 2.0,
-            s,
-            s,
-        );
-        ui_kit::draw_icon(layer, icons, id, at, if on { p.editor_background } else { p.text });
-    }
-}
+/// The height of the foot's labelled buttons (Terminal, a permission's choices, Install),
+/// logical pixels.
+const TEXT_BUTTON_H: f32 = button_size::LARGE;
 
-/// A text button (a permission's choice), returning its area.
+/// The send / stop button's icon in its circle (logical pixels).
+const SEND_ICON: f32 = 14.0;
+
+/// The shared button with `label`, from `x` (its middle at `mid`), sized to it: the main
+/// kind when `primary` (a permission's "allow", Install), else beside it. Returns its area.
 fn text_button(
     layer: &mut render_api::Layer,
-    text: &mut text_layout::TextSystem,
+    (text, icons): (&mut text_layout::TextSystem, &icons::Icons),
     ds: &Ctx<'_>,
     (x, mid): (f32, f32),
     label: &str,
     (hovered, primary): (bool, bool),
 ) -> Rect {
-    let p = ds.palette;
-    let font = ds.ui_font(-0.5);
-    let shaped = text.shape_line(label, &font);
-    let r = Rect::new(x, (mid - ds.px(14.0)).round(), shaped.width + ds.px(24.0), ds.px(28.0));
-    let fill = if primary {
-        p.accent.with_alpha(if hovered { 0.28 } else { 0.18 })
-    } else {
-        p.text.with_alpha(if hovered { 0.12 } else { 0.06 })
-    };
-    layer.quad(Quad::filled(r, fill).rounded(ds.px(radius::MD)));
-    let color = if primary { p.accent } else { p.text };
-    draw_text(
-        layer,
-        &shaped,
-        r.min_x() + ds.px(12.0),
-        ds::optical_baseline(r.min_y(), r.size.height, &font),
-        color,
-    );
+    let kind = if primary { ButtonKind::Primary } else { ButtonKind::Secondary };
+    let spec = ButtonSpec::new(kind).label(label).hovered(hovered);
+    let h = ds.px(TEXT_BUTTON_H);
+    let w = ds::button_width(text, ds, &spec, h);
+    let r = Rect::new(x.round(), (mid - h / 2.0).round(), w, h);
+    ds::button(layer, text, icons, ds, r, spec);
     r
 }
 
@@ -459,12 +431,17 @@ impl ChatView {
         );
         if self.start.is_some() && !matches!(self.phase, Phase::Moved) {
             let label = t("chat.terminal");
-            let x =
-                column.max_x() - ctx.text.shape_line(&label, &ds.ui_font(-0.5)).width - px(24.0);
+            let width = ds::button_width(
+                ctx.text,
+                ds,
+                &ButtonSpec::new(ButtonKind::Secondary).label(&label),
+                px(TEXT_BUTTON_H),
+            );
+            let x = column.max_x() - width;
             let hovered = self.hover == Some(Hit::Terminal);
             let r = text_button(
                 layer,
-                ctx.text,
+                (ctx.text, ctx.icons),
                 ds,
                 (x, status_top + status_h / 2.0),
                 &label,
@@ -486,19 +463,23 @@ impl ChatView {
                 .rounded(px(radius::LG))
                 .bordered(ds.line(), if focused { p.accent } else { p.input_border }),
         );
-        let button =
-            Rect::new(field.max_x() - px(36.0), field.min_y() + px(6.0), px(32.0), px(32.0));
+        let size = px(button_size::SPACIOUS);
+        let button = Rect::new(field.max_x() - px(36.0), field.min_y() + px(6.0), size, size);
         let running = self.conversation.running;
-        let (hit, icon) = if running { (Hit::Stop, "stop") } else { (Hit::Send, "arrow-up") };
+        // Send in the accent, Stop in the danger color: a filled circle while it can act.
+        let (hit, icon, kind) = if running {
+            (Hit::Stop, "stop", ButtonKind::Danger)
+        } else {
+            (Hit::Send, "arrow-up", ButtonKind::Primary)
+        };
         let ready = matches!(self.phase, Phase::Running(_)) && self.session.is_some();
-        icon_button(
-            layer,
-            ctx.icons,
-            ds,
-            button,
-            icon,
-            (self.hover == Some(hit), ready && (running || !self.input.text().trim().is_empty())),
-        );
+        let spec = ButtonSpec::new(kind)
+            .icon(icon)
+            .icon_size(SEND_ICON)
+            .round()
+            .enabled(ready && (running || !self.input.text().trim().is_empty()))
+            .hovered(self.hover == Some(hit));
+        ds::button(layer, ctx.text, ctx.icons, ds, button, spec);
         self.hits.push((button, hit));
         let style = ui_kit::TextInputStyle {
             background: Rgba::TRANSPARENT,
@@ -540,8 +521,14 @@ impl ChatView {
             for (i, choice) in permission.choices.iter().enumerate() {
                 let primary = choice.kind.starts_with("allow");
                 let hovered = self.hover == Some(Hit::Choice(i));
-                let r =
-                    text_button(layer, ctx.text, ds, (x, mid), &choice.name, (hovered, primary));
+                let r = text_button(
+                    layer,
+                    (ctx.text, ctx.icons),
+                    ds,
+                    (x, mid),
+                    &choice.name,
+                    (hovered, primary),
+                );
                 self.hits.push((r, Hit::Choice(i)));
                 x = r.max_x() + px(8.0);
             }
@@ -558,7 +545,7 @@ impl ChatView {
                 let hovered = self.hover == Some(Hit::Install);
                 let r = text_button(
                     layer,
-                    ctx.text,
+                    (ctx.text, ctx.icons),
                     ds,
                     (column.min_x(), bottom - px(20.0)),
                     &t("chat.install"),

@@ -1,6 +1,7 @@
 //! Painting a tool window: its header, tabs and buttons.
 
 use super::*;
+use ui_workbench::tab_strip::{self, PillTab, TabSlot};
 
 impl Workbench {
     /// The window's card: each group's header (the window's name on the first, the views
@@ -130,7 +131,7 @@ impl Workbench {
                     bounds.min_x() + ctx.px(8.0)
                 };
                 let x = self.paint_tool_tabs(layer, text, &header, g, x, &mut hits);
-                self.paint_tool_buttons(layer, &header, g, x, g == hide, &mut hits);
+                self.paint_tool_buttons(layer, text, &header, g, x, g == hide, &mut hits);
             }
         }
         if let Some(window) = self.tools.window() {
@@ -193,10 +194,8 @@ impl Workbench {
             .as_ref()
             .filter(|d| d.state == TabDragState::Moving && d.in_strip && d.group == g)
             .and_then(|d| Some((group.views.iter().position(|v| v.id == d.view)?, d)));
-        let gap = header.ctx.px(4.0);
-        let pill = |x: f32, width: f32| {
-            Rect::new(x, header.mid - header.ctx.px(12.0), width, header.ctx.px(24.0))
-        };
+        let gap = header.ctx.px(tab_strip::TAB_GAP);
+        let pill = |x: f32, width: f32| tab_strip::pill(&header.ctx, (x, header.mid), width);
         for i in 0..group.views.len() {
             if let Some((at, drag)) = dragged
                 && at == i
@@ -228,128 +227,77 @@ impl Workbench {
         header: &ToolHeader,
         (g, group, lit): (usize, &ToolGroup, bool),
         (i, x): (usize, f32),
-        mut hits: Option<&mut Vec<(Rect, ToolHit)>>,
+        hits: Option<&mut Vec<(Rect, ToolHit)>>,
     ) -> Rect {
-        let (ctx, palette, mid, hover) = (header.ctx, header.ctx.palette, header.mid, header.hover);
-        let px = |v: f32| ctx.px(v);
-        let font = ctx.ui_font(-0.5);
+        let (ctx, mid, hover) = (header.ctx, header.mid, header.hover);
         let view = &group.views[i];
         // The name it goes by now (a terminal's program), else the one it was opened with.
         let title = view.viewer.live_title().unwrap_or(&view.title);
-        let shaped = text.shape_line(title, &font);
-        let close = px(14.0);
-        // A fixed tab (neither pinned nor closable) has no room for a × (nor a pin).
-        let slot = view.pinned || view.closable();
-        let w = shaped.width + px(20.0) + if slot { close + px(4.0) } else { 0.0 };
-        let pill = Rect::new(x, mid - px(12.0), w, px(24.0));
         let on = i == group.active;
-        let fill = if on && lit {
-            palette.accent.with_alpha(0.14)
-        } else if on {
-            palette.text.with_alpha(0.08)
-        } else if hover == Some(ToolHit::View(g, i)) {
-            palette.text.with_alpha(0.06)
-        } else {
-            Rgba::TRANSPARENT
-        };
-        layer.quad(Quad::filled(pill, fill).rounded(px(radius::MD)));
-        let color = if on && lit { palette.accent } else { palette.text };
-        draw_text(
-            layer,
-            &shaped,
-            x + px(10.0),
-            ds::optical_baseline(pill.min_y(), pill.size.height, &font),
-            color,
-        );
-        if let Some(hits) = hits.as_deref_mut() {
-            hits.push((pill, ToolHit::View(g, i)));
-        }
-        // ×: on the active one and under the mouse.
-        let close_rect = Rect::new(pill.max_x() - close - px(6.0), mid - close / 2.0, close, close);
-        let inner = Rect::new(
-            close_rect.min_x() + px(2.0),
-            close_rect.min_y() + px(2.0),
-            close - px(4.0),
-            close - px(4.0),
-        );
-        // A pinned one shows a pin instead (no stray click closes it; its menu does).
-        if view.pinned
-            && let Some(icon) = self.icons.id("pin")
-        {
-            draw_icon(layer, &self.icons, icon, inner, palette.text_muted);
-        }
         let hovered = matches!(hover, Some(ToolHit::View(hg, h) | ToolHit::CloseView(hg, h)) if hg == g && h == i);
-        let shows_close = !view.pinned && view.closable() && (on || hovered);
-        if shows_close && let Some(icon) = self.icons.id("x") {
+        // A fixed tab (neither pinned nor closable) has no room for a × (nor a pin); a pinned
+        // one shows a pin instead (no stray click closes it; its menu does); the × shows on
+        // the active one and under the mouse.
+        let slot = if view.pinned {
+            TabSlot::Pin
+        } else if view.closable() {
             let lit = hover == Some(ToolHit::CloseView(g, i));
-            if lit {
-                layer.quad(
-                    Quad::filled(close_rect, palette.text.with_alpha(0.1)).rounded(close / 2.0),
-                );
-            }
-            let color = if lit { palette.text } else { palette.text_muted };
-            draw_icon(layer, &self.icons, icon, inner, color);
-            if let Some(hits) = hits {
-                hits.push((close_rect, ToolHit::CloseView(g, i)));
+            TabSlot::Close { shown: on || hovered, lit }
+        } else {
+            TabSlot::None
+        };
+        let tab =
+            PillTab::new(title).slot(slot).on(on, lit).hovered(hover == Some(ToolHit::View(g, i)));
+        let drawn = tab_strip::pill_tab(layer, text, &self.icons, &ctx, (x, mid), &tab);
+        if let Some(hits) = hits {
+            hits.push((drawn.pill, ToolHit::View(g, i)));
+            if let Some(close) = drawn.close {
+                hits.push((close, ToolHit::CloseView(g, i)));
             }
         }
-        pill
+        drawn.pill
     }
 
     /// A group's header buttons: "+" after its tabs (from `x`), if the window makes views
     /// (the terminal: a shell); on the right (`hide`: this group's header has them) half the
     /// height, all of it, the window's options ("⋮"), hide; then the line under the header.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_tool_buttons(
         &self,
         layer: &mut render_api::Layer,
+        text: &mut TextSystem,
         header: &ToolHeader,
         g: usize,
         x: f32,
         hide: bool,
         hits: &mut Vec<(Rect, ToolHit)>,
     ) {
-        let (ctx, b, palette, mid) = (header.ctx, header.bounds, header.ctx.palette, header.mid);
+        let (ctx, b, mid) = (header.ctx, header.bounds, header.mid);
         let px = |v: f32| ctx.px(v);
-        // A button: its hover background (lit while it's in effect) and its icon, inset.
-        let lit_button =
+        // A ghost icon button, lit while it's in effect.
+        let mut lit_button =
             |layer: &mut render_api::Layer, at: Rect, hit: ToolHit, icon: &str, on: bool| {
-                if on {
-                    layer.quad(
-                        Quad::filled(at, palette.accent.with_alpha(0.14)).rounded(px(radius::MD)),
-                    );
-                } else if header.hover == Some(hit) {
-                    layer.quad(
-                        Quad::filled(at, palette.text.with_alpha(0.08)).rounded(px(radius::MD)),
-                    );
-                }
-                if let Some(icon) = self.icons.id(icon) {
-                    let inner = Rect::new(
-                        at.min_x() + px(5.0),
-                        at.min_y() + px(5.0),
-                        at.size.width - px(10.0),
-                        at.size.height - px(10.0),
-                    );
-                    let color = if on { palette.accent } else { palette.text_muted };
-                    draw_icon(layer, &self.icons, icon, inner, color);
-                }
+                let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                    .icon(icon)
+                    .rest_tone(ds::Tone::Neutral)
+                    .on(on)
+                    .hovered(header.hover == Some(hit));
+                ds::button(layer, text, &self.icons, &ctx, at, spec);
             };
-        let button = |layer: &mut render_api::Layer, at: Rect, hit: ToolHit, icon: &str| {
-            lit_button(layer, at, hit, icon, false);
-        };
         let size = px(24.0);
         if self.tool_new_command().is_some() {
             let plus = Rect::new(x + px(2.0), mid - size / 2.0, size, size);
-            button(layer, plus, ToolHit::New(g), "plus");
+            lit_button(layer, plus, ToolHit::New(g), "plus", false);
             hits.push((plus, ToolHit::New(g)));
         }
         if hide {
             let at = Rect::new(b.max_x() - px(10.0) - size, mid - size / 2.0, size, size);
-            button(layer, at, ToolHit::Hide, "minus");
+            lit_button(layer, at, ToolHit::Hide, "minus", false);
             hits.push((at, ToolHit::Hide));
             // Before it: the window's options, all the height (its icon says which way a
             // press goes), half of it.
             let more = Rect::new(at.min_x() - px(4.0) - size, at.min_y(), size, size);
-            button(layer, more, ToolHit::More, "more-vertical");
+            lit_button(layer, more, ToolHit::More, "more-vertical", false);
             hits.push((more, ToolHit::More));
             let now = self.tools.bottom_size;
             let full = Rect::new(more.min_x() - px(4.0) - size, at.min_y(), size, size);
@@ -360,9 +308,6 @@ impl Workbench {
             lit_button(layer, half, ToolHit::Half, "view-split-down", now == BottomSize::Half);
             hits.push((half, ToolHit::Half));
         }
-        layer.quad(Quad::filled(
-            Rect::new(b.min_x(), b.min_y() + header.height, b.size.width, ctx.line()),
-            palette.card_border,
-        ));
+        tab_strip::strip_border(layer, &ctx, b.min_x(), b.max_x(), b.min_y() + header.height);
     }
 }

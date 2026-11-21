@@ -6,6 +6,7 @@
 
 use kernel::{Point, Rect};
 use ui_components::control::{Control, Press};
+use ui_components::search_field::SearchField;
 use ui_components::{KeyReach, ViewerCursor, ViewerKey};
 use ui_kit::TextInput;
 
@@ -103,6 +104,75 @@ impl Control for KeyField<'_> {
             }
             _ => false,
         }
+    }
+}
+
+/// A modal's search (a popover's filter, the history's search) as a form's control: the
+/// app's search field (its press, drag, editing keys, ⌘A / ⌘X / ⌘Z, × emptying it), with
+/// the same rule as [`KeyField`]'s for ⌦ (at the end, nothing selected: the view's). What
+/// it changed is said in `edited`.
+#[derive(Debug)]
+pub(crate) struct SearchPart<'a> {
+    pub field: &'a mut SearchField,
+    /// Set when its text changed (typed, deleted, undone, cut, emptied by ×).
+    pub edited: &'a mut bool,
+}
+
+impl Control for SearchPart<'_> {
+    fn area(&self) -> Option<Rect> {
+        Control::area(&*self.field)
+    }
+
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        let press = Control::press(self.field, p, clicks);
+        *self.edited |= self.field.take_cleared();
+        press
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        Control::drag(self.field, p)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        Control::hover(self.field, p)
+    }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        Control::cursor(&*self.field, p)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        let input = &self.field.input;
+        let at_end = input.cursor() >= input.text().len() && input.selected_text().is_empty();
+        if key == ViewerKey::Delete && at_end {
+            return false;
+        }
+        let used = Control::key(self.field, key, reach);
+        *self.edited |= used && matches!(key, ViewerKey::Backspace | ViewerKey::Delete);
+        used
+    }
+
+    fn text(&mut self, typed: &str) -> bool {
+        *self.edited = true;
+        Control::text(self.field, typed)
+    }
+
+    fn selected_text(&self) -> Option<String> {
+        Control::selected_text(&*self.field)
+    }
+
+    fn command(&mut self, id: &str) -> bool {
+        // A cut with nothing selected isn't used (the view's own, if any).
+        if id == "cut" && self.field.input.selected_text().is_empty() {
+            return false;
+        }
+        let used = Control::command(self.field, id);
+        *self.edited |= used && matches!(id, "cut" | "undo" | "redo");
+        used
     }
 }
 

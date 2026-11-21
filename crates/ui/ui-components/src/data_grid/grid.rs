@@ -68,6 +68,7 @@ pub(super) enum Hit {
     ClearWhere,
     ClearOrder,
     Find,
+    ClearFind,
     FindPrev,
     FindNext,
     FindClose,
@@ -258,7 +259,8 @@ pub(super) struct Geometry {
 /// ⌘F in the rows.
 #[derive(Debug, Default)]
 pub(super) struct Find {
-    pub input: TextInput,
+    /// Its field (the app's search field: × empties it; its caret while it has the keys).
+    pub search: crate::search_field::SearchField,
     pub open: bool,
     pub matches: Vec<CellPos>,
     pub current: usize,

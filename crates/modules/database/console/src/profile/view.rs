@@ -35,10 +35,11 @@ use render_api::Quad;
 use text_layout::Font;
 use ui_components::control::{Control, Controls, Divider, NOWHERE, Press, Thumb};
 use ui_components::ds::{self, Ctx, Tone, radius};
+use ui_components::search_field::SearchField;
 use ui_components::{
-    AppRequest, Level, Orientation, PressMods, ServiceId, Splitter, SplitterStyle, TablePaint, Tip,
-    TreeTable, ViewMemory, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor, ViewerKey,
-    ViewerPaint,
+    AppRequest, KeyReach, Level, Orientation, PressMods, ServiceId, Splitter, SplitterStyle,
+    TablePaint, Tip, TreeTable, ViewMemory, ViewMenuEntry, Viewer, ViewerAction, ViewerCursor,
+    ViewerKey, ViewerPaint,
 };
 use ui_kit::{draw_icon, draw_text};
 use workbench_model::Notification;
@@ -131,7 +132,6 @@ enum Hit {
     Mode(usize),
     ModeMenu,
     Filter,
-    FilterClear,
     ExpandAll,
     CollapseAll,
     OpenInTab,
@@ -147,18 +147,12 @@ enum Hit {
     Compare,
     TablesNote,
     Compact(usize),
-    MenuItem(usize),
     DrawerClose,
 }
 
-/// A dropdown the view draws itself (Export ▾, "…", the switcher as a menu): its rows' ids
-/// come back as commands.
-#[derive(Debug, Clone)]
-struct Dropdown {
-    anchor: Rect,
-    items: Vec<(String, String, &'static str, bool)>,
-    rect: Rect,
-}
+/// A row of a menu of the view's buttons (Export ▾, "…", the switcher as a menu): its id
+/// (it comes back as a command), its label, its icon, whether it can be chosen.
+type MenuRow = (String, String, &'static str, bool);
 
 /// An export being written in the background.
 type Pending = Arc<Mutex<Option<Result<PathBuf, String>>>>;
@@ -186,7 +180,9 @@ pub struct ProfileView {
     mode: ProfileMode,
     graph: GraphView,
     flame: FlameView,
-    filter: String,
+    /// The steps' filter (the app's search field: ×, ⌘A; a character typed starts it).
+    filter: SearchField,
+    /// The filter has the keys (its caret shown).
     typing: bool,
     panel_w: f32,
     /// The project's dragged sizes: the panel's width is kept there ([`PANEL_SIZE`]).
@@ -199,7 +195,8 @@ pub struct ProfileView {
     bounds: Rect,
     hits: Vec<(Rect, Hit, Option<String>)>,
     hover: Option<Hit>,
-    dropdown: Option<Dropdown>,
+    /// A menu asked for under one of its buttons, for the app to show.
+    asked_menu: Option<(Rect, Vec<ViewMenuEntry>)>,
     /// The panel's two parts this frame.
     findings_area: Rect,
     details_area: Rect,
@@ -280,7 +277,7 @@ impl ProfileView {
             mode: ProfileMode::Tree,
             graph: GraphView::default(),
             flame: FlameView::default(),
-            filter: String::new(),
+            filter: SearchField::new(),
             typing: false,
             panel_w: layout::PANEL_W,
             sizes: None,
@@ -292,7 +289,7 @@ impl ProfileView {
             bounds: Rect::default(),
             hits: Vec::new(),
             hover: None,
-            dropdown: None,
+            asked_menu: None,
             findings_area: Rect::default(),
             details_area: Rect::default(),
             panel_heads: [Rect::default(); 2],
@@ -430,7 +427,6 @@ impl ProfileView {
             return false;
         }
         self.mode = mode;
-        self.dropdown = None;
         // Another view chosen: the comparison left.
         self.compare = None;
         if mode == ProfileMode::Tables {
