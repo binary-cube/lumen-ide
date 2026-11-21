@@ -131,3 +131,68 @@ fn our_saves_are_heard_as_written_not_as_new_entries() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Reading `.git` (as the editor's git state does: its `HEAD`, its refs) is no change of it:
+/// on Linux the reads are heard, and taking them as changes read it again, forever. A file
+/// closed after being written still is one.
+#[test]
+fn reading_the_repository_is_not_a_change_of_it() {
+    use notify::event::{AccessKind, AccessMode, DataChange};
+    let dir = std::env::temp_dir().join(format!(
+        "tree-watch-reads-{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    std::fs::create_dir_all(dir.join(".git")).unwrap();
+    let dirs = WatchedDirs { vcs: vec![".git"], own: Vec::new() };
+    let (watcher, hear) = TreeWatcher::hearing(&dir, dirs, Arc::new(|| {}));
+    let head = dir.join(".git").join("HEAD");
+    let event = |kind: EventKind| Ok(notify::Event::new(kind).add_path(head.clone()));
+    hear(event(EventKind::Access(AccessKind::Open(AccessMode::Read))));
+    hear(event(EventKind::Access(AccessKind::Read)));
+    hear(event(EventKind::Access(AccessKind::Close(AccessMode::Read))));
+    assert!(!watcher.take_vcs_changed(), "only read");
+    hear(event(EventKind::Access(AccessKind::Close(AccessMode::Write))));
+    assert!(watcher.take_vcs_changed(), "closed after a write");
+    hear(event(EventKind::Modify(ModifyKind::Data(DataChange::Content))));
+    assert!(watcher.take_vcs_changed(), "written");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The app's own folder never wakes the loop by what the app does there: its caches and
+/// indexes written, and anything read in it (Linux hears reads), are heard by no one; only
+/// the user's files kept there (the consoles') count, and only when written.
+#[test]
+fn the_app_s_own_folder_wakes_nothing_by_itself() {
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange};
+    use std::sync::atomic::AtomicUsize;
+    let dir = std::env::temp_dir().join(format!(
+        "tree-watch-own-{}",
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+    ));
+    let own = dir.join(kernel::brand::PROJECT_DIR);
+    std::fs::create_dir_all(own.join("index")).unwrap();
+    std::fs::create_dir_all(own.join("consoles")).unwrap();
+    let woken = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&woken);
+    let dirs = WatchedDirs { vcs: vec![".git"], own: vec!["consoles"] };
+    let (watcher, hear) = TreeWatcher::hearing(
+        &dir,
+        dirs,
+        Arc::new(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+        }),
+    );
+    let event = |kind: EventKind, path: PathBuf| Ok(notify::Event::new(kind).add_path(path));
+    let cache = own.join("index").join("chunks.bin");
+    let console = own.join("consoles").join("main.sql");
+    hear(event(EventKind::Create(CreateKind::File), cache.clone()));
+    hear(event(EventKind::Modify(ModifyKind::Data(DataChange::Content)), cache.clone()));
+    hear(event(EventKind::Access(AccessKind::Open(AccessMode::Read)), cache));
+    hear(event(EventKind::Access(AccessKind::Close(AccessMode::Read)), console.clone()));
+    assert_eq!(woken.load(Ordering::SeqCst), 0, "the app's own work and reads wake nothing");
+    assert!(watcher.drain_written().is_empty() && watcher.drain_changed().is_empty());
+    assert!(watcher.drain_own_written().is_empty() && !watcher.take_vcs_changed());
+    hear(event(EventKind::Modify(ModifyKind::Data(DataChange::Content)), console.clone()));
+    assert_eq!(watcher.drain_written(), vec![console], "the user's console written: heard");
+    let _ = std::fs::remove_dir_all(&dir);
+}

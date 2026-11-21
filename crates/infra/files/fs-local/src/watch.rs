@@ -126,6 +126,13 @@ impl std::fmt::Debug for TreeWatcher {
     }
 }
 
+/// An event that only tells of a file opened or read (Linux hears those; the other systems
+/// don't): a file closed after it was written still is a write.
+fn only_read(kind: &EventKind) -> bool {
+    use notify::event::{AccessKind, AccessMode};
+    matches!(kind, EventKind::Access(access) if *access != AccessKind::Close(AccessMode::Write))
+}
+
 impl TreeWatcher {
     /// Watches `root`; `dirs`: the repositories' own folders (`.git`, from the version
     /// control modules), and those of the project's own folder that are the user's.
@@ -191,6 +198,12 @@ impl TreeWatcher {
         let dropped_waker = Arc::clone(&waker);
         let handler = move |event: notify::Result<notify::Event>| {
             let Ok(mut event) = event else { return };
+            // A file opened or read changes nothing; on Linux they are heard too, and reading
+            // `.git` (its `HEAD`, its refs) would be heard as a change of it, read again:
+            // a loop that never ends.
+            if only_read(&event.kind) {
+                return;
+            }
             // The system dropped events (too many at once, under load): everything is looked
             // at again, as when watching starts.
             if event.need_rescan() {
