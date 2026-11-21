@@ -461,6 +461,7 @@ impl ParamsView {
             padding: ds.px(10.0),
             caret_width: ds.px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         }
     }
 }

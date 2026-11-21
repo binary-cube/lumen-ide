@@ -73,6 +73,7 @@ impl SourcesView {
             padding: ds.px(10.0),
             caret_width: ds.px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         }
     }
 
@@ -498,14 +499,11 @@ impl SourcesView {
                     draw_text(pen.layer, &shaped, x, base, p.text);
                     if changed {
                         // Not applied yet: a dot after its name.
-                        let d = px(6.0);
-                        let at = Rect::new(
-                            x + shaped.width + px(6.0),
-                            (row_rect.min_y() + (h - d) / 2.0).round(),
-                            d,
-                            d,
+                        let center = kernel::Point::new(
+                            x + shaped.width + px(6.0 + CHANGED_DOT / 2.0),
+                            row_rect.min_y() + h / 2.0,
                         );
-                        pen.layer.quad(Quad::filled(at, p.accent).rounded(d / 2.0));
+                        ds::dot(pen.layer, ds, center, CHANGED_DOT, p.accent);
                     }
                     let ds_shaped = pen.text.shape_line(&driver, &detail_font);
                     draw_text(
@@ -1330,3 +1328,6 @@ impl SourcesView {
         *y += px(ds::BUTTON_H) + px(12.0);
     }
 }
+
+/// The dot after a source's name while its changes aren't applied (logical pixels).
+const CHANGED_DOT: f32 = 6.0;

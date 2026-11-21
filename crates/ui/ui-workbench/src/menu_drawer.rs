@@ -22,7 +22,7 @@ use ui_kit::{KeyHint, draw_icon, draw_text};
 
 use crate::anim::{Appear, Tween};
 use crate::context_menu::MenuEntry;
-use crate::ds::{self, Ctx, radius};
+use crate::ds::{self, Ctx};
 use crate::menu_nav::{DrawerMenu, DrawerNav, HoverIntent, Intent, NavFocus, NavKey, NavOutcome};
 use crate::modal::{KeyFooter, paint_key_footer};
 use crate::palette::Palette;

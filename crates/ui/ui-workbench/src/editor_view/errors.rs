@@ -81,9 +81,7 @@ impl EditorView {
         let ui = Font::new(palette.ui_font.clone(), px(palette.ui_font_size));
         let ui_metrics = text.metrics(&ui);
         let small = Font::new(palette.ui_font.clone(), px(palette.ui_font_size - 1.5));
-        let small_metrics = text.metrics(&small);
         let chip_font = Font::new(self.font_family.clone(), px(palette.code_font_size - 1.5));
-        let chip_metrics = text.metrics(&chip_font);
 
         // The content: the code lines (measured) and the header.
         let mut display = String::new();
@@ -109,8 +107,10 @@ impl EditorView {
         // Shaped as single lines: a newline in a message or a code (a parameter written over
         // two lines) would draw its second part back at the start, over the first.
         let msg = text.shape_line(&one_line(message), &ui);
-        let chip = code.map(|c| text.shape_line(&one_line(c), &chip_font));
-        let label = text.shape_line(&one_line(line_label), &small);
+        let chip_text = code.map(|c| one_line(c).into_owned());
+        let chip = chip_text.as_ref().map(|c| text.shape_line(c, &chip_font));
+        let label_text = one_line(line_label).into_owned();
+        let label = text.shape_line(&label_text, &small);
         let pad = px(14.0);
         let icon = px(18.0);
         let gutter = px(40.0);
@@ -141,11 +141,10 @@ impl EditorView {
             small,
             code_metrics,
             ui_metrics,
-            small_metrics,
-            chip_metrics,
+            chip_font,
             message: msg,
-            chip,
-            label,
+            chip_text,
+            label_text,
             rows,
             indent_x,
             pad,
@@ -193,7 +192,6 @@ impl EditorView {
         let ui = Font::new(palette.ui_font.clone(), px(palette.ui_font_size));
         let um = text.metrics(&ui);
         let chip_font = Font::new(self.font_family.clone(), px(palette.code_font_size - 1.5));
-        let chm = text.metrics(&chip_font);
         // On one line (see `measure_preview`).
         let msg = text.shape_line(&one_line(message), &ui);
         let chip = code.map(|c| text.shape_line(&one_line(c), &chip_font));
@@ -211,40 +209,18 @@ impl EditorView {
             y = at.y - h - px(12.0);
         }
         let tip = Rect::new(x.round(), y.round(), w.round(), h);
-        let line = s.round().max(1.0);
         let layer = scene.push_layer(None);
         let ctx = crate::ds::Ctx::new(palette, s);
         crate::ds::surface(layer, &ctx, tip, crate::ds::Elevation::Low, crate::ds::radius::MD);
-        let ic = Rect::new(tip.min_x() + px(12.0), tip.min_y() + (h - icon) / 2.0, icon, icon);
-        layer.quad(Quad::filled(ic, tone.with_alpha(0.14)).rounded(icon / 2.0));
+        let mid = tip.min_y() + h / 2.0;
         let bang = Font::new(palette.ui_font.clone(), px(10.0)).with_weight(Font::BOLD);
-        let bm = text.metrics(&bang);
-        let shaped = text.shape_line("!", &bang);
-        draw_text(
-            layer,
-            &shaped,
-            (ic.min_x() + (icon - shaped.width) / 2.0).round(),
-            centered_baseline(ic.min_y(), icon, &bm),
-            tone,
-        );
+        let ic =
+            error_mark(&bang, tone, TIP_MARK).paint(layer, text, &ctx, tip.min_x() + px(12.0), mid);
         let mut cx = ic.max_x() + px(8.0);
         draw_text(layer, &msg, cx, centered_baseline(tip.min_y(), h, &um), palette.text);
         cx += msg.width + px(8.0);
-        if let Some(chip) = &chip {
-            let ch = px(22.0);
-            let r = Rect::new(cx, tip.min_y() + (h - ch) / 2.0, chip.width + px(12.0), ch);
-            layer.quad(
-                Quad::filled(r, tone.with_alpha(0.08))
-                    .rounded(px(5.0))
-                    .bordered(line, tone.with_alpha(0.18)),
-            );
-            draw_text(
-                layer,
-                chip,
-                r.min_x() + px(6.0),
-                centered_baseline(r.min_y(), ch, &chm),
-                tone,
-            );
+        if let Some(code) = code {
+            code_chip(&one_line(code), &chip_font, tone).paint(layer, text, &ctx, cx, mid);
         }
     }
 
@@ -304,11 +280,11 @@ pub(super) struct Preview<'a> {
     small: Font,
     code_metrics: FontMetrics,
     ui_metrics: FontMetrics,
-    small_metrics: FontMetrics,
-    chip_metrics: FontMetrics,
+    chip_font: Font,
     message: Arc<ShapedLine>,
-    chip: Option<Arc<ShapedLine>>,
-    label: Arc<ShapedLine>,
+    /// The code shown in its chip, and the line's label, on one line.
+    chip_text: Option<String>,
+    label_text: String,
     rows: Vec<PreviewRow>,
     /// The width of the trimmed indentation.
     indent_x: f32,
@@ -379,21 +355,11 @@ impl Preview<'_> {
     ) {
         let px = |v: f32| self.px(v);
         let (pad, icon, header_h) = (self.pad, self.icon, self.header_h);
-        let line = self.scale.round().max(1.0);
+        let ctx = crate::ds::Ctx::new(palette, self.scale).with_opacity(self.t);
         let mid = card.min_y() + header_h / 2.0;
-        let ic = Rect::new(card.min_x() + pad, (mid - icon / 2.0).round(), icon, icon);
-        layer
-            .quad(Quad::filled(ic, self.fade(palette.danger.with_alpha(0.14))).rounded(icon / 2.0));
         let bang = Font::new(palette.ui_font.clone(), px(11.0)).with_weight(Font::BOLD);
-        let bm = text.metrics(&bang);
-        let shaped = text.shape_line("!", &bang);
-        draw_text(
-            layer,
-            &shaped,
-            (ic.min_x() + (icon - shaped.width) / 2.0).round(),
-            centered_baseline(ic.min_y(), icon, &bm),
-            self.fade(palette.danger),
-        );
+        let mark = error_mark(&bang, palette.danger, icon / self.scale);
+        let ic = mark.paint(layer, text, &ctx, card.min_x() + pad, mid);
         let mut cx = ic.max_x() + px(10.0);
         draw_text(
             layer,
@@ -403,32 +369,13 @@ impl Preview<'_> {
             self.fade(palette.text),
         );
         cx += self.message.width + px(8.0);
-        if let Some(chip) = &self.chip {
-            let ch = px(22.0);
-            let r = Rect::new(cx, (mid - ch / 2.0).round(), chip.width + px(12.0), ch);
-            layer.quad(
-                Quad::filled(r, self.fade(palette.danger.with_alpha(0.08)))
-                    .rounded(px(5.0))
-                    .bordered(line, self.fade(palette.danger.with_alpha(0.18))),
-            );
-            draw_text(
-                layer,
-                chip,
-                r.min_x() + px(6.0),
-                centered_baseline(r.min_y(), ch, &self.chip_metrics),
-                self.fade(palette.danger),
-            );
+        if let Some(code) = &self.chip_text {
+            code_chip(code, &self.chip_font, palette.danger).paint(layer, text, &ctx, cx, mid);
         }
-        let lw = self.label.width + px(14.0);
-        let lr = Rect::new(card.max_x() - pad - lw, (mid - px(10.0)).round(), lw, px(20.0));
-        layer.quad(Quad::filled(lr, self.fade(palette.text.with_alpha(0.05))).rounded(px(10.0)));
-        draw_text(
-            layer,
-            &self.label,
-            lr.min_x() + px(7.0),
-            centered_baseline(lr.min_y(), lr.size.height, &self.small_metrics),
-            self.fade(palette.text_muted),
-        );
+        crate::ds::Badge::new(&self.label_text)
+            .font(&self.small)
+            .baseline(crate::ds::BadgeBaseline::Metrics)
+            .paint_right(layer, text, &ctx, card.max_x() - pad, mid);
     }
 
     /// The code: a subtle panel inside the card, with line numbers; the error line marked
@@ -653,4 +600,41 @@ pub(super) fn paint_occurrence_marks(
         marks.quad(Quad::filled(mark, palette.accent.with_alpha(0.75)).rounded(occ_h / 2.0));
         out.push((y + occ_h / 2.0, m.start));
     }
+}
+
+/// The error tooltip's mark (logical pixels).
+const TIP_MARK: f32 = 16.0;
+/// An error's mark's tint, and its code chip's fill and border (the tone's alphas).
+const MARK_FILL: f32 = 0.14;
+const CHIP_FILL: f32 = 0.08;
+const CHIP_BORDER: f32 = 0.18;
+/// A code chip: its height, corners and padding (logical pixels).
+const CHIP_H: f32 = 22.0;
+const CHIP_RADIUS: f32 = 5.0;
+const CHIP_PAD: f32 = 6.0;
+
+/// An error's mark: "!" in `font` on a round tint of `tone`, `side` logical pixels across.
+fn error_mark<'f>(font: &'f Font, tone: Rgba, side: f32) -> crate::ds::Badge<'f> {
+    crate::ds::Badge::new("!")
+        .color(tone)
+        .fill_alpha(MARK_FILL)
+        .size(crate::ds::BadgeSize::Custom(side))
+        .min_width(side)
+        .pad(0.0)
+        .centered()
+        .font(font)
+        .baseline(crate::ds::BadgeBaseline::Metrics)
+}
+
+/// An error's code (`E0308`) in a chip of `tone`, in the code's `font`.
+fn code_chip<'f>(code: &'f str, font: &'f Font, tone: Rgba) -> crate::ds::Badge<'f> {
+    crate::ds::Badge::new(code)
+        .color(tone)
+        .fill_alpha(CHIP_FILL)
+        .border(tone.with_alpha(CHIP_BORDER))
+        .size(crate::ds::BadgeSize::Custom(CHIP_H))
+        .radius(CHIP_RADIUS)
+        .pad(CHIP_PAD)
+        .font(font)
+        .baseline(crate::ds::BadgeBaseline::Metrics)
 }

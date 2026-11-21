@@ -356,12 +356,9 @@ impl ChoiceMenu {
             }
             let rect = Rect::new(p.min_x() + pad, top, p.size.width - pad * 2.0, row_h);
             let selected = i == self.selected;
-            if selected {
-                layer.quad(
-                    Quad::filled(rect, ctx.fade(palette.accent.with_alpha(0.12)))
-                        .rounded(px(radius::MD)),
-                );
-            }
+            ds::RowHighlight::new(selected, false)
+                .selected_alpha(CHOSEN_ALPHA)
+                .paint(layer, ctx, rect);
             let inner = rect.min_x() + px(space::MD);
             if let Some(id) = icons.id(option.icon) {
                 let size = px(16.0);
@@ -448,6 +445,9 @@ struct Frame {
     /// The end (exclusive) of the rows shown.
     end: usize,
 }
+
+/// The chosen option's back (the accent's alpha).
+const CHOSEN_ALPHA: f32 = 0.12;
 
 #[cfg(test)]
 #[path = "../tests/unit/choice_menu.rs"]

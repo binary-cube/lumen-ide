@@ -185,6 +185,25 @@ impl<S: GridSource> DataGrid<S> {
             ("extractors", _) => return self.open_extractors(),
             ("find", _) => self.open_find(),
             ("more", _) => return self.open_more(),
+            // A row of the "…" menu: its tool, as from its button.
+            ("tool", _) => {
+                let Some(tool) = Tool::from_id(arg) else { return false };
+                return match tool {
+                    Tool::PageSize => self.open_sizes(),
+                    Tool::Extractor => self.open_extractors(),
+                    _ => self.run_tool(tool),
+                };
+            }
+            ("page-size", _) => {
+                let size = match arg {
+                    "all" => None,
+                    n => match n.parse::<u32>() {
+                        Ok(n) if super::super::paging::PAGE_SIZES.contains(&n) => Some(n),
+                        _ => return false,
+                    },
+                };
+                self.choose_page_size(size);
+            }
             ("refresh", _) => self.refresh(),
             ("transpose", _) => {
                 self.toggle_transpose();

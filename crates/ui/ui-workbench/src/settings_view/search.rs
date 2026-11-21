@@ -270,11 +270,9 @@ impl SettingsView {
         for (slot, &index) in self.results.iter().enumerate() {
             let entry = &entries[index];
             let r = Rect::new(x0 - px(10.0), y, width + px(20.0), row_h);
-            if slot == self.selected {
-                layer.quad(
-                    Quad::filled(r, ctx.fade(palette.accent.with_alpha(0.10))).rounded(px(10.0)),
-                );
-            }
+            ds::RowHighlight::new(slot == self.selected, false)
+                .radius(RESULT_RADIUS)
+                .paint(layer, ctx, r);
             let section = sections.iter().find(|s| s.id == entry.section);
             if let Some(id) = section.and_then(|s| icons.id(s.icon)) {
                 let size = px(16.0);
@@ -347,3 +345,6 @@ fn entries_shape(model: &SettingsModel) -> u64 {
     (model.frameworks.len(), &model.project, &model.code_language).hash(&mut h);
     h.finish()
 }
+
+/// A search result's corners while chosen (logical pixels).
+const RESULT_RADIUS: f32 = 10.0;

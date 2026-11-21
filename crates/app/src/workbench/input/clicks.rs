@@ -262,10 +262,12 @@ impl Workbench {
             }
         }
         if tab.find_open && tab.find_bar.contains(p) {
-            if let Some(hit) = tab.find_bar.hit(p) {
+            if let Some(hit) = tab.find_bar.press(p, clicks) {
                 self.find_hit(text, hit);
             }
-            return MouseResult::Redraw;
+            // A field pressed holds the pointer: a drag selects in it.
+            let held = self.tabs.get(self.active).is_some_and(|t| t.find_bar.held());
+            return if held { MouseResult::StartDrag } else { MouseResult::Redraw };
         }
         // On the right lane's thumb: held, a mark under it taken on letting go (unmoved).
         if tab.view.on_lane_thumb(p, &tab.doc, &tab.folds)

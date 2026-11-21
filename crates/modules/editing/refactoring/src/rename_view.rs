@@ -417,6 +417,7 @@ impl Viewer for RenameView {
             padding: px(12.0),
             caret_width: px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         self.name.paint(layer, ctx.text, field, true, &t("refactor.new_name"), &style);
         self.name_area = Some(field);

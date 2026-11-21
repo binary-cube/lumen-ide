@@ -381,14 +381,19 @@ fn paint_project(
     let px = |v: f32| ctx.px(v);
     let (layer, text, icons) = (&mut *list.layer, &mut *list.text, list.icons);
     let badge = px(26.0);
-    paint_badge(
-        layer,
-        Rect::new(r.min_x() + px(10.0), r.min_y() + (r.size.height - badge) / 2.0, badge, badge),
-        &project.name,
-        text,
-        p,
-        ctx.scale,
-    );
+    ds::Avatar::new(&project.name, ui_components::tag_colors::project(&project.name))
+        .solid()
+        .paint(
+            layer,
+            text,
+            ctx,
+            Rect::new(
+                r.min_x() + px(10.0),
+                r.min_y() + (r.size.height - badge) / 2.0,
+                badge,
+                badge,
+            ),
+        );
     // What it is: a small mark on the badge's corner, and a chip after the name.
     let (icon, label, tone) = match &project.kind {
         Some(kind) => (kind.icon, kind.label.clone(), ds::Tone::Accent),

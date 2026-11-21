@@ -35,6 +35,7 @@ every caller has today: a new option never moves a pixel where it isn't asked fo
 | A list to choose from, with search (one or many) | `picker::Picker` |
 | A dropdown's list asked by an editor bar (it has no keys of its own) | `ToolbarAction::List` (the app shows the shared picker under the field) |
 | Badges (named sizes 15/16/18/20, a color, a fill's alpha, a count centered, corners, bold, a font, a baseline, a zoom) | `ds::Badge` (`ds::badge` + `BadgeSpec` the usual one) |
+| A name's avatar (its initials: tinted round, or solid square with white letters), a dot, a dot cut out of what it stands on | `ds::Avatar`, `ds::dot`, `ds::ringed_dot` |
 | Key caps: a field's corner (`ds::keycap`, `ds::Keycap`: from either side, sizes, `keycap_width`), a footer's hints, a key in a button — one drawing, named looks | `ui_kit::paint_keycap` + `KeycapLook` (`hint`, `flat`; `ds::inline_key_look`) |
 | A dot on a button, a file's row | `ds::badges` |
 | Text that fits (ellipsized, wrapped), a section title | `ds::text` |
@@ -119,9 +120,11 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
   - its kind: primary, danger, secondary, toolbar, ghost (transparent, lit under the
     mouse: a bar's icon, a toggle like `.*`, a link), soft (a faint fill and border),
     raised (floating over content);
-  - its shape (box or round), its icon and / or label, its tone (or a color of its own:
-    `tone_color`), a key, a menu's ▾, `on`, `busy` (or `busy_amount`), `enabled`,
-    `hovered` (or `hover_amount`), a hover's tone, a theme's colors, a fixed surface;
+  - its shape (box or round), its icon (or an `avatar`) and / or label (in its own `font`
+    if given), its tone (or a color of its own: `tone_color`), `outlined`, its content
+    from the left (`start`), a key, a menu's ▾, `on`, `busy` (or `busy_amount`, a spinner
+    on every kind), `enabled`, `hovered` (or `hover_amount`), a hover's tone, a theme's
+    colors, a fixed surface;
   - its size from `button_size` (named, never a raw number).
 
   Never a rounded quad, an icon and a hit drawn by hand, never a module's own
@@ -133,6 +136,14 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
   is the focused one: asking for it never moves the focus from one field to another (with
   none focused, the view's default field takes it). `take_cleared` tells the
   view × emptied it.
+- **A field with a button inside it** (× in a URL, Send in a chat box) is the shared field
+  (`TextInputStyle`, e.g. `ds::field_style`) with room kept on its right (`trail`; `lead`
+  on its left) and the shared button drawn there: never a frame drawn by hand around a
+  frameless field.
+- **A component's own menus are the app's**: a part embedded in a view (the data grid's
+  "…" and page sizes) asks for its menu under its button (`take_menu` on the part), and
+  the view hosting it hands it on from its own `Viewer::take_menu`; its rows come back as
+  the view's commands.
 - **Nothing generic names a module, a language or a view**: no `"php"`, `"terminal"`,
   `"database"` in the app or in components; what differs is said by whoever it belongs to
   (a field on its contribution, a default method it overrides).

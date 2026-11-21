@@ -113,6 +113,12 @@ impl Workbench {
             self.editors.tab_drag = Some(TabDrag { tab: i, title, icon, at: p, target });
             return true;
         }
+        // A find bar's field holds the pointer: its selection follows.
+        if let Some(tab) = self.tabs.get_mut(self.active)
+            && tab.find_bar.held()
+        {
+            return tab.find_bar.drag(p);
+        }
         if self.viewer_drag {
             let changed = self
                 .tabs
@@ -256,6 +262,11 @@ impl Workbench {
         if let Some(drag) = self.editors.tab_drag.take() {
             self.drop_tab(&drag);
             return true;
+        }
+        if let Some(tab) = self.tabs.get_mut(self.active)
+            && tab.find_bar.held()
+        {
+            return tab.find_bar.release();
         }
         if std::mem::take(&mut self.viewer_drag) {
             let changed = self

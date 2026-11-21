@@ -47,11 +47,10 @@ impl<S: GridSource> DataGrid<S> {
         let small = ds.ui_font(-1.0);
         let size_shaped = text.shape_line(&size_label, &small);
         let chevron = px(12.0);
-        let submit_font = ds.ui_font(-1.0).with_weight(Font::SEMIBOLD);
         let submit = (pending > 0).then(|| {
-            let shaped = text.shape_line(&i18n::tr!("grid.submit", count = pending), &submit_font);
-            let w = (shaped.width + px(24.0)).round();
-            (shaped, w)
+            let label = i18n::tr!("grid.submit", count = pending);
+            let w = (text.shape_line(&label, &ds::button_font(ds)).width + px(24.0)).round();
+            (label, w)
         });
         // The data extractor's pill: its name and a chevron (rounded up: rounded down, its
         // name wouldn't fit the room left for it and would end in "…").
@@ -112,108 +111,47 @@ impl<S: GridSource> DataGrid<S> {
                 Tool::Of => {
                     let Some(of_shaped) = &of_shaped else { continue };
                     let estimate = matches!(total, Total::Estimate(_));
-                    let r = Rect::new(x - px(4.0), mid - px(12.0), w + px(8.0), px(24.0));
-                    if estimate {
-                        if self.hover == Some(Hit::Count) {
-                            layer.quad(
-                                Quad::filled(r, p.accent.with_alpha(0.10)).rounded(px(radius::SM)),
-                            );
-                        }
-                        self.hits.push((r, Hit::Count));
+                    if !estimate {
+                        draw_text(layer, of_shaped, x.round(), base, p.text_muted);
+                        continue;
                     }
-                    let color = if estimate { p.accent } else { p.text_muted };
-                    draw_text(layer, of_shaped, x.round(), base, color);
+                    // An estimate is a link: pressed, the rows are counted.
+                    let r = Rect::new(x - px(4.0), mid - px(12.0), w + px(8.0), px(24.0));
+                    let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                        .label(&of)
+                        .strong()
+                        .tone(ds::Tone::Accent)
+                        .hover_tint(ds::Tone::Accent)
+                        .hovered(self.hover == Some(Hit::Count));
+                    ds::button(layer, text, icons, ds, r, spec);
+                    self.hits.push((r, Hit::Count));
                     continue;
                 }
                 Tool::PageSize => {
-                    // The page's size: a pill opening the choices.
+                    // The page's size: a field opening the choices.
                     let r = Rect::new(x, (mid - px(13.0)).round(), w, px(26.0));
-                    let hovered = self.hover == Some(Hit::PageSize) || self.sizes_open;
-                    layer.quad(
-                        Quad::filled(
-                            r,
-                            if hovered {
-                                p.text.with_alpha(0.07)
-                            } else {
-                                p.text.with_alpha(0.035)
-                            },
-                        )
-                        .rounded(px(radius::SM))
-                        .bordered(ds.line(), p.border),
-                    );
-                    draw_text(
-                        layer,
-                        &size_shaped,
-                        r.min_x() + px(10.0),
-                        ds::optical_baseline(r.min_y(), r.size.height, &small),
-                        p.text,
-                    );
-                    if let Some(id) = icons.id("chevron-down") {
-                        let ir = Rect::new(
-                            r.max_x() - px(8.0) - chevron,
-                            (mid - chevron / 2.0).round(),
-                            chevron,
-                            chevron,
-                        );
-                        ui_kit::draw_icon(layer, icons, id, ir, p.text_muted);
-                    }
+                    // Its choices are the app's menu (open there, not here).
+                    let open = false;
+                    let hovered = self.hover == Some(Hit::PageSize);
+                    toolbar_dropdown(layer, text, icons, ds, r, (&size_label, open, hovered));
                     self.hits.push((r, Hit::PageSize));
                     continue;
                 }
                 Tool::Extractor => {
                     let r = Rect::new(x, (mid - px(13.0)).round(), w, px(26.0));
-                    let hovered = self.hover == Some(Hit::Extractor) || self.extract_open;
-                    layer.quad(
-                        Quad::filled(
-                            r,
-                            if hovered {
-                                p.text.with_alpha(0.07)
-                            } else {
-                                p.text.with_alpha(0.035)
-                            },
-                        )
-                        .rounded(px(radius::SM))
-                        .bordered(ds.line(), p.border),
-                    );
-                    let room = (w - chevron - px(24.0)).max(0.0);
-                    draw_fitted(
-                        layer,
-                        text,
-                        &extractor_label,
-                        &small,
-                        (
-                            r.min_x() + px(10.0),
-                            room,
-                            ds::optical_baseline(r.min_y(), r.size.height, &small),
-                        ),
-                        p.text,
-                        Align::Left,
-                    );
-                    if let Some(id) = icons.id("chevron-down") {
-                        let ir = Rect::new(
-                            r.max_x() - px(8.0) - chevron,
-                            (mid - chevron / 2.0).round(),
-                            chevron,
-                            chevron,
-                        );
-                        ui_kit::draw_icon(layer, icons, id, ir, p.text_muted);
-                    }
+                    let open = self.extract_open;
+                    let hovered = self.hover == Some(Hit::Extractor);
+                    toolbar_dropdown(layer, text, icons, ds, r, (&extractor_label, open, hovered));
                     self.hits.push((r, Hit::Extractor));
                     continue;
                 }
                 Tool::Submit => {
-                    let Some((shaped, w)) = &submit else { continue };
+                    let Some((label, w)) = &submit else { continue };
                     let r = Rect::new(x, (mid - px(13.0)).round(), *w, px(26.0));
-                    let hovered = self.hover == Some(Hit::Submit);
-                    let fill = if hovered { p.accent.mix(Rgba::WHITE, 0.12) } else { p.accent };
-                    layer.quad(Quad::filled(r, fill).rounded(px(radius::SM)));
-                    draw_text(
-                        layer,
-                        shaped,
-                        r.min_x() + px(12.0),
-                        ds::optical_baseline(r.min_y(), r.size.height, &submit_font),
-                        Rgba::WHITE,
-                    );
+                    let spec = ds::ButtonSpec::new(ds::ButtonKind::Primary)
+                        .label(label)
+                        .hovered(self.hover == Some(Hit::Submit));
+                    ds::button(layer, text, icons, ds, r, spec);
                     self.hits.push((r, Hit::Submit));
                     continue;
                 }
@@ -233,7 +171,6 @@ impl<S: GridSource> DataGrid<S> {
             let on = match tool {
                 Tool::Transpose => self.transpose,
                 Tool::Find => self.find.open,
-                Tool::More => self.more_open,
                 _ => false,
             };
             let enabled = self.tool_enabled(tool);
@@ -580,4 +517,20 @@ impl<S: GridSource> DataGrid<S> {
             draw_text(layer, &shaped, x + px(26.0), base, color);
         }
     }
+}
+
+/// A grid toolbar's field opening a list (the page's size, the data extractor): the shared
+/// dropdown, compact, in the accent while its list is open.
+fn toolbar_dropdown(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    icons: &icons::Icons,
+    ds: &Ctx<'_>,
+    r: Rect,
+    (value, open, hovered): (&str, bool, bool),
+) {
+    let spec =
+        ds::DropdownSpec { value, open, hovered, enabled: true, note: None, placeholder: None };
+    let look = ds::DropdownLook { compact: true, ..ds::DropdownLook::default() };
+    ds::dropdown_styled(layer, text, icons, ds, r, (spec, look));
 }

@@ -111,6 +111,7 @@ fn the_characters_places_are_found_in_one_pass() {
         padding: 0.0,
         caret_width: 1.0,
         lead: 0.0,
+        trail: 0.0,
     };
     let mut ts = TextSystem::new();
     for masked in [false, true] {
@@ -159,6 +160,7 @@ fn the_selection_stays_within_the_field() {
         padding: 8.0,
         caret_width: 1.0,
         lead: 0.0,
+        trail: 0.0,
     };
     let mut ts = TextSystem::new();
     let mut input = TextInput::new(&"postgresql://admin:admin@10.10.10.10/db ".repeat(8));
@@ -175,4 +177,63 @@ fn the_selection_stays_within_the_field() {
         .collect();
     assert_eq!(quads.len(), 1);
     assert!(quads[0].min_x() >= bounds.min_x() && quads[0].max_x() <= bounds.max_x(), "{quads:?}");
+}
+
+/// A field with room kept on its right (a button inside it): a long text, its selection
+/// and the caret stay clear of that room, the text scrolled to the caret within the rest.
+#[test]
+fn the_trailing_room_stays_free() {
+    let selection = Rgba::new(0.1, 0.2, 0.9, 1.0);
+    let caret = Rgba::new(0.9, 0.1, 0.1, 1.0);
+    let trail = 40.0;
+    let style = TextInputStyle {
+        font: Font::new(text_layout::FontFamily::SansSerif, 13.0),
+        background: Rgba::TRANSPARENT,
+        border: Rgba::TRANSPARENT,
+        border_focused: Rgba::TRANSPARENT,
+        text: Rgba::WHITE,
+        placeholder: Rgba::WHITE,
+        selection,
+        caret,
+        radius: 0.0,
+        border_width: 0.0,
+        padding: 8.0,
+        caret_width: 1.0,
+        lead: 0.0,
+        trail,
+    };
+    let mut ts = TextSystem::new();
+    let bounds = Rect::new(10.0, 0.0, 200.0, 24.0);
+    let room = bounds.max_x() - style.padding * 0.5 - trail;
+    let long = "https://example.test/api/v1/items?page=1&size=20 ".repeat(6);
+    for selected in [false, true] {
+        let mut input = TextInput::new(&long);
+        if selected {
+            input.select(long.len() - 10..long.len());
+        } else {
+            input.end(false);
+        }
+        let mut scene = render_api::Scene::default();
+        input.paint(scene.push_layer(None), &mut ts, bounds, true, "", &style);
+        let layer = &scene.layers()[0];
+        let shaped = ts.shape_line(&long, &style.font);
+        assert!(!layer.glyphs.is_empty(), "the text shows");
+        for g in &layer.glyphs {
+            let advance = shaped.glyphs.iter().find(|s| s.key == g.key).map_or(0.0, |s| s.advance);
+            assert!(g.origin.x + advance <= room + 0.5, "a glyph in the room: {:?}", g.origin);
+        }
+        let lit = |c: Rgba, of: Rgba| (c.r, c.g, c.b) == (of.r, of.g, of.b);
+        for q in layer.quads.iter().filter(|q| lit(q.color, selection) || lit(q.color, caret)) {
+            assert!(q.bounds.max_x() <= room + 0.5, "{selected}: {:?}", q.bounds);
+        }
+        let caret_drawn = layer.quads.iter().any(|q| lit(q.color, caret));
+        assert!(caret_drawn, "the caret shows");
+    }
+    // Without the room, the same text reaches past it (the room is what kept it free).
+    let mut input = TextInput::new(&long);
+    input.end(false);
+    let mut scene = render_api::Scene::default();
+    let wide = TextInputStyle { trail: 0.0, ..style };
+    input.paint(scene.push_layer(None), &mut ts, bounds, true, "", &wide);
+    assert!(scene.layers()[0].glyphs.iter().any(|g| g.origin.x > room));
 }

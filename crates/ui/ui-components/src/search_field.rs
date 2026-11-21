@@ -172,6 +172,7 @@ impl SearchField {
             padding: 0.0,
             caret_width: ctx.px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         self.input.paint(layer, text, input_rect, focused, placeholder, &style);
         if extras.trailing > 0.0 { trailing } else { Rect::default() }

@@ -550,6 +550,7 @@ impl Viewer for FormatsView {
             padding: px(10.0),
             caret_width: px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         let line_h = px(44.0);
         let mut y = b.min_y() + px(8.0);

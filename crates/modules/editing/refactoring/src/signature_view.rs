@@ -573,6 +573,7 @@ impl SignatureView {
             padding: px(8.0),
             caret_width: px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         let row = &self.rows[i];
         let top = table.top + i as f32 * table.row_h;

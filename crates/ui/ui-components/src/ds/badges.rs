@@ -1,4 +1,5 @@
-//! Badges and labelled rows: a tone's badge, a dot on a button, a file's row, a key cap.
+//! Badges and labelled rows: a tone's badge, a name's avatar, a dot on a button, a file's
+//! row, a key cap.
 
 use super::*;
 
@@ -428,6 +429,73 @@ impl<'a> Badge<'a> {
     }
 }
 
+/// How an [`Avatar`] looks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AvatarLook {
+    /// A circle faintly in its color, the initials in it (a picker's row).
+    #[default]
+    Tinted,
+    /// A rounded square filled with its color, the initials in white, bold (a project's).
+    Solid,
+}
+
+/// A name's avatar: its initials ([`initials`]) on its color, in a square rect. The one
+/// avatar of the app: a picker's rows, the projects, the top bar's project (a button's
+/// [`super::ButtonSpec::avatar`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Avatar<'a> {
+    pub name: &'a str,
+    pub color: Rgba,
+    pub look: AvatarLook,
+}
+
+/// A tinted avatar's fill (its color's alpha), and its letters' font (below the UI's).
+const AVATAR_TINT: f32 = 0.16;
+const AVATAR_FONT: f32 = -4.0;
+/// A solid avatar's corners (logical pixels), and its letters' share of its height.
+const AVATAR_RADIUS: f32 = 5.0;
+const AVATAR_LETTERS: f32 = 0.5;
+
+impl<'a> Avatar<'a> {
+    /// `name`'s avatar in `color`, tinted.
+    pub fn new(name: &'a str, color: Rgba) -> Self {
+        Self { name, color, look: AvatarLook::Tinted }
+    }
+
+    /// A rounded square filled with its color, white bold letters.
+    pub fn solid(mut self) -> Self {
+        self.look = AvatarLook::Solid;
+        self
+    }
+
+    /// Drawn in `rect` (square).
+    pub fn paint(&self, layer: &mut Layer, text: &mut TextSystem, ctx: &Ctx<'_>, rect: Rect) {
+        let side = rect.size.height;
+        let (font, letters) = match self.look {
+            AvatarLook::Tinted => {
+                let back = Quad::filled(rect, ctx.fade(self.color.with_alpha(AVATAR_TINT)));
+                layer.quad(back.rounded(side / 2.0));
+                (ctx.ui_font(AVATAR_FONT).with_weight(Font::SEMIBOLD), self.color)
+            }
+            AvatarLook::Solid => {
+                let back = Quad::filled(rect, ctx.fade(self.color));
+                layer.quad(back.rounded(ctx.px(AVATAR_RADIUS).round()));
+                let size = (side * AVATAR_LETTERS).round();
+                (Font::new(ctx.palette.ui_font.clone(), size).with_weight(Font::BOLD), Rgba::WHITE)
+            }
+        };
+        let shaped = text.shape_line(&initials(self.name), &font);
+        let baseline = match self.look {
+            AvatarLook::Tinted => optical_baseline(rect.min_y(), side, &font),
+            AvatarLook::Solid => {
+                ui_kit::centered_baseline(rect.min_y(), side, &text.metrics(&font))
+            }
+        };
+        let x = (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round();
+        draw_text(layer, &shaped, x, baseline, ctx.fade(letters));
+    }
+}
+
 /// What a count means: its color by meaning.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum BadgeKind {
@@ -482,6 +550,23 @@ pub fn dot(layer: &mut Layer, ctx: &Ctx<'_>, center: Point, diameter: f32, color
     let rect = Rect::new((center.x - d / 2.0).round(), (center.y - d / 2.0).round(), d, d);
     layer.quad(Quad::filled(rect, ctx.fade(color)).rounded(d / 2.0));
     rect
+}
+
+/// [`dot`] cut out of what it stands on (an icon's corner): ringed `ring` logical pixels
+/// wide in each of `behind`, drawn in order (the surface, then a row's light over it).
+/// Returns the dot's rectangle (without the ring).
+pub fn ringed_dot(
+    layer: &mut Layer,
+    ctx: &Ctx<'_>,
+    center: Point,
+    (diameter, ring): (f32, f32),
+    color: Rgba,
+    behind: &[Rgba],
+) -> Rect {
+    for back in behind {
+        dot(layer, ctx, center, diameter + 2.0 * ring, *back);
+    }
+    dot(layer, ctx, center, diameter, color)
 }
 
 /// A file in a list (what's to upload, what changed): its state's mark (`M`, `A`, `!`…) in

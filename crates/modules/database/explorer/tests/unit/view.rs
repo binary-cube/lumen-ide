@@ -541,11 +541,18 @@ fn a_narrow_view_keeps_its_header_and_toolbar_apart_and_says_what_each_button_do
             assert!(r.max_x() <= left_of_tabs, "{r:?} reaches {left_of_tabs}");
         }
     }
-    // Refresh from "…" shows its keys.
-    view.grid.as_mut().unwrap().open_more();
-    paint_at(&mut view, 460.0);
-    assert!(view.grid.as_ref().unwrap().more_open());
-    view.grid.as_mut().unwrap().edit_key(ViewerKey::Escape, KeyReach::default());
+    // "…" is the app's menu, the view handing on what its grid asked (Refresh with its keys).
+    assert!(view.grid.as_mut().unwrap().open_more());
+    let (anchor, rows) = view.take_menu().expect("the grid's menu, through the view");
+    assert_eq!(anchor, more);
+    let refresh = rows.iter().find_map(|e| match e {
+        ViewMenuEntry::Item { id, shortcut, .. } if id == "grid:tool:refresh" => Some(shortcut),
+        _ => None,
+    });
+    if let Some(shortcut) = refresh {
+        assert_eq!(shortcut.as_deref(), Some("F5"));
+    }
+    assert!(view.take_menu().is_none(), "taken once");
     paint_at(&mut view, 460.0);
     if let Some(r) = view.grid.as_ref().unwrap().tool_area(Tool::Refresh) {
         assert_eq!(view.tooltip_at(mid(r)).unwrap().shortcut.as_deref(), Some("F5"));

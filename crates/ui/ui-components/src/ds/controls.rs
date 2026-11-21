@@ -307,6 +307,21 @@ pub fn busy_primary_button(
     let base = ctx.palette.accent;
     let fill = if hovered { base.mix(Rgba::WHITE, 0.12 * (1.0 - busy)) } else { base };
     layer.quad(Quad::filled(rect, ctx.fade(fill)).rounded(ctx.px(radius::MD)));
+    busy_label(layer, text, ctx, rect, (label, Rgba::WHITE), busy);
+}
+
+/// A busy button's spinner and label in `color`, centered together in `rect`: `busy`
+/// (0..=1) is how far the spinner has grown and faded in, and how much room it has opened
+/// before the label (see [`busy_primary_button`]).
+pub(super) fn busy_label(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    rect: Rect,
+    (label, color): (&str, Rgba),
+    busy: f32,
+) {
+    let busy = busy.clamp(0.0, 1.0);
     let font = button_font(ctx);
     let shaped = text.shape_line(label, &font);
     let room = ctx.px(BUSY_EXTRA) * busy;
@@ -315,7 +330,7 @@ pub fn busy_primary_button(
     if busy > 0.05 {
         let spinner = Loader {
             size: BUSY_SPINNER * busy,
-            color: Some(Rgba::WHITE.with_alpha(busy)),
+            color: Some(color.with_alpha(color.a * busy)),
             ..Loader::default()
         };
         loader(layer, text, ctx, x, rect.center().y, &spinner);
@@ -325,7 +340,7 @@ pub fn busy_primary_button(
         &shaped,
         (x + room).round(),
         optical_baseline(rect.min_y(), rect.size.height, &font),
-        ctx.fade(Rgba::WHITE),
+        ctx.fade(color),
     );
 }
 
@@ -1178,6 +1193,7 @@ pub fn field_style(ctx: &Ctx<'_>, font: Font, invalid: bool) -> ui_kit::TextInpu
         padding: ctx.px(10.0),
         caret_width: ctx.px(1.5).max(1.0),
         lead: 0.0,
+        trail: 0.0,
     }
 }
 
@@ -1198,6 +1214,7 @@ pub fn search_input_style(ctx: &Ctx<'_>, height: f32) -> ui_kit::TextInputStyle 
         padding: ctx.px(14.0),
         caret_width: ctx.px(1.5).max(1.0),
         lead: ctx.px(22.0),
+        trail: 0.0,
     }
 }
 

@@ -57,7 +57,6 @@ pub(super) enum Hit {
     Forward,
     Last,
     PageSize,
-    PageChoice(Option<u32>),
     Refresh,
     Cancel,
     Count,
@@ -79,9 +78,8 @@ pub(super) enum Hit {
     DeleteRows,
     Revert,
     Submit,
-    /// The "…" holding the tools that didn't fit, and one of its rows.
+    /// The "…" holding the tools that didn't fit (its menu is the app's).
     More,
-    MoreChoice(Tool),
     /// The data extractor's pill ("CSV ▾"), and a row of its popover.
     Extractor,
     ExtractorRow(usize),
@@ -290,13 +288,13 @@ pub struct DataGrid<S: GridSource> {
     pub(super) field_tip: Option<(String, Rect)>,
     /// One row shown as column – value.
     pub(super) transpose: bool,
-    /// The page sizes' popover is open.
-    pub(super) sizes_open: bool,
     /// The toolbar's layout for its last width and state.
     pub(super) toolbar: kernel::Memo<ToolbarSpec, ToolbarLayout>,
-    /// The tools in the "…" menu now, and whether it's open.
+    /// The tools in the "…" menu now.
     pub(super) collapsed: Vec<Tool>,
-    pub(super) more_open: bool,
+    /// A menu its toolbar asked for under one of its buttons ("…", the page size): the
+    /// app's menu shows it ([`Self::take_menu`]), its rows coming back as commands.
+    pub(super) asked_menu: Option<crate::control::AskedMenu>,
     /// What has a tooltip besides the hits (the headers' marks, disabled buttons).
     pub(super) marks: Vec<(Rect, Mark)>,
     /// The commands behind the toolbar's actions (their keys shown).
@@ -388,10 +386,9 @@ impl<S: GridSource> DataGrid<S> {
             find: Find::default(),
             field_tip: None,
             transpose: false,
-            sizes_open: false,
             toolbar: kernel::Memo::default(),
             collapsed: Vec::new(),
-            more_open: false,
+            asked_menu: None,
             marks: Vec::new(),
             commands: None,
             geometry: Geometry::default(),
@@ -489,17 +486,100 @@ impl<S: GridSource> DataGrid<S> {
         })
     }
 
-    /// Whether the "…" menu is open.
-    pub fn more_open(&self) -> bool {
-        self.more_open
+    /// Whether a menu of its toolbar is asked for and not taken yet.
+    pub fn menu_asked(&self) -> bool {
+        self.asked_menu.is_some()
     }
 
-    /// Opens the "…" menu (`false`: everything fits, there's none).
+    /// The menu its toolbar asked for under one of its buttons, for the view hosting it to
+    /// give the app (its own [`crate::Viewer::take_menu`]): taken once.
+    pub fn take_menu(&mut self) -> Option<crate::control::AskedMenu> {
+        self.asked_menu.take()
+    }
+
+    /// Where the button behind `hit` was last drawn.
+    fn hit_area(&self, hit: Hit) -> Option<Rect> {
+        self.hits.iter().find(|(_, h)| *h == hit).map(|(r, _)| *r)
+    }
+
+    /// Asks for the "…" menu under its button (`false`: everything fits, there's none).
     pub fn open_more(&mut self) -> bool {
-        self.more_open = !self.collapsed.is_empty();
-        self.sizes_open = false;
         self.extract_open = false;
-        self.more_open
+        if self.collapsed.is_empty() {
+            return false;
+        }
+        let Some(anchor) = self.hit_area(Hit::More) else { return false };
+        self.asked_menu = Some((anchor, self.more_menu()));
+        true
+    }
+
+    /// Asks for the page sizes' menu under their field (or the "…" holding it).
+    pub(super) fn open_sizes(&mut self) -> bool {
+        self.extract_open = false;
+        let Some(anchor) = self.hit_area(Hit::PageSize).or_else(|| self.hit_area(Hit::More)) else {
+            return false;
+        };
+        self.asked_menu = Some((anchor, self.sizes_menu()));
+        true
+    }
+
+    /// The "…" menu: the tools put away, in the toolbar's order and groups, each with its
+    /// icon, its name and its keys (those that can't be used now greyed out).
+    fn more_menu(&self) -> Vec<ViewMenuEntry> {
+        let group = |t: Tool| match t {
+            Tool::First | Tool::Back | Tool::Forward | Tool::Last | Tool::PageSize => 0,
+            Tool::Add | Tool::Delete => 1,
+            _ => 2,
+        };
+        let mut entries = Vec::with_capacity(self.collapsed.len() + 2);
+        let mut last = None;
+        for &tool in &self.collapsed {
+            let Some(id) = tool.id() else { continue };
+            if last.is_some_and(|g| g != group(tool)) {
+                entries.push(ViewMenuEntry::Separator);
+            }
+            last = Some(group(tool));
+            entries.push(ViewMenuEntry::Item {
+                id: format!("{MENU_PREFIX}tool:{id}"),
+                label: super::paint::tool_label(self, tool),
+                shortcut: self.tool_keys(tool),
+                icon: super::paint::tool_icon(tool),
+                look: crate::viewer::RowLook {
+                    disabled: !self.tool_enabled(tool),
+                    ..Default::default()
+                },
+            });
+        }
+        entries
+    }
+
+    /// The page sizes' menu: each size and "all" (the one in force checked); with a large
+    /// total, a note that showing every row is slow.
+    fn sizes_menu(&self) -> Vec<ViewMenuEntry> {
+        let mut entries: Vec<ViewMenuEntry> = super::paging::PAGE_SIZES
+            .iter()
+            .map(|&n| {
+                ViewMenuEntry::item(
+                    format!("{MENU_PREFIX}page-size:{n}"),
+                    i18n::tr!("grid.page_size", count = n),
+                )
+                .checked_if(self.paging.size == Some(n))
+            })
+            .collect();
+        entries.push(
+            ViewMenuEntry::item(format!("{MENU_PREFIX}page-size:all"), i18n::t("grid.page_all"))
+                .checked_if(self.paging.size.is_none()),
+        );
+        let total = self.source.total().approximate();
+        if let Some(total) = total.filter(|t| *t > super::paging::LARGE) {
+            let warning = i18n::tr!("grid.page_all_warning", total = super::paint::grouped(total));
+            entries.push(ViewMenuEntry::Separator);
+            entries.push(
+                ViewMenuEntry::item(format!("{MENU_PREFIX}page-size-note"), warning)
+                    .disabled_if(true),
+            );
+        }
+        entries
     }
 
     /// Tool `tool` run as from its button (the "…" menu's rows). `true` if it could be.

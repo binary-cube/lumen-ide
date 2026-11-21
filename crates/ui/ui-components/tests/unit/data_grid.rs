@@ -532,6 +532,19 @@ fn the_toolbar_never_overlaps_and_puts_away_what_doesnt_fit() {
     assert!(g.collapsed_tools().contains(&Tool::Refresh));
 }
 
+/// The ids of a menu's rows that can be run (greyed-out ones aside), as the app shows them.
+fn runnable(entries: &[ViewMenuEntry]) -> Vec<String> {
+    entries
+        .iter()
+        .filter_map(|e| match e {
+            ViewMenuEntry::Item { id, look, .. } if !look.disabled => Some(id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The "…" is the app's menu, asked under its button: every tool put away has its row
+/// (with its icon; those that can't be used now greyed out), a row runs its tool.
 #[test]
 fn the_more_menu_holds_the_tools_put_away_and_runs_them() {
     let mut text = text_layout::TextSystem::new();
@@ -542,54 +555,65 @@ fn the_more_menu_holds_the_tools_put_away_and_runs_them() {
         |r: Rect| Point::new(r.min_x() + r.size.width / 2.0, r.min_y() + r.size.height / 2.0);
     g.press(middle(more), 1, NONE);
     g.release();
-    assert!(g.more_open());
-    paint_at(&mut g, &mut text, 260.0);
-    let rows: Vec<(Rect, Tool)> = g
-        .hits
+    assert!(g.menu_asked());
+    let (anchor, entries) = g.take_menu().expect("the menu, under the …");
+    assert_eq!(anchor, more);
+    assert!(g.take_menu().is_none(), "taken once");
+    let rows = runnable(&entries);
+    for tool in g.collapsed_tools() {
+        let Some(id) = tool.id() else { continue };
+        let row = format!("grid:tool:{id}");
+        let shown = entries
+            .iter()
+            .any(|e| matches!(e, ViewMenuEntry::Item { id, icon: Some(_), .. } if *id == row));
+        assert!(shown, "{tool:?} has its row, with its icon");
+        assert_eq!(rows.contains(&row), g.tool_enabled(*tool), "{tool:?}");
+    }
+    // Refresh from the menu: run.
+    let before = g.source.refreshed;
+    assert!(g.command("grid:tool:refresh"));
+    assert_eq!(g.source.refreshed, before + 1);
+    // Find too.
+    assert!(g.command("grid:tool:find"));
+    assert!(g.find.open);
+    g.find.open = false;
+    // A tool that can't be used now isn't run (the first page: ‹‹).
+    assert!(!g.command("grid:tool:first"));
+    // The page size from the menu asks for its choices, under the "…".
+    assert!(g.command("grid:tool:page-size"));
+    let (anchor, sizes) = g.take_menu().expect("the sizes' menu");
+    assert_eq!(anchor, more);
+    assert!(runnable(&sizes).contains(&"grid:page-size:all".to_owned()));
+}
+
+/// The page sizes are the app's menu under their field: the one in force checked, a row
+/// choosing its size.
+#[test]
+fn the_page_sizes_are_the_app_s_menu() {
+    let mut text = text_layout::TextSystem::new();
+    let mut g = editable();
+    paint_at(&mut g, &mut text, 1400.0);
+    let field = toolbar_hits(&g).into_iter().find(|(_, h)| *h == Hit::PageSize).unwrap().0;
+    g.press(Point::new(field.min_x() + 4.0, field.min_y() + 4.0), 1, NONE);
+    g.release();
+    let (anchor, entries) = g.take_menu().expect("the sizes' menu");
+    assert_eq!(anchor, field);
+    let checked: Vec<&str> = entries
         .iter()
-        .filter_map(|(r, h)| match h {
-            Hit::MoreChoice(t) => Some((*r, *t)),
+        .filter_map(|e| match e {
+            ViewMenuEntry::Item { id, look, .. } if look.checked => Some(id.as_str()),
             _ => None,
         })
         .collect();
-    // Every tool put away that can be used now has its row (the first page: ‹‹ can't).
-    for tool in g.collapsed_tools() {
-        let usable = g.tool_enabled(*tool);
-        assert_eq!(rows.iter().any(|(_, t)| t == tool), usable, "{tool:?}");
-    }
-    // The menu stays in the grid, under the toolbar.
-    for (r, _) in &rows {
-        assert!(r.min_x() >= 0.0 && r.max_x() <= 260.0 && r.min_y() > 46.0);
-    }
-    // Refresh from the menu: run, the menu closed.
-    let refresh = rows.iter().find(|(_, t)| *t == Tool::Refresh).unwrap().0;
-    let before = g.source.refreshed;
-    g.press(middle(refresh), 1, NONE);
-    g.release();
-    assert!(!g.more_open());
-    assert_eq!(g.source.refreshed, before + 1);
-    // Find too (what's put away depends on the texts: after the refresh the total is read
-    // again).
-    g.open_more();
-    paint_at(&mut g, &mut text, 260.0);
-    let find = g.hits.iter().find(|(_, h)| *h == Hit::MoreChoice(Tool::Find)).unwrap().0;
-    g.press(middle(find), 1, NONE);
-    assert!(g.find.open);
-    g.find.open = false;
-    // Esc closes it; a press elsewhere closes it without running anything.
-    g.open_more();
-    assert!(g.edit_key(ViewerKey::Escape, KeyReach::default()));
-    assert!(!g.more_open());
-    g.open_more();
-    g.press(Point::new(130.0, 400.0), 1, NONE);
-    assert!(!g.more_open());
-    assert!(!g.find.open);
-    // The page size from the menu opens its choices.
-    g.open_more();
-    paint_at(&mut g, &mut text, 260.0);
-    let size = g.hits.iter().find(|(_, h)| *h == Hit::MoreChoice(Tool::PageSize)).unwrap().0;
-    g.press(middle(size), 1, NONE);
-    assert!(g.sizes_open);
+    let size = g.paging().size.map_or("all".to_owned(), |n| n.to_string());
+    assert_eq!(checked, [format!("grid:page-size:{size}").as_str()]);
+    assert!(g.command("grid:page-size:10"));
+    assert_eq!(g.paging().size, Some(10));
+    assert!(g.command("grid:page-size:all"));
+    assert_eq!(g.paging().size, None);
+    // Only the sizes offered.
+    assert!(!g.command("grid:page-size:7"));
+    assert_eq!(g.paging().size, None);
 }
 
 #[test]
@@ -950,8 +974,11 @@ fn a_narrow_toolbar_puts_the_pill_in_the_more_menu() {
     assert!(g.collapsed_tools().contains(&Tool::Extractor));
     g.open_more();
     paint_at(&mut g, &mut text, 300.0);
-    let row = g.hits.iter().find(|(_, h)| *h == Hit::MoreChoice(Tool::Extractor)).unwrap().0;
-    g.press(middle(row), 1, NONE);
+    assert!(
+        g.take_menu()
+            .is_some_and(|(_, rows)| runnable(&rows).contains(&"grid:tool:copy-as".to_owned()))
+    );
+    assert!(g.command("grid:tool:copy-as"));
     assert!(g.extractors_open());
     paint_at(&mut g, &mut text, 300.0);
     assert!(g.extract_area.is_some(), "anchored at the \"…\"");

@@ -26,7 +26,6 @@ use ui_kit::{KeyHint, draw_icon, draw_text};
 use crate::Painter;
 use crate::ds::{self, Ctx};
 use crate::modal::{Modal, ModalHit, ModalSize, ModalSpec};
-use crate::top_bar::paint_badge;
 
 mod drag;
 mod paint;

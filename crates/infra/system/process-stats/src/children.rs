@@ -50,7 +50,30 @@ impl ProcessTrees {
         }
         let system = self.system.get_or_insert_with(System::new);
         let kind = ProcessRefreshKind::nothing().with_cpu().with_memory().with_disk_usage();
-        system.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+        // Only the trees' own processes when the system names a process's children (Linux):
+        // every process of the system read each second costs a desktop's hundreds of them.
+        let walked = if cfg!(target_os = "linux") {
+            trees_of(roots, &linux_children, &|pid| {
+                std::path::Path::new(&format!("/proc/{pid}")).exists()
+            })
+        } else {
+            None
+        };
+        match walked {
+            Some(pids) => {
+                let pids: Vec<Pid> = pids.into_iter().map(Pid::from_u32).collect();
+                // One held that's no longer in a tree (it ended, or left it): the table made
+                // anew with the trees' own (what's read is totals, nothing lost).
+                let kept: std::collections::HashSet<Pid> = pids.iter().copied().collect();
+                if system.processes().keys().any(|p| !kept.contains(p)) {
+                    *system = System::new();
+                }
+                system.refresh_processes_specifics(ProcessesToUpdate::Some(&pids), true, kind);
+            }
+            None => {
+                system.refresh_processes_specifics(ProcessesToUpdate::All, true, kind);
+            }
+        }
         let processes = system.processes();
         // The names of programs that ended are forgotten (an id is reused later).
         self.names.retain(|pid, _| processes.contains_key(&Pid::from_u32(*pid)));
@@ -133,6 +156,49 @@ impl ProcessTrees {
         let process = self.system.as_ref().and_then(|s| s.process(Pid::from_u32(pid)));
         process.map_or((0, true), |p| (p.start_time(), p.run_time() >= 2))
     }
+}
+
+/// The most processes walked under the roots (a runaway tree is measured in part, never
+/// walked forever).
+const MOST_PROCESSES: usize = 4096;
+
+/// `roots` and every process under them, found by asking each for its children
+/// (`children`: `None` when they can't be read); `None` if they can't be read for one still
+/// running (`alive`): then every process is looked at instead. One that ended has nothing
+/// under it. Each once, a cycle never walked twice.
+pub(crate) fn trees_of(
+    roots: &[u32],
+    children: &dyn Fn(u32) -> Option<Vec<u32>>,
+    alive: &dyn Fn(u32) -> bool,
+) -> Option<Vec<u32>> {
+    let mut found: Vec<u32> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut stack: Vec<u32> = roots.to_vec();
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid) || found.len() >= MOST_PROCESSES {
+            continue;
+        }
+        found.push(pid);
+        match children(pid) {
+            Some(more) => stack.extend(more),
+            // Ended meanwhile: nothing under it. Unknown for a root still running: can't say.
+            None if alive(pid) => return None,
+            None => {}
+        }
+    }
+    Some(found)
+}
+
+/// Process `pid`'s children as Linux lists them (`/proc/<pid>/task/<tid>/children`, every
+/// thread's); `None` when they can't be read (it ended, or the kernel doesn't keep them).
+fn linux_children(pid: u32) -> Option<Vec<u32>> {
+    let tasks = std::fs::read_dir(format!("/proc/{pid}/task")).ok()?;
+    let mut out = Vec::new();
+    for task in tasks.flatten() {
+        let text = std::fs::read_to_string(task.path().join("children")).ok()?;
+        out.extend(text.split_whitespace().filter_map(|n| n.parse::<u32>().ok()));
+    }
+    Some(out)
 }
 
 // Its tests start a program under another name (Unix's `arg0`).

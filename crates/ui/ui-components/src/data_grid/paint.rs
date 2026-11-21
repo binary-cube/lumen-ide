@@ -13,7 +13,6 @@ use super::grid::{
     Mark, PopRow, ROW_H, TOOLBAR_H, horizontal_bar, tool_hit,
 };
 use super::layout::MIN_WIDTH;
-use super::paging::{LARGE, PAGE_SIZES};
 use super::selection::CellPos;
 use super::source::{Align, CellMark, CellRef, GridSource, RowState, SourceStatus, Total};
 use super::toolbar::{self, Metrics, Tool, ToolbarSpec};
@@ -140,6 +139,7 @@ fn field_style(ds: &Ctx<'_>, error: bool) -> TextInputStyle {
         padding: ds.px(10.0),
         caret_width: ds.px(1.5).max(1.0),
         lead: 0.0,
+        trail: 0.0,
     }
 }
 
@@ -207,14 +207,6 @@ impl<S: GridSource> DataGrid<S> {
             let layer = scene.push_layer(None);
             self.paint_field_tip(layer, text, icons, &ds);
         }
-        if self.sizes_open {
-            let layer = scene.push_layer(None);
-            self.paint_sizes(layer, text, icons, &ds);
-        }
-        if self.more_open {
-            let layer = scene.push_layer(None);
-            self.paint_more(layer, text, icons, &ds);
-        }
         if self.extract_open {
             self.paint_extractors(scene, text, icons, &ds);
         } else {
@@ -262,10 +254,6 @@ impl<S: GridSource> DataGrid<S> {
     // ─── Bottom bar ───
 
     // ─── The large editor ───
-
-    // ─── The page sizes' popover ───
-
-    // ─── The "…" menu ───
 
     // ─── The data extractors' popover ───
 }

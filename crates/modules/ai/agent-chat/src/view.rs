@@ -18,7 +18,7 @@ use acp_client::{AgentProcess, Event};
 use agents::{AgentSession, Launch};
 use contracts::terminal::{RunInTerminal, TerminalPlace};
 use i18n::t;
-use kernel::{Point, Rect, Rgba};
+use kernel::{Point, Rect};
 use render_api::Quad;
 use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, button_size, radius};
@@ -74,6 +74,10 @@ enum Hit {
 /// share of the font's size (logical pixels where not said).
 const COLUMN: f32 = 820.0;
 const FIELD_H: f32 = 44.0;
+/// The room between the chat field's edge and its text.
+const FIELD_PADDING: f32 = 14.0;
+/// The room between the chat field's text and its send button.
+const SEND_GAP: f32 = 8.0;
 const LINE: f32 = 1.55;
 
 /// The places of the conversation's scrollbar and of the field among its controls (see
@@ -458,11 +462,6 @@ impl ChatView {
         );
         self.field = field;
         let focused = ctx.focused;
-        layer.quad(
-            Quad::filled(field, p.input_background)
-                .rounded(px(radius::LG))
-                .bordered(ds.line(), if focused { p.accent } else { p.input_border }),
-        );
         let size = px(button_size::SPACIOUS);
         let button = Rect::new(field.max_x() - px(36.0), field.min_y() + px(6.0), size, size);
         let running = self.conversation.running;
@@ -479,24 +478,16 @@ impl ChatView {
             .round()
             .enabled(ready && (running || !self.input.text().trim().is_empty()))
             .hovered(self.hover == Some(hit));
-        ds::button(layer, ctx.text, ctx.icons, ds, button, spec);
-        self.hits.push((button, hit));
+        // The shared field, send kept in its room on the right (the text scrolls short of it).
         let style = ui_kit::TextInputStyle {
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            border_width: 0.0,
-            padding: 0.0,
-            lead: 0.0,
+            radius: px(radius::LG),
+            padding: px(FIELD_PADDING),
+            trail: field.max_x() - button.min_x() - px(FIELD_PADDING) * 0.5 + px(SEND_GAP),
             ..ds::field_style(ds, ds.ui_font(0.0), false)
         };
-        let area = Rect::new(
-            field.min_x() + px(14.0),
-            field.min_y(),
-            button.min_x() - px(8.0) - field.min_x() - px(14.0),
-            field.size.height,
-        );
-        self.input.paint(layer, ctx.text, area, focused, &t("chat.placeholder"), &style);
+        self.input.paint(layer, ctx.text, field, focused, &t("chat.placeholder"), &style);
+        ds::button(layer, ctx.text, ctx.icons, ds, button, spec);
+        self.hits.push((button, hit));
         let mut bottom = field.min_y() - px(10.0);
         // A permission waited for: what for, its choices.
         if let Some(permission) = self.conversation.permission.clone() {

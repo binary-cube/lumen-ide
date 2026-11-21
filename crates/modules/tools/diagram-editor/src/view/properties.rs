@@ -415,6 +415,7 @@ impl DiagramView {
                     padding: px(4.0),
                     caret_width: ctx.scale.max(1.0),
                     lead: 0.0,
+                    trail: 0.0,
                 };
                 input.paint(layer, text, parts.value, true, "", &style);
             }

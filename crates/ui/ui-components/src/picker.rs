@@ -83,11 +83,7 @@ fn paint_lead(p: &mut RowPaint<'_, '_>, item: &PickerItem, content: Rect, name_r
     let badge = Rect::new(content.min_x(), (mid - s / 2.0).round(), s, s);
     if item.avatar {
         let tint = crate::tag_colors::for_key(&item.label, pal);
-        p.layer.quad(Quad::filled(badge, tint.with_alpha(0.16)).rounded(s / 2.0));
-        let letters = ctx.ui_font(-4.0).with_weight(Font::SEMIBOLD);
-        let shaped = p.text.shape_line(&ds::initials(&item.label), &letters);
-        let lx = (badge.min_x() + (s - shaped.width) / 2.0).round();
-        draw_text(p.layer, &shaped, lx, ds::optical_baseline(badge.min_y(), s, &letters), tint);
+        ds::Avatar::new(&item.label, tint).paint(p.layer, p.text, ctx, badge);
     } else if let Some(id) = item.icon.and_then(|i| p.icons.id(i)) {
         let is = px(14.0);
         let at = Rect::new(badge.min_x() + (s - is) / 2.0, (mid - is / 2.0).round(), is, is);

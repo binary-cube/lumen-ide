@@ -325,15 +325,70 @@ pe care o folosește.
   eliberarea după un click care deschide un meniu, meniul cerut printr-o comandă în
   Services, butonul ocupat cu tastă).
 
+## Făcut (2026-11-21: ultimele componente)
+
+- **Componente noi / opțiuni noi** (toate cu teste, implicitul = aspectul de azi):
+  - `ds::Avatar` (inițialele pe culoarea lor: `Tinted` rotund, `Solid` pătrat plin, litere
+    albe) — unicul avatar: picker-ul, lista proiectelor, bara de sus
+    (`top_bar::paint_badge` șters);
+  - `ButtonSpec`: `avatar()`, `font()`, `start(pad)` (conținut de la stânga, pentru valori
+    într-un loc rezervat), `outlined()` (margine în culoarea conținutului); `busy` /
+    `busy_amount` merg și pe secundar și pe pericol (`busy_heavy_button`, `busy_label`);
+  - `ds::ringed_dot` (punct decupat din ce e sub el).
+- **Mutate:** Submit / totalul estimat / mărimea paginii / extractorul din grid
+  (`ds::button`, `ds::dropdown_styled` compact); butoanele rândurilor de stare din setări;
+  elementele clicabile ale barei de stare (`ds::button`, un singur baseline); pastila
+  proiectului din bara de sus; eticheta regiunii pliate și mărcile / cipurile erorilor din
+  editor, notele și cipurile parametrilor din cardul de hover, insigna de fel din completare
+  (`Badge`); punctele (taburi, fereastra de stare, exploratorul bazelor de date,
+  completarea); evidențierile rândurilor din meniuri (`choice_menu`, `context_menu`,
+  `menu_drawer`, fereastra de stare), din completare, din setări și markerul de pliere
+  (`RowHighlight`); câmpul din dialog și cel de redenumire din clientul HTTP (doar
+  `TextInput`, fără ramă desenată de mână).
+- **Ce se vede diferit:** Submit în fontul butoanelor, colțuri MD; câmpurile mărime pagină /
+  extractor arată ca dropdown-urile (fundalul câmpurilor, colțuri MD); butoanele setărilor
+  transparente în repaus (accentul de 6% dispare), 8% sub mouse; textul barei de stare
+  poate coborî / urca cu ≤1 px (baseline-ul optic al butoanelor); ▾ proiectului din bara de
+  sus 10 px în culoarea textului (ca la ramura de lângă el), avatarul la 6 px de nume.
+
+## Făcut (2026-11-21: locul din dreapta al câmpului, bara de căutare, meniurile grid-ului)
+
+- **Locul din dreapta al câmpului** (`ui_kit::TextInputStyle::trail`, perechea lui `lead`,
+  implicit 0 = aspectul de azi): câmpul își păstrează rama întreagă, iar textul, selecția și
+  cursorul derulează în ce rămâne (și placeholder-ul, când e loc). Câmpul URL din clientul
+  HTTP (× în locul lui) și câmpul agentului din chat (Send / Stop) sunt acum câmpul comun +
+  butonul comun, fără ramă desenată de mână. Literalii de stil (≈20) au primit `trail: 0.0`.
+  Test: `the_trailing_room_stays_free` (ui-kit).
+- **Bara de căutare din editor** (`find_bar`): câmpul de căutare e `SearchField`
+  (`paint_with` + `SearchExtras { trailing, invalid }`: `Cc` / `W` / `.*` în locul din
+  dreapta, marginea roșie la un regex greșit); câmpul de înlocuire e un `TextInput` cu
+  stilul pastilei de căutare (`ds::search_input_style`, textul aliniat cu al căutării).
+  Focusul e al barei, prin `Controls` (`focus()` / `set_focus`); un click pune cursorul
+  (două un cuvânt, trei tot), trasul selectează (aplicația trimite mutările și eliberarea
+  barei cât un câmp ține pointerul). Tastele (Enter / ⇧Enter, Esc, Tab, ⌘A, ⌘G…) rămân pe
+  drumul de azi. Teste: `find_bar` (ui-workbench).
+- **Meniurile grid-ului** („…” și mărimile paginii) sunt meniul aplicației: grid-ul le cere
+  sub butonul lor (`DataGrid::take_menu`, o dată), iar vederea care îl găzduiește le dă mai
+  departe din `Viewer::take_menu` (exploratorul bazelor de date, rezultatele consolei,
+  log-ul). Rândurile: `grid:tool:<id>` (unealta, ca din butonul ei; mărimea paginii cere la
+  rândul ei meniul mărimilor, `copy-as` deschide fereastra extractorilor), `grid:page-size:<n|all>`
+  (cea în vigoare bifată; la un total mare, nota de încetineală ca rând gri). Uneltele care
+  nu se pot folosi acum sunt gri (nu rulează). Ferestrele desenate de grid pentru ele
+  (`paint_sizes`, `paint_more`) s-au șters. Ce se vede diferit: meniurile au aspectul
+  meniului aplicației; butonul „…” / câmpul mărimii nu mai arată „deschis” cât meniul e
+  deschis. Fereastra extractorilor (comutatoare, titluri, derulare) rămâne a grid-ului.
+  Teste: `the_more_menu_holds_the_tools_put_away_and_runs_them`,
+  `the_page_sizes_are_the_app_s_menu` (ui-components), testul vederii înguste din
+  exploratorul bazelor de date.
+
 ## Lăsat (2026-11-21)
 
-- Insignele consolei (Limited / ReadOnly / Production) și ale profiler-ului: arată doar un
-  tooltip, nu sunt butoane.
-- Desenele care sunt conținut, nu controale (nodurile grafurilor, nuanțele diff-ului,
-  previzualizările, legendele, fundalurile cardurilor) rămân ale vederilor lor.
-- În componente: Submit și Count din grid, butonul din rândurile setărilor, elementele
-  barei de stare, pastila proiectului din bara de sus (insigna ei e o imagine).
-- Un buton secundar sau de pericol ocupat nu arată încă spinner.
+- **Insignele consolei** (Limited / ReadOnly / Production) și ale profiler-ului: arată doar
+  un tooltip, nu sunt butoane.
+- **Conținut, nu controale:** nodurile grafurilor, nuanțele diff-ului, previzualizările,
+  legendele, fundalurile cardurilor și ale câmpurilor de cod, plăcile cu iconițe din
+  antetele dialogurilor, inlay-urile din editor, bulele din chat, bannerele de avertizare,
+  mărcile de pe banda scrollbar-ului, insigna linkului (⌘ click) cu tastele ei.
 
 ## Lăsat
 

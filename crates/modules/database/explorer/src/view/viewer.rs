@@ -491,6 +491,11 @@ impl Viewer for DataView {
         used
     }
 
+    /// The menu its grid's toolbar asked for ("…", the page sizes): the app shows it.
+    fn take_menu(&mut self) -> Option<(kernel::Rect, Vec<ViewMenuEntry>)> {
+        self.grid.as_mut().and_then(DataGrid::take_menu)
+    }
+
     fn take_action(&mut self) -> Option<ViewerAction> {
         self.action.take()
     }

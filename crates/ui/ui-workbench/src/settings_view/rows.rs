@@ -72,17 +72,8 @@ impl SettingsView {
     ) -> f32 {
         let SectionArea { layer, text, ctx, x0, top, width } = area;
         let px = |v: f32| ctx.px(v);
-        let mut rows = BlockRows {
-            layer,
-            text,
-            ctx,
-            icons,
-            x0,
-            width,
-            y: top,
-            block: LANGUAGE_CHOOSER,
-            small: ctx.ui_font(-1.0),
-        };
+        let mut rows =
+            BlockRows { layer, text, ctx, icons, x0, width, y: top, block: LANGUAGE_CHOOSER };
         let at = rows.layer.quads.len();
         let label = i18n::t("settings.languages_choose");
         let detail = i18n::t("settings.languages_choose_detail");
@@ -150,17 +141,7 @@ impl SettingsView {
         // The notes that end the block go under its card.
         let trailing = block.rows.iter().rev().take_while(|r| matches!(r, SettingsRow::Notes(_)));
         let (body, notes) = block.rows.split_at(block.rows.len() - trailing.count());
-        let mut rows = BlockRows {
-            layer,
-            text,
-            ctx,
-            icons,
-            x0,
-            width,
-            y,
-            block: contributed.id,
-            small: ctx.ui_font(-1.0),
-        };
+        let mut rows = BlockRows { layer, text, ctx, icons, x0, width, y, block: contributed.id };
         // The block's anchor: the whole block, unless a row makes itself what a search
         // highlights (a switch card).
         let anchor = self.anchors.len();
@@ -525,10 +506,14 @@ impl SettingsView {
         let ctx = rows.ctx;
         let palette = ctx.palette;
         let px = |v: f32| ctx.px(v);
-        let small = rows.small.clone();
-        let shaped: Vec<_> =
-            buttons.iter().map(|(_, label, _)| rows.text.shape_line(label, &small)).collect();
-        let buttons_w: f32 = shaped.iter().map(|s| s.width + px(24.0) + px(8.0)).sum();
+        let label_font = ds::button_label_font(ctx);
+        let widths: Vec<f32> = buttons
+            .iter()
+            .map(|(_, label, _)| {
+                (rows.text.shape_line(label, &label_font).width + px(24.0)).round()
+            })
+            .collect();
+        let buttons_w: f32 = widths.iter().map(|w| w + px(8.0)).sum();
         let pad = px(form::ROW_PAD);
         let font = ctx.ui_font(-0.5);
         let room = (rows.width - 2.0 * pad - buttons_w - px(8.0)).max(px(80.0));
@@ -550,35 +535,19 @@ impl SettingsView {
             y += line_h;
         }
         let mut right = rows.x0 + rows.width - pad;
-        for ((action, _, danger), shaped) in buttons.iter().zip(&shaped).rev() {
-            let button = Rect::new(
-                (right - shaped.width - px(24.0)).round(),
-                (mid - px(15.0)).round(),
-                (shaped.width + px(24.0)).round(),
-                px(30.0),
-            );
+        for ((action, label, danger), w) in buttons.iter().zip(&widths).rev() {
+            let button = Rect::new((right - w).round(), (mid - px(15.0)).round(), *w, px(30.0));
             right = button.min_x() - px(8.0);
             let action = SettingsAction::Press { block: rows.block, action };
-            let hovered = self.hover == Some(action.clone());
-            let tint = if *danger { palette.danger } else { palette.accent };
-            let fill = match (hovered, danger) {
-                (true, true) => palette.danger.with_alpha(0.12),
-                (false, true) => Rgba::TRANSPARENT,
-                (true, false) => palette.accent.with_alpha(0.14),
-                (false, false) => palette.accent.with_alpha(0.06),
-            };
-            rows.layer.quad(
-                Quad::filled(button, ctx.fade(fill))
-                    .rounded(px(8.0))
-                    .bordered(ctx.line(), ctx.fade(tint.with_alpha(0.55))),
-            );
-            draw_text(
-                rows.layer,
-                shaped,
-                button.min_x() + px(12.0),
-                ds::optical_baseline(button.min_y(), button.size.height, &small),
-                ctx.fade(tint),
-            );
+            let tone = if *danger { ds::Tone::Danger } else { ds::Tone::Accent };
+            let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+                .label(label)
+                .tone(tone)
+                .hover_tint(tone)
+                .outlined()
+                .corner(8.0)
+                .hovered(self.hover == Some(action.clone()));
+            ds::button(rows.layer, rows.text, rows.icons, ctx, button, spec);
             self.block_hits.push((button, action));
         }
         rows.y = top + h;
@@ -616,6 +585,7 @@ impl SettingsView {
             padding: px(12.0),
             caret_width: px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         let (layer, text) = (&mut *rows.layer, &mut *rows.text);
         // A long hint cut to the field: never drawn past its edge.
@@ -692,7 +662,7 @@ const DROPDOWN_W: f32 = 200.0;
 
 /// Where a block's rows are painted: the layer, the text, the drawing context, the icons,
 /// the card's column (its left edge and width), the next row's top (each row moves it
-/// down), the block's id and the small font (buttons, notes).
+/// down) and the block's id.
 pub(super) struct BlockRows<'a, 'c> {
     pub(super) layer: &'a mut Layer,
     pub(super) text: &'a mut TextSystem,
@@ -702,7 +672,6 @@ pub(super) struct BlockRows<'a, 'c> {
     pub(super) width: f32,
     y: f32,
     pub(super) block: &'static str,
-    small: text_layout::Font,
 }
 
 impl BlockRows<'_, '_> {

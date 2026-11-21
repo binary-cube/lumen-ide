@@ -30,6 +30,8 @@ const ROW: f32 = 34.0;
 const PAD: f32 = 14.0;
 /// The request's share of the width, at first.
 const DEFAULT_SHARE: f32 = 0.56;
+/// The room kept for the URL field's × on its right (logical pixels).
+const CLEAR_ROOM: f32 = 30.0;
 
 /// A field without a frame (a table's cell, between the table's lines): typed in, its
 /// caret shows it.
@@ -108,31 +110,13 @@ impl RequestEditor {
             h,
         );
         let url_focused = focused && self.focus == Some(Focus::Url);
-        // The text ends before the × (never under it): the frame drawn whole, the text in
-        // what's left of it.
-        let style = ds::field_style(&ds, code.clone(), false);
+        // The text ends before the × (never under it): the shared field, × in its room.
         let clearing = !form.url.text().is_empty();
-        if clearing {
-            let border = if url_focused { style.border_focused } else { style.border };
-            layer.quad(
-                Quad::filled(url_r, style.background)
-                    .rounded(style.radius)
-                    .bordered(style.border_width, border),
-            );
-            let mut inner = style.clone();
-            inner.background = Rgba::TRANSPARENT;
-            inner.border = Rgba::TRANSPARENT;
-            inner.border_focused = Rgba::TRANSPARENT;
-            let text_r = Rect::new(
-                url_r.min_x(),
-                url_r.min_y(),
-                (url_r.size.width - px(30.0)).max(0.0),
-                url_r.size.height,
-            );
-            form.url.paint(layer, text, text_r, url_focused, &t("http.url_placeholder"), &inner);
-        } else {
-            form.url.paint(layer, text, url_r, url_focused, &t("http.url_placeholder"), &style);
-        }
+        let style = TextInputStyle {
+            trail: if clearing { px(CLEAR_ROOM) } else { 0.0 },
+            ..ds::field_style(&ds, code.clone(), false)
+        };
+        form.url.paint(layer, text, url_r, url_focused, &t("http.url_placeholder"), &style);
         hits.push((url_r, Hit::Field(Focus::Url)));
         if clearing {
             let hovered = self.hover == Some(Hit::Clear(Focus::Url));

@@ -173,10 +173,10 @@ impl SettingsView {
         );
         if can_preload {
             if self.hover.as_ref() == Some(&preload) {
-                layer.quad(
-                    Quad::filled(check_area, ctx.fade(palette.text.with_alpha(0.05)))
-                        .rounded(px(8.0)),
-                );
+                ds::RowHighlight::new(false, true)
+                    .hover(ds::HoverFill::Faint(CHECK_HOVER))
+                    .radius(CHECK_RADIUS)
+                    .paint(layer, ctx, check_area);
             }
             self.module_hits.push((check_area, preload));
         }
@@ -203,10 +203,10 @@ impl SettingsView {
         );
         if row.enabled {
             if self.hover.as_ref() == Some(&hide) {
-                layer.quad(
-                    Quad::filled(hide_area, ctx.fade(palette.text.with_alpha(0.05)))
-                        .rounded(px(8.0)),
-                );
+                ds::RowHighlight::new(false, true)
+                    .hover(ds::HoverFill::Faint(CHECK_HOVER))
+                    .radius(CHECK_RADIUS)
+                    .paint(layer, ctx, hide_area);
             }
             self.module_hits.push((hide_area, hide));
         }
@@ -451,3 +451,8 @@ fn row_hover(layer: &mut render_api::Layer, ctx: &ds::Ctx<'_>, r: Rect, hovered:
 /// A row's corners (logical pixels) and its hover's alpha of the text.
 const ROW_RADIUS: f32 = 10.0;
 const ROW_HOVER: f32 = 0.04;
+
+/// A module's check (preload, hidden) under the mouse: its back (the text's alpha) and its
+/// corners (logical pixels).
+const CHECK_HOVER: f32 = 0.05;
+const CHECK_RADIUS: f32 = 8.0;

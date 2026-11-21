@@ -82,3 +82,43 @@ fn set_text_by_the_owner_is_not_an_edit() {
     assert_eq!(field.text(), "query");
     assert!(!field.take_edited());
 }
+
+/// A very long text pasted stays inside the field: no glyph past its × (nor its left edge),
+/// the caret at the text's end, within the field, never over a glyph.
+#[test]
+fn a_very_long_paste_stays_inside_the_field() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut field = SearchField::new();
+    painted(&mut field, true);
+    let long = "klgaksld fgkldfgkl adkflg kaldfgkl adklgb ".repeat(40);
+    assert!(Control::text(&mut field, &long));
+    let mut layer = Layer::default();
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let rect = Rect::new(0.0, 0.0, 300.0, 34.0);
+    field.paint(&mut layer, &mut text, &icons, &ctx, (rect, true), "Search");
+    let clear = field.clear_area().expect("× with text");
+    let font = ctx.ui_font(-0.5);
+    let glyphs: Vec<_> = layer.glyphs.iter().filter(|g| g.origin.y > rect.min_y()).collect();
+    let text_glyphs: Vec<_> = glyphs
+        .iter()
+        .filter(|g| g.origin.x > rect.min_x() + 20.0 && g.origin.x < clear.min_x())
+        .collect();
+    assert!(!text_glyphs.is_empty(), "the text shows");
+    let widest = text.shape_line("W", &font).width;
+    for g in &text_glyphs {
+        assert!(g.origin.x + widest * 0.5 <= clear.min_x(), "a glyph runs into ×: {:?}", g.origin);
+    }
+    let caret = layer
+        .quads
+        .iter()
+        .rev()
+        .find(|q| q.bounds.size.width <= 2.0 && q.bounds.size.height > 10.0)
+        .map(|q| q.bounds);
+    if let Some(caret) = caret {
+        assert!(caret.max_x() <= clear.min_x(), "the caret before ×: {caret:?}");
+        let last = text_glyphs.iter().map(|g| g.origin.x).fold(f32::MIN, f32::max);
+        assert!(last < caret.min_x(), "the caret after the last glyph: {last} vs {caret:?}");
+    }
+}

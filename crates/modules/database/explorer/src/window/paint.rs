@@ -305,22 +305,13 @@ impl DatabaseWindow {
                 } else {
                     None
                 };
-                let (d, ring) = (px(7.0), px(1.5));
-                let at = Rect::new(
-                    icon_rect.max_x() - d + px(1.0),
-                    icon_rect.max_y() - d + px(1.0),
-                    d,
-                    d,
+                let half = px(LINK_DOT) / 2.0;
+                let center = kernel::Point::new(
+                    icon_rect.max_x() - half + px(1.0),
+                    icon_rect.max_y() - half + px(1.0),
                 );
-                let outer =
-                    Rect::new(at.min_x() - ring, at.min_y() - ring, d + 2.0 * ring, d + 2.0 * ring);
-                layer.quad(
-                    Quad::filled(outer, p.sidebar_background).rounded(outer.size.width / 2.0),
-                );
-                if let Some(under) = under {
-                    layer.quad(Quad::filled(outer, under).rounded(outer.size.width / 2.0));
-                }
-                layer.quad(Quad::filled(at, dot).rounded(d / 2.0));
+                let behind = [p.sidebar_background, under.unwrap_or(Rgba::TRANSPARENT)];
+                ds::ringed_dot(layer, ds, center, (LINK_DOT, LINK_RING), dot, &behind);
             }
             let baseline = centered_baseline(top, h, &metrics);
             let label_x = (icon_rect.max_x() + px(7.0)).round();
@@ -383,3 +374,7 @@ impl DatabaseWindow {
         }
     }
 }
+
+/// A linked entry's dot on its icon's corner, and its ring (logical pixels).
+const LINK_DOT: f32 = 7.0;
+const LINK_RING: f32 = 1.5;

@@ -41,6 +41,7 @@ pub fn field_style(
         padding: ds.px(4.0),
         caret_width: ds.line().max(1.0),
         lead: 0.0,
+        trail: 0.0,
     }
 }
 

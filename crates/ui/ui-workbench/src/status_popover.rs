@@ -82,6 +82,10 @@ const PILL_PIN_ICON: f32 = 13.0;
 const HEADER_PIN_ICON: f32 = 15.0;
 /// The figures a window of graphs keeps room for (in the code font: digits as wide).
 const FIGURES_ROOM: &str = "99 · 9999 MB";
+/// A row running its command, under the mouse (the accent's alpha).
+const ROW_LIT: f32 = 0.14;
+/// A pill's dot in its color (logical pixels).
+const PILL_DOT: f32 = 7.0;
 /// The room each pill's figure keeps (so the pills don't move as values change).
 const PILL_ROOM: &str = "9999 MB";
 
@@ -243,7 +247,7 @@ impl StatusPopover {
             text_layout::Font::new(palette.code_font.clone(), px(palette.ui_font_size - 1.5));
         let h = px(24.0);
         let gap = px(4.0);
-        let dot = px(7.0);
+        let dot = px(PILL_DOT);
         let room = text.shape_line(PILL_ROOM, &mono).width;
         let figure = |text: &mut TextSystem, v: &str| text.shape_line(v, &mono).width.max(room);
         // The bar between a pill's two values, and the space on each side of it.
@@ -277,8 +281,8 @@ impl StatusPopover {
             face(layer, r);
             self.shapes.push((r, h / 2.0));
             let mut cx = r.min_x() + px(10.0);
-            let d = Rect::new(cx, (top + (h - dot) / 2.0).round(), dot, dot);
-            layer.quad(Quad::filled(d, ctx.fade(pill.color)).rounded(dot / 2.0));
+            let center = Point::new(cx + dot / 2.0, top + h / 2.0);
+            ds::dot(layer, &ctx, center, PILL_DOT, pill.color);
             cx += dot + px(6.0);
             let label = text.shape_line(&pill.label, &font);
             let base = ds::optical_baseline(top, h, &font);
@@ -445,12 +449,10 @@ impl StatusPopover {
                         h,
                     );
                     if let Some(action) = action {
-                        if self.hovered == Some(*action) {
-                            layer.quad(
-                                Quad::filled(r, ctx.fade(palette.accent.with_alpha(0.14)))
-                                    .rounded(px(radius::SM)),
-                            );
-                        }
+                        ds::RowHighlight::new(self.hovered == Some(*action), false)
+                            .selected_alpha(ROW_LIT)
+                            .radius(radius::SM)
+                            .paint(layer, &ctx, r);
                         self.rows.push((r, action));
                     }
                     if let Some(id) = icon.and_then(|i| icons.id(i)) {

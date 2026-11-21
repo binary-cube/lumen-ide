@@ -439,12 +439,10 @@ impl ContextMenu {
             // A greyed-out row: its icon, label and keys faded.
             let dim = |c: kernel::Rgba| if look.disabled { c.with_alpha(c.a * 0.45) } else { c };
             let (label_ink, icon_ink) = row_ink(look, selected, palette);
-            if selected {
-                layer.quad(
-                    Quad::filled(row, ctx.fade(palette.accent.with_alpha(0.14)))
-                        .rounded(px(radius::SM)),
-                );
-            }
+            ds::RowHighlight::new(selected, false)
+                .selected_alpha(ROW_LIT)
+                .radius(radius::SM)
+                .paint(layer, &ctx, row);
             if let Some(rgb) = look.swatch {
                 // A label's color: a dot in the icon's place.
                 let size = px(12.0);
@@ -542,6 +540,9 @@ fn row_ink(look: RowLook, selected: bool, palette: &Palette) -> (kernel::Rgba, k
     }
     (palette.text, if selected { palette.accent } else { palette.text_muted })
 }
+
+/// The row under the mouse or the keys (the accent's alpha).
+const ROW_LIT: f32 = 0.14;
 
 #[cfg(test)]
 #[path = "../tests/unit/context_menu.rs"]

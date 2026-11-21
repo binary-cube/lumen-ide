@@ -572,6 +572,7 @@ impl ColorPicker {
             padding: ctx.px(10.0),
             caret_width: ctx.px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         let input_layer = scene.push_layer(Some(field));
         self.input.paint(input_layer, text, field, self.input_focused, "#rrggbb", &style);

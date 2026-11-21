@@ -6,11 +6,12 @@ use std::time::Instant;
 
 use code_intelligence::{CompletionItem, CompletionKind, Visibility};
 use kernel::{Point, Rect, Rgba};
-use render_api::{Quad, Scene};
+use render_api::Scene;
 use text_layout::{Font, TextSystem};
 use ui_components::EdgeScrollbar;
 use ui_kit::{KeyHint, centered_baseline, draw_text, paint_key_hints};
 
+use crate::ds;
 use crate::palette::Palette;
 
 /// How many rows are visible at once.
@@ -264,24 +265,23 @@ impl CompletionPopup {
         for (row, item) in self.items.iter().enumerate().skip(self.first).take(VISIBLE) {
             let top = r.min_y() + pad + (row - self.first) as f32 * self.row_h;
             let row_rect = Rect::new(r.min_x() + pad, top, r.size.width - 2.0 * pad, self.row_h);
-            if row == self.selected {
-                layer.quad(Quad::filled(row_rect, palette.selection).rounded(px(5.0)));
-            }
-            // The kind badge.
+            ds::RowHighlight::new(row == self.selected, false)
+                .selected_fill(palette.selection)
+                .radius(ROW_RADIUS)
+                .paint(layer, &ctx, row_rect);
+            // The kind badge: its letter on a square in its color.
             let (letter, color) = badge(item.kind, palette);
-            let size = px(16.0);
-            let badge_rect =
-                Rect::new(row_rect.min_x() + px(6.0), top + (self.row_h - size) / 2.0, size, size);
-            layer.quad(Quad::filled(badge_rect, color.with_alpha(0.22)).rounded(px(4.0)));
-            let shaped = text.shape_line(letter, &badge_font);
-            let bm = text.metrics(&badge_font);
-            draw_text(
-                layer,
-                &shaped,
-                (badge_rect.min_x() + (size - shaped.width) / 2.0).round(),
-                centered_baseline(badge_rect.min_y(), size, &bm),
-                color,
-            );
+            let badge_rect = ds::Badge::new(letter)
+                .color(color)
+                .fill_alpha(KIND_FILL)
+                .size(ds::BadgeSize::Custom(KIND_SIZE))
+                .min_width(KIND_SIZE)
+                .pad(0.0)
+                .radius(KIND_RADIUS)
+                .centered()
+                .font(&badge_font)
+                .baseline(ds::BadgeBaseline::Metrics)
+                .paint(layer, text, &ctx, row_rect.min_x() + px(6.0), top + self.row_h / 2.0);
 
             // Member visibility: a small dot over the badge corner (green public,
             // yellow protected, red private).
@@ -291,18 +291,11 @@ impl CompletionPopup {
                     Visibility::Protected => palette.terminal_ansi[11],
                     Visibility::Private => palette.terminal_ansi[9],
                 };
-                let dot = px(7.0);
-                let r = Rect::new(
-                    badge_rect.max_x() - dot * 0.6,
-                    badge_rect.max_y() - dot * 0.6,
-                    dot,
-                    dot,
-                );
-                layer.quad(
-                    Quad::filled(r, color)
-                        .rounded(dot / 2.0)
-                        .bordered(px(1.0).max(1.0), palette.popup_background),
-                );
+                // Its center a tenth of it inside the badge's corner.
+                let inset = px(VISIBILITY_DOT) * 0.1;
+                let center = Point::new(badge_rect.max_x() - inset, badge_rect.max_y() - inset);
+                let size = (VISIBILITY_DOT - 2.0 * VISIBILITY_RING, VISIBILITY_RING);
+                ds::ringed_dot(layer, &ctx, center, size, color, &[palette.popup_background]);
             }
             // The label, with the matched letters accented.
             let baseline = centered_baseline(top, self.row_h, &metrics);
@@ -371,6 +364,16 @@ fn matched_chars(query: &str, label: &str) -> Vec<usize> {
     }
     out
 }
+
+/// The chosen row's corners (logical pixels).
+const ROW_RADIUS: f32 = 5.0;
+/// A kind's badge: its side, its corners (logical pixels) and its fill (its color's alpha).
+const KIND_SIZE: f32 = 16.0;
+const KIND_RADIUS: f32 = 4.0;
+const KIND_FILL: f32 = 0.22;
+/// A member's visibility: a dot on its badge's corner and its ring (logical pixels).
+const VISIBILITY_DOT: f32 = 7.0;
+const VISIBILITY_RING: f32 = 1.0;
 
 #[cfg(test)]
 #[path = "../tests/unit/completion_popup.rs"]

@@ -42,9 +42,7 @@ impl<S: GridSource> DataGrid<S> {
 
     /// A key: in the field having it, else to move in the rows. `true` if used.
     pub fn edit_key(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
-        if (self.sizes_open || self.more_open || self.extract_open) && key == ViewerKey::Escape {
-            self.sizes_open = false;
-            self.more_open = false;
+        if self.extract_open && key == ViewerKey::Escape {
             self.extract_open = false;
             return true;
         }

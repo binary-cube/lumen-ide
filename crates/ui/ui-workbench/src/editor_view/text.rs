@@ -365,15 +365,21 @@ impl EditorView {
             Some(languages::FoldCount::Items(n)) => i18n::tr!("fold.items", count = n),
             None => "⋯".to_owned(),
         };
-        let shaped_label = text.shape_line(&label, &f.ui_font);
-        let pad = (6.0 * self.scale).round();
+        // The label is a badge in the row's text: the tabs' hover, a border, the UI's font
+        // on the code's baseline.
+        let ctx = crate::ds::Ctx::new(palette, self.scale);
+        let badge = crate::ds::Badge::new(&label)
+            .font(&f.ui_font)
+            .baseline(crate::ds::BadgeBaseline::At(row.baseline))
+            .color(palette.text_muted)
+            .fill(palette.tab_hover)
+            .border(palette.border)
+            .radius(FOLD_RADIUS)
+            .pad(FOLD_PAD)
+            .size(crate::ds::BadgeSize::Custom(layout.line_height / self.scale - 2.0 * FOLD_INSET));
         let px = (f.x0 + width + layout.advance * 0.6).round();
-        let pill = Rect::new(
-            px,
-            row.top + 3.0 * self.scale,
-            shaped_label.width + 2.0 * pad,
-            layout.line_height - 6.0 * self.scale,
-        );
+        let mid = row.top + layout.line_height / 2.0;
+        let pill = Rect::new(px, mid, badge.width(text, &ctx), 0.0);
         let closing = f.doc.buffer().line_text(fold.end_line as usize);
         let closing = closing.trim();
         let closing = (!closing.is_empty()
@@ -397,12 +403,7 @@ impl EditorView {
                 color,
             ));
         }
-        content.quad(
-            Quad::filled(pill, palette.tab_hover)
-                .rounded(4.0 * self.scale)
-                .bordered(self.scale.round().max(1.0), palette.border),
-        );
-        draw_text(content, &shaped_label, pill.min_x() + pad, row.baseline, palette.text_muted);
+        let pill = badge.paint(content, text, &ctx, px, mid);
         self.pills.push((pill, row.line));
         if let Some((shaped, x)) = &closing {
             draw_text(content, shaped, *x, row.baseline, palette.code_text);
@@ -484,3 +485,9 @@ impl EditorView {
         self.preedit = Some(preedit);
     }
 }
+
+/// A folded region's label: its corners, the room on each side of its text, and its inset
+/// from the row's top and bottom (logical pixels).
+const FOLD_RADIUS: f32 = 4.0;
+const FOLD_PAD: f32 = 6.0;
+const FOLD_INSET: f32 = 3.0;

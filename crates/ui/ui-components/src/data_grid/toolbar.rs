@@ -34,6 +34,37 @@ pub enum Tool {
     More,
 }
 
+impl Tool {
+    /// Its id in the "…" menu's rows (`None`: never there).
+    pub fn id(self) -> Option<&'static str> {
+        Some(match self {
+            Tool::First => "first",
+            Tool::Back => "back",
+            Tool::Forward => "forward",
+            Tool::Last => "last",
+            Tool::PageSize => "page-size",
+            Tool::Add => "add",
+            Tool::Delete => "delete",
+            Tool::Refresh => "refresh",
+            Tool::Find => "find",
+            Tool::Transpose => "transpose",
+            Tool::Extractor => "copy-as",
+            Tool::Range
+            | Tool::Of
+            | Tool::Loader
+            | Tool::Cancel
+            | Tool::Revert
+            | Tool::Submit
+            | Tool::More => return None,
+        })
+    }
+
+    /// The tool of a "…" menu row's id.
+    pub fn from_id(id: &str) -> Option<Self> {
+        MENU_ORDER.into_iter().find(|t| t.id() == Some(id))
+    }
+}
+
 /// What goes first when there isn't room, step by step (a step's tools together).
 pub const COLLAPSE: &[&[Tool]] = &[
     &[Tool::PageSize],

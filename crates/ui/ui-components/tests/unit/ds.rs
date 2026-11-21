@@ -1318,3 +1318,109 @@ fn a_busy_primary_button_draws_nothing_over_its_spinner() {
     let keyed = plain.key("↵").menu(true);
     assert_eq!(draw(keyed, &mut text), draw(plain, &mut text));
 }
+
+/// Every dialog button shows its spinner while busy, as the primary does: the danger one
+/// keeps its fill, the secondary its border; neither draws its key over the spinner.
+#[test]
+fn a_busy_danger_or_secondary_button_shows_its_spinner() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = Rect::new(0.0, 0.0, 160.0, BUTTON_H);
+    for kind in [ButtonKind::Danger, ButtonKind::Secondary] {
+        let idle = ButtonSpec::new(kind).label("Drop").hovered(true);
+        let (rest, busy) =
+            (drawn(idle, r, &ctx, &mut text), drawn(idle.busy(true), r, &ctx, &mut text));
+        assert!(busy.quads.len() > rest.quads.len(), "{kind:?}: its spinner");
+        if kind == ButtonKind::Danger {
+            assert_eq!(busy.quads[0].color, palette.danger, "filled, not lit while busy");
+        } else {
+            assert_eq!(busy.quads[0].color.a, 0.0, "transparent, not lit while busy");
+        }
+        let keyed = drawn(idle.busy(true).key("↵"), r, &ctx, &mut text);
+        assert_eq!(keyed.quads.len(), busy.quads.len(), "{kind:?}: no key over the spinner");
+        let half = drawn(idle.busy_amount(0.5), r, &ctx, &mut text);
+        assert!(half.quads.len() > rest.quads.len(), "{kind:?}: a growing spinner");
+    }
+}
+
+/// An outlined button: a border in its content's color (faint), with or without a back;
+/// without the option a ghost has no border at rest, and a soft one keeps its own.
+#[test]
+fn an_outlined_button_is_bordered_in_its_tone() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = Rect::new(0.0, 0.0, 120.0, 30.0);
+    let ghost = ButtonSpec::new(ButtonKind::Ghost).label("Remove").tone(Tone::Danger);
+    assert!(drawn(ghost, r, &ctx, &mut text).quads.is_empty(), "a ghost at rest: no back");
+    let outlined = drawn(ghost.outlined(), r, &ctx, &mut text);
+    let border = outlined.quads.first().map(|q| (q.border_width, q.border_color));
+    assert_eq!(border, Some((1.0, palette.danger.with_alpha(0.55))));
+    let soft = drawn(ButtonSpec::new(ButtonKind::Soft).label("Add"), r, &ctx, &mut text);
+    assert_eq!(soft.quads.first().map(|q| q.border_color), Some(palette.border));
+}
+
+/// An avatar: tinted, a circle faintly in its color with the initials in it; solid, a
+/// rounded square in its color with white initials.
+#[test]
+fn an_avatar_shows_the_initials_in_its_look() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let color = Rgba::rgb(0x3366cc);
+    let r = Rect::new(10.0, 10.0, 20.0, 20.0);
+    let mut tinted = Layer::default();
+    Avatar::new("seo-analyzer", color).paint(&mut tinted, &mut text, &ctx, r);
+    assert_eq!(tinted.quads[0].color, color.with_alpha(0.16));
+    assert_eq!(tinted.quads[0].corner_radius, 10.0);
+    assert_eq!(tinted.glyphs.len(), 2, "S and A");
+    assert!(tinted.glyphs.iter().all(|g| g.color == color));
+    let mut solid = Layer::default();
+    Avatar::new("seo-analyzer", color).solid().paint(&mut solid, &mut text, &ctx, r);
+    assert_eq!((solid.quads[0].color, solid.quads[0].corner_radius), (color, 5.0));
+    assert!(solid.glyphs.iter().all(|g| g.color == Rgba::WHITE));
+}
+
+/// A button's avatar takes its icon's place (counted in its width); its label in the font
+/// it was given; from its left edge after its room when asked, else centered.
+#[test]
+fn a_button_takes_an_avatar_a_font_and_a_start() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let avatar = Avatar::new("docker", Rgba::rgb(0x22aa66)).solid();
+    let bold = ctx.ui_font(0.0).with_weight(Font::BOLD);
+    let plain = ButtonSpec::new(ButtonKind::Ghost).label("docker");
+    let spec = plain.avatar(avatar).icon_size(20.0).font(&bold);
+    let w = button_width(&mut text, &ctx, &spec, 28.0);
+    assert!(w > button_width(&mut text, &ctx, &plain, 28.0) + 20.0, "the avatar and a gap");
+    let r = Rect::new(0.0, 0.0, w + 40.0, 28.0);
+    let centered = drawn(spec, r, &ctx, &mut text);
+    assert_eq!(centered.quads.iter().filter(|q| q.color == avatar.color).count(), 1);
+    let first = |layer: &Layer| {
+        layer.quads.iter().find(|q| q.color == avatar.color).map(|q| q.bounds.min_x())
+    };
+    assert_eq!(first(&drawn(spec.start(8.0), r, &ctx, &mut text)), Some(8.0));
+    assert!(first(&centered).is_some_and(|x| x > 8.0), "centered: further in");
+    let label = |layer: &Layer| layer.glyphs.iter().filter(|g| g.color == palette.text).count();
+    assert_eq!(label(&centered), 6, "the label in its font");
+}
+
+/// A ringed dot: a circle in each color behind it (wider by its ring), then the dot, all
+/// on one center.
+#[test]
+fn a_ringed_dot_is_cut_out_of_what_it_stands_on() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut layer = Layer::default();
+    let behind = [palette.window_background, palette.accent.with_alpha(0.1)];
+    let at = Point::new(20.0, 20.0);
+    let dot = ringed_dot(&mut layer, &ctx, at, (7.0, 1.5), palette.danger, &behind);
+    assert_eq!(layer.quads.len(), 3);
+    assert_eq!(layer.quads[2].color, palette.danger);
+    assert_eq!(layer.quads[2].bounds, dot);
+    assert!(layer.quads[0].bounds.size.width > dot.size.width, "the ring");
+    let centers: Vec<_> = layer.quads.iter().map(|q| q.bounds.center()).collect();
+    assert!(centers.iter().all(|c| (c.x - 20.0).abs() <= 1.0 && (c.y - 20.0).abs() <= 1.0));
+}

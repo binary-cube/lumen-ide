@@ -651,21 +651,16 @@ impl<'a> TabLook<'a> {
             draw_icon(layer, self.icons, id, r, color);
             if let Some(accent) = tab.accent {
                 // Its color: a dot on the icon's lower right, ringed in the bar's color.
-                let (dot, ring) = (self.px(7.0), self.px(1.5));
-                let at = Rect::new(r.max_x() - dot + ring, r.max_y() - dot + ring, dot, dot);
-                let outer = Rect::new(
-                    at.min_x() - ring,
-                    at.min_y() - ring,
-                    dot + 2.0 * ring,
-                    dot + 2.0 * ring,
-                );
+                let (half, ring) = (self.px(ACCENT_DOT) / 2.0, self.px(ACCENT_RING));
+                let center = Point::new(r.max_x() - half + ring, r.max_y() - half + ring);
                 let back = if is_active {
                     palette.tab_active_background
                 } else {
                     palette.tab_bar_background
                 };
-                layer.quad(Quad::filled(outer, back).rounded(outer.size.width / 2.0));
-                layer.quad(Quad::filled(at, accent).rounded(dot / 2.0));
+                let ctx = crate::ds::Ctx::new(palette, self.scale);
+                let size = (ACCENT_DOT, ACCENT_RING);
+                crate::ds::ringed_dot(layer, &ctx, center, size, accent, &[back]);
             }
             label_x += icon + self.gap * 0.75;
         }
@@ -714,14 +709,6 @@ impl<'a> TabLook<'a> {
     ) {
         let (palette, close) = (self.palette, slot.close);
         let (is_active, hovered) = (slot.active, slot.hovered);
-        let centered = |size: f32| {
-            Rect::new(
-                close.min_x() + (close.size.width - size) / 2.0,
-                close.min_y() + (close.size.height - size) / 2.0,
-                size,
-                size,
-            )
-        };
         let ctx = crate::ds::Ctx::new(palette, self.scale);
         let ghost = crate::ds::ButtonSpec::new(crate::ds::ButtonKind::Ghost);
         if tab.pinned && !hovered {
@@ -731,11 +718,16 @@ impl<'a> TabLook<'a> {
             let x = ghost.icon("x").rest_tone(crate::ds::Tone::Neutral);
             crate::ds::button(layer, text, self.icons, &ctx, close, x);
         } else if tab.dirty {
-            let dot = self.px(7.0);
-            layer.quad(Quad::filled(centered(dot), palette.accent).rounded(dot / 2.0));
+            crate::ds::dot(layer, &ctx, close.center(), DIRTY_DOT, palette.accent);
         }
     }
 }
+
+/// A tab's color: a dot on its icon's corner, and its ring (logical pixels).
+const ACCENT_DOT: f32 = 7.0;
+const ACCENT_RING: f32 = 1.5;
+/// The dot of a tab with unsaved changes (logical pixels).
+const DIRTY_DOT: f32 = 7.0;
 
 #[cfg(test)]
 #[path = "../tests/unit/tab_bar.rs"]

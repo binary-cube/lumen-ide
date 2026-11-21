@@ -392,11 +392,19 @@ impl TextInput {
 
         let metrics = text.metrics(&s.font);
         let baseline = centered_baseline(bounds.min_y(), bounds.size.height, &metrics);
-        let inner_width = bounds.size.width - 2.0 * s.padding - s.lead;
+        let inner_width = (bounds.size.width - 2.0 * s.padding - s.lead - s.trail).max(0.0);
+        // The text's room: inside the padding, clear of what's before (`lead`) and after it
+        // (`trail`: a button inside the field).
+        let inside =
+            (bounds.min_x() + s.padding * 0.5 + s.lead, bounds.max_x() - s.padding * 0.5 - s.trail);
         if self.text.is_empty() {
             let shaped = text.shape_line(placeholder, &s.font);
             let x = bounds.min_x() + s.padding + s.lead;
-            draw_text(layer, &shaped, x, baseline, s.placeholder);
+            if s.trail > 0.0 {
+                draw_text_within(layer, &shaped, x, baseline, s.placeholder, inside);
+            } else {
+                draw_text(layer, &shaped, x, baseline, s.placeholder);
+            }
         }
 
         // A secret: a dot per character (the offsets follow).
@@ -415,7 +423,6 @@ impl TextInput {
         let scroll = if focused { (caret_x - inner_width + s.caret_width).max(0.0) } else { 0.0 };
         let x0 = (bounds.min_x() + s.padding + s.lead - scroll).round();
 
-        let inside = (bounds.min_x() + s.padding * 0.5 + s.lead, bounds.max_x() - s.padding * 0.5);
         let sel = self.selection();
         if focused && !sel.is_empty() {
             // Within the field, as the text is: a long text scrolled to its caret starts far
@@ -486,6 +493,9 @@ pub struct TextInputStyle {
     pub caret_width: f32,
     /// More room before the text (an icon there, drawn by the field's owner).
     pub lead: f32,
+    /// Room kept free after the text (a button inside the field, drawn by its owner: ×,
+    /// Send): the text, its selection and the caret scroll within the rest.
+    pub trail: f32,
 }
 
 #[cfg(test)]

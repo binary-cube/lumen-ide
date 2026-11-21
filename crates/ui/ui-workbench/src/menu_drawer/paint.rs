@@ -597,12 +597,9 @@ impl MenuDrawer {
                 inner.size.width - px(16.0),
                 head_h,
             );
-            if self.under == Some(Under::SubBack) {
-                layer.quad(
-                    Quad::filled(self.sub_back, ctx.fade(p.text.with_alpha(0.05)))
-                        .rounded(ctx.px(radius::MD)),
-                );
-            }
+            ds::RowHighlight::new(false, self.under == Some(Under::SubBack))
+                .hover(ds::HoverFill::Faint(ROW_UNDER))
+                .paint(layer, ctx, self.sub_back);
             if let Some(id) = icons.id("chevron-left") {
                 let size = px(14.0);
                 let at = Rect::new(
@@ -780,16 +777,17 @@ fn paint_entry(
 /// A row's background as the list modals light theirs: the keyboard's (or the open
 /// category's) in the accent, the mouse's faintly.
 fn paint_row_background(layer: &mut Layer, ctx: &Ctx<'_>, row: Rect, lit: bool, under: bool) {
-    let p = ctx.palette;
-    let fill = if lit {
-        p.accent.with_alpha(0.12)
-    } else if under {
-        p.text.with_alpha(0.05)
-    } else {
-        return;
-    };
-    layer.quad(Quad::filled(row, ctx.fade(fill)).rounded(ctx.px(radius::MD)));
+    ds::RowHighlight::new(lit, under)
+        .selected_alpha(ROW_LIT)
+        .hover(ds::HoverFill::Faint(ROW_UNDER))
+        .paint(layer, ctx, row);
 }
+
+/// A row lit (the accent's alpha), under the mouse (the text's), and the open category's
+/// (the text's).
+const ROW_LIT: f32 = 0.12;
+const ROW_UNDER: f32 = 0.05;
+const ROW_OPEN: f32 = 0.07;
 
 /// A row's icon (`size`, at `inset` from its left edge), in the accent when lit.
 fn paint_icon(
@@ -815,7 +813,7 @@ fn paint_icon(
 /// The open category's row: a neutral fill and an accent mark on its left.
 fn paint_open_mark(layer: &mut Layer, ctx: &Ctx<'_>, row: Rect) {
     let p = ctx.palette;
-    layer.quad(Quad::filled(row, ctx.fade(p.text.with_alpha(0.07))).rounded(ctx.px(radius::MD)));
+    ds::RowHighlight::new(false, true).hover(ds::HoverFill::Faint(ROW_OPEN)).paint(layer, ctx, row);
     let (w, h) = (ctx.px(3.0), (row.size.height * 0.5).round());
     let mark = Rect::new(
         row.min_x() + ctx.px(2.0),

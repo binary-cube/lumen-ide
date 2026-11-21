@@ -374,8 +374,7 @@ impl Dialog {
         }
         // The text field (e.g. the new name), below the message.
         if let Some(input) = &mut self.input {
-            let layer = scene.push_layer(Some(card));
-            let field = paint_field(y, &geo, layer, &ctx);
+            let field = field_rect(y, &geo, &ctx);
             y = field.max_y() + px(4.0);
             paint_input(input, field, &style, text, scene);
         }
@@ -832,20 +831,17 @@ fn paint_message(
     y
 }
 
-/// The text field's box (e.g. for the new name), below the message (`y`); returns it.
-fn paint_field(y: f32, geo: &Geometry, layer: &mut Layer, ctx: &Ctx<'_>) -> Rect {
+/// Where the text field (e.g. for the new name) goes, below the message (`y`).
+fn field_rect(y: f32, geo: &Geometry, ctx: &Ctx<'_>) -> Rect {
     let px = |v: f32| ctx.px(v);
-    let field =
-        Rect::new(geo.card.min_x() + geo.text_x, (y + px(10.0)).round(), geo.max_text, px(36.0));
-    layer.quad(
-        Quad::filled(field, ctx.fade(ctx.palette.editor_background))
-            .rounded(px(radius::SM + 1.0))
-            .bordered(ctx.line(), ctx.fade(ctx.palette.accent.with_alpha(0.7))),
-    );
-    field
+    Rect::new(geo.card.min_x() + geo.text_x, (y + px(10.0)).round(), geo.max_text, px(36.0))
 }
 
-/// The text field's text, on its own layer clipped to the `field` box.
+/// The field's border: the accent, a little faded (it always has the keys).
+const FIELD_BORDER: f32 = 0.7;
+
+/// The text field (the shared input on the editor's background, its border in the accent),
+/// on its own layer clipped to the `field` box.
 fn paint_input(
     input: &mut ui_kit::TextInput,
     field: Rect,
@@ -856,20 +852,22 @@ fn paint_input(
     let ctx = &style.ctx;
     let px = |v: f32| ctx.px(v);
     let palette = ctx.palette;
+    let border = ctx.fade(palette.accent.with_alpha(FIELD_BORDER));
     let style = ui_kit::TextInputStyle {
         font: style.body.clone(),
-        background: Rgba::TRANSPARENT,
-        border: Rgba::TRANSPARENT,
-        border_focused: Rgba::TRANSPARENT,
+        background: ctx.fade(palette.editor_background),
+        border,
+        border_focused: border,
         text: ctx.fade(palette.text),
         placeholder: ctx.fade(palette.text_muted),
         selection: ctx.fade(palette.selection),
         caret: ctx.fade(palette.caret),
-        radius: 0.0,
-        border_width: 0.0,
+        radius: px(radius::SM + 1.0),
+        border_width: ctx.line(),
         padding: px(10.0),
         caret_width: px(1.5).max(1.0),
         lead: 0.0,
+        trail: 0.0,
     };
     let input_layer = scene.push_layer(Some(field));
     input.paint(input_layer, text, field, true, "", &style);

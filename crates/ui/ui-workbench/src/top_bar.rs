@@ -5,13 +5,14 @@
 //! On macOS it sits in the title bar, next to the window buttons (`left_inset`).
 
 use icons::{IconId, Icons};
-use kernel::{Point, Rect, Rgba};
-use render_api::{ImageData, Layer, Quad, Scene};
+use kernel::{Point, Rect};
+use render_api::{ImageData, Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_kit::{centered_baseline, draw_icon, draw_text};
 
 use crate::ds;
 use crate::palette::Palette;
+use ui_components::tag_colors;
 
 /// The bar height, in logical pixels.
 const HEIGHT: f32 = 40.0;
@@ -252,40 +253,34 @@ impl TopBar {
                 &no_project
             }
         };
-        let label = text.shape_line(name, &bold);
-        let badge = px(20.0);
-        let width = px(8.0) + badge + px(8.0) + label.width + px(6.0) + px(12.0) + px(8.0);
+        // A ghost button: its avatar (or a folder without a project), its name, its ▾.
+        let mut spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
+            .label(name)
+            .font(&bold)
+            .icon_size(PROJECT_AVATAR)
+            .menu(true)
+            .corner(PROJECT_RADIUS)
+            .start(PROJECT_PAD)
+            .colors(ds::ButtonColors {
+                icon: palette.text,
+                hover: palette.tab_hover,
+                on_back: palette.tab_hover,
+                on_icon: palette.text,
+            })
+            .hovered(menu_open || self.hover == Some(TopBarHit::Projects));
+        spec = match model.project {
+            Some(name) => spec.avatar(ds::Avatar::new(name, tag_colors::project(name)).solid()),
+            None => spec.icon("folder").icon_color(palette.text_muted),
+        };
+        let width = ds::button_width(text, &ctx, &spec, pill_h);
         self.project = Rect::new(x, pill_top, width, pill_h);
-        if menu_open || self.hover == Some(TopBarHit::Projects) {
-            layer.quad(Quad::filled(self.project, palette.tab_hover).rounded(px(7.0)));
-        }
-        let badge_rect = Rect::new(x + px(8.0), pill_top + (pill_h - badge) / 2.0, badge, badge);
-        match model.project {
-            Some(name) => paint_badge(layer, badge_rect, name, text, palette, s),
-            None => {
-                if let Some(id) = icons.id("folder") {
-                    draw_icon(layer, icons, id, badge_rect, palette.text_muted);
-                }
-            }
-        }
-        let label_x = badge_rect.max_x() + px(8.0);
-        draw_text(layer, &label, label_x, baseline, palette.text);
-        if let Some(id) = icons.id("chevron-down") {
-            let size = px(12.0);
-            let r = Rect::new(
-                label_x + label.width + px(6.0),
-                b.min_y() + (b.size.height - size) / 2.0,
-                size,
-                size,
-            );
-            draw_icon(layer, icons, id, r, palette.text_muted);
-        }
-        let shown_to = label_x + label.width + px(6.0) + px(12.0);
+        ds::button(layer, text, icons, &ctx, self.project, spec);
+        let avatar = px(PROJECT_AVATAR);
         self.occupied.push(Rect::new(
-            badge_rect.min_x(),
-            badge_rect.min_y(),
-            shown_to - badge_rect.min_x(),
-            badge_rect.size.height,
+            x + px(PROJECT_PAD),
+            (pill_top + (pill_h - avatar) / 2.0).round(),
+            width - 2.0 * px(PROJECT_PAD),
+            avatar,
         ));
         x = self.project.max_x() + px(14.0);
 
@@ -448,7 +443,7 @@ impl ProjectTint {
         let strength = palette.top_bar_tint.to_bits();
         let fresh = self.cached.as_ref().is_some_and(|(n, s, _)| n == name && *s == strength);
         if !fresh {
-            let color = ui_components::tag_colors::project(name).to_rgba8();
+            let color = tag_colors::project(name).to_rgba8();
             let (w, h) = (64u32, 32u32);
             let mut pixels = Vec::with_capacity((w * h * 4) as usize);
             for y in 0..h {
@@ -478,31 +473,11 @@ impl ProjectTint {
     }
 }
 
-/// A project's badge: a colored rounded square, with the initials.
-pub fn paint_badge(
-    layer: &mut Layer,
-    rect: Rect,
-    name: &str,
-    text: &mut TextSystem,
-    palette: &Palette,
-    scale: f32,
-) {
-    layer.quad(
-        Quad::filled(rect, ui_components::tag_colors::project(name)).rounded((5.0 * scale).round()),
-    );
-    let font = Font::new(palette.ui_font.clone(), (rect.size.height * 0.5).round())
-        .with_weight(Font::BOLD);
-    let initials = text.shape_line(&project_initials(name), &font);
-    let metrics = text.metrics(&font);
-    let baseline = centered_baseline(rect.min_y(), rect.size.height, &metrics);
-    draw_text(
-        layer,
-        &initials,
-        (rect.min_x() + (rect.size.width - initials.width) / 2.0).round(),
-        baseline,
-        Rgba::WHITE,
-    );
-}
+/// The project's button in the bar: its avatar's side, its corners, the room before its
+/// avatar (logical pixels).
+const PROJECT_AVATAR: f32 = 20.0;
+const PROJECT_RADIUS: f32 = 7.0;
+const PROJECT_PAD: f32 = 8.0;
 
 #[cfg(test)]
 #[path = "../tests/unit/top_bar.rs"]

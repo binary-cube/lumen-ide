@@ -107,3 +107,37 @@ fn a_meter_in_a_window_behind_jumps() {
     assert_eq!(bar.meter_at(&[0.1, 0.5], t0), [0.8, 0.5]);
     assert!(bar.next_frame().is_some() || bar.meter_since.is_some());
 }
+
+/// A clickable item is the shared button: under the mouse its back in the tabs' hover,
+/// rounded; its text on the same baseline as a plain item's.
+#[test]
+fn a_clickable_item_is_a_button_on_the_bar_s_baseline() {
+    let (mut ts, palette) = (TextSystem::new(), Palette::dark());
+    let mut bar = StatusBar::default();
+    bar.set_bounds(Rect::new(0.0, 0.0, 800.0, 32.0), 1.0);
+    let right = [StatusItem::text("UTF-8").clickable("encoding"), StatusItem::text("12:40")];
+    let paint = |bar: &mut StatusBar, ts: &mut TextSystem| {
+        let mut scene = Scene::default();
+        bar.paint(&[], &right, &Icons::builtin(), ts, &mut scene, &palette);
+        scene
+    };
+    let rest = paint(&mut bar, &mut ts);
+    let backs = |scene: &Scene| {
+        scene
+            .layers()
+            .iter()
+            .flat_map(|l| &l.quads)
+            .filter(|q| q.color == palette.tab_hover)
+            .count()
+    };
+    assert_eq!(backs(&rest), 0, "at rest: no back");
+    let pill = bar.action_rect("encoding").expect("its hit");
+    assert!(bar.hover(pill.center()));
+    let lit = paint(&mut bar, &mut ts);
+    let back = lit.layers().iter().flat_map(|l| &l.quads).find(|q| q.color == palette.tab_hover);
+    assert_eq!(back.map(|q| (q.bounds, q.corner_radius)), Some((pill, ITEM_RADIUS)));
+    let mut baselines: Vec<f32> =
+        lit.layers().iter().flat_map(|l| &l.glyphs).map(|g| g.origin.y.round()).collect();
+    baselines.dedup();
+    assert_eq!(baselines.len(), 1, "one baseline: {baselines:?}");
+}

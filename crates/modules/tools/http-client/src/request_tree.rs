@@ -826,16 +826,11 @@ impl RequestTree {
                         (self.list.max_x() - inset - icon_rect.max_x() - px(5.0)).max(px(40.0)),
                         h - px(4.0),
                     );
-                    let border = if self.naming_error { p.danger } else { p.accent };
-                    layer.quad(
-                        Quad::filled(field, p.input_background)
-                            .rounded(px(5.0))
-                            .bordered(ds.line(), border),
-                    );
-                    let mut style = ds::field_style(&ds, font.clone(), false);
-                    style.background = Rgba::TRANSPARENT;
-                    style.border = Rgba::TRANSPARENT;
-                    style.border_focused = Rgba::TRANSPARENT;
+                    // The shared field, its border lit while it's being named (in the
+                    // danger color when the name can't be used).
+                    let mut style = ds::field_style(&ds, font.clone(), self.naming_error);
+                    style.border = style.border_focused;
+                    style.radius = px(NAMING_RADIUS);
                     style.padding = px(6.0);
                     input.paint(layer, text, field, focused, &t("http.collection_name"), &style);
                     self.naming_field = field;
@@ -1326,3 +1321,6 @@ fn changed_outside() -> workbench_model::Completion {
 #[cfg(test)]
 #[path = "../tests/unit/request_tree.rs"]
 mod tests;
+
+/// The naming field's corners (logical pixels): a row's.
+const NAMING_RADIUS: f32 = 5.0;

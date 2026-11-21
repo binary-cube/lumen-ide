@@ -435,6 +435,7 @@ impl Viewer for MoveView {
             padding: px(12.0),
             caret_width: px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         let placeholder = t(if self.by_namespace() {
             "refactor.global_namespace"

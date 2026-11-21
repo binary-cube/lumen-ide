@@ -244,7 +244,7 @@ impl Workbench {
             && let Some(tab) = self.tabs.get_mut(self.active)
         {
             tab.find_bar.focused_input().insert(typed);
-            if tab.find_bar.focus == FindField::Query {
+            if tab.find_bar.focus() == FindField::Query {
                 tab.update_query(&sink);
                 tab.view.reveal_cursor(&tab.doc, &tab.folds, text, &self.palette);
             }
@@ -647,7 +647,7 @@ impl Workbench {
         let sink = self.find_sink();
         let Some(tab) = self.tabs.get_mut(self.active) else { return false };
         let bar = &mut tab.find_bar;
-        let query_changed = bar.focus == FindField::Query;
+        let query_changed = bar.focus() == FindField::Query;
         match key {
             EditKey::Escape => {
                 tab.find_open = false;
@@ -655,7 +655,7 @@ impl Workbench {
                 return true;
             }
             EditKey::Enter { shift } => {
-                if bar.focus == FindField::Replace {
+                if bar.focus() == FindField::Replace {
                     tab.find.replacement = bar.replace.text().to_owned();
                     tab.find.replace_current(&mut tab.doc);
                 } else if shift {
@@ -668,10 +668,10 @@ impl Workbench {
             }
             EditKey::Tab { .. } => {
                 if bar.show_replace {
-                    bar.focus = match bar.focus {
+                    bar.set_focus(match bar.focus() {
                         FindField::Query => FindField::Replace,
                         FindField::Replace => FindField::Query,
-                    };
+                    });
                 }
                 return true;
             }
@@ -981,13 +981,13 @@ impl Workbench {
                 tab.find_bar.query.set_text(&selected);
             }
         }
-        tab.find_bar.query.select_all();
+        tab.find_bar.query.input.select_all();
         tab.find_bar.show_replace |= replace;
-        tab.find_bar.focus = if replace && !tab.find_bar.query.text().is_empty() {
+        tab.find_bar.set_focus(if replace && !tab.find_bar.query.text().is_empty() {
             FindField::Replace
         } else {
             FindField::Query
-        };
+        });
         tab.find_open = true;
         self.focus = Focus::Find;
         tab.update_query(&sink);
@@ -1015,7 +1015,7 @@ impl Workbench {
         let mut query = tab.find.query.clone();
         match hit {
             FindHit::Field(field) => {
-                tab.find_bar.focus = field;
+                tab.find_bar.set_focus(field);
                 self.focus = Focus::Find;
                 return;
             }
@@ -1027,7 +1027,7 @@ impl Workbench {
             FindHit::Clear => {
                 tab.find_bar.query.set_text("");
                 query.pattern.clear();
-                tab.find_bar.focus = FindField::Query;
+                tab.find_bar.set_focus(FindField::Query);
                 self.focus = Focus::Find;
             }
             FindHit::ToggleCase => query.case_sensitive = !query.case_sensitive,

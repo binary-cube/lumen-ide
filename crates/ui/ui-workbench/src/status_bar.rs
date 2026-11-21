@@ -12,7 +12,7 @@ use icons::{IconId, Icons};
 use kernel::{Point, Rect, Rgba};
 use render_api::{Quad, Scene};
 use text_layout::{Font, TextSystem};
-use ui_kit::{centered_baseline, draw_icon, draw_text};
+use ui_kit::{draw_icon, draw_text};
 
 use crate::palette::Palette;
 
@@ -331,11 +331,9 @@ impl StatusBar {
         let (bounds, s) = (self.bounds, self.scale);
         let px = |v: f32| (v * s).round();
         let font = Font::new(palette.ui_font.clone(), px(palette.ui_font_size - 0.5));
-        let metrics = text.metrics(&font);
-        let baseline = centered_baseline(bounds.min_y(), bounds.size.height, &metrics);
         let padding = px(14.0);
         let gap = px(18.0);
-        let icon_size = px(14.0);
+        let icon_size = px(ITEM_ICON);
         let icon_gap = px(6.0);
         let icon_top = (bounds.min_y() + (bounds.size.height - icon_size) / 2.0).round();
 
@@ -376,19 +374,24 @@ impl StatusBar {
         let hover = self.hover;
         let pill_h = px(20.0);
         let pill_top = (bounds.min_y() + (bounds.size.height - pill_h) / 2.0).round();
+        // Every item's text on the same baseline as a clickable item's (a button's label).
+        let baseline = crate::ds::optical_baseline(pill_top, pill_h, &font);
         let mut draw = |x: f32, item: &StatusItem, text: &mut TextSystem| -> f32 {
             let mut x = x;
-            if let Some(action) = item.action {
-                let w = item_width(item, text);
-                let pill = Rect::new(x - px(6.0), pill_top, w + px(12.0), pill_h);
-                if hover == Some(action) {
-                    layer.quad(Quad::filled(pill, palette.tab_hover).rounded(px(5.0)));
-                }
-                actions.push((pill, action));
-            }
+            let w = item_width(item, text);
+            let pill = Rect::new(x - px(ITEM_PAD), pill_top, w + 2.0 * px(ITEM_PAD), pill_h);
             if let Some(tip) = &item.tooltip {
-                let w = item_width(item, text);
-                tips.push((Rect::new(x - px(6.0), pill_top, w + px(12.0), pill_h), tip.clone()));
+                tips.push((pill, tip.clone()));
+            }
+            if let Some(action) = item.action {
+                actions.push((pill, action));
+                // A clickable item is a button, lit under the mouse as a tab (a meter's
+                // bars drawn over its back).
+                let hovered = hover == Some(action);
+                item_button(layer, text, icons, (&ds, &font), pill, (item, hovered));
+                if item.meter.is_empty() {
+                    return x + w;
+                }
             }
             if !item.meter.is_empty() {
                 let bottom = (bounds.min_y() + (bounds.size.height + bar_h) / 2.0).round();
@@ -397,7 +400,7 @@ impl StatusBar {
                         (meter_shown.get(i).copied().unwrap_or(0.0), *color)
                     });
                 meter.paint(layer, &ds, (x, bottom), levels);
-                return x + item_width(item, text);
+                return x + w;
             }
             if let Some((icon, color)) = item.icon {
                 let rect = Rect::new(x, icon_top, icon_size, icon_size);
@@ -508,6 +511,55 @@ impl StatusBar {
             crate::ds::divider_vertical(layer, &ds, sx, line_top, line_top + line_h);
         }
     }
+}
+
+/// The room on each side of an item inside its button (logical pixels).
+const ITEM_PAD: f32 = 6.0;
+/// An item's icon (logical pixels).
+const ITEM_ICON: f32 = 14.0;
+/// A clickable item's corners (logical pixels).
+const ITEM_RADIUS: f32 = 5.0;
+
+/// A clickable item as the shared button in `pill` (a meter: its back alone): its icon (in its own color) and its
+/// text in the bar's font and muted color, lit under the mouse in the tabs' hover; an item
+/// with an icon starts after its padding (its value in a reserved slot doesn't shift it),
+/// a lone value is centered.
+fn item_button(
+    layer: &mut render_api::Layer,
+    text: &mut TextSystem,
+    icons: &Icons,
+    (ds, font): (&crate::ds::Ctx<'_>, &Font),
+    pill: Rect,
+    (item, hovered): (&StatusItem, bool),
+) {
+    let p = ds.palette;
+    let colors = crate::ds::ButtonColors {
+        icon: p.text_muted,
+        hover: p.tab_hover,
+        on_back: p.tab_hover,
+        on_icon: p.text_muted,
+    };
+    let mut spec = crate::ds::ButtonSpec::new(crate::ds::ButtonKind::Ghost)
+        .colors(colors)
+        .corner(ITEM_RADIUS)
+        .icon_size(ITEM_ICON)
+        .font(font)
+        .hovered(hovered);
+    if !item.meter.is_empty() {
+        // Its bars are drawn over the back by the bar.
+        crate::ds::button(layer, text, icons, ds, pill, spec);
+        return;
+    }
+    if !item.text.is_empty() {
+        spec = spec.label(&item.text);
+    }
+    if let Some((icon, color)) = item.icon {
+        spec = spec.icon_id(icon).start(ITEM_PAD);
+        if let Some(color) = color {
+            spec = spec.icon_color(color);
+        }
+    }
+    crate::ds::button(layer, text, icons, ds, pill, spec);
 }
 
 #[cfg(test)]

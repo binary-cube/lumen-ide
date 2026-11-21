@@ -286,6 +286,7 @@ impl Viewer for RenameView {
             padding: px(10.0),
             caret_width: px(1.5).max(1.0),
             lead: 0.0,
+            trail: 0.0,
         };
         self.input.paint(layer, text, field, true, &t("console.rename_placeholder"), &style);
         // `.sql` after the name, as the file will be.

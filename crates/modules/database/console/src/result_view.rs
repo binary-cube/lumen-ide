@@ -800,6 +800,11 @@ impl Viewer for ResultView {
         Some(entries)
     }
 
+    /// The menu its grid's toolbar asked for ("…", the page sizes): the app shows it.
+    fn take_menu(&mut self) -> Option<(kernel::Rect, Vec<ViewMenuEntry>)> {
+        self.grid.take_menu()
+    }
+
     fn command(&mut self, id: &str) -> bool {
         let used = match id {
             "find" => {

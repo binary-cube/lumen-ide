@@ -3,16 +3,27 @@
 use document::SearchQuery;
 use i18n::{t, tr};
 use icons::Icons;
-use kernel::{Point, Rect, Rgba};
+use kernel::{Point, Rect};
 use render_api::Quad;
 use text_layout::{Font, TextSystem};
-use ui_kit::{TextInput, TextInputStyle, centered_baseline, draw_icon, draw_text};
+use ui_components::control::{Control, Controls, Shown};
+use ui_components::search_field::{SearchExtras, SearchField};
+use ui_kit::{TextInput, centered_baseline, draw_text};
 
 use crate::palette::Palette;
 use crate::{Painter, ds};
 
 /// Height of a bar row, in logical pixels.
 const ROW: f32 = 42.0;
+/// One option's width inside the search field (`Cc`, `W`, `.*`), logical pixels.
+const TOGGLE_W: f32 = 26.0;
+/// The room between two options, logical pixels.
+const TOGGLE_GAP: f32 = 2.0;
+/// The options' room on the search field's right: three options and the gaps between them.
+const TOGGLES_W: f32 = 3.0 * TOGGLE_W + 2.0 * TOGGLE_GAP;
+/// The fields' places among the bar's parts (its `Controls`).
+const QUERY: usize = 0;
+const REPLACE: usize = 1;
 
 /// What [`FindBar::paint`] draws, and where.
 #[derive(Debug, Clone, Copy)]
@@ -48,61 +59,125 @@ pub enum FindHit {
     ReplaceAll,
 }
 
-/// The bar's UI state (text fields, focus). Each tab has one.
-#[derive(Debug, Clone)]
+/// The bar's UI state (its fields, which one has the focus). Each tab has one.
+///
+/// The search field is the app's [`SearchField`] (its options and its count beside it,
+/// its border red for a bad pattern); the replacement a plain field in the search pill's
+/// look. Both are the bar's parts: a press puts the caret (two a word, three all), a drag
+/// selects, and the focus is the bar's one ([`Controls`]).
+#[derive(Debug, Default)]
 pub struct FindBar {
-    pub query: TextInput,
+    pub query: SearchField,
     pub replace: TextInput,
     pub show_replace: bool,
-    pub focus: FindField,
+    controls: Controls,
     panel: Rect,
     hits: Vec<(Rect, FindHit)>,
     hover: Option<FindHit>,
 }
 
-impl Default for FindBar {
-    fn default() -> Self {
-        Self {
-            query: TextInput::default(),
-            replace: TextInput::default(),
-            show_replace: false,
-            focus: FindField::Query,
-            panel: Rect::default(),
-            hits: Vec::new(),
-            hover: None,
+impl FindBar {
+    /// `f` with the bar's parts (the replace field only while its row shows).
+    fn with_controls<R>(
+        &mut self,
+        f: impl FnOnce(&mut Controls, &mut [&mut dyn Control]) -> R,
+    ) -> R {
+        let mut replace = Shown { part: &mut self.replace, shown: self.show_replace };
+        let mut parts: [&mut dyn Control; 2] = [&mut self.query, &mut replace];
+        f(&mut self.controls, &mut parts)
+    }
+
+    /// The field with the focus (the search one unless the replacement took it).
+    pub fn focus(&self) -> FindField {
+        match self.controls.focused() {
+            Some(REPLACE) if self.show_replace => FindField::Replace,
+            _ => FindField::Query,
         }
     }
-}
 
-impl FindBar {
+    /// Gives the focus to `field`.
+    pub fn set_focus(&mut self, field: FindField) {
+        let to = match field {
+            FindField::Query => QUERY,
+            FindField::Replace => REPLACE,
+        };
+        self.with_controls(|controls, parts| controls.focus(parts, Some(to)));
+    }
+
     pub fn focused_input_ref(&self) -> &TextInput {
-        match self.focus {
-            FindField::Query => &self.query,
+        match self.focus() {
+            FindField::Query => &self.query.input,
             FindField::Replace => &self.replace,
         }
     }
 
     pub fn focused_input(&mut self) -> &mut TextInput {
-        match self.focus {
-            FindField::Query => &mut self.query,
+        match self.focus() {
+            FindField::Query => &mut self.query.input,
             FindField::Replace => &mut self.replace,
         }
+    }
+
+    /// A press at `p` with `clicks` in a row: a button's hit, or a field's (its caret put
+    /// there, the focus given to it; × empties the search field: [`FindHit::Clear`]).
+    pub fn press(&mut self, p: Point, clicks: u32) -> Option<FindHit> {
+        if let Some(hit) = self.button_at(p) {
+            return Some(hit);
+        }
+        let (i, _) = self.with_controls(|controls, parts| controls.press(parts, p, clicks))?;
+        if self.query.take_cleared() {
+            return Some(FindHit::Clear);
+        }
+        Some(FindHit::Field(if i == REPLACE { FindField::Replace } else { FindField::Query }))
+    }
+
+    /// A field holds the pointer (pressed, its selection follows the drag).
+    pub fn held(&self) -> bool {
+        self.controls.held()
+    }
+
+    /// The pointer dragged while a field holds it: its selection stretched there.
+    pub fn drag(&mut self, p: Point) -> bool {
+        self.with_controls(|controls, parts| controls.drag(parts, p)).is_some_and(|(_, c)| c)
+    }
+
+    /// The pointer let go.
+    pub fn release(&mut self) -> bool {
+        self.with_controls(|controls, parts| controls.release(parts)).is_some_and(|(_, c)| c)
     }
 
     pub fn contains(&self, p: Point) -> bool {
         self.panel.contains(p)
     }
 
+    /// What's at `p`: a button, the search field's ×, a field.
     pub fn hit(&self, p: Point) -> Option<FindHit> {
+        if let Some(hit) = self.button_at(p) {
+            return Some(hit);
+        }
+        if self.query.clear_area().is_some_and(|r| r.contains(p)) {
+            return Some(FindHit::Clear);
+        }
+        if Control::hit(&self.query, p) {
+            return Some(FindHit::Field(FindField::Query));
+        }
+        (self.show_replace && self.replace.contains(p))
+            .then_some(FindHit::Field(FindField::Replace))
+    }
+
+    /// The button at `p` (the fields' own parts aside).
+    fn button_at(&self, p: Point) -> Option<FindHit> {
         self.hits.iter().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
 
-    /// The mouse moved; `true` if the hovered button changed.
+    /// The mouse moved; `true` if the hovered button (or the search field's ×) changed.
     pub fn hover(&mut self, p: Point) -> bool {
-        let hover = self.hit(p).filter(|h| !matches!(h, FindHit::Field(_)));
+        let hover = self.button_at(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        let over_field = if hover.is_some() { None } else { Some(p) };
+        let field = self.with_controls(|controls, parts| controls.hover(parts, over_field));
+        changed | field
     }
 
     /// Strip height (physical pixels): one row for search, another for replace.
@@ -209,8 +284,8 @@ impl FindBar {
         );
     }
 
-    /// The search field: its container, the magnifier, the options (Cc / W / .*), × (with
-    /// text) and the text.
+    /// The search field (the app's: the magnifier, the text, × with text), the options
+    /// (Cc / W / .*) in the room it keeps on its right; red when the pattern is bad.
     fn paint_query_field(
         &mut self,
         layer: &mut render_api::Layer,
@@ -219,80 +294,40 @@ impl FindBar {
         field: Rect,
         spec: &FindBarSpec<'_>,
     ) {
-        let (palette, icons) = (look.palette, look.icons);
-        let px = |v: f32| look.px(v);
-        let (top, field_h) = (field.min_y(), field.size.height);
-        let query_focused = spec.focused && self.focus == FindField::Query;
-        look.paint_field(layer, field, query_focused);
-        if let Some(id) = icons.id("search") {
-            let size = px(14.0);
-            let r = Rect::new(
-                field.min_x() + px(9.0),
-                (top + (field_h - size) / 2.0).round(),
-                size,
-                size,
-            );
-            draw_icon(layer, icons, id, r, palette.text_muted);
-        }
-        // Inside, on the right: × (with text), then Cc / W / .*.
-        let toggles_w = self.paint_toggles(layer, text, look, field, spec.options);
-        let mut input_right = field.max_x() - px(4.0) - toggles_w - px(4.0);
-        if !self.query.text().is_empty() {
-            let r = Rect::new(
-                input_right - px(22.0),
-                top + (field_h - px(22.0)) / 2.0,
-                px(22.0),
-                px(22.0),
-            );
-            // The same round × as the other search fields.
-            let ctx = crate::ds::Ctx::new(palette, look.scale);
-            let mid = r.min_y() + r.size.height / 2.0;
-            let hovered = look.hover == Some(FindHit::Clear);
-            crate::ds::clear_button(
-                layer,
-                icons,
-                &ctx,
-                r.min_x() + r.size.width / 2.0,
-                mid,
-                hovered,
-            );
-            self.hits.push((r, FindHit::Clear));
-            input_right = r.min_x() - px(2.0);
-        }
-        let input = Rect::new(
-            field.min_x() + px(30.0),
-            top,
-            input_right - field.min_x() - px(30.0),
-            field_h,
-        );
+        let query_focused = spec.focused && self.focus() == FindField::Query;
+        let extras = SearchExtras { trailing: TOGGLES_W, invalid: spec.error };
         let placeholder = t("find.placeholder");
-        self.query.paint(layer, text, input, query_focused, &placeholder, &look.input_style);
-        self.hits.push((
-            Rect::new(field.min_x(), top, input_right - field.min_x(), field_h),
-            FindHit::Field(FindField::Query),
-        ));
+        let room = self.query.paint_with(
+            layer,
+            text,
+            look.icons,
+            &look.ctx(),
+            (field, query_focused),
+            &placeholder,
+            extras,
+        );
+        self.paint_toggles(layer, text, look, room, spec.options);
     }
 
-    /// The options inside the search field, on its right (Cc / W / .*): highlighted when
-    /// on. Returns how wide they are together.
+    /// The options inside the search field, in the room it kept (`room`): highlighted when
+    /// on.
     fn paint_toggles(
         &mut self,
         layer: &mut render_api::Layer,
         text: &mut TextSystem,
         look: &Look<'_>,
-        field: Rect,
+        room: Rect,
         options: &SearchQuery,
-    ) -> f32 {
+    ) {
         let px = |v: f32| look.px(v);
-        let toggle = px(26.0);
-        let toggles_w = 3.0 * toggle + 2.0 * px(2.0);
-        let mut x = field.max_x() - px(4.0) - toggles_w;
+        let toggle = px(TOGGLE_W);
+        let mut x = room.min_x();
         for (label, active, hit) in [
             ("Cc", options.case_sensitive, FindHit::ToggleCase),
             ("W", options.whole_word, FindHit::ToggleWord),
             (".*", options.regex, FindHit::ToggleRegex),
         ] {
-            let r = Rect::new(x, field.min_y() + px(3.0), toggle, field.size.height - px(6.0));
+            let r = Rect::new(x, room.min_y() + px(3.0), toggle, room.size.height - px(6.0));
             let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
                 .label(label)
                 .rest_tone(ds::Tone::Neutral)
@@ -300,9 +335,8 @@ impl FindBar {
                 .hovered(look.hover == Some(hit));
             ds::button(layer, text, look.icons, &look.ctx(), r, spec);
             self.hits.push((r, hit));
-            x += toggle + px(2.0);
+            x += toggle + px(TOGGLE_GAP);
         }
-        toggles_w
     }
 
     /// The replace row: its field (in `field`, under the search field) and the Replace /
@@ -317,18 +351,16 @@ impl FindBar {
     ) {
         let px = |v: f32| look.px(v);
         let (top, field_h) = (field.min_y(), field.size.height);
-        let replace_focused = focused && self.focus == FindField::Replace;
-        look.paint_field(layer, field, replace_focused);
-        let input = Rect::new(field.min_x() + px(30.0), top, field.size.width - px(36.0), field_h);
-        self.replace.paint(
-            layer,
-            text,
-            input,
-            replace_focused,
-            &t("find.replace_placeholder"),
-            &look.input_style,
-        );
-        self.hits.push((field, FindHit::Field(FindField::Replace)));
+        let replace_focused = focused && self.focus() == FindField::Replace;
+        // The search pill's look, its text where the search field's is (past the room its
+        // magnifier takes there).
+        let ctx = look.ctx();
+        let style = ui_kit::TextInputStyle {
+            font: ctx.ui_font(-0.5),
+            ..ds::search_input_style(&ctx, field_h)
+        };
+        let placeholder = t("find.replace_placeholder");
+        self.replace.paint(layer, text, field, replace_focused, &placeholder, &style);
 
         let mut x = field.max_x() + px(12.0);
         for (label, hit) in
@@ -353,9 +385,6 @@ struct Look<'a> {
     icons: &'a Icons,
     scale: f32,
     small: Font,
-    /// The fields draw only their text; the bar draws the container (background, border,
-    /// the magnifier and the options inside it).
-    input_style: TextInputStyle,
     row: f32,
     field_h: f32,
     button: f32,
@@ -366,29 +395,12 @@ struct Look<'a> {
 impl<'a> Look<'a> {
     fn new(scale: f32, palette: &'a Palette, icons: &'a Icons, hover: Option<FindHit>) -> Self {
         let px = |v: f32| (v * scale).round();
-        let font = Font::new(palette.ui_font.clone(), px(palette.ui_font_size));
         let small = Font::new(palette.ui_font.clone(), px(palette.ui_font_size - 1.0));
-        let input_style = TextInputStyle {
-            font,
-            background: Rgba::TRANSPARENT,
-            border: Rgba::TRANSPARENT,
-            border_focused: Rgba::TRANSPARENT,
-            text: palette.text,
-            placeholder: palette.text_muted,
-            selection: palette.selection,
-            caret: palette.caret,
-            radius: 0.0,
-            border_width: 0.0,
-            padding: px(2.0),
-            caret_width: px(1.5).max(1.0),
-            lead: 0.0,
-        };
         Self {
             palette,
             icons,
             scale,
             small,
-            input_style,
             row: px(ROW),
             field_h: px(30.0),
             button: px(ds::button_size::MEDIUM),
@@ -423,20 +435,13 @@ impl<'a> Look<'a> {
         ds::button(layer, text, self.icons, &self.ctx(), r, spec);
         hits.push((r, hit));
     }
-
-    /// A field's container: background and border (accent when focused).
-    fn paint_field(&self, layer: &mut render_api::Layer, field: Rect, focused: bool) {
-        let palette = self.palette;
-        let border = if focused { palette.accent } else { palette.input_border };
-        layer.quad(
-            Quad::filled(field, palette.input_background)
-                .rounded((6.0 * self.scale).round())
-                .bordered(self.line, border),
-        );
-    }
 }
 
 /// The baseline centering `font`'s text in a row `h` tall at `top`.
 fn centered(top: f32, h: f32, font: &Font, text: &mut TextSystem) -> f32 {
     centered_baseline(top, h, &text.metrics(font))
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/find_bar.rs"]
+mod tests;

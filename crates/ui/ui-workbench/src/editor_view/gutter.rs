@@ -376,7 +376,10 @@ impl EditorView {
                 size,
                 size,
             );
-            gutter.quad(Quad::filled(bg, palette.tab_hover).rounded(4.0 * self.scale));
+            crate::ds::RowHighlight::new(false, true)
+                .hover(crate::ds::HoverFill::Color(palette.tab_hover))
+                .radius(FOLD_HOVER_RADIUS)
+                .paint(gutter, &crate::ds::Ctx::new(palette, self.scale), bg);
         }
         let color = if collapsed {
             palette.accent
@@ -425,3 +428,6 @@ pub(super) fn draw_triangle(
 fn current_bar(annotation: f32, scale: f32) -> (f32, f32) {
     (annotation + (1.0 * scale).round(), (3.0 * scale).round().max(3.0))
 }
+
+/// A fold marker's back under the mouse: its corners (logical pixels).
+const FOLD_HOVER_RADIUS: f32 = 4.0;

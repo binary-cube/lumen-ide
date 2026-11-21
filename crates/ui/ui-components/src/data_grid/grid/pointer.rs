@@ -66,20 +66,6 @@ impl<S: GridSource> DataGrid<S> {
     pub fn press(&mut self, p: Point, clicks: u32, mods: PressMods) -> bool {
         self.press_clicks = clicks;
         self.press_shift = mods.shift;
-        // The "…" menu first: a press elsewhere closes it (one on a row runs it).
-        if self.more_open {
-            self.more_open = false;
-            if let Some(Hit::MoreChoice(tool)) = self.hit(p) {
-                if tool == Tool::PageSize {
-                    self.sizes_open = true;
-                } else if tool == Tool::Extractor {
-                    self.open_extractors();
-                } else {
-                    self.run_tool(tool);
-                }
-            }
-            return true;
-        }
         // The extractors' popover: a row used; a press elsewhere closes it (one inside it,
         // between rows, does nothing).
         if self.extract_open {
@@ -87,14 +73,6 @@ impl<S: GridSource> DataGrid<S> {
                 Some(Hit::ExtractorRow(at)) => self.use_extractor_row(at),
                 _ if self.extract_area.is_some_and(|r| r.contains(p)) => {}
                 _ => self.extract_open = false,
-            }
-            return true;
-        }
-        // The page sizes' popover first: a press elsewhere closes it.
-        if self.sizes_open {
-            self.sizes_open = false;
-            if let Some(Hit::PageChoice(size)) = self.hit(p) {
-                self.choose_page_size(size);
             }
             return true;
         }
@@ -195,18 +173,16 @@ impl<S: GridSource> DataGrid<S> {
                     self.go(|pg, _| pg.last(total));
                 }
             }
-            Hit::PageSize => self.sizes_open = true,
+            Hit::PageSize => {
+                self.open_sizes();
+            }
             Hit::More => {
                 self.open_more();
-            }
-            Hit::MoreChoice(tool) => {
-                self.run_tool(tool);
             }
             Hit::Extractor => {
                 self.open_extractors();
             }
             Hit::ExtractorRow(at) => self.use_extractor_row(at),
-            Hit::PageChoice(size) => self.choose_page_size(size),
             Hit::Refresh => self.refresh(),
             Hit::Cancel => self.source.cancel(),
             Hit::Count => self.source.count(),
@@ -482,7 +458,7 @@ impl<S: GridSource> DataGrid<S> {
             };
             return Some(Tip::new(r, why.clone()));
         }
-        if self.more_open || self.sizes_open || self.big.is_some() || self.drag.is_some() {
+        if self.big.is_some() || self.drag.is_some() {
             return None;
         }
         let tool_tip = |r: Rect, tool: Tool| {
@@ -541,9 +517,6 @@ impl<S: GridSource> DataGrid<S> {
             self.extract_scroll = (self.extract_scroll + dy).max(0.0);
             // Clamped to its rows at the next paint.
             return (self.extract_scroll - before).abs() > 0.1;
-        }
-        if self.sizes_open || self.more_open {
-            return false;
         }
         let (y, x) = (self.scroll_y, self.scroll_x);
         self.scroll_y = (self.scroll_y + dy).max(0.0);

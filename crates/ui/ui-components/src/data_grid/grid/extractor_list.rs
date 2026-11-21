@@ -77,8 +77,7 @@ impl<S: GridSource> DataGrid<S> {
         self.extract_rows = self.extractor_rows();
         self.extract_scroll = 0.0;
         self.extract_open = true;
-        self.sizes_open = false;
-        self.more_open = false;
+        self.asked_menu = None;
         true
     }
 

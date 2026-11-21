@@ -59,8 +59,23 @@ pub struct HoverCard {
 /// One thing to draw, relative to the card's top-left corner.
 #[derive(Debug)]
 enum Op {
-    Text { x: f32, baseline: f32, line: Arc<ShapedLine>, color: Rgba },
-    Fill { rect: Rect, color: Rgba, radius: f32 },
+    Text {
+        x: f32,
+        baseline: f32,
+        line: Arc<ShapedLine>,
+        color: Rgba,
+    },
+    Fill {
+        rect: Rect,
+        color: Rgba,
+        radius: f32,
+    },
+    /// A badge (a note, a parameter's type or name): from `x`, centered on `mid`.
+    Badge {
+        x: f32,
+        mid: f32,
+        badge: CardBadge,
+    },
 }
 
 #[derive(Debug)]
@@ -277,6 +292,9 @@ impl CodeHover {
                     );
                     layer.quad(Quad::filled(r, color.with_alpha(color.a * alpha)).rounded(*radius));
                 }
+                Op::Badge { x, mid, badge } => {
+                    badge.badge().paint(layer, text, &ctx, ox + x, oy + mid);
+                }
             }
         }
         if shown.max_scroll > 0.0 {
@@ -459,8 +477,6 @@ struct Builder<'a> {
     chip_font: Font,
     um: FontMetrics,
     cm: FontMetrics,
-    sm: FontMetrics,
-    chm: FontMetrics,
     code_h: f32,
     ui_h: f32,
     ops: Vec<Op>,
@@ -491,8 +507,7 @@ impl<'a> Builder<'a> {
             Font::new(palette.ui_font.clone(), ((palette.ui_font_size - 1.0) * scale).round());
         let chip_font =
             Font::new(palette.code_font.clone(), ((palette.code_font_size - 1.0) * scale).round());
-        let (cm, um, sm, chm) =
-            (ts.metrics(&code_font), ts.metrics(&ui), ts.metrics(&small), ts.metrics(&chip_font));
+        let (cm, um) = (ts.metrics(&code_font), ts.metrics(&ui));
         let code_h = (cm.ascent + cm.descent + px(5.0)).round();
         let ui_h = (um.ascent + um.descent + px(5.0)).round();
         Self {
@@ -507,8 +522,6 @@ impl<'a> Builder<'a> {
             chip_font,
             um,
             cm,
-            sm,
-            chm,
             code_h,
             ui_h,
             ops: Vec::new(),
@@ -635,24 +648,14 @@ impl<'a> Builder<'a> {
         let (palette, pad) = (self.palette, self.pad);
         self.y += self.px(8.0);
         let y = self.y;
-        let pill_h = self.px(20.0);
+        let pill_h = self.px(NOTE_H);
         let mut x = pad;
         for (note, warning) in &card.notes {
             let tone = if *warning { palette.warning } else { palette.accent };
-            let shaped = ts.shape_line(&one_line(note), &self.small);
-            let pill = Rect::new(x, y, shaped.width + self.px(16.0), pill_h);
-            self.ops.push(Op::Fill {
-                rect: pill,
-                color: tone.with_alpha(0.12),
-                radius: pill_h / 2.0,
-            });
-            self.ops.push(Op::Text {
-                x: x + self.px(8.0),
-                baseline: centered_baseline(y, pill_h, &self.sm),
-                line: shaped,
-                color: tone,
-            });
-            x = pill.max_x() + self.px(6.0);
+            let badge = CardBadge::note(one_line(note).into_owned(), tone, self.small.clone());
+            let w = badge.badge().width(ts, &Ctx::new(palette, self.scale));
+            self.ops.push(Op::Badge { x, mid: y + pill_h / 2.0, badge });
+            x += w + self.px(6.0);
         }
         self.widest = self.widest.max(x - pad);
         self.y += pill_h;
@@ -726,21 +729,18 @@ impl<'a> Builder<'a> {
         let chips = [(param.ty.as_deref(), ty_color), (Some(param.name.as_str()), variable)];
         for (chip, color) in chips {
             let Some(chip) = chip else { continue };
-            let shaped = ts.shape_line(&one_line(chip), &self.chip_font);
-            let rect =
-                Rect::new(x, y + (row_h - chip_h) / 2.0, shaped.width + self.px(12.0), chip_h);
-            self.ops.push(Op::Fill {
-                rect,
-                color: palette.text.with_alpha(0.06),
-                radius: self.px(5.0),
-            });
-            self.ops.push(Op::Text {
-                x: x + self.px(6.0),
-                baseline: centered_baseline(rect.min_y(), chip_h, &self.chm),
-                line: shaped,
+            let badge = CardBadge {
+                label: one_line(chip).into_owned(),
                 color,
-            });
-            x = rect.max_x() + self.px(4.0);
+                fill: Some(palette.text.with_alpha(CODE_FILL)),
+                font: self.chip_font.clone(),
+                height: chip_h / self.scale,
+                radius: Some(CODE_RADIUS),
+                pad: CODE_PAD,
+            };
+            let w = badge.badge().width(ts, &Ctx::new(palette, self.scale));
+            self.ops.push(Op::Badge { x, mid: y + row_h / 2.0, badge });
+            x += w + self.px(4.0);
         }
         self.widest = self.widest.max(x - self.pad);
         x
@@ -836,3 +836,49 @@ fn code_fill(pad: f32, top: f32, card_w: f32, bottom: f32, scale: f32, palette: 
 #[cfg(test)]
 #[path = "../tests/unit/code_hover.rs"]
 mod tests;
+
+/// A note's badge: its height and the room on each side of its text (logical pixels).
+const NOTE_H: f32 = 20.0;
+const NOTE_PAD: f32 = 8.0;
+/// A parameter's code chip: its fill (the text's alpha), its corners and the room on each
+/// side of its text (logical pixels).
+const CODE_FILL: f32 = 0.06;
+const CODE_RADIUS: f32 = 5.0;
+const CODE_PAD: f32 = 6.0;
+
+/// A badge of the card, kept with its layout: its text, its color (its fill made from it,
+/// or its own), its font, its height (logical), its corners (`None`: a pill), its padding.
+#[derive(Debug)]
+struct CardBadge {
+    label: String,
+    color: Rgba,
+    fill: Option<Rgba>,
+    font: Font,
+    height: f32,
+    radius: Option<f32>,
+    pad: f32,
+}
+
+impl CardBadge {
+    /// A note in `color`: a pill tinted in it.
+    fn note(label: String, color: Rgba, font: Font) -> Self {
+        Self { label, color, fill: None, font, height: NOTE_H, radius: None, pad: NOTE_PAD }
+    }
+
+    /// The shared badge it is.
+    fn badge(&self) -> ds::Badge<'_> {
+        let mut badge = ds::Badge::new(&self.label)
+            .color(self.color)
+            .size(ds::BadgeSize::Custom(self.height))
+            .pad(self.pad)
+            .font(&self.font)
+            .baseline(ds::BadgeBaseline::Metrics);
+        if let Some(fill) = self.fill {
+            badge = badge.fill(fill);
+        }
+        if let Some(radius) = self.radius {
+            badge = badge.radius(radius);
+        }
+        badge
+    }
+}

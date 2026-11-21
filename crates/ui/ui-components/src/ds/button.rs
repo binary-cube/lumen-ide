@@ -122,6 +122,17 @@ pub struct ButtonSpec<'a> {
     /// Its content in this tone only under the mouse (a delete × turning red), its back as
     /// its kind's.
     pub hover_content_tone: Option<Tone>,
+    /// A border in its content's color, faint (a settings row's action, outlined in the
+    /// accent or, destructive, in the danger color).
+    pub outlined: bool,
+    /// Its label in this font (a light button among a bar's texts: the bar's own), over
+    /// its kind's.
+    pub font: Option<&'a Font>,
+    /// Its content from its left edge after this room (logical pixels), not centered: an
+    /// item whose value changes in a slot kept for its widest.
+    pub start: Option<f32>,
+    /// A name's avatar in its icon's place (a project's), as big as an icon would be.
+    pub avatar: Option<Avatar<'a>>,
 }
 
 impl<'a> ButtonSpec<'a> {
@@ -155,6 +166,10 @@ impl<'a> ButtonSpec<'a> {
             clear_hovered: false,
             busy_amount: None,
             hover_content_tone: None,
+            outlined: false,
+            font: None,
+            start: None,
+            avatar: None,
         }
     }
 
@@ -299,6 +314,30 @@ impl<'a> ButtonSpec<'a> {
         self
     }
 
+    /// Outlined in its content's color (see [`Self::outlined`]).
+    pub fn outlined(mut self) -> Self {
+        self.outlined = true;
+        self
+    }
+
+    /// Its label in `font` (see [`Self::font`]).
+    pub fn font(mut self, font: &'a Font) -> Self {
+        self.font = Some(font);
+        self
+    }
+
+    /// Its content from its left edge after `pad` logical pixels (see [`Self::start`]).
+    pub fn start(mut self, pad: f32) -> Self {
+        self.start = Some(pad);
+        self
+    }
+
+    /// `avatar` in its icon's place (see [`Self::avatar`]).
+    pub fn avatar(mut self, avatar: Avatar<'a>) -> Self {
+        self.avatar = Some(avatar);
+        self
+    }
+
     /// How busy it is now (0..=1).
     fn busy_now(&self) -> f32 {
         self.busy_amount.unwrap_or(if self.busy { 1.0 } else { 0.0 })
@@ -324,7 +363,7 @@ impl<'a> ButtonSpec<'a> {
     }
 
     fn has_icon(&self) -> bool {
-        self.icon.is_some() || self.icon_id.is_some()
+        self.icon.is_some() || self.icon_id.is_some() || self.avatar.is_some()
     }
 }
 
@@ -396,6 +435,8 @@ const TINT_REST: f32 = 0.15;
 const TINT_HOVER: f32 = 0.24;
 const SURFACE_HOVER: f32 = 0.14;
 const RAISED_HOVER: f32 = 0.06;
+/// An outlined button's border (its content's color).
+const OUTLINE_ALPHA: f32 = 0.55;
 
 /// The white a filled button's key cap is drawn with: its back, its key.
 const FILLED_KEY_BACK: f32 = 0.18;
@@ -471,9 +512,14 @@ pub fn button_label_font(ctx: &Ctx<'_>) -> Font {
     ctx.ui_font(-1.0).with_weight(BUTTON_WEIGHT)
 }
 
-/// A light button's label font: its own, or the dialogs' when `strong`.
+/// A light button's label font: the one it was given, or its own, or the dialogs' when
+/// `strong`.
 fn label_font(ctx: &Ctx<'_>, spec: &ButtonSpec<'_>) -> Font {
-    if spec.strong { button_font(ctx) } else { button_label_font(ctx) }
+    match spec.font {
+        Some(font) => font.clone(),
+        None if spec.strong => button_font(ctx),
+        None => button_label_font(ctx),
+    }
 }
 
 /// Where a clearable button's × is in its `rect` (its own hit: a press there clears).
@@ -547,17 +593,20 @@ pub fn button(
     {
         return round_filled(layer, text, icons, ctx, rect, spec);
     }
-    // A busy primary button draws its label after its spinner, without its key or chevron
-    // (nothing over the spinner).
-    let busy_primary = spec.kind == ButtonKind::Primary && spec.busy_now() > 0.0;
+    // A busy dialog button (primary, danger, secondary) draws its label after its spinner,
+    // without its key or chevron (nothing over the spinner).
+    let busy_heavy = heavy && spec.busy_now() > 0.0;
     // A menu or keyed button's label leaves its chevron's and key's room (drawn after the
     // back).
-    let custom = heavy && !busy_primary && (spec.menu || spec.key.is_some());
+    let custom = heavy && !busy_heavy && (spec.menu || spec.key.is_some());
     let label = if custom { "" } else { spec.label.unwrap_or_default() };
     match spec.kind {
-        ButtonKind::Primary if busy_primary => {
+        ButtonKind::Primary if busy_heavy => {
             let hovered = spec.hovered && spec.enabled;
             busy_primary_button(layer, text, ctx, rect, label, spec.busy_now(), hovered);
+        }
+        ButtonKind::Danger | ButtonKind::Secondary if busy_heavy => {
+            busy_heavy_button(layer, text, ctx, rect, &spec);
         }
         ButtonKind::Primary => primary_button(layer, text, ctx, rect, label, spec.enabled, lit),
         ButtonKind::Danger => danger_button(layer, text, ctx, rect, label, spec.enabled, lit),
@@ -575,10 +624,43 @@ pub fn button(
             return light_button(layer, text, icons, ctx, rect, spec);
         }
     }
-    if !busy_primary && (spec.menu || spec.key.is_some()) {
+    if !busy_heavy && (spec.menu || spec.key.is_some()) {
         heavy_trailing(layer, text, icons, ctx, rect, spec);
     }
 }
+
+/// A busy danger or secondary button, as [`busy_primary_button`] in its own kind: the
+/// danger one filled in its color, the secondary bordered and transparent; the mouse's light
+/// fading out as it gets busy, its spinner and label in its content's color.
+fn busy_heavy_button(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    rect: Rect,
+    spec: &ButtonSpec<'_>,
+) {
+    let p = ctx.palette;
+    let busy = spec.busy_now();
+    let lit = if spec.hovered && spec.enabled { 1.0 - busy } else { 0.0 };
+    let radius = ctx.px(radius::MD);
+    let color = if spec.kind == ButtonKind::Danger {
+        let fill = p.danger.mix(Rgba::WHITE, FILLED_HOVER_MIX * lit);
+        layer.quad(Quad::filled(rect, ctx.fade(fill)).rounded(radius));
+        Rgba::WHITE
+    } else {
+        let fill = p.text.with_alpha(SECONDARY_HOVER * lit);
+        layer.quad(
+            Quad::filled(rect, ctx.fade(fill))
+                .rounded(radius)
+                .bordered(ctx.line(), ctx.fade(p.border)),
+        );
+        if spec.enabled { p.text } else { p.text_muted }
+    };
+    busy_label(layer, text, ctx, rect, (spec.label.unwrap_or_default(), color), busy);
+}
+
+/// A secondary button's back under the mouse (the text's color).
+const SECONDARY_HOVER: f32 = 0.08;
 
 /// A filled, secondary or toolbar button's label (in what its key and chevron leave), its
 /// key cap and its chevron, over the back its kind drew.
@@ -722,15 +804,19 @@ fn light_button(
         surface_with(layer, ctx, rect, Elevation::Low, radius, p.popup_background);
     }
     let fill = light_fill(ctx, &spec);
-    let soft = spec.kind == ButtonKind::Soft;
+    let color = light_color(ctx, &spec);
+    let border = match (spec.outlined, spec.kind) {
+        (true, _) => Some(color.with_alpha(color.a * OUTLINE_ALPHA)),
+        (false, ButtonKind::Soft) => Some(p.border),
+        _ => None,
+    };
     let mut back = Quad::filled(rect, ctx.fade(fill.unwrap_or(Rgba::TRANSPARENT))).rounded(radius);
-    if soft {
-        back = back.bordered(ctx.line(), ctx.fade(p.border));
+    if let Some(border) = border {
+        back = back.bordered(ctx.line(), ctx.fade(border));
     }
-    if fill.is_some() || soft {
+    if fill.is_some() || border.is_some() {
         layer.quad(back);
     }
-    let color = light_color(ctx, &spec);
     content(layer, text, icons, ctx, rect, &spec, (color, false));
 }
 
@@ -824,7 +910,10 @@ fn content(
         + menu_room(ctx, spec);
     // The × keeps its own place at the end; the rest is centered in what it leaves.
     let room = rect.size.width - clear_room(ctx, spec);
-    let x0 = (rect.min_x() + (room - content) / 2.0).round();
+    let x0 = match spec.start {
+        Some(pad) => (rect.min_x() + ctx.px(pad)).round(),
+        None => (rect.min_x() + (room - content) / 2.0).round(),
+    };
     let mid = rect.min_y() + rect.size.height / 2.0;
     // Where the last piece drawn ends.
     let mut end = x0;
@@ -838,6 +927,10 @@ fn content(
         loader(layer, text, ctx, x0 + icon * (1.0 - busy) / 2.0, mid, &spinner);
         end = x0 + icon;
     } else if busy > 0.0 && !spec.has_icon() {
+        end = x0 + icon;
+    } else if let Some(avatar) = spec.avatar {
+        let r = Rect::new(x0, (mid - icon / 2.0).round(), icon, icon);
+        avatar.paint(layer, text, ctx, r);
         end = x0 + icon;
     } else if let Some(id) = spec.icon_id.or_else(|| spec.icon.and_then(|i| icons.id(i))) {
         let r = Rect::new(x0, (mid - icon / 2.0).round(), icon, icon);
