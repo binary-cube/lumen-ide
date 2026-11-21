@@ -1,5 +1,7 @@
 //! The search's panel as its view's one control: over the whole window (a press outside it
-//! still closes the folders suggested), its scrollbar's thumb held while dragged, and with
+//! still closes the folders suggested), its scrollbar's thumb held while dragged (the
+//! folders suggested's too: their list, the shared one, comes first wherever it lies over
+//! the panel), and with
 //! the focus its keys and what's typed. Its fields keep their own order (Tab opens the
 //! folder's row the first time, goes on through the rows shown) and its keys their own
 //! meaning (↑ ↓ through the results, ↵ by the field, esc the suggestions first), so it
@@ -85,9 +87,10 @@ impl PanelPart<'_> {
             ViewerKey::Right => panel.typing().move_right(reach.word, reach.extend),
             ViewerKey::Home => panel.typing().home(reach.extend),
             ViewerKey::End => panel.typing().end(reach.extend),
-            // On a recent search (the field empty): ⌫ / Delete forget it.
+            // On a recent search (the search's field empty, the keyboard in it): ⌫ / Delete
+            // forget it.
             ViewerKey::Backspace | ViewerKey::Delete
-                if panel.showing_recent() && panel.input.text().is_empty() =>
+                if panel.in_query() && panel.showing_recent() && panel.input.text().is_empty() =>
             {
                 if let Some(ProjectSearchAction::Recent(i)) = panel.selected_action() {
                     *self.ask = Some(Ask::Act(ProjectSearchAction::ForgetRecent(i)));
@@ -112,9 +115,15 @@ impl Control for PanelPart<'_> {
         true
     }
 
-    /// Its scrollbar's thumb (held), else what's there: a field's caret, a row, a button.
-    /// Anywhere but on the folders suggested or the folder's field, their list closes.
-    fn press(&mut self, p: Point, _clicks: u32) -> Press {
+    /// The folders suggested first (a row taken, their thumb held), then its scrollbar's
+    /// thumb (held), else what's there: a field's caret, a row, a button. Anywhere but on
+    /// the folders suggested or the folder's field, their list closes.
+    fn press(&mut self, p: Point, clicks: u32) -> Press {
+        if self.panel.on_suggestions(p) {
+            let (press, chosen) = self.panel.press_suggestions(p, clicks);
+            *self.ask = chosen.map(|i| Ask::Act(ProjectSearchAction::Suggestion(i)));
+            return press;
+        }
         if self.panel.press_bar(p) {
             return Press::Held;
         }
@@ -137,22 +146,28 @@ impl Control for PanelPart<'_> {
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        self.panel.drag_bar(p)
+        self.panel.drag_suggestions(p) || self.panel.drag_bar(p)
     }
 
     fn release(&mut self) -> bool {
-        self.panel.release_bar()
+        self.panel.release_suggestions() | self.panel.release_bar()
     }
 
+    /// The folders suggested lit under the mouse; what's under their list isn't hovered.
     fn hover(&mut self, p: Option<Point>) -> bool {
         let p = p.unwrap_or(NOWHERE);
-        let bar = self.panel.hover_bar(p);
-        self.panel.hover(p) | bar
+        let list = self.panel.hover_suggestions(p);
+        let under = if self.panel.on_suggestions(p) { NOWHERE } else { p };
+        let bar = self.panel.hover_bar(under);
+        self.panel.hover(under) | bar | list
     }
 
     /// A hand over what's clicked (a row, a button, the `esc` key, the search's ×); the
     /// text's over the search.
     fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        if self.panel.on_suggestions(p) {
+            return self.panel.suggestions_cursor(p);
+        }
         if self.panel.hit(p) == Some(ProjectSearchAction::FocusQuery) {
             return Control::cursor(&self.panel.input, p);
         }
@@ -165,7 +180,6 @@ impl Control for PanelPart<'_> {
                     | ProjectSearchAction::ForgetRecent(_)
                     | ProjectSearchAction::ClearRecent
                     | ProjectSearchAction::EnableSemantic
-                    | ProjectSearchAction::Suggestion(_)
                     | ProjectSearchAction::Toggle(_)
                     | ProjectSearchAction::ToggleReplace
                     | ProjectSearchAction::ReplaceAll
@@ -174,8 +188,11 @@ impl Control for PanelPart<'_> {
         clickable.then_some(ViewerCursor::Pointer)
     }
 
-    /// By rows (as the editor's lines).
+    /// Over the folders suggested, their rows; else by rows (as the editor's lines).
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        if let Some(moved) = self.panel.scroll_suggestions(dy) {
+            return moved;
+        }
         let line = (WHEEL_ROW * self.scale.max(1.0)).max(1.0);
         let rows = (dy / line).round() as isize;
         if rows != 0 {
@@ -224,6 +241,9 @@ impl Control for PanelPart<'_> {
     /// A name cut short: the whole of it (its path); the folder's button, the replacement's,
     /// an option's: what it does.
     fn tooltip(&self, p: Point) -> Option<Tip> {
+        if self.panel.on_suggestions(p) {
+            return None;
+        }
         let button = self.panel.scope_button();
         if button.contains(p) {
             return Some(Tip::new(button, i18n::t("search.folder")));
@@ -242,5 +262,10 @@ impl Control for PanelPart<'_> {
     /// Its appearance (a fade, a slight slide).
     fn animating(&self) -> bool {
         self.panel.is_animating()
+    }
+
+    /// When the folders suggested's scrollbar next fades.
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        self.panel.suggestions_deadline()
     }
 }

@@ -745,6 +745,11 @@ impl Viewer for SearchView {
     fn is_animating(&self) -> bool {
         self.controls.is_animating()
     }
+
+    /// When a part next needs a frame (the folders suggested's scrollbar fading).
+    fn frame_deadline(&self) -> Option<std::time::Instant> {
+        self.controls.next_frame()
+    }
 }
 
 /// The panel's place among the view's controls.

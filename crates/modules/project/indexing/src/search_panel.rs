@@ -9,7 +9,9 @@ use render_api::{Layer, Scene};
 use text_layout::{Font, FontMetrics, TextSystem};
 use text_search::Hit;
 use ui_components::control::Control;
+use ui_components::picker::Picker;
 use ui_components::search_field::SearchField;
+use ui_components::{ViewerCursor, ViewerKey};
 use ui_kit::{KeyHint, TextInput, centered_baseline, draw_icon, draw_text};
 use workspace::FileMatch;
 
@@ -119,17 +121,19 @@ pub struct ProjectSearch {
     scope_open: bool,
     /// The keyboard is in the folder's field (else in the search's).
     in_scope: bool,
-    /// The folders the one typed goes on to, and the one lit among them.
+    /// The folders the one typed goes on to, and their list: the shared one, a popover
+    /// under the folder's field (over the results, the header as tall as ever); the last
+    /// place of the mouse, for the wheel over it.
     suggestions: Vec<String>,
-    suggestion: usize,
-    /// Where the folder's button, the two fields and the suggestions were drawn.
+    suggestion_list: Picker,
+    pointer: Point,
+    /// Where the folder's button and the two fields were drawn.
     scope_button: Rect,
     scope_hover: bool,
     hover_replace: bool,
     hover_replace_all: bool,
     query_field: Rect,
     scope_field: Rect,
-    suggestion_rows: Vec<(Rect, usize)>,
     /// What replaces what's found, whether its row shows, the keyboard in it; its button in
     /// the field, its field and its Replace All (whether there's something to replace).
     pub replace: TextInput,
@@ -193,8 +197,9 @@ const VISIBLE_UNDER_FOLDERS: usize = 4;
 /// the results' height, under their header).
 const LISTED_VISIBLE: usize = 9;
 const RECENT: usize = 6;
-/// The folders suggested for the one typed, at most.
-pub const SUGGESTIONS: usize = 6;
+/// The folders suggested for the one typed, at most: every one a project's folder has
+/// (their list scrolls), bounded so a folder of thousands doesn't fill it.
+pub const SUGGESTIONS: usize = 300;
 
 /// A result's representative line for `query`: the first line containing a word
 /// from the query (otherwise the first non-empty one). Returns (0-based line in the file,
@@ -430,9 +435,6 @@ impl ProjectSearch {
         if self.replace_open && self.replace_field.contains(p) {
             return Some(ProjectSearchAction::FocusReplace);
         }
-        if let Some((_, i)) = self.suggestion_rows.iter().find(|(r, _)| r.contains(p)) {
-            return Some(ProjectSearchAction::Suggestion(*i));
-        }
         if self.scope_open && self.mask_field.contains(p) {
             return Some(ProjectSearchAction::FocusMask);
         }
@@ -552,7 +554,6 @@ impl ProjectSearch {
         self.tips.clear();
         self.forget_buttons.clear();
         self.clear_all = Rect::default();
-        self.suggestion_rows.clear();
         self.option_buttons.clear();
         self.enable = Rect::default();
         self.bar_area = None;
@@ -605,6 +606,8 @@ impl ProjectSearch {
             }
         }
         self.paint_footer(mode, text, scene, &f, &fonts);
+        // Last: the folders suggested, over everything.
+        self.paint_suggestions(text, scene, &f);
     }
 
     /// The panel's measures this frame (and its place, kept for the clicks).
@@ -649,12 +652,7 @@ impl ProjectSearch {
         };
         let scope_h = if self.scope_open { px(50.0) } else { 0.0 };
         let replace_h = if self.replace_open { px(50.0) } else { 0.0 };
-        let suggest_h = if self.has_suggestions() {
-            self.suggestions.len() as f32 * px(SUGGESTION_H) + px(space::SM)
-        } else {
-            0.0
-        };
-        let height = field_h + replace_h + scope_h + suggest_h + list_h + footer_h;
+        let height = field_h + replace_h + scope_h + list_h + footer_h;
         self.panel = Rect::new(
             (v.min_x() + (v.size.width - width) / 2.0).round(),
             (v.min_y() + v.size.height * 0.14 + (1.0 - shown) * px(10.0)).round(),
@@ -668,7 +666,6 @@ impl ProjectSearch {
             field_h,
             replace_h,
             scope_h,
-            suggest_h,
             footer_h,
             list_h,
             row_h,
@@ -683,20 +680,15 @@ impl ProjectSearch {
     }
 }
 
-/// A folder suggested's row (logical pixels).
-const SUGGESTION_H: f32 = 32.0;
-
 /// The panel's measures this frame, computed once and shared by its parts.
 struct Frame<'a> {
     ctx: Ctx<'a>,
     icons: &'a Icons,
     panel: Rect,
     field_h: f32,
-    /// The replacement's row and the folder's (0: hidden), the folders suggested under it
-    /// (0: none).
+    /// The replacement's row and the folder's (0: hidden).
     replace_h: f32,
     scope_h: f32,
-    suggest_h: f32,
     footer_h: f32,
     list_h: f32,
     /// A scrolled row's height (a recent search or a file).
@@ -724,9 +716,9 @@ struct Fonts {
 }
 
 impl Frame<'_> {
-    /// What's above the list: the field, the folder's row and its suggestions.
+    /// What's above the list: the field, the replacement's row and the folder's.
     fn head_h(&self) -> f32 {
-        self.field_h + self.replace_h + self.scope_h + self.suggest_h
+        self.field_h + self.replace_h + self.scope_h
     }
 }
 

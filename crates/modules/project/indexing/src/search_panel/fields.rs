@@ -1,6 +1,9 @@
 //! The fields beside the search's: the folder and the mask, the replacement, the options, the folders suggested, which one has the keyboard.
 
 use super::*;
+use ui_components::KeyReach;
+use ui_components::control::Press;
+use ui_components::picker::{PickerEvent, PickerItem};
 
 impl ProjectSearch {
     /// The folder searched in: `folder` (relative to the project; empty: all of it), its row
@@ -9,7 +12,7 @@ impl ProjectSearch {
         self.scope.set_text(folder);
         self.scope_open = !folder.is_empty();
         self.in_scope = false;
-        self.suggestions.clear();
+        self.clear_suggestions();
     }
 
     /// The folder searched in as the start of the paths in it (`src/Controller/`).
@@ -41,6 +44,12 @@ impl ProjectSearch {
         self.in_mask
     }
 
+    /// The keyboard is in the search's own field (not the folder's, the mask's or the
+    /// replacement's).
+    pub fn in_query(&self) -> bool {
+        !self.in_scope && !self.in_mask && !self.in_replace
+    }
+
     /// The folder's button: its row shows and takes the keyboard; pressed again with no
     /// folder or mask set, it hides.
     pub fn toggle_scope(&mut self) {
@@ -60,7 +69,7 @@ impl ProjectSearch {
             self.in_replace = false;
             self.in_mask = false;
         } else {
-            self.suggestions.clear();
+            self.clear_suggestions();
         }
     }
 
@@ -132,11 +141,26 @@ impl ProjectSearch {
         }
     }
 
-    /// The folders the one typed goes on to (the typed one itself left out).
+    /// The folders the one typed goes on to (the typed one itself left out): the shared
+    /// list opened under the folder's field as its suggestions (the field keeps the typing,
+    /// the first one lit: ↵ takes it), closed when there are none.
     pub fn set_suggestions(&mut self, folders: Vec<String>) {
         let typed = self.scope.text().trim().trim_matches('/').to_owned();
         self.suggestions = folders.into_iter().filter(|f| *f != typed).collect();
-        self.suggestion = 0;
+        if self.suggestions.is_empty() {
+            self.suggestion_list.close();
+            return;
+        }
+        let items = self
+            .suggestions
+            .iter()
+            .map(|folder| PickerItem {
+                label: folder.clone(),
+                icon: Some("folder"),
+                ..PickerItem::default()
+            })
+            .collect();
+        self.suggestion_list.open_suggestions(items, None, true);
     }
 
     #[cfg(test)]
@@ -145,28 +169,104 @@ impl ProjectSearch {
     }
 
     pub fn has_suggestions(&self) -> bool {
-        self.in_scope && !self.suggestions.is_empty()
+        self.in_scope && self.suggestion_list.is_open()
     }
 
     pub fn clear_suggestions(&mut self) {
         self.suggestions.clear();
+        self.suggestion_list.close();
     }
 
-    /// Lights the suggestion `delta` rows away.
+    /// Lights the suggestion `delta` rows away (as the list's arrows).
     pub fn move_suggestion(&mut self, delta: isize) {
-        if !self.suggestions.is_empty() {
-            self.suggestion = ui_kit::step_index(self.suggestion, delta, self.suggestions.len());
-        }
+        let key = if delta < 0 { ViewerKey::Up } else { ViewerKey::Down };
+        self.suggestion_list.key(key, KeyReach::default());
     }
 
     /// The suggestion lit (`None`: the one at `index`) is taken: the folder's field holds it
-    /// and a `/`, to go on into it.
+    /// and a `/`, the caret after it, to go on into it.
     pub fn take_suggestion(&mut self, index: Option<usize>) -> bool {
-        let Some(folder) = self.suggestions.get(index.unwrap_or(self.suggestion)) else {
+        let Some(at) = index.or_else(|| self.suggestion_list.highlighted()) else {
             return false;
         };
+        let Some(folder) = self.suggestions.get(at) else { return false };
         self.scope.set_text(&format!("{folder}/"));
+        self.scope.end(false);
         true
+    }
+
+    /// `p` is on the folders suggested (their list, over the results).
+    pub fn on_suggestions(&self, p: Point) -> bool {
+        self.has_suggestions() && self.suggestion_list.contains(p)
+    }
+
+    /// A press on the folders suggested: its scrollbar's thumb held, or the folder chosen
+    /// (the index taken).
+    pub fn press_suggestions(&mut self, p: Point, clicks: u32) -> (Press, Option<usize>) {
+        let press = Control::press(&mut self.suggestion_list, p, clicks);
+        match self.suggestion_list.take_event() {
+            Some(PickerEvent::Chosen(i)) => (press, Some(i)),
+            _ => (press, None),
+        }
+    }
+
+    /// The mouse moved to `p` (kept for the wheel): the suggestion under it lit. `true` if
+    /// something changed.
+    pub fn hover_suggestions(&mut self, p: Point) -> bool {
+        self.pointer = p;
+        self.has_suggestions() && self.suggestion_list.hover(p)
+    }
+
+    /// The wheel over the folders suggested (where the mouse was last): their rows scrolled.
+    /// `None`: the mouse isn't over them.
+    pub fn scroll_suggestions(&mut self, dy: f32) -> Option<bool> {
+        let pointer = self.pointer;
+        self.on_suggestions(pointer).then(|| self.suggestion_list.scroll(dy))
+    }
+
+    /// The suggestions' thumb dragged to `p`; `true` if their rows moved.
+    pub fn drag_suggestions(&mut self, p: Point) -> bool {
+        self.suggestion_list.dragging() && self.suggestion_list.drag(p)
+    }
+
+    /// The mouse let go: the suggestions' thumb too. `true` if it was held.
+    pub fn release_suggestions(&mut self) -> bool {
+        self.suggestion_list.release()
+    }
+
+    /// The cursor over the folders suggested (`None`: not over them).
+    pub fn suggestions_cursor(&self, p: Point) -> Option<ViewerCursor> {
+        if !self.on_suggestions(p) {
+            return None;
+        }
+        self.suggestion_list.cursor_at(p)
+    }
+
+    /// When the suggestions' scrollbar next fades.
+    pub fn suggestions_deadline(&self) -> Option<std::time::Instant> {
+        self.has_suggestions().then(|| self.suggestion_list.next_frame()).flatten()
+    }
+
+    /// Where the folders suggested were drawn last, all of it and their rows (the tests).
+    #[cfg(test)]
+    pub(crate) fn suggestions_area(&self) -> Option<(Rect, Rect)> {
+        self.has_suggestions()
+            .then(|| {
+                Control::area(&self.suggestion_list).map(|a| (a, self.suggestion_list.list_area()))
+            })
+            .flatten()
+    }
+
+    /// Where the folder's field was drawn last (the tests).
+    #[cfg(test)]
+    pub(crate) fn scope_field(&self) -> Rect {
+        self.scope_field
+    }
+
+    /// Where the panel was drawn last (the tests).
+    #[cfg(test)]
+    pub(crate) fn panel_area(&self) -> Rect {
+        self.panel
     }
 
     /// The caret where the field at `p` was clicked; `true` when it was the search's ×

@@ -86,7 +86,11 @@ impl ProjectQueries for Fake {
         ("file", String::new())
     }
     fn complete_folder(&self, typed: &str, limit: usize) -> Vec<String> {
-        let folders = ["lib", "src", "src/sub"].map(String::from);
+        let folders: Vec<String> = if self.0 == FOLDERS {
+            (0..FOLDER_COUNT).map(|i| format!("dir{i:02}")).collect()
+        } else {
+            ["lib", "src", "src/sub"].map(String::from).to_vec()
+        };
         workspace::complete_folders(&folders, typed, limit)
     }
 }
@@ -671,4 +675,142 @@ fn an_option_turned_on_is_lit_on_its_button() {
     let (replace, folder) = (view.panel.replace_button(), view.panel.scope_button());
     assert_eq!(on.len(), 1, "the one turned on");
     assert!(on[0].min_x() >= replace.max_x() && on[0].max_x() <= folder.min_x());
+}
+
+/// The root of the project with many folders (more suggested than a short window shows).
+const FOLDERS: &str = "/folders";
+/// Its folders (`dir00`, `dir01`…), all at its top.
+const FOLDER_COUNT: usize = 12;
+
+/// Paints the view in an area `width` × `height`.
+fn painted_at(view: &mut SearchView, width: f32, height: f32) {
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    view.paint(ViewerPaint {
+        bounds: kernel::Rect::new(0.0, 0.0, width, height),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+}
+
+/// The folders suggested are the shared list opened under the folder's field, over the
+/// results: the panel (its header) as tall with them as without.
+#[test]
+fn the_folders_suggested_open_as_a_list_over_the_results() {
+    let mut view = opened(kernel::ProjectId::new(), FOLDERS, None);
+    view.edit_key(ViewerKey::Tab);
+    assert!(view.panel.has_suggestions());
+    painted_at(&mut view, 1200.0, 800.0);
+    let with = view.panel.panel_area();
+    let (area, _) = view.panel.suggestions_area().expect("the list drawn");
+    let field = view.panel.scope_field();
+    assert!(area.min_y() >= field.max_y(), "under the folder's field");
+    assert!(area.max_y() > field.max_y() + 100.0, "over the results, past the header");
+    view.edit_key(ViewerKey::Escape);
+    assert!(!view.panel.has_suggestions() && !view.closed());
+    painted_at(&mut view, 1200.0, 800.0);
+    let without = view.panel.panel_area();
+    assert_eq!(without.size, with.size, "the header keeps its height");
+    // A click on a row takes its folder.
+    view.edit_key(ViewerKey::Tab);
+    view.edit_key(ViewerKey::Tab);
+    view.edit_key(ViewerKey::Tab);
+    assert!(view.panel.in_scope());
+    view.text_input("dir0");
+    painted_at(&mut view, 1200.0, 800.0);
+    let (_, rows) = view.panel.suggestions_area().expect("the list drawn");
+    let second = Point::new(rows.center().x, rows.min_y() + 28.0 * 1.5);
+    view.hover(second);
+    assert_eq!(view.cursor_at(second), Some(ViewerCursor::Pointer), "a hand on its rows");
+    assert!(view.click(second).is_none());
+    assert_eq!(view.panel.scope.text(), "dir01/");
+}
+
+/// In a short window the list fits the room under its field: fewer rows, scrolled by the
+/// wheel and by its thumb dragged (the press choosing nothing).
+#[test]
+fn the_folders_suggested_fit_a_short_window_and_scroll() {
+    let mut view = opened(kernel::ProjectId::new(), FOLDERS, None);
+    view.edit_key(ViewerKey::Tab);
+    painted_at(&mut view, 1200.0, 340.0);
+    let (area, rows) = view.panel.suggestions_area().expect("the list drawn");
+    assert!(area.max_y() <= 340.0, "within the window");
+    assert!(rows.size.height < FOLDER_COUNT as f32 * 28.0, "fewer rows than suggested");
+    let thumb = Point::new(rows.max_x() - 4.0, rows.min_y() + 6.0);
+    view.hover(thumb);
+    assert!(view.click(thumb).is_none());
+    assert!(view.panel.has_suggestions(), "the bar took the press: nothing chosen");
+    assert_eq!(view.panel.scope.text(), "");
+    assert!(view.drag(Point::new(thumb.x, thumb.y + 120.0)), "the rows follow the thumb");
+    view.release();
+    assert!(!view.drag(Point::new(thumb.x, thumb.y + 160.0)), "let go: not held");
+    view.hover(rows.center());
+    assert!(view.scroll(0.0, -200.0), "the wheel over the list scrolls it");
+    assert_eq!(view.panel.first_row(), 0, "not the results under it");
+}
+
+/// The keys choose a folder: ↓ ↑ move through the list, ↵ takes the lit one (and goes into
+/// it), esc closes the list before the search.
+#[test]
+fn the_keys_choose_a_folder_suggested() {
+    let mut view = opened(kernel::ProjectId::new(), FOLDERS, None);
+    view.edit_key(ViewerKey::Tab);
+    painted_at(&mut view, 1200.0, 340.0);
+    view.edit_key(ViewerKey::Down);
+    view.edit_key(ViewerKey::Down);
+    view.edit_key(ViewerKey::Up);
+    view.edit_key(ViewerKey::Down);
+    view.edit_key(ViewerKey::Enter);
+    assert_eq!(view.panel.scope.text(), "dir02/");
+    assert!(!view.panel.has_suggestions(), "no folders in it");
+    // The caret after it: what's typed goes on from there.
+    for _ in 0..3 {
+        view.edit_key(ViewerKey::Backspace);
+    }
+    view.text_input("1");
+    assert_eq!(view.panel.scope.text(), "dir1");
+    assert!(view.panel.has_suggestions(), "typing filters them");
+    assert_eq!(view.panel.suggestion_at(0), Some("dir10"));
+    view.edit_key(ViewerKey::Escape);
+    assert!(!view.panel.has_suggestions() && !view.closed(), "esc closed only the list");
+}
+
+/// Every folder is offered, more than fit: the list scrolls to the last one (by its thumb,
+/// by the keys), and a path typed lists that folder's own.
+#[test]
+fn every_folder_is_offered_and_the_list_scrolls_to_the_last() {
+    let mut view = opened(kernel::ProjectId::new(), FOLDERS, None);
+    view.edit_key(ViewerKey::Tab);
+    let last = format!("dir{:02}", FOLDER_COUNT - 1);
+    assert_eq!(view.panel.suggestion_at(FOLDER_COUNT - 1), Some(last.as_str()), "all of them");
+    assert_eq!(view.panel.suggestion_at(0), Some("dir00"), "by name");
+    painted_at(&mut view, 1200.0, 800.0);
+    let (_, rows) = view.panel.suggestions_area().expect("the list drawn");
+    let thumb = Point::new(rows.max_x() - 4.0, rows.min_y() + 6.0);
+    view.hover(thumb);
+    assert!(view.click(thumb).is_none());
+    assert!(view.drag(Point::new(thumb.x, rows.max_y() + 400.0)), "dragged to the end");
+    view.release();
+    painted_at(&mut view, 1200.0, 800.0);
+    let bottom = Point::new(rows.center().x, rows.max_y() - 14.0);
+    view.hover(bottom);
+    assert!(view.click(bottom).is_none());
+    assert_eq!(view.panel.scope.text(), format!("{last}/"), "the last row shown and taken");
+    // ↑ from the first goes round to the last.
+    let mut view = opened(kernel::ProjectId::new(), FOLDERS, None);
+    view.edit_key(ViewerKey::Tab);
+    view.edit_key(ViewerKey::Up);
+    view.edit_key(ViewerKey::Enter);
+    assert_eq!(view.panel.scope.text(), format!("{last}/"));
+    // A path typed: that folder's own.
+    let mut view = opened(kernel::ProjectId::new(), "/sub", None);
+    view.edit_key(ViewerKey::Tab);
+    view.text_input("src/");
+    assert_eq!(view.panel.suggestion_at(0), Some("src/sub"));
 }

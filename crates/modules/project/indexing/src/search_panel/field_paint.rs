@@ -1,4 +1,4 @@
-//! The search's field (its buttons: the replacement, the options, the folder) and the rows under it: the replacement's, the folder's and its suggestions.
+//! The search's field (its buttons: the replacement, the options, the folder) and the rows under it: the replacement's, the folder's, and the folders suggested under it.
 
 use super::*;
 use ui_components::ds::{ButtonKind, ButtonSpec, Tone, button_size};
@@ -126,7 +126,7 @@ impl ProjectSearch {
     }
 
     /// The folder's row under the field: "In", the folder's field (the whole project while
-    /// it's empty), then the folders it may go on to while it's typed in.
+    /// it's empty), "Files" and the mask's.
     pub(super) fn paint_scope(&mut self, text: &mut TextSystem, scene: &mut Scene, f: &Frame<'_>) {
         let (ctx, p, palette, icons) = (&f.ctx, f.panel, f.ctx.palette, f.icons);
         let px = |v: f32| ctx.px(v);
@@ -179,37 +179,31 @@ impl ProjectSearch {
             let at = Rect::new(field.min_x() + px(10.0), (mid - s / 2.0).round(), s, s);
             draw_icon(input_layer, icons, id, at, ctx.fade(palette.text_muted));
         }
+    }
+
+    /// The folders suggested for the one typed: the shared list under the folder's field (or
+    /// over it, when there's more room there), as tall as the window lets it, its rows
+    /// scrolled within, in layers of its own over the panel.
+    pub(super) fn paint_suggestions(
+        &mut self,
+        text: &mut TextSystem,
+        scene: &mut Scene,
+        f: &Frame<'_>,
+    ) {
         if !self.has_suggestions() {
             return;
         }
-        let layer = scene.push_layer(Some(p));
-        let mut y = top + f.scope_h;
-        let font = ctx.ui_font(-0.5);
-        let metrics = text.metrics(&font);
-        for (i, folder) in self.suggestions.iter().enumerate() {
-            let row = Rect::new(field.min_x(), y, field.size.width, px(SUGGESTION_H));
-            ds::row_highlight(layer, ctx, row, i == self.suggestion, false);
-            if let Some(id) = icons.id("folder") {
-                let s = px(15.0);
-                let at = Rect::new(
-                    row.min_x() + px(10.0),
-                    row.min_y() + (row.size.height - s) / 2.0,
-                    s,
-                    s,
-                );
-                draw_icon(layer, icons, id, at, ctx.fade(palette.accent));
-            }
-            let shown = ds::ellipsize_path(text, folder, &font, row.size.width - px(48.0));
-            let shaped = text.shape_line(&shown, &font);
-            draw_text(
-                layer,
-                &shaped,
-                row.min_x() + px(34.0),
-                centered_baseline(row.min_y(), row.size.height, &metrics),
-                ctx.fade(palette.text),
-            );
-            self.suggestion_rows.push((row, i));
-            y += px(SUGGESTION_H);
-        }
+        let ctx = &f.ctx;
+        let margin = ctx.px(ds::POPOVER_GAP);
+        let v = self.viewport;
+        let bounds = Rect::new(
+            v.min_x() + margin,
+            v.min_y() + margin,
+            (v.size.width - margin * 2.0).max(0.0),
+            (v.size.height - margin * 2.0).max(0.0),
+        );
+        let placeholder = t("search.whole_project");
+        let anchor = (self.scope_field, bounds);
+        self.suggestion_list.paint(scene, text, f.icons, ctx, anchor, &placeholder);
     }
 }
