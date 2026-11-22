@@ -653,6 +653,22 @@ fn a_terminal_is_renamed_by_its_key() {
     assert!(!rename("rename-test-key", "y"), "its tab closed");
 }
 
+/// A program another module runs (an agent's session) keeps the project it was opened in,
+/// though it isn't counted among the shells: its process's row says that project.
+#[test]
+fn a_program_run_for_a_module_keeps_its_project() {
+    let project = Some(kernel::ProjectId::new());
+    let start = TerminalStart {
+        project,
+        launch: Some(agents::Launch::new("agent", &[], None)),
+        ..TerminalStart::default()
+    };
+    let mut view = TerminalView::default();
+    ui_components::Viewer::set_data(&mut view, &start);
+    assert_eq!(view.project, project);
+    assert!(view._live.is_none(), "not one of the numbered shells");
+}
+
 /// A keyed terminal's name wins over what its program calls itself; one closed and opened
 /// again with the same key is the one typed into (its old slot let go).
 #[test]

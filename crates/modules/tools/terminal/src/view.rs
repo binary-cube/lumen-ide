@@ -192,6 +192,9 @@ pub struct TerminalView {
     /// Counted among the live shells while it exists (a view the app made; not the tests'
     /// bare ones).
     _live: Option<Live>,
+    /// The project it was opened in (a program another module runs too, though it isn't
+    /// counted among the shells): said on its process's row in the Task Manager.
+    project: Option<kernel::ProjectId>,
     /// Its shell's process id, listed while it's held.
     shell: Option<ShellPid>,
     /// The wheel's part of a line not reported yet to a program that takes the wheel (a
@@ -419,7 +422,7 @@ impl TerminalView {
         let size = self.term_size();
         match pty::spawn(&profile, size, waker) {
             Ok(session) => {
-                let project = self._live.as_ref().and_then(|l| l.0);
+                let project = self.project;
                 let watch = session.watch();
                 self.watch.clone_from(&watch);
                 // Noted for the next start, should the app end without stopping it (plan 83).
@@ -747,6 +750,7 @@ impl Viewer for TerminalView {
                     .push((key.clone(), Arc::downgrade(&slot)));
                 self.renamed = Some(slot);
             }
+            self.project = start.project;
             // A program another module runs isn't one of the shells (they're numbered apart).
             if start.launch.is_none() {
                 self._live = Some(Live::new(start.project));
@@ -754,6 +758,7 @@ impl Viewer for TerminalView {
         } else if let Some(restored) = data.downcast_ref::<ui_components::Restored>() {
             self.cwd.clone_from(&restored.project);
             self._live = Some(Live::new(restored.id));
+            self.project = restored.id;
         }
     }
 
