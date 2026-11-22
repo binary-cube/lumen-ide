@@ -257,8 +257,14 @@ impl SettingsView {
         let SectionArea { layer, text, ctx, x0, top, width } = area;
         let palette = ctx.palette;
         let px = |v: f32| ctx.px(v);
-        let title = i18n::tr!("settings.results_for", query = self.query.text().trim().to_owned());
-        let mut y = ds::section_title(layer, text, ctx, x0, top, &title, None) + px(14.0);
+        // What was typed, cut with "…" so the title (its quotes) fits the width.
+        let font = ds::section_title_font(ctx);
+        let frame = i18n::tr!("settings.results_for", query = String::new());
+        let room = width - text.shape_line(&frame, &font).width;
+        let query = ds::ellipsize(text, self.query.text().trim(), &font, room);
+        let title = i18n::tr!("settings.results_for", query = query);
+        let mut y =
+            ds::section_title_in(layer, text, ctx, (x0, top, width), &title, None) + px(14.0);
         if self.results.is_empty() {
             let area = Rect::new(x0, y, width, px(120.0));
             ds::empty_state(layer, text, ctx, area, &i18n::t("settings.no_results"), None);

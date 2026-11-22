@@ -279,20 +279,39 @@ pub fn section_title(
     title: &str,
     detail: Option<&str>,
 ) -> f32 {
-    let font = ctx.ui_font(0.5).with_weight(Font::SEMIBOLD);
+    section_title_in(layer, text, ctx, (x, y, f32::INFINITY), title, detail)
+}
+
+/// The font of a [`section_title`].
+pub fn section_title_font(ctx: &Ctx<'_>) -> Font {
+    ctx.ui_font(0.5).with_weight(Font::SEMIBOLD)
+}
+
+/// [`section_title`] kept within `width` from `x`: a title or a description longer than
+/// that (one made from what the user typed) is cut with "…", never drawn past its room.
+pub fn section_title_in(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    (x, y, width): (f32, f32, f32),
+    title: &str,
+    detail: Option<&str>,
+) -> f32 {
+    let font = section_title_font(ctx);
     let m = text.metrics(&font);
-    let shaped = text.shape_line(title, &font);
-    draw_text(layer, &shaped, x, (y + m.ascent).round(), ctx.fade(ctx.palette.text));
+    let baseline = (y + m.ascent).round();
+    draw_ellipsized(layer, text, title, &font, (x, baseline), width, ctx.fade(ctx.palette.text));
     let mut bottom = y + m.ascent + m.descent;
     if let Some(detail) = detail {
         let small = ctx.ui_font(-1.0);
         let sm = text.metrics(&small);
-        let shaped = text.shape_line(detail, &small);
-        draw_text(
+        draw_ellipsized(
             layer,
-            &shaped,
-            x,
-            (bottom + ctx.px(3.0) + sm.ascent).round(),
+            text,
+            detail,
+            &small,
+            (x, (bottom + ctx.px(3.0) + sm.ascent).round()),
+            width,
             ctx.fade(ctx.palette.text_muted),
         );
         bottom += ctx.px(3.0) + sm.ascent + sm.descent;

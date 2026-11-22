@@ -45,6 +45,29 @@ fn a_text_drawn_cut_stays_in_its_room() {
     assert_eq!(whole, 5);
 }
 
+/// A section title made from what was typed (a search's "Results for …") stays in its
+/// width, cut with "…"; a short one is drawn whole, as without a width.
+#[test]
+fn a_long_section_title_stays_in_its_width() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let layer = scene.push_layer(None);
+    let long =
+        "Results for http://10.0.13.174:8090/download/a-very-long-pasted-address.apk".repeat(4);
+    let width = 300.0;
+    section_title_in(layer, &mut text, &ctx, (10.0, 0.0, width), &long, Some(&long));
+    assert!(!layer.glyphs.is_empty());
+    assert!(layer.glyphs.iter().all(|g| g.origin.x <= 10.0 + width), "drawn past its width");
+    layer.glyphs.clear();
+    let bottom = section_title_in(layer, &mut text, &ctx, (10.0, 0.0, width), "Keymap", None);
+    let whole = layer.glyphs.len();
+    layer.glyphs.clear();
+    assert_eq!(section_title(layer, &mut text, &ctx, 10.0, 0.0, "Keymap", None), bottom);
+    assert_eq!((whole, layer.glyphs.len()), (6, 6));
+}
+
 /// The baselines a layer's glyphs sit on, distinct, top to bottom.
 fn baselines(layer: &render_api::Layer) -> Vec<f32> {
     let mut ys: Vec<f32> = layer.glyphs.iter().map(|g| g.origin.y.round()).collect();
