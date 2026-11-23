@@ -64,3 +64,19 @@ fn a_tile_of_many_colors_is_one_image() {
         assert_eq!(px, fill.to_rgba8(), "box {i}");
     }
 }
+
+/// A flat shape (an area at zero, a bar of no height) covers nothing: no path to fill (it
+/// would only be refused, a warning in the log each time); a line along it still has one.
+#[test]
+fn a_flat_shape_covers_nothing() {
+    use kernel::Point;
+    let flat = [
+        Seg::Move(Point::new(0.0, 10.0)),
+        Seg::Line(Point::new(50.0, 10.0)),
+        Seg::Line(Point::new(100.0, 10.0)),
+        Seg::Close,
+    ];
+    assert!(outline(&flat, None, 1.0, 0.0, 0.0).is_none());
+    let line = Line { color: kernel::Rgba::WHITE, width: 2.0, dash: None };
+    assert!(outline(&flat, Some(&line), 1.0, 0.0, 0.0).is_some());
+}

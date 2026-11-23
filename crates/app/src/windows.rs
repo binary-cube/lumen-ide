@@ -92,6 +92,12 @@ impl AppWindows {
 }
 
 impl Application for AppWindows {
+    /// Opened as a later start's (the first window's, once there's one).
+    fn paths_opened(&mut self, paths: Vec<std::path::PathBuf>) {
+        crate::instance::hand_in(paths);
+        self.open_handed();
+    }
+
     fn window_opened(&mut self, window: Arc<dyn Window>) {
         let (workbench, paths, restore) = match self.first.take() {
             Some(workbench) => (workbench, Vec::new(), std::mem::take(&mut self.first_restores)),

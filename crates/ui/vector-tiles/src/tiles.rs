@@ -265,10 +265,14 @@ pub fn tile<'a>(
 }
 
 /// What an operation covers, as a filled path: the shape, or its line's outline (dashed
-/// when the line is).
+/// when the line is). A shape with no area (flat: an area at zero, a bar of no height)
+/// covers nothing: `None`, never filled (it would only be refused, and told in the log).
 fn outline(segs: &[Seg], line: Option<&Line>, k: f32, dx: f32, dy: f32) -> Option<tiny_skia::Path> {
     let path = skia_path(segs, k, dx, dy)?;
-    let Some(l) = line else { return Some(path) };
+    let Some(l) = line else {
+        let b = path.bounds();
+        return (b.width() > 0.0 && b.height() > 0.0).then_some(path);
+    };
     let mut stroke = tiny_skia::Stroke {
         width: l.width * k,
         line_join: tiny_skia::LineJoin::Round,

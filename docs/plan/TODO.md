@@ -22,6 +22,25 @@ făcute se șterg.
     și caseta regiunii puse (`GetRgnBox`). **De făcut pe Windows:** pornit cu
     `EDITOR_LOG=debug`, pastilele fixate peste editorul de diagrame, liniile „a page's hole
     cut” / „a page's region set” din jurnal arată unde e nepotrivirea.
+  - **Găsit (2026-11-24, jurnalul de pe Windows 10):**
+    - găurile cerute sunt la locul lor (zona paginii (341, 111, 578, 656), pastilele de
+      24 px cu raza 12);
+    - din momentul în care există stratul plutitor, nu se mai decupează nimic din pagină:
+      pastilele sunt desenate de strat;
+    - stratul era o fereastră copil creată fără `WS_EX_NOREDIRECTIONBITMAP` (fereastra
+      aplicației îl are). Deci sub conținutul DirectComposition stătea suprafața opacă a
+      sistemului, pe toată regiunea (forma plus marginea umbrei, colțuri mari): petele.
+  - **Reparat:** stratul se creează cu `WS_EX_NOREDIRECTIONBITMAP`.
+  - **De confirmat pe Windows** cu build-ul care conține reparația.
+
+- **Windows: „leak detected” la închidere** (văzut în jurnal 2026-11-24, DX12). La
+  închiderea ferestrei, alocatorul de memorie GPU al DX12 spune că mai erau blocuri
+  alocate (`leak detected`, zeci de linii `WARN` cu ținta `log`). Nu e o scurgere cât
+  rulează: apare când dispozitivul GPU e lăsat înaintea unor resurse (texturi, buffere).
+  - **De căutat:** ordinea în care se eliberează rendererul, atlasele (glife, iconițe),
+    straturile ferestrei și dispozitivul la închidere; ce ține încă o resursă GPU după ce
+    pleacă fereastra (o resursă făcută dinainte, `prepared`).
+  - **De verificat pe Windows:** jurnalul la închidere, fără nicio linie `leak detected`.
 
 - **Windows: „Open with” deschide altă instanță a aplicației** (raportat 2026-11-23). Un
   fișier deschis cu „Open with” → aplicația, apoi alt fișier la fel: se deschide o

@@ -1,6 +1,7 @@
 //! The floating layer over the pages (Windows): a child window of its own, over the
 //! window's pages (the system's web views, child windows too), that the app draws what
-//! floats into — through DirectComposition, transparent where nothing is drawn. Its region
+//! floats into — through DirectComposition only (no redirection surface of the system's
+//! under it), transparent where nothing is drawn. Its region
 //! is where something floats (with room for its shadow): only there is it drawn and does it
 //! take the mouse, which it hands to the app's window as if it were there (it sits at the
 //! window's origin, so its coordinates are the window's).
@@ -28,7 +29,7 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDBLCLK, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEACTIVATE,
     WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCHITTEST, WM_PAINT, WM_RBUTTONDBLCLK,
     WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SETCURSOR, WM_XBUTTONDBLCLK, WM_XBUTTONDOWN, WM_XBUTTONUP,
-    WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS,
+    WNDCLASSW, WS_CHILD, WS_CLIPSIBLINGS, WS_EX_NOREDIRECTIONBITMAP,
 };
 
 /// `MA_NOACTIVATE`: a click on it doesn't activate anything.
@@ -142,8 +143,11 @@ impl Floating {
             let mut client: RECT = std::mem::zeroed();
             GetClientRect(parent, &mut client);
             let (w, h) = (client.right - client.left, client.bottom - client.top);
+            // No redirection surface (as the app's window has none): only DirectComposition
+            // draws it, transparent where nothing floats. With one, the system's opaque surface
+            // shows under it, over the whole region (the shapes and their shadows' room).
             let hwnd = CreateWindowExW(
-                0,
+                WS_EX_NOREDIRECTIONBITMAP,
                 name.as_ptr(),
                 std::ptr::null(),
                 WS_CHILD | WS_CLIPSIBLINGS,

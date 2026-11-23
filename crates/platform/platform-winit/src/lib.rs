@@ -24,6 +24,8 @@ mod jump_list;
 #[cfg(target_os = "macos")]
 mod menu;
 mod motion;
+#[cfg(target_os = "macos")]
+mod opened;
 mod system_idle;
 #[cfg(target_os = "macos")]
 mod system_sign;
@@ -95,9 +97,11 @@ pub(crate) enum UserEvent {
     ResetModifiers(WindowId),
     /// The system's accessibility: its tree asked for, a node acted on, a screen reader gone.
     Access(accesskit_winit::Event),
-    /// A window's accessibility tree, made by the app's last frame.
-    /// A tree's update, for the system's ask it was made for.
+    /// A window's accessibility tree's update, for the system's ask it was made for.
     AccessTree(WindowId, u64, accesskit::TreeUpdate),
+    /// Files the system asked the app to open (macOS: Finder's "Open With", the Dock).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    PathsOpened(Vec<std::path::PathBuf>),
 }
 
 impl From<accesskit_winit::Event> for UserEvent {
@@ -116,6 +120,9 @@ impl Platform for WinitPlatform {
             .build()
             .map_err(|e| PlatformError::EventLoop(e.to_string()))?;
         event_loop.set_control_flow(ControlFlow::Wait);
+        // The files the system opens with the app (before the first window too).
+        #[cfg(target_os = "macos")]
+        opened::listen(event_loop.create_proxy());
         let (options, app) = prepare().map_err(PlatformError::Start)?;
         let mut handler = Handler {
             proxy: event_loop.create_proxy(),
@@ -895,6 +902,7 @@ impl ApplicationHandler<UserEvent> for Handler {
 
     fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
+            UserEvent::PathsOpened(paths) => self.app.paths_opened(paths),
             // Commands from the native menu: the active window.
             // The sign's row bringing the app to the front: its last window, unminimized.
             UserEvent::Command(id) if id == platform_api::SHOW_APP => {

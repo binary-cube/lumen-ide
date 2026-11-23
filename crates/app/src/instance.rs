@@ -34,15 +34,18 @@ pub enum Start {
 
 /// Hands `paths` to the running instance, or becomes it.
 pub fn claim(paths: &[PathBuf]) -> Start {
-    let Some(tag) = executable_tag() else { return Start::Run };
-    if hand_over(&tag, paths) {
-        tracing::info!(paths = paths.len(), tag = %tag, "handed to the running instance");
-        return Start::Handed;
+    let Some((tag, exe)) = executable_tag() else { return Start::Run };
+    // Its channel's tag and its program in the log: a start that didn't reach the running
+    // one shows whether it looked for the same (another program: another tag) and why not.
+    match hand_over(&tag, paths) {
+        Ok(()) => {
+            tracing::info!(paths = paths.len(), tag = %tag, "handed to the running instance");
+            return Start::Handed;
+        }
+        Err(why) => tracing::info!(tag = %tag, exe = %exe, why, "no running instance took it"),
     }
-    // Its channel's tag in the log: a start that didn't reach the running one shows here
-    // whether it looked for the same.
     match listen(&tag) {
-        Ok(()) => tracing::info!(tag = %tag, "listening for later starts"),
+        Ok(()) => tracing::info!(tag = %tag, exe = %exe, "listening for later starts"),
         Err(e) => tracing::warn!(tag = %tag, error = %e, "can't listen for later starts"),
     }
     Start::Run
@@ -55,16 +58,28 @@ pub fn set_waker(waker: Arc<dyn Fn() + Send + Sync>) {
     }
 }
 
+/// Paths to open as a later start's (the system's own asking: macOS' "Open With"): queued,
+/// the app woken.
+pub fn hand_in(paths: Vec<PathBuf>) {
+    if let Ok(mut queue) = INCOMING.lock() {
+        queue.push_back(paths);
+    }
+    if let Some(wake) = WAKER.lock().ok().and_then(|w| w.clone()) {
+        wake();
+    }
+}
+
 /// The paths handed since the last call.
 pub fn take() -> Vec<Vec<PathBuf>> {
     INCOMING.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default()
 }
 
-/// What tells this executable's instance apart: a hash of its path.
-fn executable_tag() -> Option<String> {
+/// What tells this executable's instance apart: a hash of its path (and the path, as it was
+/// read, for the log).
+fn executable_tag() -> Option<(String, String)> {
     let exe = std::env::current_exe().ok()?;
     let exe = exe.canonicalize().unwrap_or(exe);
-    Some(format!("{:016x}", fnv(&exe)))
+    Some((format!("{:016x}", fnv(&exe)), exe.display().to_string()))
 }
 
 /// A stable hash of a path (FNV-1a: the same in every run, unlike `DefaultHasher`'s seed),
@@ -120,10 +135,11 @@ pub(crate) fn socket_dir() -> PathBuf {
         .unwrap_or_else(std::env::temp_dir)
 }
 
-/// Sends the paths to the running instance; `true` if it took them.
-fn hand_over(tag: &str, paths: &[PathBuf]) -> bool {
-    let Ok(name) = address(tag) else { return false };
-    let Ok(stream) = Stream::connect(name) else { return false };
+/// Sends the paths to the running instance; why not when it didn't take them (none
+/// listens: the channel isn't there; it didn't answer).
+fn hand_over(tag: &str, paths: &[PathBuf]) -> Result<(), String> {
+    let name = address(tag).map_err(|e| format!("no channel name: {e}"))?;
+    let stream = Stream::connect(name).map_err(|e| format!("no channel: {e}"))?;
     let mut message = String::new();
     for path in paths {
         // Relative to where this start was made: absolute for the other one.
@@ -133,11 +149,10 @@ fn hand_over(tag: &str, paths: &[PathBuf]) -> bool {
     }
     message.push('\n');
     let mut reader = BufReader::new(stream);
-    if reader.get_mut().write_all(message.as_bytes()).is_err() {
-        return false;
-    }
+    reader.get_mut().write_all(message.as_bytes()).map_err(|e| format!("not sent: {e}"))?;
     let mut answer = String::new();
-    reader.read_line(&mut answer).is_ok() && answer.trim() == "ok"
+    reader.read_line(&mut answer).map_err(|e| format!("no answer: {e}"))?;
+    if answer.trim() == "ok" { Ok(()) } else { Err(format!("answered {:?}", answer.trim())) }
 }
 
 /// Listens for later starts (a socket left by a crash is taken over).
@@ -168,12 +183,7 @@ fn receive(stream: Stream) -> Option<()> {
         }
         paths.push(PathBuf::from(path));
     }
-    if let Ok(mut queue) = INCOMING.lock() {
-        queue.push_back(paths);
-    }
-    if let Some(wake) = WAKER.lock().ok().and_then(|w| w.clone()) {
-        wake();
-    }
+    hand_in(paths);
     reader.get_mut().write_all(b"ok\n").ok()
 }
 

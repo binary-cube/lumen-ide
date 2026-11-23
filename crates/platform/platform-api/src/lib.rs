@@ -706,6 +706,10 @@ pub trait Application {
 
     /// The process ends (quit, the system's own quit too): what's still to write, written.
     fn exiting(&mut self) {}
+
+    /// The system asked the app to open `paths` (macOS: Finder's "Open With", a file dropped
+    /// on the Dock's icon), before its first window too.
+    fn paths_opened(&mut self, _paths: Vec<std::path::PathBuf>) {}
 }
 
 #[derive(Debug, thiserror::Error)]

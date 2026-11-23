@@ -32,5 +32,38 @@
   <true/>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.developer-tools</string>
+  <!-- Offered in Finder's "Open With" for any file or folder (an alternate, never taking
+       another app's place as the default): text, code, data, a project's folder. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Document</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.text</string>
+        <string>public.source-code</string>
+        <string>public.script</string>
+        <string>public.data</string>
+        <string>public.content</string>
+      </array>
+    </dict>
+    <dict>
+      <key>CFBundleTypeName</key>
+      <string>Folder</string>
+      <key>CFBundleTypeRole</key>
+      <string>Editor</string>
+      <key>LSHandlerRank</key>
+      <string>Alternate</string>
+      <key>LSItemContentTypes</key>
+      <array>
+        <string>public.folder</string>
+      </array>
+    </dict>
+  </array>
 </dict>
 </plist>
