@@ -775,7 +775,15 @@ pub fn render(
             },
         );
     } else {
+        // `EDITOR_SNAPSHOT_ACCESS=1`: the screen's accessibility tree, made as it's painted,
+        // written beside the picture (`<out>.access.txt`).
+        let access = flag("ACCESS").then(ui_kit::access::begin);
         workbench.paint(&mut text, &mut scene);
+        if let Some(frame) = access.map(ui_kit::access::Recording::take) {
+            let path = out.with_extension("access.txt");
+            std::fs::write(&path, crate::snapshot_gpu::access_text(&frame))
+                .with_context(|| format!("cannot write {}", path.display()))?;
+        }
     }
     // `EDITOR_SNAPSHOT_DEBUG_OVERLAY=1`: the diagnostics overlay (F12) over it, with made-up
     // frames (one over its budget).
@@ -828,6 +836,8 @@ pub fn render(
     std::fs::write(out, renderer.encode_png()?)
         .with_context(|| format!("cannot write {}", out.display()))?;
     tracing::info!(path = %out.display(), "snapshot saved");
+    // On the GPU too, when asked: after the picture, so measuring never changes it.
+    crate::snapshot_gpu::measure(&mut workbench, &mut text, *SIZE, &scene)?;
     Ok(())
 }
 

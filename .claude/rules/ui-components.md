@@ -150,6 +150,26 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
 - Found a chain that names its parts: it's a bug of the same kind as a hardcoded tool
   window — moved behind the contract.
 
+## Accessibility: every component tells what it is (plan 93d)
+
+- **A shared component describes itself where it paints**, through `ui_kit::access`, so a
+  view built from components is read by the system's screen reader without a line of its
+  own:
+  - a control whose texts are its name (a button, a tab, a list's row, a menu row, a
+    notification): `access::group(|| Described::new(role, name, rect), || paint…)`; its
+    texts that say its name aren't read again, its other texts (a row's detail) are, under
+    it;
+  - a control whose label is drawn beside it by whoever uses it (a switch, a checkbox, a
+    dropdown, a tree's fold): `access::node(|| Described::new(role, "", rect))`; it takes
+    the text on its line;
+  - a list's or a table's rows carry `.key(index)`, so their identities hold when their
+    names change;
+  - a drawing made of letters (an avatar's initials, code tokens told otherwise):
+    `access::silent`.
+- **Nothing costs while no screen reader runs:** the description is a closure, never built
+  then. **Never in the tree:** a secret field's text (not even its length), an icon's id as
+  a name, anything the user doesn't see.
+
 ## Scrolling (it went wrong each time: check it every time)
 
 - **A scrollbar is wired whole, never only drawn**: `paint` with the content's height and

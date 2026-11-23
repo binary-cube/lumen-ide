@@ -1,7 +1,8 @@
 //! Default render driver, based on wgpu (Metal, DX12, Vulkan, GL).
 //!
-//! Each scene layer produces at most two instanced draw calls: one
-//! for quads and one for glyphs. Glyphs are kept in a GPU atlas.
+//! The scene's rectangles and glyphs are one kind of instance, each carrying its layer's
+//! clip and emphasis: consecutive layers are one instanced draw, broken only by a layer's
+//! images (a texture each) or backdrop blurs. Glyphs are kept in a GPU atlas.
 //!
 //! **One GPU per process:** all windows share [`GpuContext`] (the instance,
 //! adapter, device, queue, glyph atlas, image textures); each window
@@ -15,7 +16,12 @@ mod context;
 mod drawer;
 #[cfg(target_os = "macos")]
 mod macos;
+#[cfg(any(test, feature = "offscreen"))]
+mod offscreen;
 mod prepared;
+
+#[cfg(any(test, feature = "offscreen"))]
+pub use offscreen::{Measured, Offscreen};
 
 use std::collections::HashMap;
 use std::ops::Range;
@@ -102,10 +108,10 @@ struct GpuContext {
 /// What draws into a surface of one format: the same for every window with it.
 #[derive(Debug)]
 struct Pipelines {
-    quad: wgpu::RenderPipeline,
+    /// Every layer's rectangles and glyphs, in one draw ([`PrimGpu`]).
+    prim: wgpu::RenderPipeline,
     /// Writes the background over a partial frame's areas.
     fill: wgpu::RenderPipeline,
-    glyph: wgpu::RenderPipeline,
     corner: wgpu::RenderPipeline,
     image: wgpu::RenderPipeline,
     /// Made when the first blur is drawn.
@@ -118,15 +124,6 @@ impl Pipelines {
         let quad_attributes = &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x2];
         let quad_layout = (&quad_attributes[..], std::mem::size_of::<QuadGpu>() as u64);
         // Pipelines depend on the surface format (of each window).
-        let quad_pipeline = create_pipeline(
-            device,
-            &ctx.shader,
-            format,
-            &[Some(&ctx.globals_layout)],
-            ("vs_quad", "fs_quad"),
-            quad_layout,
-            wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
-        );
         let fill_pipeline = create_pipeline(
             device,
             &ctx.shader,
@@ -136,15 +133,18 @@ impl Pipelines {
             quad_layout,
             wgpu::BlendState::REPLACE,
         );
-        let glyph_pipeline = create_pipeline(
+        let prim_pipeline = create_pipeline(
             device,
             &ctx.shader,
             format,
             &[Some(&ctx.globals_layout), Some(&ctx.atlas_layout)],
-            ("vs_glyph", "fs_glyph"),
+            ("vs_prim", "fs_prim"),
             (
-                &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x2, 2 => Float32x4, 3 => Uint32],
-                std::mem::size_of::<GlyphGpu>() as u64,
+                &wgpu::vertex_attr_array![
+                    0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Uint16x4,
+                    4 => Float32x4, 5 => Uint32
+                ],
+                std::mem::size_of::<PrimGpu>() as u64,
             ),
             wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
         );
@@ -176,9 +176,8 @@ impl Pipelines {
             wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,
         );
         Self {
-            quad: quad_pipeline,
+            prim: prim_pipeline,
             fill: fill_pipeline,
-            glyph: glyph_pipeline,
             corner: corner_pipeline,
             image: image_pipeline,
             blur: std::sync::OnceLock::new(),
@@ -308,16 +307,55 @@ struct QuadGpu {
     params: [f32; 2],
 }
 
+/// A rectangle or a glyph as the one pipeline draws it (`PrimInstance` in `shaders.wgsl`),
+/// with its layer's clip and emphasis: every layer's in one draw, in the scene's order.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
-struct GlyphGpu {
+struct PrimGpu {
+    /// x, y, w, h (a glyph's in whole pixels).
     rect: [f32; 4],
-    atlas_origin: [f32; 2],
     color: [f32; 4],
-    kind: u32,
+    border_color: [f32; 4],
+    /// Its layer's clip within the area drawn: x0, y0, x1, y1 (whole pixels; a surface is
+    /// never wider than a `u16` counts).
+    clip: [u16; 4],
+    /// A quad's corner radius and border width; a glyph's place in the atlas.
+    params: [f32; 4],
+    /// Its kind ([`PRIM_QUAD`], [`PRIM_MASK`], [`PRIM_COLOR`]), muted ([`PRIM_MUTED`]).
+    flags: u32,
 }
 
-/// What a layer draws: the scissor area and the ranges in the instance buffers.
+/// [`PrimGpu::flags`]: a rectangle, a glyph's mask, a glyph's own colors; muted by the
+/// emphasis.
+const PRIM_QUAD: u32 = 0;
+const PRIM_MASK: u32 = 1;
+const PRIM_COLOR: u32 = 2;
+const PRIM_MUTED: u32 = 4;
+
+impl PrimGpu {
+    fn quad(q: &render_api::Quad) -> Self {
+        Self {
+            rect: rect_array(&q.bounds),
+            color: color_array(q.color),
+            border_color: color_array(q.border_color),
+            clip: [0; 4],
+            params: [q.corner_radius, q.border_width, 0.0, 0.0],
+            flags: PRIM_QUAD,
+        }
+    }
+
+    /// This instance cut by `clip`, muted or not.
+    fn within(mut self, clip: PixelRect, muted: bool) -> Self {
+        let at = |v: i32| u16::try_from(v.max(0)).unwrap_or(u16::MAX);
+        self.clip = [at(clip.x0), at(clip.y0), at(clip.x1), at(clip.y1)];
+        if muted {
+            self.flags |= PRIM_MUTED;
+        }
+        self
+    }
+}
+
+/// An image instance (`ImageInstance` in `image.wgsl`).
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct ImageGpu {
@@ -353,17 +391,34 @@ const RESIZE_SETTLE: std::time::Duration = std::time::Duration::from_millis(300)
 
 #[derive(Debug)]
 struct Batch {
-    /// The scene's layer it draws.
+    /// The scene's layer it starts with (a run of primitives may go on to later layers,
+    /// never past one whose blur is made again: a render pass ends there).
     layer: usize,
-    /// The layer's clip within the area drawn (whole pixels).
-    scissor: PixelRect,
-    /// Which of the frame's areas it belongs to (0 for a full frame).
-    area: usize,
-    /// Its backdrop blurs drawn back (in the blur instances).
-    blurs: Range<u32>,
-    quads: Range<u32>,
-    images: Range<u32>,
-    glyphs: Range<u32>,
+    step: Step,
+}
+
+/// What a [`Batch`] draws.
+#[derive(Debug)]
+enum Step {
+    /// Rectangles and glyphs of one or more layers, each cut by its own clip: one draw.
+    Prims(Range<u32>),
+    /// A layer's images, each with its texture, cut by the layer's clip (`scissor`).
+    Images { scissor: PixelRect, range: Range<u32> },
+    /// A layer's backdrop blurs drawn back (in the blur instances), cut by its clip.
+    Blurs { scissor: PixelRect, range: Range<u32> },
+}
+
+/// A layer's instances, before they're split by area: where they are in the drawer's
+/// lists of the frame's layers, and its clip.
+#[derive(Debug)]
+struct LayerPlan {
+    index: usize,
+    clip: PixelRect,
+    quads: Range<usize>,
+    images: Range<usize>,
+    glyphs: Range<usize>,
+    /// Its blur's image, when it blurs (x, y, w, h).
+    blur_image: Option<[f32; 4]>,
 }
 
 /// Instance buffer that grows as needed (never shrinks).
@@ -463,19 +518,25 @@ struct Drawer {
     /// be cut): DX12 through DirectComposition.
     transparent: bool,
 
+    /// The background and the window's corners (drawn apart from the scene).
     quad_buffer: InstanceBuffer,
-    glyph_buffer: InstanceBuffer,
+    prim_buffer: InstanceBuffer,
     image_buffer: InstanceBuffer,
     images: Vec<ImageGpu>,
     /// The image `id` of each instance in `images`.
     image_ids: Vec<u64>,
     quads: Vec<QuadGpu>,
-    glyphs: Vec<GlyphGpu>,
+    prims: Vec<PrimGpu>,
+    /// This frame's rectangles and glyphs among `prims` (its statistics).
+    drawn: (usize, usize),
     batches: Vec<Batch>,
-    /// A layer's instances with the pixels each covers, before they're split by area.
-    layer_quads: Vec<(QuadGpu, PixelRect)>,
+    /// Each of the frame's areas' batches, in order (among `batches`).
+    area_batches: Vec<Range<usize>>,
+    /// The layers' instances with the pixels each covers, before they're split by area.
+    layer_plans: Vec<LayerPlan>,
+    layer_quads: Vec<(PrimGpu, PixelRect)>,
     layer_images: Vec<(ImageGpu, u64, PixelRect)>,
-    layer_glyphs: Vec<(GlyphGpu, PixelRect)>,
+    layer_glyphs: Vec<(PrimGpu, PixelRect)>,
 
     /// The last frame's pixels (one surface-sized texture), while partial redraws are on.
     kept: Option<KeptFrame>,
@@ -893,7 +954,7 @@ impl Renderer for WgpuRenderer {
         drop(state);
         let drawer = &self.drawer;
         let buffers = drawer.quad_buffer.buffer.size()
-            + drawer.glyph_buffer.buffer.size()
+            + drawer.prim_buffer.buffer.size()
             + drawer.image_buffer.buffer.size();
         #[cfg(target_os = "macos")]
         let spare_released = self.spare_released;
@@ -1161,10 +1222,9 @@ impl Renderer for WgpuRenderer {
             self.capture(max_width, done);
         }
 
-        let extra = 1 + if self.drawer.transparent && scene.window_corners > 0.0 { 4 } else { 0 };
         Ok(FrameStats {
-            quads: self.drawer.quads.len() - extra,
-            glyphs: self.drawer.glyphs.len(),
+            quads: self.drawer.drawn.0,
+            glyphs: self.drawer.drawn.1,
             draw_calls,
             drawn_pixels,
             cached_glyphs: ctx.state().atlas.len(),

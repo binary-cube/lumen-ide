@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn gpu_structs_have_expected_layout() {
     assert_eq!(std::mem::size_of::<QuadGpu>(), 56);
-    assert_eq!(std::mem::size_of::<GlyphGpu>(), 44);
+    assert_eq!(std::mem::size_of::<PrimGpu>(), 76);
     // The viewport, the emphasis, eight kept areas' rects and parameters.
     assert_eq!(std::mem::size_of::<Globals>(), 16 + 16 + 2 * 8 * 16);
 }
@@ -32,21 +32,7 @@ fn naga_parse(src: &str) -> Result<(), String> {
 
 /// A GPU without a window (`None`: no adapter here, e.g. a CI machine without one).
 fn headless() -> Option<GpuContext> {
-    pollster::block_on(async {
-        let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
-        desc.flags.remove(wgpu::InstanceFlags::VALIDATION_INDIRECT_CALL);
-        let instance = wgpu::Instance::new(desc);
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                force_fallback_adapter: false,
-                compatible_surface: None,
-                apply_limit_buckets: false,
-            })
-            .await
-            .ok()?;
-        GpuContext::new(instance, adapter).await.ok()
-    })
+    crate::offscreen::headless().ok()
 }
 
 /// Glyphs of a few shapes (by key), a color one among them; key 0 has no pixels.
@@ -885,4 +871,12 @@ fn a_size_told_again_is_no_resize() {
     assert!(!resizes(&config, PhysicalSize::new(2560, 1600)));
     assert!(resizes(&config, PhysicalSize::new(2560, 1601)));
     assert!(resizes(&config, PhysicalSize::new(0, 0)), "minimized");
+}
+
+/// The same image drawn again in a row is one run (one draw); another between breaks it.
+#[test]
+fn the_same_image_in_a_row_is_one_run() {
+    let runs: Vec<_> = drawer::same_image_runs(&[7, 7, 7, 3, 7, 7]).collect();
+    assert_eq!(runs, vec![0..3, 3..4, 4..6]);
+    assert_eq!(drawer::same_image_runs(&[]).count(), 0);
 }

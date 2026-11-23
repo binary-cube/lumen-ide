@@ -365,6 +365,10 @@ raw-window-handle = "0.6"
 bytemuck = { version = "1", features = ["derive"] }
 wgpu = "30"
 winit = "0.30"
+# The accessibility tree handed to the system's screen readers (UI Automation, NSAccessibility,
+# AT-SPI), from the winit window.
+accesskit = "0.25"
+accesskit_winit = "0.34"
 pollster = "1"
 cosmic-text = "0.19"
 memmap2 = "0.9"

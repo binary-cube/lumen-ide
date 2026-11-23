@@ -20,6 +20,9 @@ const LINE_CACHE_LIMIT: usize = 2048;
 /// grid's cells): kept, not shaped again at each frame.
 const LINE_CACHE_MOST: usize = 4 * LINE_CACHE_LIMIT;
 
+/// What the text reports to a profile recording under (`kernel::probe`).
+const PROBE: &str = "text";
+
 /// The requested font family.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FontFamily {
@@ -98,6 +101,11 @@ impl ShapedLine {
 pub struct ShapedLine {
     pub glyphs: Vec<ShapedGlyph>,
     pub width: f32,
+    /// The text shaped: the cache's own key, shared (a screen reader reads it where it's
+    /// drawn).
+    pub text: Arc<str>,
+    /// The font's size it was shaped in (physical pixels): how tall it stands.
+    pub size: f32,
 }
 
 /// The whole font (family, size, weight, italic): the key of a font's cached lines (no
@@ -155,7 +163,7 @@ const LINE_CACHE_STALE: u64 = 1 << 20;
 const LINE_CACHE_SWEEP: u64 = 1 << 12;
 
 /// A font's lines, keyed by text.
-type FontLines = GenerationalCache<Box<str>, Arc<ShapedLine>>;
+type FontLines = GenerationalCache<Arc<str>, Arc<ShapedLine>>;
 
 impl LineCache {
     fn lines(&mut self, font: &Font) -> &mut FontLines {
@@ -390,10 +398,18 @@ impl TextSystem {
     /// Shapes one line (without `\n`). The result is kept in the cache.
     pub fn shape_line(&mut self, text: &str, font: &Font) -> Arc<ShapedLine> {
         if let Some(line) = self.lines.lines(font).get(text) {
+            kernel::probe::count(PROBE, "lines cached", 1);
             return Arc::clone(line);
         }
-        let line = Arc::new(self.shape_uncached(text, font));
-        self.lines.lines(font).insert(text.into(), Arc::clone(&line));
+        kernel::probe::count(PROBE, "lines shaped", 1);
+        let shaping = kernel::probe::time(PROBE, "shape");
+        let key: Arc<str> = text.into();
+        let mut shaped = self.shape_uncached(text, font);
+        shaped.text = Arc::clone(&key);
+        shaped.size = font.size;
+        let line = Arc::new(shaped);
+        drop(shaping);
+        self.lines.lines(font).insert(key, Arc::clone(&line));
         line
     }
 
@@ -508,6 +524,8 @@ impl TextSystem {
 impl GlyphRasterizer for TextSystem {
     fn rasterize(&mut self, key: GlyphKey) -> Option<RasterizedGlyph> {
         let cache_key = *self.cache_keys.get(usize::try_from(key.0).ok()?)?;
+        kernel::probe::count(PROBE, "glyphs rasterized", 1);
+        let _rasterizing = kernel::probe::time(PROBE, "rasterize");
         let image = self.swash.get_image_uncached(&mut self.fonts, cache_key)?;
         let p = image.placement;
         let (format, data) = match image.content {

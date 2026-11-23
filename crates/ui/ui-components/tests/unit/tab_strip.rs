@@ -79,3 +79,36 @@ fn an_underlined_tab_marks_the_one_in_force() {
     assert!(off.quads.is_empty(), "no line under the others");
     assert_eq!(r.size.width - r2.size.width, 10.0, "closer together");
 }
+
+/// Tabs tell a screen reader their names and which is in force; a tab's label isn't read a
+/// second time as text.
+#[test]
+fn tabs_tell_their_names_and_the_one_in_force() {
+    use ui_kit::access::Role;
+    let palette = crate::palette::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = Icons::builtin();
+    let mut layer = Layer::default();
+    let recording = ui_kit::access::begin();
+    pill_tab(
+        &mut layer,
+        &mut text,
+        &icons,
+        &ctx,
+        (0.0, 20.0),
+        &PillTab { on: true, ..PillTab::new("Shop.php") },
+    );
+    let font = font(&ctx);
+    underline_tab(
+        &mut layer,
+        &mut text,
+        &ctx,
+        &font,
+        (0.0, 40.0, 24.0),
+        &UnderlineTab::new("Details"),
+    );
+    let frame = recording.take();
+    let tabs: Vec<_> = frame.nodes().iter().map(|n| (n.role, &*n.name, n.state.selected)).collect();
+    assert_eq!(tabs, [(Role::Tab, "Shop.php", true), (Role::Tab, "Details", false)]);
+}

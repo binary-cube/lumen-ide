@@ -798,7 +798,17 @@ impl Picker {
             }
             let content = Rect::new(content_x - px(6.0), top, content_w + px(6.0), self.row_h);
             let mut pen = RowPaint { layer: &mut *rows, text: &mut *text, icons, ctx };
-            self.render.0.paint_row(&mut pen, &self.items[i], content);
+            // A list's item to a screen reader, named by its label (its texts, drawn in it,
+            // are that name), chosen when checked.
+            let item = &self.items[i];
+            let described = || {
+                use ui_kit::access::{Described, Role};
+                Described::new(Role::ListItem, item.label.as_str(), row)
+                    .key(i as u64)
+                    .selected(self.chosen.contains(&i))
+                    .focused(lit)
+            };
+            ui_kit::access::group(described, || self.render.0.paint_row(&mut pen, item, content));
             if let Some(visible_row) = row.intersect(&list) {
                 self.rows.push((visible_row, at));
             }

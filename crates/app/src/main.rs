@@ -48,6 +48,8 @@ mod sessions;
 mod settings;
 #[cfg(feature = "snapshot")]
 mod snapshot;
+#[cfg(feature = "snapshot")]
+mod snapshot_gpu;
 mod snippets;
 mod split_tree;
 mod startup;

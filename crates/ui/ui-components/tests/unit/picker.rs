@@ -198,3 +198,33 @@ fn its_search_is_the_shared_field_with_its_clear_button() {
     assert_eq!(p.shown().len(), 8, "emptied: every item back");
     assert!(p.is_open());
 }
+
+/// Its rows tell a screen reader their names, the chosen one selected; a row's name isn't
+/// read again, its detail is, under it.
+#[test]
+fn its_rows_tell_their_names_and_the_chosen_one() {
+    use ui_kit::access::Role;
+    let palette = crate::palette::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut p = picker(Some(2));
+    let (anchor, bounds) = (Rect::new(10.0, 10.0, 300.0, 30.0), Rect::new(0.0, 0.0, 800.0, 900.0));
+    let recording = ui_kit::access::begin();
+    p.paint(&mut Scene::default(), &mut text, &icons, &ctx, (anchor, bounds), "");
+    let frame = recording.take();
+    let items: Vec<_> = frame.nodes().iter().filter(|n| n.role == Role::ListItem).collect();
+    assert_eq!(items.len(), 8);
+    assert_eq!(&*items[2].name, "bin");
+    assert!(items[2].state.selected && !items[0].state.selected);
+    // A row's name isn't read again; its detail is, under it.
+    let under = |row: &ui_kit::access::Node| {
+        frame
+            .nodes()
+            .iter()
+            .filter(|n| n.parent == row.id)
+            .map(|n| n.name.to_string())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(under(items[2]), ["uid 2"]);
+}

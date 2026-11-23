@@ -28,6 +28,7 @@ use crate::workbench::{EditKey, FoldCommand, MouseResult, Split, Workbench};
 use icons::WithIcons;
 use syntax_ts::{SyntaxConfig, SyntaxWorker};
 
+mod access;
 mod actions;
 mod alt_tap;
 mod closing;
@@ -429,6 +430,8 @@ impl EditorApp {
         };
         let only_decorations =
             only_decorations && self.workbench.repaint_decorations(&mut self.frames.scene);
+        let access =
+            access::begin(self.window.as_deref(), &mut self.frames.access, only_decorations);
         // The earliest moment the next whole frame is needed, whatever happens meanwhile.
         let looks_ahead = frame_start + Duration::from_secs(1);
         let mut full_due = looks_ahead;
@@ -571,6 +574,12 @@ impl EditorApp {
         }
 
         self.workbench.paint_phases.end();
+        access::end(
+            access,
+            &mut self.frames.access,
+            self.window.as_deref(),
+            &self.window_state.title,
+        );
         let mut glyphs = WithIcons { text: &mut **text, icons: self.workbench.icons() };
         let painted = frame_start.elapsed();
         // A profile recording's step: the scene handed to the GPU and shown.
@@ -605,6 +614,7 @@ impl EditorApp {
                 self.frames.overlay.record(frame_start.elapsed(), stats);
                 if !stats.skipped {
                     kernel::probe::frame(frame_start.elapsed());
+                    record_frame(&stats, self.frames.scene.layers().len());
                 }
                 if stats.retry {
                     window.request_redraw();
@@ -838,6 +848,25 @@ impl ResizeTest {
             "diagnostic resize"
         );
     }
+}
+
+/// What a drawn frame cost the renderer, for a profile recording (`kernel::probe`): what
+/// the scene held and what the GPU was asked to do (nothing while nothing records).
+fn record_frame(stats: &render_api::FrameStats, layers: usize) {
+    use kernel::probe::{count, level, recording};
+    const OWNER: &str = "render";
+    if !recording() {
+        return;
+    }
+    let n = |v: usize| u64::try_from(v).unwrap_or(u64::MAX);
+    count(OWNER, "draw calls", n(stats.draw_calls));
+    count(OWNER, "quads", n(stats.quads));
+    count(OWNER, "glyphs", n(stats.glyphs));
+    count(OWNER, "layers", n(layers));
+    count(OWNER, "pixels drawn", stats.drawn_pixels);
+    count(OWNER, "blurs made", n(stats.blurs));
+    level(OWNER, "draw calls a frame", n(stats.draw_calls));
+    level(OWNER, "glyphs cached", n(stats.cached_glyphs));
 }
 
 fn theme_appearance(appearance: SystemAppearance) -> Appearance {

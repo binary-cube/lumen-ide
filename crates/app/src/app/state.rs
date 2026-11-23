@@ -116,12 +116,16 @@ pub(super) struct Frames {
     /// The frames that drew only the decorations, and the whole ones (diagnostics).
     pub decoration_frames: u64,
     pub whole_frames: u64,
+    /// The accessibility tree the last frame made (while a screen reader runs): told to the
+    /// system again only when a frame changes it, and where a node it acts on is.
+    pub access: Option<super::access::Told>,
 }
 
 impl Frames {
     pub fn new() -> Self {
         Self {
             renderer: None,
+            access: None,
             floating: None,
             floating_failed: false,
             overlay: DebugOverlay::new(String::new()),

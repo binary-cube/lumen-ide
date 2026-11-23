@@ -762,8 +762,12 @@ impl EditorView {
             widest.max(self.longest_line.value().map_or(0, |w| w.0) as f32 * f.layout.advance);
         self.max_scroll_x = (widest - f.text_area.size.width + f.layout.advance * 8.0).max(0.0);
         self.paint_ruler(&f, highlights, palette);
-        self.paint_gutter(&f, text, scene, palette);
-        self.paint_text(&f, text, scene, palette);
+        // The code and its line numbers aren't read as loose texts (a token at a time): the
+        // editor is told as a text area of its own (plan 93d, part two).
+        ui_kit::access::silent(|| {
+            self.paint_gutter(&f, text, scene, palette);
+            self.paint_text(&f, text, scene, palette);
+        });
         // The cursors and the IME text being composed.
         if focused {
             self.paint_carets(&f, text, scene, palette);

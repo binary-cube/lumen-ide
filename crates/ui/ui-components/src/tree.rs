@@ -17,8 +17,14 @@ pub fn chevron_icon(expanded: bool) -> &'static str {
     if expanded { "chevron-down" } else { "chevron-right" }
 }
 
-/// The chevron of a node that folds, in `at` (nothing when the icon set has none).
+/// The chevron of a node that folds, in `at` (nothing when the icon set has none). To a
+/// screen reader it's the tree's item, open or folded, named by the text on its row.
 pub fn chevron(layer: &mut Layer, icons: &Icons, at: Rect, expanded: bool, color: Rgba) {
+    ui_kit::access::node(|| {
+        let mut node = ui_kit::access::Described::new(ui_kit::access::Role::TreeItem, "", at);
+        node.state.expanded = Some(expanded);
+        node
+    });
     if let Some(id) = icons.id(chevron_icon(expanded)) {
         ui_kit::draw_icon(layer, icons, id, at, color);
     }

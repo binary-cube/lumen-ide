@@ -436,6 +436,19 @@ impl ContextMenu {
             };
             let row = Rect::new(p.min_x() + pad, top, p.size.width - pad * 2.0, row_h);
             let selected = (self.selected == Some(i) || open_child == Some(i)) && !look.disabled;
+            // A menu's row to a screen reader: its whole label, greyed out, checked or on,
+            // a submenu's open or not (its texts drawn in it are its own).
+            ui_kit::access::node(|| {
+                use ui_kit::access::{Described, Role};
+                let mut node = Described::new(Role::MenuItem, label.as_str(), row)
+                    .disabled(look.disabled)
+                    .focused(selected);
+                node.state.checked = on.or(look.checked.then_some(true));
+                if submenu {
+                    node.state.expanded = Some(open_child == Some(i));
+                }
+                node
+            });
             // A greyed-out row: its icon, label and keys faded.
             let dim = |c: kernel::Rgba| if look.disabled { c.with_alpha(c.a * 0.45) } else { c };
             let (label_ink, icon_ink) = row_ink(look, selected, palette);

@@ -261,3 +261,23 @@ fn work_in_progress_has_its_bar() {
     let done = card(Notification::success("Copied").with_progress(1.0), &mut text);
     assert_eq!(done.progress, Some(Some(1.0)), "told how far, whatever its kind");
 }
+
+/// A notification is told to a screen reader as an alert: its title its name, its texts not
+/// read again on their own.
+#[test]
+fn a_notification_is_told_as_an_alert() {
+    use ui_kit::access::Role;
+    let n = stack(vec![Notification::success("Saved.")]);
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = Scene::default();
+    let recording = ui_kit::access::begin();
+    let painter = Painter { text: &mut text, scene: &mut scene, palette: &palette, icons: &icons };
+    ToastStack::default().paint(painter, &n, place(ToastPosition::TopCenter, 1600.0));
+    let frame = recording.take();
+    let alerts: Vec<_> = frame.nodes().iter().filter(|n| n.role == Role::Alert).collect();
+    assert_eq!(alerts.len(), 1);
+    assert_eq!(&*alerts[0].name, "Saved.");
+    assert!(!frame.nodes().iter().any(|n| n.role == Role::Label && &*n.name == "Saved."));
+}

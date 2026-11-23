@@ -86,6 +86,7 @@ impl EditorApp {
                 self.on_right_click(position)
             }
             PlatformEvent::Ime(ime) => self.on_ime(ime),
+            PlatformEvent::Access(request) => self.on_access(request),
             PlatformEvent::SystemAppearanceChanged(appearance) => {
                 self.on_appearance_changed(appearance)
             }

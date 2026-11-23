@@ -7,6 +7,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+pub mod access;
+
 use kernel::{PhysicalSize, Point, Rect, Size};
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
@@ -143,6 +145,17 @@ pub struct WindowId(pub u64);
 /// The app window, seen independently of the windowing library.
 pub trait Window: fmt::Debug {
     fn id(&self) -> WindowId;
+    /// The system wants this window's accessibility tree (a screen reader runs): the app
+    /// makes one with each frame ([`access`]). The number changes each time the system asks
+    /// anew (the whole tree is told then); `None`: not wanted, or no such system.
+    fn access_asked(&self) -> Option<u64> {
+        None
+    }
+    /// The window's accessibility tree, as the last frame made it (told only when it
+    /// changed).
+    fn update_access(&self, frame: &access::Frame) {
+        let _ = frame;
+    }
     /// Opens another window in the same process (with the first window's options); it
     /// reaches the app via [`Application::window_opened`].
     fn open_window(&self);
@@ -614,6 +627,8 @@ pub enum ScrollDelta {
 #[derive(Debug, Clone, PartialEq)]
 pub enum PlatformEvent {
     Resized(PhysicalSize),
+    /// What a screen reader asked of a node of the window's accessibility tree.
+    Access(access::Request),
     /// The color picked with the screen eyedropper (`None`: cancelled).
     ScreenColor(Option<kernel::Rgba>),
     ScaleFactorChanged(f64),

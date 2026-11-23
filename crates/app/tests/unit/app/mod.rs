@@ -113,3 +113,35 @@ fn a_standing_window_gives_back_its_frames_without_drawing() {
     assert!(app.release_without_frame(now));
     assert_eq!(released.get(), 2);
 }
+
+/// A drawn frame's cost reaches a profile recording (what the GPU was asked to do, what
+/// the scene held), and nothing while none records.
+#[test]
+fn a_frames_cost_is_recorded_only_while_recording() {
+    let stats = render_api::FrameStats {
+        quads: 40,
+        glyphs: 300,
+        draw_calls: 12,
+        drawn_pixels: 1000,
+        cached_glyphs: 90,
+        ..render_api::FrameStats::default()
+    };
+    kernel::probe::start();
+    for _ in 0..3 {
+        super::record_frame(&stats, 5);
+    }
+    let gathered = kernel::probe::take();
+    kernel::probe::stop();
+    let counted =
+        |what: &str| gathered.counts.iter().find(|c| c.0 == "render" && c.1 == what).map(|c| c.2);
+    assert_eq!(counted("draw calls"), Some(36));
+    assert_eq!(counted("layers"), Some(15));
+    assert_eq!(counted("glyphs"), Some(900));
+    let level = gathered.levels.iter().find(|l| l.0 == "render" && l.1 == "glyphs cached");
+    assert_eq!(level.map(|l| l.3), Some(90));
+    super::record_frame(&stats, 5);
+    kernel::probe::start();
+    let after = kernel::probe::take();
+    kernel::probe::stop();
+    assert!(after.counts.iter().all(|c| c.0 != "render"), "nothing kept while stopped");
+}

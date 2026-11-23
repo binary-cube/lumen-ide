@@ -753,6 +753,11 @@ impl Workbench {
         self.active_input_mut().is_some_and(|input| move_cursor(input, motion, extend))
     }
 
+    /// A text field of the window's has the keyboard (a screen reader's value goes in it).
+    pub fn text_field_focused(&mut self) -> bool {
+        self.active_input_mut().is_some()
+    }
+
     pub(super) fn active_input_mut(&mut self) -> Option<&mut ui_kit::TextInput> {
         Some(match self.input_owner()? {
             InputOwner::Overlay(o) => o.slot().input_mut(self)?,

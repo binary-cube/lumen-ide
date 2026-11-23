@@ -167,18 +167,26 @@ impl Workbench {
             zoom: modal.viewer.zoom_level(),
             closable: modal.viewer.modal_closable(),
         };
-        let Some((content, _)) = frame.paint(&spec, &self.icons, text, scene, &self.palette) else {
-            return;
+        // A dialog to a screen reader, named by its title: what's in it is under it.
+        let (icons, palette) = (&self.icons, &self.palette);
+        let dialog = || {
+            use ui_kit::access::{Described, Role};
+            Described::new(Role::Dialog, title.as_str(), window)
         };
-        modal.viewer.paint(ui_workbench::ViewerPaint {
-            bounds: content,
-            scale,
-            text,
-            scene,
-            palette: &self.palette,
-            icons: &self.icons,
-            focused: true,
-            waker,
+        ui_kit::access::group(dialog, || {
+            let Some((content, _)) = frame.paint(&spec, icons, text, scene, palette) else {
+                return;
+            };
+            modal.viewer.paint(ui_workbench::ViewerPaint {
+                bounds: content,
+                scale,
+                text,
+                scene,
+                palette,
+                icons,
+                focused: true,
+                waker,
+            });
         });
     }
 

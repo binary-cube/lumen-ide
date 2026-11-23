@@ -640,6 +640,7 @@ fn event_name(event: &PlatformEvent) -> &'static str {
         PlatformEvent::MouseUp { .. } => "mouse-up",
         PlatformEvent::Command(_) => "command",
         PlatformEvent::Ime(_) => "ime",
+        PlatformEvent::Access(_) => "access",
         PlatformEvent::SystemAppearanceChanged(_) => "appearance",
         PlatformEvent::Wake => "wake",
         PlatformEvent::MenuOpening => "menu-opening",

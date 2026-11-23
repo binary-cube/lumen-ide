@@ -353,8 +353,20 @@ impl ToastStack {
                 };
                 (&mut self.rings[at].1, steps)
             });
-            let placed =
-                paint_card(layer, text, icons, &ctx, (card, toast), rect, self.hover, ring);
+            // A message told to a screen reader as it appears: its title, its detail as its
+            // value (its texts drawn in it are these).
+            let message = &toast.notification;
+            let alert = || {
+                use ui_kit::access::{Described, Role};
+                let node = Described::new(Role::Alert, message.title.as_str(), rect);
+                match &message.detail {
+                    Some(detail) => node.value(detail.as_str()),
+                    None => node,
+                }
+            };
+            let placed = ui_kit::access::group(alert, || {
+                paint_card(layer, text, icons, &ctx, (card, toast), rect, self.hover, ring)
+            });
             self.placed.push(placed);
         }
         // The rings of cards gone (or no longer counting).

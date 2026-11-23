@@ -1,5 +1,6 @@
 //! Platform implementation on top of winit (+ rfd for dialogs, muda for the macOS menu).
 
+mod access_bridge;
 mod app_icon;
 #[cfg(target_os = "windows")]
 mod caption_windows;
@@ -59,7 +60,7 @@ use winit::keyboard::{self, ModifiersState};
 use winit::window::WindowId;
 
 /// Events sent into the winit loop from outside it (e.g. from the native menu).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) enum UserEvent {
     /// A native menu's row chosen (the menus are macOS' and Windows' only).
     #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
@@ -92,6 +93,16 @@ pub(crate) enum UserEvent {
     /// A native dialog closed: the modifier keys released while it was up never reached the
     /// window — they're assumed released (otherwise ⌘ would stay "held").
     ResetModifiers(WindowId),
+    /// The system's accessibility: its tree asked for, a node acted on, a screen reader gone.
+    Access(accesskit_winit::Event),
+    /// A window's accessibility tree, made by the app's last frame.
+    AccessTree(WindowId, accesskit::TreeUpdate),
+}
+
+impl From<accesskit_winit::Event> for UserEvent {
+    fn from(event: accesskit_winit::Event) -> Self {
+        Self::Access(event)
+    }
 }
 
 /// The winit platform (macOS, Windows, Linux X11/Wayland).
@@ -140,6 +151,8 @@ struct WinitWindow {
     clipboard: Mutex<Option<arboard::Clipboard>>,
     /// Space taken by the window buttons in the unified bar (logical pixels), or 0.
     titlebar_inset: f32,
+    /// The system's asks for its accessibility tree (see [`access_bridge`]).
+    access_asked: Arc<std::sync::atomic::AtomicU64>,
     /// Windows without the system's title bar: where the app's maximize button is.
     #[cfg(target_os = "windows")]
     caption: Option<Arc<caption_windows::Caption>>,
@@ -175,6 +188,17 @@ impl WinitWindow {
 impl Window for WinitWindow {
     fn id(&self) -> platform_api::WindowId {
         platform_api::WindowId(u64::from(self.window.id()))
+    }
+
+    fn access_asked(&self) -> Option<u64> {
+        Some(self.access_asked.load(std::sync::atomic::Ordering::Relaxed)).filter(|&n| n > 0)
+    }
+
+    fn update_access(&self, frame: &platform_api::access::Frame) {
+        let update = access_bridge::tree_update(frame, &self.window.title());
+        if let Ok(proxy) = self.proxy.lock() {
+            let _ = proxy.send_event(UserEvent::AccessTree(self.window.id(), update));
+        }
     }
 
     fn set_menus(&self, menus: Vec<platform_api::Menu>) {
@@ -597,6 +621,8 @@ struct WinState {
     drag: file_drag::FileDrag,
     /// The caret's place for the input methods (the window's [`WinitWindow::ime`]).
     ime: Arc<Mutex<ime_caret::ImeCaret>>,
+    /// Its accessibility adapter (see [`access_bridge`]).
+    access: access_bridge::Access,
 }
 
 struct Handler {
@@ -706,9 +732,20 @@ impl Handler {
                 .with_undecorated_shadow(!transparent)
                 .with_no_redirection_bitmap(transparent);
         }
-        let attributes = app_icon::with_icon(attributes, self.options.icon);
+        // Shown once its accessibility adapter is made (it must be made before).
+        let attributes = app_icon::with_icon(attributes, self.options.icon).with_visible(false);
         match event_loop.create_window(attributes) {
             Ok(window) => {
+                let access = access_bridge::Access {
+                    adapter: accesskit_winit::Adapter::with_event_loop_proxy(
+                        event_loop,
+                        &window,
+                        self.proxy.clone(),
+                    ),
+                    asked: Arc::default(),
+                };
+                let access_asked = Arc::clone(&access.asked);
+                let id = window.id();
                 // Without IME, dead keys (e.g. composed diacritics) don't work on macOS.
                 window.set_ime_allowed(true);
                 let window = Arc::new(window);
@@ -721,6 +758,7 @@ impl Handler {
                     cursor: Point::default(),
                     drag: file_drag::FileDrag::default(),
                     ime: Arc::clone(&ime),
+                    access,
                 });
                 let native_menu = self.native_menu.is_some();
                 #[cfg(target_os = "windows")]
@@ -738,10 +776,16 @@ impl Handler {
                     native_menu,
                     clipboard: Mutex::new(None),
                     titlebar_inset: self.titlebar_inset(),
+                    access_asked,
                     #[cfg(target_os = "windows")]
                     caption,
                     ime,
                 }));
+                // Shown once all of it is set (its bar, its caption, what the app restored):
+                // it was made hidden for its accessibility adapter.
+                if let Some(state) = self.windows.iter().find(|w| w.window.id() == id) {
+                    state.window.set_visible(true);
+                }
             }
             Err(e) => {
                 tracing::error!(error = %e, "can't create the window");
@@ -937,6 +981,33 @@ impl ApplicationHandler<UserEvent> for Handler {
             }
             // A timed redraw was requested: `about_to_wait` sets the deadline.
             UserEvent::Timer => {}
+            UserEvent::Access(accesskit_winit::Event { window_id, window_event }) => {
+                use accesskit_winit::WindowEvent as Asked;
+                match window_event {
+                    // A screen reader came: a frame makes the tree.
+                    Asked::InitialTreeRequested => {
+                        if let Some(state) = self.state(window_id) {
+                            state.access.asked();
+                            state.window.request_redraw();
+                        }
+                    }
+                    Asked::ActionRequested(asked) => {
+                        if let Some(request) = access_bridge::request(&asked) {
+                            self.dispatch(event_loop, window_id, PlatformEvent::Access(request));
+                        }
+                    }
+                    Asked::AccessibilityDeactivated => {
+                        if let Some(state) = self.state(window_id) {
+                            state.access.left();
+                        }
+                    }
+                }
+            }
+            UserEvent::AccessTree(id, update) => {
+                if let Some(state) = self.state(id) {
+                    state.access.adapter.update_if_active(|| update);
+                }
+            }
             UserEvent::ResetModifiers(id) => {
                 let Some(state) = self.state(id) else { return };
                 if state.modifiers != Modifiers::default() {
@@ -953,6 +1024,10 @@ impl ApplicationHandler<UserEvent> for Handler {
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
         let Some(window) = self.state(id).map(|w| Arc::clone(&w.window)) else { return };
+        // The system's accessibility follows the window (its focus, its size) first.
+        if let Some(state) = self.state(id) {
+            state.access.adapter.process_event(&window, &event);
+        }
         let translated = match event {
             WindowEvent::Resized(size) => {
                 // AppKit repositions the window buttons on every resize.

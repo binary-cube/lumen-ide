@@ -955,6 +955,104 @@ fn a_tone_color_wins_over_the_named_tone() {
     );
 }
 
+/// A button tells a screen reader what it is as it's drawn: named by its label (an icon
+/// alone: never by the icon's id), where it is, greyed out while it can't be used.
+#[test]
+fn a_button_tells_what_it_is_as_it_is_drawn() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let r = square_button(&ctx, (0.0, 20.0), button_size::LARGE);
+    let mut layer = Layer::default();
+    let recording = ui_kit::access::begin();
+    button(
+        &mut layer,
+        &mut text,
+        &icons,
+        &ctx,
+        r,
+        ButtonSpec::new(ButtonKind::Primary).label("Save"),
+    );
+    let off = ButtonSpec::new(ButtonKind::Ghost).icon("close").enabled(false);
+    button(&mut layer, &mut text, &icons, &ctx, r, off);
+    let frame = recording.take();
+    let nodes = frame.nodes();
+    assert_eq!(nodes.len(), 2);
+    assert_eq!((nodes[0].role, &*nodes[0].name, nodes[0].bounds), (Role::Button, "Save", r));
+    assert!(nodes[0].actions.press && !nodes[0].state.disabled);
+    assert_eq!(&*nodes[1].name, "", "not the icon's id");
+    assert!(nodes[1].state.disabled && !nodes[1].actions.press);
+}
+
+/// A switch, a checkbox and a radio tell their state as they're drawn: on or off, a
+/// checkbox's group partly chosen, a switch off limits greyed out.
+#[test]
+fn the_state_controls_tell_their_state() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    let recording = ui_kit::access::begin();
+    switch_enabled(&mut layer, &ctx, (0.0, 10.0), true, false, false);
+    Checkbox::new(Check::Mixed).paint(&mut layer, &mut text, &ctx, 0.0, 40.0);
+    radio(&mut layer, &ctx, 0.0, 70.0, Radio::new(true));
+    let frame = recording.take();
+    let n = frame.nodes();
+    assert_eq!(
+        n.iter().map(|n| n.role).collect::<Vec<_>>(),
+        [Role::Switch, Role::CheckBox, Role::Radio]
+    );
+    assert_eq!(n[0].state.checked, Some(true));
+    assert!(n[0].state.disabled);
+    assert!(n[1].state.mixed && n[1].state.checked == Some(false));
+    assert_eq!(n[2].state.checked, Some(true));
+}
+
+/// The choices tell what they offer: each segment a radio named by its label (the one in
+/// force checked), a dropdown its value and whether its list is open, a check row its
+/// label and whether it's the one chosen.
+#[test]
+fn the_choices_tell_what_they_offer() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut layer = Layer::default();
+    let recording = ui_kit::access::begin();
+    let labels = ["Slow", "Normal", "Fast"];
+    let spec =
+        SegmentedSpec { right: 300.0, mid: 20.0, labels: &labels, selected: 1, hovered: None };
+    segmented(&mut layer, &mut text, &ctx, spec);
+    let field = DropdownSpec {
+        value: "Dark",
+        open: true,
+        hovered: false,
+        enabled: true,
+        note: None,
+        placeholder: None,
+    };
+    dropdown(&mut layer, &mut text, &icons, &ctx, Rect::new(0.0, 50.0, 200.0, 30.0), field);
+    let row = CheckRowSpec::new("Last 7 days", true, false);
+    check_row(&mut layer, &mut text, &icons, &ctx, Rect::new(0.0, 100.0, 200.0, 30.0), row);
+    let frame = recording.take();
+    let n = frame.nodes();
+    let radios: Vec<_> = n.iter().filter(|n| n.role == Role::Radio).collect();
+    assert_eq!(radios.iter().map(|r| &*r.name).collect::<Vec<_>>(), labels);
+    assert_eq!(
+        radios.iter().map(|r| r.state.checked).collect::<Vec<_>>(),
+        [Some(false), Some(true), Some(false)]
+    );
+    let combo = n.iter().find(|n| n.role == Role::ComboBox).expect("the dropdown");
+    assert_eq!((combo.value.as_deref(), combo.state.expanded), (Some("Dark"), Some(true)));
+    let item = n.iter().find(|n| n.role == Role::ListItem).expect("the check row");
+    assert_eq!((&*item.name, item.state.checked), ("Last 7 days", Some(true)));
+    assert!(!n.iter().any(|n| n.role == Role::Label && labels.contains(&&*n.name)));
+}
+
 fn quads_of(draw: impl FnOnce(&mut Layer, &mut TextSystem, &Ctx<'_>)) -> Vec<render_api::Quad> {
     let palette = Palette::dark();
     let ctx = Ctx::new(&palette, 2.0);

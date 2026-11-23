@@ -44,6 +44,10 @@ fn switch_sized(
     let dim =
         |c: Rgba| if enabled { ctx.fade(c) } else { ctx.fade(c.with_alpha(c.a * DISABLED_ALPHA)) };
     let rect = Rect::new(x, (mid - h / 2.0).round(), w, h);
+    ui_kit::access::node(|| {
+        use ui_kit::access::{Described, Role};
+        Described::new(Role::Switch, "", rect).checked(on).disabled(!enabled)
+    });
     let track = if on {
         ctx.palette.accent
     } else {
@@ -144,6 +148,14 @@ impl Checkbox {
         let k = self.size / CHECKBOX;
         let px = |v: f32| ctx.px(v * k);
         let r = Rect::new(x.round(), (mid - size / 2.0).round(), size, size);
+        ui_kit::access::node(|| {
+            use ui_kit::access::{Described, Role};
+            let mut node = Described::new(Role::CheckBox, "", r)
+                .checked(self.state == Check::On)
+                .disabled(!self.enabled);
+            node.state.mixed = self.state == Check::Mixed;
+            node
+        });
         if self.state == Check::Off {
             let border =
                 if self.hovered && self.enabled { CHECKBOX_BORDER_HOVER } else { CHECKBOX_BORDER };
@@ -214,6 +226,10 @@ impl Radio {
         let p = ctx.palette;
         let d = ctx.px(self.size);
         let radio = Rect::new(at.x, at.y, d, d);
+        ui_kit::access::node(|| {
+            use ui_kit::access::{Described, Role};
+            Described::new(Role::Radio, "", radio).checked(self.selected)
+        });
         if self.selected {
             layer.quad(Quad::filled(radio, ctx.fade(p.accent)).rounded(d / 2.0));
             let dot = ctx.px(RADIO_DOT * self.size / RADIO);
@@ -724,6 +740,24 @@ pub fn check_row(
     rect: Rect,
     spec: CheckRowSpec<'_>,
 ) {
+    // A choice to a screen reader: named by its label, checked when it's the one chosen.
+    let described = || {
+        use ui_kit::access::{Described, Role};
+        Described::new(Role::ListItem, spec.label, rect)
+            .selected(spec.checked)
+            .checked(spec.checked)
+    };
+    ui_kit::access::group(described, || paint_check_row(layer, text, icons, ctx, rect, spec));
+}
+
+fn paint_check_row(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    icons: &icons::Icons,
+    ctx: &Ctx<'_>,
+    rect: Rect,
+    spec: CheckRowSpec<'_>,
+) {
     let p = ctx.palette;
     let h = rect.size.height;
     let r = ctx.px(spec.radius);
@@ -927,20 +961,27 @@ fn paint_segmented(
         };
         let content = icon_w(i) + shaped.width;
         let mut cx = (seg.min_x() + (w - content) / 2.0).round();
-        if let (Some(id), Some(icons)) = (icon_of(i), icons) {
-            let s = ctx.px(SEGMENT_ICON);
-            let mid = seg.min_y() + seg.size.height / 2.0;
-            let r = Rect::new(cx, (mid - s / 2.0).round(), s, s);
-            ui_kit::draw_icon(layer, icons, id, r, ctx.fade(color));
-            cx += icon_w(i);
-        }
-        draw_text(
-            layer,
-            &shaped,
-            cx,
-            optical_baseline(seg.min_y(), seg.size.height, &font),
-            ctx.fade(color),
-        );
+        // One of a few to a screen reader: named by its label, chosen when it's the one.
+        let described = || {
+            use ui_kit::access::{Described, Role};
+            Described::new(Role::Radio, *label, seg).checked(on).disabled(off)
+        };
+        ui_kit::access::group(described, || {
+            if let (Some(id), Some(icons)) = (icon_of(i), icons) {
+                let s = ctx.px(SEGMENT_ICON);
+                let mid = seg.min_y() + seg.size.height / 2.0;
+                let r = Rect::new(cx, (mid - s / 2.0).round(), s, s);
+                ui_kit::draw_icon(layer, icons, id, r, ctx.fade(color));
+                cx += icon_w(i);
+            }
+            draw_text(
+                layer,
+                &shaped,
+                cx,
+                optical_baseline(seg.min_y(), seg.size.height, &font),
+                ctx.fade(color),
+            );
+        });
         if !off {
             each(i, seg);
         }

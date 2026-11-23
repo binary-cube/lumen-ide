@@ -156,106 +156,129 @@ impl<S: GridSource> DataGrid<S> {
         let current_find = self.find.matches.get(self.find.current).copied();
         let default_label = i18n::t("grid.default");
         for i in first..last {
-            let row = self.row_at(i);
-            let top = body.min_y() + i as f32 * row_h - self.scroll_y;
-            let line = Rect::new(cells.min_x(), top, cells.size.width, row_h);
-            crate::table::stripe(layer, ds, line, i as usize);
-            let state = self.source.row_state(row);
-            let baseline = ui_kit::centered_baseline(top, row_h, &metrics);
-            for (pos, &col) in visible.iter().enumerate() {
-                let (left, right) = (x0 + edges[pos], x0 + edges[pos + 1]);
-                if right < cells.min_x() || left > cells.max_x() {
-                    continue;
-                }
-                let cell = Rect::new(left, top, right - left, row_h);
-                let at = CellPos::new(i, pos);
-                let mark = self.source.mark(row, col);
-                match mark {
-                    CellMark::Modified => {
-                        layer.quad(Quad::filled(cell, p.vcs_modified.with_alpha(0.22)))
+            let row_top = body.min_y() + i as f32 * row_h - self.scroll_y;
+            // A row to a screen reader: its cells' texts under it, in order.
+            let described = || {
+                use ui_kit::access::{Described, Role};
+                Described::new(
+                    Role::Row,
+                    "",
+                    Rect::new(cells.min_x(), row_top, cells.size.width, row_h),
+                )
+                .key(i)
+            };
+            ui_kit::access::group(described, || {
+                let row = self.row_at(i);
+                let top = body.min_y() + i as f32 * row_h - self.scroll_y;
+                let line = Rect::new(cells.min_x(), top, cells.size.width, row_h);
+                crate::table::stripe(layer, ds, line, i as usize);
+                let state = self.source.row_state(row);
+                let baseline = ui_kit::centered_baseline(top, row_h, &metrics);
+                for (pos, &col) in visible.iter().enumerate() {
+                    let (left, right) = (x0 + edges[pos], x0 + edges[pos + 1]);
+                    if right < cells.min_x() || left > cells.max_x() {
+                        continue;
                     }
-                    CellMark::Inserted => {
-                        layer.quad(Quad::filled(cell, p.vcs_added.with_alpha(0.16)))
-                    }
-                    CellMark::Deleted => layer.quad(Quad::filled(cell, p.danger.with_alpha(0.12))),
-                    CellMark::None => layer,
-                };
-                if self.selection.contains(at) {
-                    layer.quad(Quad::filled(cell, selected_fill));
-                }
-                if self.find.open && self.find.matches.binary_search(&at).is_ok() {
-                    let fill =
-                        if current_find == Some(at) { p.search_match_current } else { find_fill };
-                    layer.quad(Quad::filled(cell, fill));
-                }
-                let pad = px(CELL_PAD);
-                let room = (cell.size.width - 2.0 * pad).max(0.0);
-                match state {
-                    RowState::Ready => {
-                        let value = self.source.cell(row, col);
-                        if value.is_null() {
-                            let nb =
-                                ui_kit::centered_baseline(top, row_h, &text.metrics(&null_font));
-                            let align = columns[col].align();
-                            let label = if self.source.is_default(row, col) {
-                                default_label.as_str()
-                            } else {
-                                "NULL"
-                            };
-                            draw_fitted(
-                                layer,
-                                text,
-                                label,
-                                &null_font,
-                                (left + pad, room, nb),
-                                p.text_muted.with_alpha(0.6),
-                                align,
-                            );
-                        } else {
-                            cell_line(&mut buffer, &value);
-                            let color = match value {
-                                CellRef::Bytes(_) => p.text_muted,
-                                _ => p.text,
-                            };
-                            // An icon of the source's before the text (a level's), the text
-                            // after it.
-                            let mut start = left + pad;
-                            let mut room = room;
-                            if let Some((name, tone)) = self.source.cell_icon(row, col)
-                                && let Some(id) = icons.id(name)
-                            {
-                                let size = px(CELL_ICON);
-                                let at = Rect::new(
-                                    start,
-                                    (top + (row_h - size) / 2.0).round(),
-                                    size,
-                                    size,
-                                );
-                                ui_kit::draw_icon(layer, icons, id, at, tone.color(p));
-                                start += size + px(CELL_ICON_GAP);
-                                room = (room - size - px(CELL_ICON_GAP)).max(0.0);
-                            }
-                            draw_fitted(
-                                layer,
-                                text,
-                                &buffer,
-                                &cell_font,
-                                (start, room, baseline),
-                                color,
-                                columns[col].align(),
-                            );
+                    let cell = Rect::new(left, top, right - left, row_h);
+                    let at = CellPos::new(i, pos);
+                    let mark = self.source.mark(row, col);
+                    match mark {
+                        CellMark::Modified => {
+                            layer.quad(Quad::filled(cell, p.vcs_modified.with_alpha(0.22)))
                         }
+                        CellMark::Inserted => {
+                            layer.quad(Quad::filled(cell, p.vcs_added.with_alpha(0.16)))
+                        }
+                        CellMark::Deleted => {
+                            layer.quad(Quad::filled(cell, p.danger.with_alpha(0.12)))
+                        }
+                        CellMark::None => layer,
+                    };
+                    if self.selection.contains(at) {
+                        layer.quad(Quad::filled(cell, selected_fill));
                     }
-                    RowState::Pending => {
-                        // A placeholder bar while the page comes.
-                        let w = (room * (0.35 + ((row as usize * 7 + pos * 13) % 5) as f32 * 0.1))
-                            .min(room);
-                        let bar = Rect::new(left + pad, top + row_h / 2.0 - px(4.0), w, px(8.0));
-                        layer.quad(Quad::filled(bar, p.text.with_alpha(0.06)).rounded(px(4.0)));
+                    if self.find.open && self.find.matches.binary_search(&at).is_ok() {
+                        let fill = if current_find == Some(at) {
+                            p.search_match_current
+                        } else {
+                            find_fill
+                        };
+                        layer.quad(Quad::filled(cell, fill));
                     }
-                    RowState::Failed | RowState::Missing => {}
+                    let pad = px(CELL_PAD);
+                    let room = (cell.size.width - 2.0 * pad).max(0.0);
+                    match state {
+                        RowState::Ready => {
+                            let value = self.source.cell(row, col);
+                            if value.is_null() {
+                                let nb = ui_kit::centered_baseline(
+                                    top,
+                                    row_h,
+                                    &text.metrics(&null_font),
+                                );
+                                let align = columns[col].align();
+                                let label = if self.source.is_default(row, col) {
+                                    default_label.as_str()
+                                } else {
+                                    "NULL"
+                                };
+                                draw_fitted(
+                                    layer,
+                                    text,
+                                    label,
+                                    &null_font,
+                                    (left + pad, room, nb),
+                                    p.text_muted.with_alpha(0.6),
+                                    align,
+                                );
+                            } else {
+                                cell_line(&mut buffer, &value);
+                                let color = match value {
+                                    CellRef::Bytes(_) => p.text_muted,
+                                    _ => p.text,
+                                };
+                                // An icon of the source's before the text (a level's), the text
+                                // after it.
+                                let mut start = left + pad;
+                                let mut room = room;
+                                if let Some((name, tone)) = self.source.cell_icon(row, col)
+                                    && let Some(id) = icons.id(name)
+                                {
+                                    let size = px(CELL_ICON);
+                                    let at = Rect::new(
+                                        start,
+                                        (top + (row_h - size) / 2.0).round(),
+                                        size,
+                                        size,
+                                    );
+                                    ui_kit::draw_icon(layer, icons, id, at, tone.color(p));
+                                    start += size + px(CELL_ICON_GAP);
+                                    room = (room - size - px(CELL_ICON_GAP)).max(0.0);
+                                }
+                                draw_fitted(
+                                    layer,
+                                    text,
+                                    &buffer,
+                                    &cell_font,
+                                    (start, room, baseline),
+                                    color,
+                                    columns[col].align(),
+                                );
+                            }
+                        }
+                        RowState::Pending => {
+                            // A placeholder bar while the page comes.
+                            let w = (room
+                                * (0.35 + ((row as usize * 7 + pos * 13) % 5) as f32 * 0.1))
+                                .min(room);
+                            let bar =
+                                Rect::new(left + pad, top + row_h / 2.0 - px(4.0), w, px(8.0));
+                            layer.quad(Quad::filled(bar, p.text.with_alpha(0.06)).rounded(px(4.0)));
+                        }
+                        RowState::Failed | RowState::Missing => {}
+                    }
                 }
-            }
+            });
         }
         // The columns' separators.
         crate::table::column_lines(

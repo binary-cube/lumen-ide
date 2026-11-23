@@ -577,7 +577,38 @@ pub fn chip_spec<'a>(
 }
 
 /// Draws the button `spec` describes in `rect`.
+impl ButtonSpec<'_> {
+    /// What it is to a screen reader: a button named by its label (an icon alone: by the
+    /// text on its line, never the icon's own id), greyed out while it can't be used; one
+    /// opening a menu says its list is closed.
+    fn described(&self, rect: Rect) -> ui_kit::access::Described {
+        use ui_kit::access::{Described, Role};
+        let name = self.label.unwrap_or_default();
+        let mut node = Described::new(Role::Button, name, rect).disabled(!self.enabled);
+        node.state.selected = self.on;
+        if self.menu {
+            node.state.expanded = Some(false);
+        }
+        node
+    }
+}
+
 pub fn button(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    icons: &icons::Icons,
+    ctx: &Ctx<'_>,
+    rect: Rect,
+    spec: ButtonSpec<'_>,
+) {
+    // Its label is its name: drawn under it, not read a second time.
+    ui_kit::access::group(
+        || spec.described(rect),
+        || paint_button(layer, text, icons, ctx, rect, spec),
+    );
+}
+
+fn paint_button(
     layer: &mut Layer,
     text: &mut TextSystem,
     icons: &icons::Icons,

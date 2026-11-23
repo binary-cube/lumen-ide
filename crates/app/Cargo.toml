@@ -169,7 +169,7 @@ serde_json.workspace = true
 [features]
 # `--snapshot`: the screens rendered into PNGs (visual checks, `scripts/ui-snapshots.sh`);
 # not in the builds handed out.
-snapshot = ["agent-chat/snapshot", "database-explorer/snapshot", "remote-projects/snapshot", "database-console/snapshot", "services-panel/snapshot", "task-manager/snapshot", "keep-awake/snapshot", "relax/snapshot", "dep:lsp-client", "lsp-client/fake"]
+snapshot = ["agent-chat/snapshot", "database-explorer/snapshot", "remote-projects/snapshot", "database-console/snapshot", "services-panel/snapshot", "task-manager/snapshot", "keep-awake/snapshot", "relax/snapshot", "dep:lsp-client", "lsp-client/fake", "render-wgpu/offscreen"]
 # The system's allocator on Windows too, instead of mimalloc (to compare them).
 system-allocator = []
 

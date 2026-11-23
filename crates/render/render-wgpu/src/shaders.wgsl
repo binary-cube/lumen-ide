@@ -37,70 +37,118 @@ fn vs_quad(@builtin(vertex_index) vertex_index: u32, quad: QuadInstance) -> Quad
     return out;
 }
 
-// Same formula as `quad_coverage` in render-software.
-@fragment
-fn fs_quad(in: QuadVarying) -> @location(0) vec4<f32> {
-    let half = in.rect.zw * 0.5;
-    let radius = max(min(in.params.x, min(half.x, half.y)), 0.0);
-    let d = abs(in.pixel - (in.rect.xy + half)) - (half - vec2<f32>(radius));
+// A rounded, bordered rectangle's color at `pixel`, premultiplied: the same formula as
+// `quad_coverage` in render-software. `params`: corner radius, border width.
+fn quad_coverage(
+    rect: vec4<f32>,
+    color: vec4<f32>,
+    border_color: vec4<f32>,
+    params: vec2<f32>,
+    pixel: vec2<f32>,
+) -> vec4<f32> {
+    let half = rect.zw * 0.5;
+    let radius = max(min(params.x, min(half.x, half.y)), 0.0);
+    let d = abs(pixel - (rect.xy + half)) - (half - vec2<f32>(radius));
     let dist = length(max(d, vec2<f32>(0.0))) + min(max(d.x, d.y), 0.0) - radius;
 
     let shape = clamp(0.5 - dist, 0.0, 1.0);
     var fill = shape;
     var border = 0.0;
-    if (in.params.y > 0.0) {
-        fill = clamp(0.5 - (dist + in.params.y), 0.0, 1.0);
+    if (params.y > 0.0) {
+        fill = clamp(0.5 - (dist + params.y), 0.0, 1.0);
         border = shape - fill;
     }
-
-    let fill_a = in.color.a * fill;
-    let border_a = in.border_color.a * border;
-    let rgb = in.border_color.rgb * border_a + in.color.rgb * fill_a * (1.0 - border_a);
-    return emphasize(vec4<f32>(rgb, border_a + fill_a * (1.0 - border_a)), in.pixel);
+    let fill_a = color.a * fill;
+    let border_a = border_color.a * border;
+    let rgb = border_color.rgb * border_a + color.rgb * fill_a * (1.0 - border_a);
+    return vec4<f32>(rgb, border_a + fill_a * (1.0 - border_a));
 }
 
-// ─── Glyphs: copied pixel by pixel from the atlas ───
+// The background over a partial frame's areas.
+@fragment
+fn fs_quad(in: QuadVarying) -> @location(0) vec4<f32> {
+    let color = quad_coverage(in.rect, in.color, in.border_color, in.params, in.pixel);
+    return emphasize(color, in.pixel);
+}
+
+// ─── Primitives: every layer's rectangles and glyphs in one draw ───
+//
+// A primitive is a rectangle (rounded, bordered: the quads' SDF) or a glyph (copied pixel
+// by pixel from the atlas), in the scene's order. Each carries its layer's clip (whole
+// pixels, as a scissor would cut) and whether its layer is muted by the emphasis, so the
+// layers need no draw of their own.
 
 @group(1) @binding(0) var mask_atlas: texture_2d<f32>;
 @group(1) @binding(1) var color_atlas: texture_2d<f32>;
 
-struct GlyphInstance {
-    @location(0) rect: vec4<f32>,          // x, y, w, h (whole pixels)
-    @location(1) atlas_origin: vec2<f32>,  // the glyph's corner in the atlas, in texels
-    @location(2) color: vec4<f32>,
-    @location(3) kind: u32,                // 0 = mask, 1 = color
+// `flags`: the kind in bits 0–1, muted by the emphasis in bit 2 (`PrimGpu` in Rust).
+const PRIM_QUAD: u32 = 0u;
+const PRIM_MASK: u32 = 1u;
+const PRIM_COLOR: u32 = 2u;
+const PRIM_MUTED: u32 = 4u;
+
+struct PrimInstance {
+    @location(0) rect: vec4<f32>,          // x, y, w, h (a glyph's: whole pixels)
+    @location(1) color: vec4<f32>,
+    @location(2) border_color: vec4<f32>,
+    @location(3) clip: vec4<u32>,          // x0, y0, x1, y1 (whole pixels)
+    @location(4) params: vec4<f32>,        // corner radius, border width, a glyph's atlas x, y
+    @location(5) flags: u32,
 };
 
-struct GlyphVarying {
+struct PrimVarying {
     @builtin(position) position: vec4<f32>,
-    @location(0) texel: vec2<f32>,
+    @location(0) @interpolate(flat) rect: vec4<f32>,
     @location(1) @interpolate(flat) color: vec4<f32>,
-    @location(2) @interpolate(flat) kind: u32,
+    @location(2) @interpolate(flat) border_color: vec4<f32>,
+    @location(3) @interpolate(flat) params: vec4<f32>,
+    @location(4) @interpolate(flat) flags: u32,
 };
 
 @vertex
-fn vs_glyph(@builtin(vertex_index) vertex_index: u32, glyph: GlyphInstance) -> GlyphVarying {
-    let corner = strip_corner(vertex_index);
-    var out: GlyphVarying;
-    out.position = to_clip(glyph.rect.xy + corner * glyph.rect.zw);
-    out.texel = glyph.atlas_origin + corner * glyph.rect.zw;
-    out.color = glyph.color;
-    out.kind = glyph.kind;
+fn vs_prim(@builtin(vertex_index) vertex_index: u32, prim: PrimInstance) -> PrimVarying {
+    // Its rectangle cut by its clip: the pixels whose centers are in both (as a scissor).
+    let clip = vec4<f32>(prim.clip);
+    let lo = max(prim.rect.xy, clip.xy);
+    let hi = max(min(prim.rect.xy + prim.rect.zw, clip.zw), lo);
+    var out: PrimVarying;
+    out.position = to_clip(lo + strip_corner(vertex_index) * (hi - lo));
+    out.rect = prim.rect;
+    out.color = prim.color;
+    out.border_color = prim.border_color;
+    out.params = prim.params;
+    out.flags = prim.flags;
     return out;
 }
 
-@fragment
-fn fs_glyph(in: GlyphVarying) -> @location(0) vec4<f32> {
-    let texel = vec2<i32>(floor(in.texel));
-    if (in.kind == 0u) {
+// A glyph's pixel at `pixel`, from the atlas: a mask in the instance's color, or its own
+// colors faded by the instance's alpha (a dimmed row, a modal appearing).
+fn glyph_color(in: PrimVarying, pixel: vec2<f32>, kind: u32) -> vec4<f32> {
+    let texel = vec2<i32>(floor(in.params.zw + pixel - in.rect.xy));
+    if (kind == PRIM_MASK) {
         let a = textureLoad(mask_atlas, texel, 0).r * in.color.a;
-        return emphasize(vec4<f32>(in.color.rgb * a, a), in.position.xy);
+        return vec4<f32>(in.color.rgb * a, a);
     }
-    // Its own colors; the instance color's alpha still fades it (a dimmed row, a modal
-    // appearing).
+    // PRIM_COLOR
     let c = textureLoad(color_atlas, texel, 0);
     let a = c.a * in.color.a;
-    return emphasize(vec4<f32>(c.rgb * a, a), in.position.xy);
+    return vec4<f32>(c.rgb * a, a);
+}
+
+@fragment
+fn fs_prim(in: PrimVarying) -> @location(0) vec4<f32> {
+    let pixel = in.position.xy;
+    let kind = in.flags & 3u;
+    var color: vec4<f32>;
+    if (kind == PRIM_QUAD) {
+        color = quad_coverage(in.rect, in.color, in.border_color, in.params.xy, pixel);
+    } else {
+        color = glyph_color(in, pixel, kind);
+    }
+    if ((in.flags & PRIM_MUTED) != 0u) {
+        return emphasize(color, pixel);
+    }
+    return color;
 }
 
 // ─── The window's corners: what's outside them is erased (left transparent) ───

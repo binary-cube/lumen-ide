@@ -264,6 +264,12 @@ impl ToOwnedKey<Box<str>> for str {
     }
 }
 
+impl ToOwnedKey<std::sync::Arc<str>> for str {
+    fn to_owned_key(&self) -> std::sync::Arc<str> {
+        self.into()
+    }
+}
+
 impl ToOwnedKey<std::path::PathBuf> for std::path::Path {
     fn to_owned_key(&self) -> std::path::PathBuf {
         self.to_path_buf()

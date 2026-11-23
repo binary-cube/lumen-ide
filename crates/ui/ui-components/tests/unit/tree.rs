@@ -37,3 +37,21 @@ fn the_chevron_points_down_when_open() {
     assert_eq!(chevron_icon(true), "chevron-down");
     assert_eq!(chevron_icon(false), "chevron-right");
 }
+
+/// A folding node tells a screen reader it's a tree's item, open or folded, named by the
+/// text on its row.
+#[test]
+fn a_folding_node_is_a_tree_item_named_by_its_row() {
+    use ui_kit::access::Role;
+    let icons = Icons::builtin();
+    let mut layer = Layer::default();
+    let mut text = text_layout::TextSystem::new();
+    let font = text_layout::Font::new(text_layout::FontFamily::SansSerif, 13.0);
+    let recording = ui_kit::access::begin();
+    chevron(&mut layer, &icons, Rect::new(0.0, 0.0, 16.0, 16.0), true, Rgba::WHITE);
+    let label = text.shape_line("src", &font);
+    ui_kit::draw_text(&mut layer, &label, 20.0, 12.0, Rgba::WHITE);
+    let frame = recording.take();
+    let item = frame.nodes().iter().find(|n| n.role == Role::TreeItem).expect("the item");
+    assert_eq!((&*item.name, item.state.expanded), ("src", Some(true)));
+}

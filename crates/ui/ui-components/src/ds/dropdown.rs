@@ -143,7 +143,30 @@ pub fn dropdown_with_icon(
     paint(layer, text, icons, ctx, r, (spec, look), Some(icon));
 }
 
+/// The field to a screen reader: a choice's box showing its value, its list open or not
+/// (its name is the text on its row).
 fn paint(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    icons: &icons::Icons,
+    ctx: &Ctx<'_>,
+    r: Rect,
+    (spec, look): (DropdownSpec<'_>, DropdownLook<'_>),
+    icon: Option<&str>,
+) {
+    let described = || {
+        use ui_kit::access::{Described, Role};
+        let mut node =
+            Described::new(Role::ComboBox, "", r).value(spec.value).disabled(!spec.enabled);
+        node.state.expanded = Some(spec.open);
+        node
+    };
+    ui_kit::access::group(described, || {
+        paint_field(layer, text, icons, ctx, r, (spec, look), icon)
+    });
+}
+
+fn paint_field(
     layer: &mut Layer,
     text: &mut TextSystem,
     icons: &icons::Icons,

@@ -14,6 +14,18 @@ inspirăm din trei idei ale lui și le facem în codul nostru, pe nevoile noastr
 culori, același text, pixel cu pixel unde se poate (verificat cu snapshot-uri înainte și
 după). Câștigul e dedesubt: CPU, GPU, memorie, cadre.
 
+**Scalabil, nimic scris de două ori** (cerut 2026-11-22, la fel ca la controale):
+- **un singur loc pentru fiecare lucru:**
+  - un singur drawer, folosit și de ferestre, și de măsurători, și de teste;
+  - un singur tip de instanță pe GPU;
+  - un singur `shape_line`, deasupra căruia stau toate paragrafele;
+- **accesibilitatea vine din componente:** fiecare componentă comună își descrie singură
+  nodul (o metodă implicită pe contract), iar un view compus primește arborele din părțile
+  lui. Niciun view nu scrie de mână rolul unui buton;
+- **ce lipsește se adaugă în componentă**, ca opțiune, pentru toți;
+- **o singură unealtă de comparare:** `scripts/ui-snapshots.sh`, aceeași pentru pixelii
+  CPU, pixelii GPU și cifre.
+
 **Ordinea:** întâi măsurăm (pasul 93a). Fiecare parte pornește doar dacă cifrele arată că
 merită, și cifrele se scriu aici, înainte și după.
 
@@ -171,35 +183,75 @@ AT-SPI (Linux). A scrie noi cele trei punți ar însemna luni de cod specific fi
 sistem, fără niciun câștig vizibil. Ce construim e al nostru: nodurile, rolurile, numele,
 focusul, acțiunile.
 
+**Cum se construiește arborele: odată cu desenarea, din componente.** UI-ul nostru se
+desenează pe loc: `ds::button`, `SearchField`, `Checkbox` și celelalte nu sunt obiecte
+care să existe între cadre, ci funcții care pun dreptunghiuri și glife în `Scene` la
+fiecare cadru. Arborele de accesibilitate se face exact la fel, în același loc:
+
+- **`AccessFrame`**, pereche cu `Scene`: o listă de noduri pusă de componente cât
+  desenează, fiecare cu rolul (buton, câmp, comutator, listă, rând, tab, meniu, dialog,
+  text), numele, valoarea, starea (bifat, apăsat, dezactivat, extins, selectat),
+  dreptunghiul și părintele (grupurile: un panou, un modal, o listă).
+- **Componenta comună își pune singură nodul**, o singură dată, în codul ei:
+  - `ds::button` pune un buton, numit după etichetă sau, dacă n-are, după tooltip;
+  - `SearchField` și `TextInput` pun un câmp, cu valoarea și selecția;
+  - `Checkbox`, comutatorul și `Radio` pun starea lor;
+  - segmentele, dropdown-ul și `Picker` pun o listă cu alegerea;
+  - `DataGrid`, `table` și `TreeList` pun un tabel sau un arbore, doar cu rândurile
+    vizibile;
+  - tab-urile, meniurile aplicației, modalele (un dialog cu titlul lui), toast-urile
+    (anunțate) și bara de stare.
+
+  Niciun view nu scrie de mână rolul unui buton. Un view care folosește componentele
+  devine accesibil fără să se schimbe.
+- **Textul de pe ecran și numele controalelor fără etichetă proprie:**
+  - `ShapedLine` ține textul ei, ca `Arc<str>` comun cu cheia din cache (16 octeți pe
+    linie, nicio copie);
+  - `draw_text` pune un nod „text” cât se face arborele, deci cititorul de ecran citește
+    tot ce scrie pe ecran;
+  - un comutator, un checkbox sau un buton doar cu iconiță primește numele textului de pe
+    rândul lui (ca „Auto-save” lângă comutatorul lui);
+  - nicio pagină nu se schimbă.
+- **Zonele cu tooltip ale unui view** (tabelele lui de „hit”: dreptunghi → acțiune) devin
+  noduri numite după tooltip. Ce are deja un nume pentru mouse îl are și pentru cititorul
+  de ecran, fără cod nou.
+- **Gol cât nu e cerut:** `AccessFrame` e `None` dacă nu rulează niciun cititor de ecran
+  (sistemul spune asta). Componentele verifică un `Option`, deci nicio alocare și niciun
+  cost în plus.
+- **Numai când s-a schimbat:** arborele unui cadru se compară cu cel de dinainte (ca
+  desenarea parțială), iar sistemului i se trimit doar nodurile schimbate. Identitatea
+  unui nod vine din locul lui (view, componentă, cheie), nu din poziția pe ecran.
+
 Pași:
 
-1. **Puntea cu sistemul** în `platform-winit` (adaptorul AccessKit pentru winit), în
-   spatele unui contract din `platform-api`: platforma primește un arbore și trimite
-   înapoi acțiuni (focus, apăsare, setare de valoare). Arborele se cere **doar când un
-   cititor de ecran e activ** (sistemul spune asta). Altfel nu costă nimic.
-2. **Contractul:** o metodă implicită pe `Control` (și pe `Viewer`, `OverlaySlot`) care își
-   descrie nodul: rol, nume, valoare, stare (bifat, dezactivat, extins), dreptunghi, copii.
-   Implicitul e „nimic” (un grup), deci nu se strică nimic.
-3. **Componentele comune întâi**, ca să se propage peste tot:
-   - butoanele: `ds::button` / `ButtonSpec` (rolul, eticheta sau tooltip-ul ca nume,
-     `on` → apăsat, `enabled`);
-   - câmpurile: `SearchField`, `TextInput`, `MultilineField` (valoarea, selecția, caret-ul);
-   - controalele de stare: `Checkbox`, `Radio`, switch, segmented, dropdown + `Picker`;
-   - listele și tabelele: `Picker` (o listă), `DataGrid` / `table` (un tabel), `TreeList`
-     (un arbore);
-   - restul: tab-urile, meniurile aplicației, modalele (dialog, cu titlul lor), toast-urile
-     (anunțate).
-4. **Editorul de cod:** un câmp de text pe mai multe linii, cu linia curentă, caret-ul și
-   selecția. Nu tot fișierul o dată: o fereastră în jurul caret-ului, cum fac editoarele
+1. **Contractul** în `render-api` (sau un crate mic `access-api`, pus în
+   `architecture.toml`): `AccessFrame`, `AccessNode`, `Role`, `State`. Nu depinde de
+   AccessKit: e al nostru, ca `Scene`.
+2. **Puntea cu sistemul** în `platform-winit`: adaptorul AccessKit pentru winit, în
+   spatele unui contract din `platform-api`. Primește arborele și trimite înapoi acțiunile
+   (focus, apăsare, setare de valoare, derulare).
+3. **Acțiunile trec pe aceleași căi ca mouse-ul și tastatura:**
+   - o apăsare venită de la cititor devine un click în centrul nodului;
+   - un focus devine focusul din `Controls`;
+   - o valoare setată devine textul scris în câmp.
+
+   Comportamentul nu se scrie de două ori.
+4. **Componentele comune, una câte una**, fiecare cu testul ei. Ordinea, după cât de des
+   apar: butoane, câmpuri, comutatoare și checkbox-uri, liste și picker, tab-uri, meniuri,
+   modale, tabele și arbori, bara de stare, toast-uri.
+5. **Editorul de cod:** un câmp de text pe mai multe linii, cu linia curentă, caret-ul și
+   selecția. Nu tot fișierul o dată, ci o fereastră în jurul caret-ului, ca alte editoare
    mari.
-5. **Focusul:** focusul nostru (`Controls`) e focusul cititorului de ecran, și invers: o
-   acțiune venită de la cititor trece prin aceleași căi ca tastatura și mouse-ul.
-6. **Nimic generic nu numește un modul:** fiecare modul își descrie view-urile prin
-   contract. Regula din `ui-components.md` se aplică la fel.
+6. **Nimic generic nu numește un modul:** fiecare modul primește accesibilitatea prin
+   componentele pe care le folosește. Ce are în plus (un desen al lui, cum e o diagramă)
+   descrie prin aceeași listă.
 
 **De verificat:**
 - **Teste:** arborele unui view dat (rolurile, numele, focusul), plus o acțiune de apăsare
   venită din arbore ajunge la buton.
+- **Snapshot:** `EDITOR_SNAPSHOT_ACCESS=1` scrie arborele unui ecran ca text, iar
+  `scripts/ui-snapshots.sh` îl compară, ca pe pixeli. Așa un ecran care își pierde numele
+  sau rolurile se vede la compare.
 - **Manual, de utilizator:** VoiceOver pe macOS, Narrator pe Windows, Orca pe Linux. Le
   verifică utilizatorul sau colegul, nu le pornesc eu.
 - **Cost:** zero cât nu e activ niciun cititor de ecran (măsurat în 93a, scenariul 6).
@@ -230,3 +282,206 @@ Pași:
   dreptunghiurile și merg bine. Ar fi o rescriere a tuturor view-urilor, fără câștig vizibil.
 - **Rasterizatorul de fonturi propriu:** doar dacă `swash` sau `skrifa` arată o problemă
   reală (calitate, viteză) la măsurători.
+
+## Făcut (2026-11-22): 93a, sondele
+
+- **Ce raportează un cadru desenat** (`record_frame` în `crates/app/src/app/mod.rs`, sub
+  `render`):
+  - numărate: draw call-uri, dreptunghiuri, glife, straturi, pixeli redesenați, blur-uri
+    refăcute;
+  - niveluri: draw call-uri pe cadru (cel mai mare și ultimul), glife în atlas.
+
+  Datele vin din `FrameStats`, pe care rendererul îl dădea deja, deci nimic nou în driver.
+- **Ce raportează textul** (`text-layout`, sub `text`): linii din cache și linii modelate
+  din nou, timpul de modelare (`shape`), glife rasterizate și timpul lor (`rasterize`).
+- **Cât costă cât nu înregistrează nimic:** o citire atomică pe apel. Test:
+  `a_frames_cost_is_recorded_only_while_recording`.
+- **Cum se măsoară în aplicație:** Help → „Record a Profile…”, câte un profil pentru
+  fiecare scenariu, pe sistemele utilizatorilor (macOS, Windows, Ubuntu).
+- **Cum se compară înainte / după, reproductibil, fără fereastră:**
+  - **`render_wgpu::Offscreen`:** desenează pe GPU fără fereastră, cu același drawer
+    (pipeline-uri, atlas, desenare parțială). Dă cifrele unui cadru și pixelii citiți
+    înapoi. Testele GPU existente folosesc aceeași funcție `headless`.
+  - **`EDITOR_SNAPSHOT_GPU=<cadre>`:** ecranul unui snapshot pictat și desenat de atâtea
+    ori. Tipărește straturile, dreptunghiurile, glifele, draw call-urile, timpul de pictare
+    și de encodare (medie, mediană, maxim) și liniile modelate sau luate din cache.
+  - **`EDITOR_SNAPSHOT_GPU_SAVE` / `_REFERENCE` / `_TOLERANCE`:** poza GPU păstrată sau
+    comparată pixel cu pixel.
+  - **`SNAPSHOT_GPU=10 scripts/ui-snapshots.sh record|compare <dir>`:** toate ecranele, în
+    ambele teme. Compară pixelii CPU, pixelii GPU și cifrele (înainte / după, unul sub
+    altul). Cifrele de referință rămân în `<dir>/gpu.txt`.
+
+| Scenariu | Sistem | Draw call-uri / cadru | Timp CPU / cadru | Linii modelate / s | Glife rasterizate |
+|---|---|---|---|---|---|
+| 1. editor, fișier PHP mare, derulat | | | | | |
+| 2. Settings, căutare tastată | | | | | |
+| 3. Task Manager deschis | | | | | |
+| 4. terminal cu output continuu | | | | | |
+| 5. diagramă mare | | | | | |
+| 6. aplicația stând degeaba | | | | | |
+
+## Făcut (2026-11-22): 93b, o singură trecere
+
+- **O singură instanță pentru dreptunghiuri și glife** (`PrimGpu`, 76 de octeți;
+  `vs_prim` / `fs_prim`):
+  - poartă clip-ul stratului ei, pe `u16`, tăiat direct în geometrie: aceiași pixeli ca
+    un scissor;
+  - poartă și marcajul de estompare sub modal (un bit), deci straturile nu mai cer
+    globals diferite;
+  - o singură formulă SDF în shader, folosită și de fundal.
+- **Batch-urile, zonă cu zonă, în ordinea scenei** (`Drawer::prepare` + `batch_area`):
+  - straturile consecutive formează o rulare (un draw);
+  - se întrerupe doar la imaginile unui strat, la blur-urile lui și la stratul unui blur
+    refăcut, unde se termină o trecere de desenare;
+  - fiecare zonă își are lista ei (`area_batches`), iar pipeline-ul și legăturile se pun
+    o singură dată, nu la fiecare rulare.
+- **Aceeași imagine de mai multe ori la rând** (particulele decorațiunilor) se desenează
+  într-un singur draw (`same_image_runs`).
+- **Atlasul plin:** o glifă fără loc se sare, iar restul cadrului se desenează (test
+  `a_glyph_without_room_leaves_the_rest_drawn`).
+- **Teste:**
+  - `clipped_layers_are_drawn_in_one_draw_in_their_order`: nouă straturi cu clip-uri
+    diferite, un draw, marginile exacte;
+  - `the_same_image_in_a_row_is_one_run`;
+  - toate testele GPU de dinainte trec (desenarea parțială egală cu cea completă,
+    estomparea ca în referință, blur-urile, imaginile).
+- **Review făcut de un agent separat**, 12 constatări, toate verificate:
+  - **reparate:**
+    - atlasul plin;
+    - cifrele `Offscreen` aceleași ca ale ferestrei;
+    - rulările se întrerup doar la un blur refăcut;
+    - lista de batch-uri pe zonă;
+    - legăturile puse o dată;
+    - o singură formulă SDF;
+    - instanța de la 84 la 76 de octeți;
+    - lungimea fișierului comparat;
+    - poza GPU luată din scena snapshot-ului (reproductibilă și pe ecranele animate);
+    - `Offscreen` doar cu `feature = "offscreen"`;
+  - **lăsate:**
+    - culorile pe 8 biți: ar schimba pixelii;
+    - contorul de linii din cache: o citire atomică pe apel cât nu înregistrează nimic.
+
+### Cifrele 93b (2026-11-23, toate ecranele `scripts/ui-snapshots.sh`, ambele teme)
+
+**Cum s-a măsurat:** referința e făcută cu vechiul renderer (un worktree cu `target`
+propriu), cu aceeași unealtă. Comparația:
+`SNAPSHOT_GPU=5 scripts/ui-snapshots.sh compare`, build de debug, macOS, Apple silicon.
+
+| | Înainte | După |
+|---|---|---|
+| Draw call-uri pe cadru, media celor 297 de ecrane (tema închisă) | 47,1 | **5,7** |
+| Cel mai mare număr de draw call-uri pe un ecran | 107 | 61 (Theme Studio, multe imagini diferite) |
+| Encodarea CPU a unui cadru, mediana medie | 0,61 ms | 0,58 ms |
+
+- **Pixelii:** din 594 de ecrane, 580 au pixelii GPU identici (100) sau cu cel mult 1/255
+  pe margini (480).
+- **Celelalte 14** sunt exact ecranele la care diferă și poza CPU, unde rendererul software
+  e neatins:
+  - `settings-5`: iese diferit chiar și de la o rulare la alta cu același binar, verificat
+    și cu binarul vechi;
+  - `rename`: iese identic când e rulat separat;
+  - „running”, „running-wait”, notificările: au animații, numărători și inele după ceas;
+    nu au fost rulate separat.
+- **Pe GPU** câștigul vine din mai puține schimbări de stare (pipeline, legături, scissor),
+  pe care un build de debug pe CPU nu le arată. Cifrele de GPU și de release vin din
+  profilurile din aplicație (93a).
+
+## Făcut (2026-11-23): 93d, accesibilitatea (prima parte)
+
+- **Contractul** (`platform_api::access`):
+  - `Frame` cu noduri sub grupuri: rol, nume, valoare, stare (bifat, parțial, apăsat,
+    deschis, ales, focus), acțiuni, dreptunghi;
+  - identități stabile, după părinte, rol, nume și ordinea între frați, nu după loc, deci
+    o listă derulată își păstrează nodurile;
+  - `changes`: doar ce s-a schimbat;
+  - `Request`: apăsare, focus, valoare.
+- **Înregistratorul** (`ui_kit::access`): pe firul UI, oprit cât nu e cerut (o verificare
+  de `Cell<bool>`, nodul nici măcar descris).
+  - **Textul de pe ecran:** `ShapedLine` ține textul ei, ca `Arc<str>` comun cu cheia din
+    cache, iar `draw_text` pune un nod de text. Semnele fără litere (✓, săgeți) nu se pun.
+  - **Fără dubluri:** un text desenat într-un control cu nume (eticheta unui buton, un rând
+    de meniu, o notificare) nu se mai citește încă o dată.
+  - **Nume automate:** un control fără nume (comutator, checkbox, dropdown, rândul unui
+    arbore) ia textul de pe rândul lui, cel mai apropiat.
+- **Componentele care se descriu singure:**
+  - butonul (`ds::button`): numele din etichetă sau iconiță, starea activ / dezactivat /
+    deschide un meniu;
+  - câmpurile (`TextInput`, deci și `SearchField`): valoarea, iar la parolă doar puncte
+    (un test verifică că textul nu ajunge în arbore);
+  - comutatorul, checkbox-ul și radio-ul;
+  - segmentele (radio-uri), dropdown-ul (combo, valoarea, deschis), rândurile cu ✓;
+  - rândurile picker-ului;
+  - tab-urile (pastilă și subliniate);
+  - meniurile aplicației (rând, bifat, submeniu deschis);
+  - modalele (dialog cu titlul lor);
+  - notificările (alertă cu titlul și detaliul lor);
+  - rândurile de arbore care se pliază (`tree::chevron`).
+- **Legătura cu sistemul** (`platform-winit/src/access_bridge.rs`, AccessKit 0.34: UI
+  Automation, NSAccessibility, AT-SPI):
+  - fereastra se creează invizibilă, i se atașează adaptorul, apoi se arată;
+  - cererea arborelui pornește înregistrarea, plecarea cititorului de ecran o oprește;
+  - arborele se trimite întreg, doar când un cadru l-a schimbat (AccessKit îl compară și
+    anunță sistemul doar de diferențe);
+  - cererile cititorului ajung la aplicație ca `PlatformEvent::Access`: o apăsare sau un
+    focus devin un click în mijlocul nodului, iar o valoare înseamnă tot textul ales și
+    înlocuit.
+- **Snapshot:** `EDITOR_SNAPSHOT_ACCESS=1` scrie arborele ecranului ca text lângă poză
+  (`<out>.access.txt`).
+
+### Lăsat, pentru partea a doua
+
+- Tabelele (`DataGrid`, `table`) ca tabel cu rânduri și celule; editorul de cod ca câmp de
+  text pe mai multe linii (o fereastră în jurul caret-ului).
+- Arborele trimis parțial (doar nodurile schimbate și părinții lor), dacă măsurătorile
+  arată că trimiterea întreagă costă.
+- `scripts/ui-snapshots.sh` să compare și arborii ca text, ca pe pixeli.
+- **Verificarea manuală, de utilizator:** VoiceOver pe macOS, Narrator / NVDA pe Windows,
+  Orca pe Linux.
+
+### Făcut, după review (2026-11-23)
+
+Un review făcut de un agent separat, cu 16 constatări de corectitudine, plus performanță și
+duplicare; toate verificate.
+
+- **Reparate:**
+  - **Cererile cititorului de ecran:**
+    - un „focus” nu mai apasă nimic: dă focus doar unui câmp de text;
+    - o valoare se scrie doar într-un câmp care are tastatura, după ce i se alege textul
+      (calea lui ⌘A);
+    - click-ul trece pe calea reală a mouse-ului (mutare, apăsare, eliberare) și nu
+      intră în numărătoarea unui dublu-click.
+  - **Înregistrarea:**
+    - e o gardă (`Recording`): o ieșire timpurie din cadru sau o panică o opresc;
+    - un cadru care desenează doar decorațiunile nu face arbore, deci rămâne cel trimis
+      ultima dată.
+  - **Arborele trimis sistemului:** din nou întreg de fiecare dată când sistemul îl cere
+    din nou (`access_asked`: un număr al cererii) sau când se schimbă titlul ferestrei.
+  - **Identitățile:**
+    - un control fără nume ia identitatea după numele găsit pe rândul lui, nu după
+      ordinea între cele fără nume, iar copiii lui o urmează;
+    - rândurile picker-ului și ale tabelelor au o cheie (indexul).
+  - **Ce se citește:**
+    - un text dintr-un control cu nume se ignoră doar dacă e numele sau valoarea lui;
+      celelalte (detaliul unui rând) rămân, sub el;
+    - controlul ultim e ținut pe părinte și se uită la deschiderea sau închiderea unui
+      grup;
+    - numele de pe rând se caută doar printre textele aceluiași părinte, sortate pe
+      înălțime, la cel mult 12 înălțimi de control (nu mai e O(n²));
+    - textele au înălțimea fontului (`ShapedLine.size`), nu zero.
+  - **Ce nu ajunge în arbore:**
+    - un buton doar cu iconiță nu mai e numit după id-ul intern al iconiței;
+    - un câmp secret nu dă nimic din text, nici lungimea, nici afișat;
+    - inițialele avatarului (`access::silent`).
+  - **Editorul de cod:** codul și numerele de linie nu mai sunt citite ca texte risipite
+    (`access::silent`), până la partea a doua.
+  - **Fereastra:** se arată după ce bara, caption-ul și ce a restaurat aplicația sunt puse.
+  - **Fără alocări pe nod:** numele sunt `Arc<str>`, textele împart linia din cache;
+    compararea cu ultimul arbore e o egalitate de liste; `Frame::children()` e locul unic
+    al grupării pe părinte (puntea și snapshot-ul îl folosesc).
+  - **Regula pentru componente noi:** în `.claude/rules/ui-components.md`.
+- **Lăsate (partea a doua):**
+  - rândurile de arbore descrise de rândul întreg (azi: chevron-ul celor care se pliază);
+    rândurile sub `List` / `Table` / `Menu` („element n din m”);
+  - pe Windows, orice client UI Automation (nu doar un cititor de ecran) pornește
+    înregistrarea și nu o mai oprește: de măsurat, eventual o limită de cost;
+  - arborele trimis la cel mult ~10 cadre pe secundă în animații, dacă măsurătorile o cer.

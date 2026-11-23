@@ -14,6 +14,10 @@
 # The sample project, a sample git repository (fixed author and dates: the same hashes every
 # run) and HOME live in a fixed scratch folder, so what's shown matches between runs;
 # nothing of the user's (recent projects, settings, repositories) is read or written.
+# `SNAPSHOT_GPU=<frames>`: each screen also drawn on the GPU (no window) that many times:
+# what it cost (draw calls, paint and encode time, lines shaped) written to `gpu.txt` in the
+# folder (record) or listed beside the reference's (compare), and its GPU picture kept
+# (record) or compared pixel for pixel (compare; `SNAPSHOT_GPU_TOLERANCE=<pixels>`).
 # Left out (not the same twice): the Task Manager measured (`TASKS=1`; its made-up
 # scenarios are in), the remote wizard (needs
 # the demo SFTP server), the local history (needs a versions folder).
@@ -39,6 +43,8 @@ work="${TMPDIR:-/tmp}/ui-snapshots"
 project="$work/project"
 rm -rf "$work"
 mkdir -p "$project/src" "$project/lib" "$work/home" "$out"
+# A new record measures anew.
+[[ "$mode" == record && -n "${SNAPSHOT_GPU:-}" ]] && rm -f "$out/gpu.txt"
 
 cat > "$project/src/Shop.php" <<'PHP'
 <?php
@@ -833,6 +839,13 @@ for theme in default-dark default-light; do
             [[ -z "$v" ]] && continue
             [[ "$v" == EDITOR_* ]] && env+=("$v") || env+=("EDITOR_SNAPSHOT_$v")
         done
+        # On the GPU too: measured, its picture kept or compared (see the header).
+        if [[ -n "${SNAPSHOT_GPU:-}" ]]; then
+            raw="$out/$name-$theme.gpu"
+            env+=(EDITOR_SNAPSHOT_GPU="$SNAPSHOT_GPU" EDITOR_SNAPSHOT_GPU_TOLERANCE="${SNAPSHOT_GPU_TOLERANCE:-0}")
+            [[ "$mode" == record ]] && env+=(EDITOR_SNAPSHOT_GPU_SAVE="$raw") \
+                || env+=(EDITOR_SNAPSHOT_GPU_REFERENCE="$raw")
+        fi
         count=$((count + 1))
         # A sample put in the project for this case only (the new languages').
         placed=""
@@ -882,8 +895,24 @@ SESSIONS
             paths=("$root" "$root/$file")
         fi
         env -u CLICOLOR -u LSCOLORS -u LS_COLORS "${env[@]}" \
-            "$bin" --snapshot "$target" ${paths[@]+"${paths[@]}"} >/dev/null 2>&1 \
-            || { echo "failed: $name ($theme)" >&2; differ=1; [[ -n "$placed" ]] && rm -f "$placed"; continue; }
+            "$bin" --snapshot "$target" ${paths[@]+"${paths[@]}"} >/dev/null 2>"$work/stderr" \
+            || {
+                echo "failed: $name ($theme)" >&2
+                grep -h '^gpu compare' "$work/stderr" >&2 || true
+                differ=1
+                [[ -n "$placed" ]] && rm -f "$placed"
+                continue
+            }
+        if [[ -n "${SNAPSHOT_GPU:-}" ]]; then
+            measured=$(grep -h '^gpu: ' "$work/stderr" | sed 's/^gpu: //' || true)
+            if [[ "$mode" == record ]]; then
+                echo "$name $theme | $measured" >> "$out/gpu.txt"
+            else
+                before=$(grep -h "^$name $theme | " "$out/gpu.txt" 2>/dev/null | sed 's/^[^|]*| //' || true)
+                printf '%s (%s)\n  before: %s\n  after:  %s\n' "$name" "$theme" "$before" "$measured"
+                grep -h '^gpu compare' "$work/stderr" | sed 's/^/  /' || true
+            fi
+        fi
         [[ -n "$placed" ]] && rm -f "$placed"
         # What a case put in the project (a SQL file attached, 39n; the extractors' folder,
         # 39o2) gone before the next.

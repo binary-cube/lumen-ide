@@ -492,7 +492,8 @@ impl<'a> Avatar<'a> {
             }
         };
         let x = (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round();
-        draw_text(layer, &shaped, x, baseline, ctx.fade(letters));
+        // Initials are a picture of the name, not text to read (the name is said beside it).
+        ui_kit::access::silent(|| draw_text(layer, &shaped, x, baseline, ctx.fade(letters)));
     }
 }
 

@@ -134,8 +134,39 @@ pub fn pill(ctx: &Ctx<'_>, (x, mid): (f32, f32), width: f32) -> Rect {
     Rect::new(x, mid - ctx.px(TAB_H / 2.0), width, ctx.px(TAB_H))
 }
 
+/// Where `tab` drawn from `x`, centered on `mid`, stands: its pill.
+fn tab_pill(text: &mut TextSystem, ctx: &Ctx<'_>, at: (f32, f32), tab: &PillTab<'_>) -> Rect {
+    let width = text.shape_line(tab.label, &font(ctx)).width;
+    pill(ctx, at, tab.width_of(width, ctx))
+}
+
+/// A tab to a screen reader: named by its label, chosen while it's the one in force (its
+/// label, drawn in it, is its name).
+fn tab_node(label: &str, on: bool, bounds: Rect) -> ui_kit::access::Described {
+    use ui_kit::access::{Described, Role};
+    Described::new(Role::Tab, label, bounds).selected(on)
+}
+
 /// Draws `tab` from `x`, centered on `mid`.
 pub fn pill_tab(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    icons: &Icons,
+    ctx: &Ctx<'_>,
+    (x, mid): (f32, f32),
+    tab: &PillTab<'_>,
+) -> PillTabRects {
+    if !ui_kit::access::recording() {
+        return paint_pill_tab(layer, text, icons, ctx, (x, mid), tab);
+    }
+    let bounds = tab_pill(text, ctx, (x, mid), tab);
+    ui_kit::access::group(
+        || tab_node(tab.label, tab.on, bounds),
+        || paint_pill_tab(layer, text, icons, ctx, (x, mid), tab),
+    )
+}
+
+fn paint_pill_tab(
     layer: &mut Layer,
     text: &mut TextSystem,
     icons: &Icons,
@@ -147,7 +178,7 @@ pub fn pill_tab(
     let p = ctx.palette;
     let font = font(ctx);
     let shaped = text.shape_line(tab.label, &font);
-    let pill = pill(ctx, (x, mid), tab.width_of(shaped.width, ctx));
+    let pill = tab_pill(text, ctx, (x, mid), tab);
     let (fill, color) = tab.colors(p);
     layer.quad(Quad::filled(pill, ctx.fade(fill)).rounded(px(ds::radius::MD)));
     let mut tx = x + px(TAB_PAD);
@@ -237,7 +268,10 @@ pub fn underline_tab(
     let r = Rect::new(x, top, shaped.width + 2.0 * pad, height);
     let base = ds::optical_baseline(top, height, font);
     let color = if tab.on { p.text } else { p.text_muted };
-    draw_text(layer, &shaped, x + pad, base, ctx.fade(color));
+    ui_kit::access::group(
+        || tab_node(tab.label, tab.on, r),
+        || draw_text(layer, &shaped, x + pad, base, ctx.fade(color)),
+    );
     if tab.on {
         let line = ctx.px(UNDERLINE);
         let under = Rect::new(r.min_x(), r.max_y() - line, r.size.width, line);

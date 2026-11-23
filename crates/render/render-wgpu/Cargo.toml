@@ -25,3 +25,8 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
 
 [lints]
 workspace = true
+
+[features]
+# `Offscreen`: a scene drawn without a window, measured and read back (the snapshots'
+# GPU comparisons); not in the builds handed out.
+offscreen = []

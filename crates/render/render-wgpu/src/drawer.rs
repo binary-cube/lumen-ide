@@ -33,12 +33,15 @@ impl Drawer {
             transparent,
             image_buffer: InstanceBuffer::new(device, "image-instances"),
             quad_buffer: InstanceBuffer::new(device, "quad-instances"),
-            glyph_buffer: InstanceBuffer::new(device, "glyph-instances"),
+            prim_buffer: InstanceBuffer::new(device, "prim-instances"),
             images: Vec::new(),
             image_ids: Vec::new(),
             quads: Vec::new(),
-            glyphs: Vec::new(),
+            prims: Vec::new(),
+            drawn: (0, 0),
             batches: Vec::new(),
+            area_batches: Vec::new(),
+            layer_plans: Vec::new(),
             layer_quads: Vec::new(),
             layer_images: Vec::new(),
             layer_glyphs: Vec::new(),
@@ -293,10 +296,13 @@ impl Drawer {
         }
     }
 
-    /// Turns the scene into GPU instances, one batch per layer and area drawn (`areas`:
-    /// disjoint; the whole surface for a full frame): an area's batches hold only the
-    /// instances that touch it, so a small area costs few draws. Fails only if the atlas
-    /// fills up.
+    /// Turns the scene into GPU instances and their batches, area by area (`areas`:
+    /// disjoint; the whole surface for a full frame), in the scene's order: the rectangles
+    /// and glyphs of consecutive layers make one batch (each cut by its layer's clip), a
+    /// layer's images or blurs one of their own between them, and a layer that blurs
+    /// starts a new run (a render pass may end there). An area's batches hold only the
+    /// instances that touch it, so a small area costs little. A glyph that finds no room in
+    /// the atlas is left out and the rest drawn; the frame then says the atlas is full.
     pub(super) fn prepare(
         &mut self,
         ctx: &GpuContext,
@@ -305,18 +311,25 @@ impl Drawer {
         rasterizer: &mut dyn GlyphRasterizer,
     ) -> Result<(), AtlasFull> {
         self.quads.clear();
-        self.glyphs.clear();
+        self.prims.clear();
+        self.drawn = (0, 0);
         self.images.clear();
         self.image_ids.clear();
         self.batches.clear();
+        self.area_batches.clear();
         self.blur_instances.clear();
+        self.layer_plans.clear();
+        self.layer_quads.clear();
+        self.layer_images.clear();
+        self.layer_glyphs.clear();
         let mut state = ctx.state();
         state.frame += 1;
         let frame = state.frame;
         let Some(bounds) = areas.iter().copied().reduce(|a, b| a.union(&b)) else {
             return Ok(());
         };
-        for (layer_index, layer) in scene.layers().iter().enumerate() {
+        let mut full = false;
+        for (index, layer) in scene.layers().iter().enumerate() {
             let clip = match layer.clip {
                 Some(c) => PixelRect::covering(&c).intersect(&bounds),
                 None => Some(bounds),
@@ -329,20 +342,13 @@ impl Drawer {
                 continue;
             };
             let touching = |r: PixelRect| r.intersect(&clip);
-
-            self.layer_quads.clear();
+            let quads = self.layer_quads.len();
             for q in &layer.quads {
                 if let Some(r) = touching(PixelRect::covering(&q.bounds)) {
-                    let gpu = QuadGpu {
-                        rect: rect_array(&q.bounds),
-                        color: color_array(q.color),
-                        border_color: color_array(q.border_color),
-                        params: [q.corner_radius, q.border_width],
-                    };
-                    self.layer_quads.push((gpu, r));
+                    self.layer_quads.push((PrimGpu::quad(q), r));
                 }
             }
-            self.layer_images.clear();
+            let images = self.layer_images.len();
             for instance in &layer.images {
                 let Some(r) = touching(PixelRect::covering(&instance.bounds)) else {
                     mark_used(&mut state, instance.image.id, frame);
@@ -360,79 +366,52 @@ impl Drawer {
                     self.layer_images.push((gpu, instance.image.id, r));
                 }
             }
-            self.layer_glyphs.clear();
+            let glyphs = self.layer_glyphs.len();
             for g in &layer.glyphs {
-                let Some(entry) = state.atlas.get_or_insert(g.key, rasterizer)? else {
-                    continue;
+                let entry = match state.atlas.get_or_insert(g.key, rasterizer) {
+                    Ok(Some(entry)) => entry,
+                    Ok(None) => continue,
+                    Err(AtlasFull) => {
+                        full = true;
+                        continue;
+                    }
                 };
                 let x = g.origin.x.round() + entry.left as f32;
                 let y = g.origin.y.round() - entry.top as f32;
                 let rect = Rect::new(x, y, entry.width as f32, entry.height as f32);
                 if let Some(r) = touching(PixelRect::covering(&rect)) {
-                    let gpu = GlyphGpu {
+                    let gpu = PrimGpu {
                         rect: rect_array(&rect),
-                        atlas_origin: [entry.x as f32, entry.y as f32],
                         color: color_array(g.color),
-                        kind: u32::from(entry.color),
+                        border_color: [0.0; 4],
+                        clip: [0; 4],
+                        params: [0.0, 0.0, entry.x as f32, entry.y as f32],
+                        flags: if entry.color { PRIM_COLOR } else { PRIM_MASK },
                     };
                     self.layer_glyphs.push((gpu, r));
                 }
             }
-
             // Its blur's image, when it blurs (drawn back in its rectangles).
-            let image = self.wanted.iter().find(|w| w.layer == layer_index).map(|w| {
+            let blur_image = self.wanted.iter().find(|w| w.layer == index).map(|w| {
                 let plan = render_api::BlurPlan::for_radius(w.radius);
                 let (rw, rh) = plan.reduced(w.bounds);
                 let d = plan.factor as f32;
                 [w.bounds.x0 as f32, w.bounds.y0 as f32, rw as f32 * d, rh as f32 * d]
             });
-            for (index, area) in areas.iter().enumerate() {
-                let Some(scissor) = clip.intersect(area) else { continue };
-                let hits = |r: &PixelRect| r.intersect(area).is_some();
-                let blur_start = self.blur_instances.len() as u32;
-                if let Some(image) = image {
-                    for b in &layer.blurs {
-                        if hits(&PixelRect::covering(&b.rect)) {
-                            self.blur_instances.push(BlurGpu {
-                                rect: rect_array(&b.rect),
-                                image,
-                                opacity: b.opacity,
-                                corner: b.corner,
-                                _pad: [0.0; 2],
-                            });
-                        }
-                    }
-                }
-                let quad_start = self.quads.len() as u32;
-                self.quads
-                    .extend(self.layer_quads.iter().filter(|(_, r)| hits(r)).map(|(q, _)| *q));
-                let image_start = self.images.len() as u32;
-                for (image, id, r) in &self.layer_images {
-                    if hits(r) {
-                        self.images.push(*image);
-                        self.image_ids.push(*id);
-                    }
-                }
-                let glyph_start = self.glyphs.len() as u32;
-                self.glyphs
-                    .extend(self.layer_glyphs.iter().filter(|(_, r)| hits(r)).map(|(g, _)| *g));
-                let batch = Batch {
-                    layer: layer_index,
-                    scissor,
-                    area: index,
-                    blurs: blur_start..self.blur_instances.len() as u32,
-                    quads: quad_start..self.quads.len() as u32,
-                    images: image_start..self.images.len() as u32,
-                    glyphs: glyph_start..self.glyphs.len() as u32,
-                };
-                if !(batch.blurs.is_empty()
-                    && batch.quads.is_empty()
-                    && batch.images.is_empty()
-                    && batch.glyphs.is_empty())
-                {
-                    self.batches.push(batch);
-                }
-            }
+            self.layer_plans.push(LayerPlan {
+                index,
+                clip,
+                quads: quads..self.layer_quads.len(),
+                images: images..self.layer_images.len(),
+                glyphs: glyphs..self.layer_glyphs.len(),
+                blur_image,
+            });
+        }
+        let muted_below = scene.emphasis().map_or(0, |e| e.below());
+        for area in areas {
+            let start = self.batches.len();
+            self.batch_area(scene, area, muted_below);
+            self.area_batches.push(start..self.batches.len());
         }
         // This window's images on screen: kept whatever their age (another window's too).
         let ids = state.shown.entry(self.id).or_default();
@@ -450,7 +429,82 @@ impl Drawer {
             }
             keep
         });
-        Ok(())
+        if full { Err(AtlasFull) } else { Ok(()) }
+    }
+
+    /// The batches of one of the frame's areas (see [`Self::prepare`]).
+    fn batch_area(&mut self, scene: &Scene, area: &PixelRect, muted_below: usize) {
+        let hits = |r: &PixelRect| r.intersect(area).is_some();
+        // The run of primitives being gathered: where it starts, and its first layer.
+        let mut run: Option<(u32, usize)> = None;
+        let close =
+            |run: &mut Option<(u32, usize)>, prims: &[PrimGpu], batches: &mut Vec<Batch>| {
+                if let Some((start, layer)) = run.take()
+                    && (start as usize) < prims.len()
+                {
+                    let step = Step::Prims(start..prims.len() as u32);
+                    batches.push(Batch { layer, step });
+                }
+            };
+        for plan in &self.layer_plans {
+            let Some(scissor) = plan.clip.intersect(area) else { continue };
+            let muted = plan.index < muted_below;
+            // A blur made again ends the render pass before its layer: a run never goes
+            // past it.
+            if self.stale.contains(&plan.index) {
+                close(&mut run, &self.prims, &mut self.batches);
+            }
+            if let Some(image) = plan.blur_image {
+                let start = self.blur_instances.len() as u32;
+                for b in &scene.layers()[plan.index].blurs {
+                    if hits(&PixelRect::covering(&b.rect)) {
+                        self.blur_instances.push(BlurGpu {
+                            rect: rect_array(&b.rect),
+                            image,
+                            opacity: b.opacity,
+                            corner: b.corner,
+                            _pad: [0.0; 2],
+                        });
+                    }
+                }
+                let range = start..self.blur_instances.len() as u32;
+                if !range.is_empty() {
+                    close(&mut run, &self.prims, &mut self.batches);
+                    let step = Step::Blurs { scissor, range };
+                    self.batches.push(Batch { layer: plan.index, step });
+                }
+            }
+            let before = self.prims.len();
+            for (q, _) in self.layer_quads[plan.quads.clone()].iter().filter(|(_, r)| hits(r)) {
+                self.prims.push(q.within(scissor, muted));
+            }
+            self.drawn.0 += self.prims.len() - before;
+            if self.prims.len() > before {
+                run.get_or_insert((before as u32, plan.index));
+            }
+            let start = self.images.len() as u32;
+            for (image, id, r) in &self.layer_images[plan.images.clone()] {
+                if hits(r) {
+                    self.images.push(*image);
+                    self.image_ids.push(*id);
+                }
+            }
+            let range = start..self.images.len() as u32;
+            if !range.is_empty() {
+                close(&mut run, &self.prims, &mut self.batches);
+                let step = Step::Images { scissor, range };
+                self.batches.push(Batch { layer: plan.index, step });
+            }
+            let before = self.prims.len();
+            for (g, _) in self.layer_glyphs[plan.glyphs.clone()].iter().filter(|(_, r)| hits(r)) {
+                self.prims.push(g.within(scissor, muted));
+            }
+            self.drawn.1 += self.prims.len() - before;
+            if self.prims.len() > before {
+                run.get_or_insert((before as u32, plan.index));
+            }
+        }
+        close(&mut run, &self.prims, &mut self.batches);
     }
 
     /// [`Self::prepare`], once more after making room in the atlas if it filled up.
@@ -510,7 +564,7 @@ impl Drawer {
         }
         let belt = &mut self.belt;
         self.quad_buffer.upload(&ctx.device, belt, encoder, &self.quads);
-        self.glyph_buffer.upload(&ctx.device, belt, encoder, &self.glyphs);
+        self.prim_buffer.upload(&ctx.device, belt, encoder, &self.prims);
         self.image_buffer.upload(&ctx.device, belt, encoder, &self.images);
         if !self.blur_instances.is_empty() {
             self.blur_buffer
@@ -597,7 +651,7 @@ impl Drawer {
                 pass.draw(0..4, extras.fill..extras.fill + 1);
                 draw_calls += 1;
             }
-            draw_calls += self.draw_batches(&mut pass, state, index, &layers);
+            draw_calls += self.draw_batches(&mut pass, state, (index, area), &layers);
             if let Some(corners) = extras.corners.filter(|_| last) {
                 pass.set_scissor_rect(area.x0 as u32, area.y0 as u32, area.width(), area.height());
                 pass.set_pipeline(&self.pipelines.corner);
@@ -610,61 +664,74 @@ impl Drawer {
         draw_calls
     }
 
-    /// The batches of the `area`-th area, clipped: their quads, images, then glyphs.
+    /// The batches of the `area`-th area (`rect`), in order: runs of primitives cut by
+    /// their own clips, and the images and blurs between them cut by their layers'.
     /// Returns the draw calls.
     pub(super) fn draw_batches(
         &self,
         pass: &mut wgpu::RenderPass<'_>,
         state: &SharedState,
-        area: usize,
+        (area, rect): (usize, PixelRect),
         layers: &Range<usize>,
     ) -> usize {
+        let scissor = |pass: &mut wgpu::RenderPass<'_>, r: PixelRect| {
+            pass.set_scissor_rect(r.x0 as u32, r.y0 as u32, r.width(), r.height());
+        };
         let mut draw_calls = 0;
-        for batch in self.batches.iter().filter(|b| b.area == area && layers.contains(&b.layer)) {
-            let clip = batch.scissor;
-            let globals = self.globals_for(batch.layer);
-            pass.set_scissor_rect(clip.x0 as u32, clip.y0 as u32, clip.width(), clip.height());
-            if !batch.blurs.is_empty()
-                && let (Some(pipelines), Some(buffer), Some(blur)) = (
-                    &self.blur_pipelines,
-                    &self.blur_buffer,
-                    self.blurs.iter().find(|b| b.of.layer == batch.layer),
-                )
-            {
-                pass.set_pipeline(&pipelines.composite);
-                pass.set_bind_group(0, globals, &[]);
-                pass.set_bind_group(1, &blur.composite, &[]);
-                pass.set_vertex_buffer(0, buffer.buffer.slice(..));
-                pass.draw(0..4, batch.blurs.clone());
-                draw_calls += 1;
-            }
-            if !batch.quads.is_empty() {
-                pass.set_pipeline(&self.pipelines.quad);
-                pass.set_bind_group(0, globals, &[]);
-                pass.set_vertex_buffer(0, self.quad_buffer.buffer.slice(..));
-                pass.draw(0..4, batch.quads.clone());
-                draw_calls += 1;
-            }
-            if !batch.images.is_empty() {
-                pass.set_pipeline(&self.pipelines.image);
-                pass.set_bind_group(0, globals, &[]);
-                pass.set_vertex_buffer(0, self.image_buffer.buffer.slice(..));
-                for i in batch.images.clone() {
-                    let Some(gpu) = state.textures.get(&self.image_ids[i as usize]) else {
-                        continue;
-                    };
-                    pass.set_bind_group(1, &gpu.bind_group, &[]);
-                    pass.draw(0..4, i..i + 1);
+        // The primitives' state stays bound from one run to the next unless an image or a
+        // blur changed it.
+        let mut prims_bound = false;
+        let batches = self.area_batches.get(area).map_or(&[][..], |r| &self.batches[r.clone()]);
+        for batch in batches.iter().filter(|b| layers.contains(&b.layer)) {
+            match &batch.step {
+                Step::Prims(range) => {
+                    if !prims_bound {
+                        scissor(pass, rect);
+                        pass.set_pipeline(&self.pipelines.prim);
+                        // One bind for every layer: an instance not muted ignores the
+                        // emphasis.
+                        pass.set_bind_group(0, self.globals_for(0), &[]);
+                        pass.set_bind_group(1, &state.atlas_bind_group, &[]);
+                        pass.set_vertex_buffer(0, self.prim_buffer.buffer.slice(..));
+                        prims_bound = true;
+                    }
+                    pass.draw(0..4, range.clone());
                     draw_calls += 1;
                 }
-            }
-            if !batch.glyphs.is_empty() {
-                pass.set_pipeline(&self.pipelines.glyph);
-                pass.set_bind_group(0, globals, &[]);
-                pass.set_bind_group(1, &state.atlas_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.glyph_buffer.buffer.slice(..));
-                pass.draw(0..4, batch.glyphs.clone());
-                draw_calls += 1;
+                Step::Images { scissor: clip, range } => {
+                    prims_bound = false;
+                    scissor(pass, *clip);
+                    pass.set_pipeline(&self.pipelines.image);
+                    pass.set_bind_group(0, self.globals_for(batch.layer), &[]);
+                    pass.set_vertex_buffer(0, self.image_buffer.buffer.slice(..));
+                    // The same image drawn again in a row (a decoration's particles): one
+                    // draw for all of them, its texture bound once.
+                    let ids = &self.image_ids[range.start as usize..range.end as usize];
+                    for run in same_image_runs(ids) {
+                        let Some(gpu) = state.textures.get(&ids[run.start]) else { continue };
+                        pass.set_bind_group(1, &gpu.bind_group, &[]);
+                        let first = range.start + run.start as u32;
+                        pass.draw(0..4, first..first + run.len() as u32);
+                        draw_calls += 1;
+                    }
+                }
+                Step::Blurs { scissor: clip, range } => {
+                    let (Some(pipelines), Some(buffer), Some(blur)) = (
+                        &self.blur_pipelines,
+                        &self.blur_buffer,
+                        self.blurs.iter().find(|b| b.of.layer == batch.layer),
+                    ) else {
+                        continue;
+                    };
+                    prims_bound = false;
+                    scissor(pass, *clip);
+                    pass.set_pipeline(&pipelines.composite);
+                    pass.set_bind_group(0, self.globals_for(batch.layer), &[]);
+                    pass.set_bind_group(1, &blur.composite, &[]);
+                    pass.set_vertex_buffer(0, buffer.buffer.slice(..));
+                    pass.draw(0..4, range.clone());
+                    draw_calls += 1;
+                }
             }
         }
         draw_calls
@@ -754,6 +821,18 @@ impl Drawer {
         }
         drawn
     }
+}
+
+/// The runs of the same image in a row among `ids` (their places in it).
+pub(super) fn same_image_runs(ids: &[u64]) -> impl Iterator<Item = Range<usize>> + '_ {
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        let first = *ids.get(start)?;
+        let len = ids[start..].iter().take_while(|&&id| id == first).count();
+        let run = start..start + len;
+        start += len;
+        Some(run)
+    })
 }
 
 /// A globals uniform (`Globals`) and its bind group.

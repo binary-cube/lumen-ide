@@ -2,6 +2,7 @@
 //!
 //! For now: drawing helpers for text and the single-line text field.
 
+pub mod access;
 pub mod caret;
 mod filter;
 mod key_hints;
@@ -21,6 +22,7 @@ use text_layout::{FontMetrics, ShapedLine};
 /// Adds the glyphs of a shaped line to the layer, starting at `x` with the baseline at
 /// `baseline`.
 pub fn draw_text(layer: &mut Layer, line: &ShapedLine, x: f32, baseline: f32, color: Rgba) {
+    access::text(line, x, baseline);
     layer.glyphs.extend(line.glyphs.iter().map(|g| GlyphInstance {
         key: g.key,
         origin: Point::new(x + g.x, baseline + g.y),

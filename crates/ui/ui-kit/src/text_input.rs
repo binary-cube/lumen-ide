@@ -375,6 +375,20 @@ impl TextInput {
     }
 
     /// Draws the field in `bounds`. Long text scrolls so the cursor stays visible.
+    /// What it is to a screen reader: a field named by its placeholder, its text as its
+    /// value. A secret's (a password, even shown) has none: its text never leaves the field
+    /// (no copy kept by the tree, by the system).
+    fn described(
+        &self,
+        bounds: Rect,
+        focused: bool,
+        placeholder: &str,
+    ) -> crate::access::Described {
+        use crate::access::{Described, Role};
+        let field = Described::new(Role::TextField, placeholder, bounds).focused(focused);
+        if self.secret || self.masked { field } else { field.value(self.text.as_str()) }
+    }
+
     pub fn paint(
         &self,
         layer: &mut Layer,
@@ -384,6 +398,7 @@ impl TextInput {
         placeholder: &str,
         style: &TextInputStyle,
     ) {
+        crate::access::node(|| self.described(bounds, focused, placeholder));
         let s = style;
         let border = if focused { s.border_focused } else { s.border };
         layer.quad(
