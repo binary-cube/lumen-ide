@@ -73,3 +73,7 @@ impl Appear {
         self.0.is_some_and(|t| t.animating())
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/unit/anim.rs"]
+mod tests;

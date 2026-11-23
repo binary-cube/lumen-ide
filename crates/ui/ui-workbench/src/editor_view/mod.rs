@@ -23,13 +23,19 @@ use crate::palette::Palette;
 use crate::splitter::Orientation;
 use ui_components::scrollbar::{ScrollMetrics, Scrollbar, ScrollbarStyle};
 
+mod access;
 mod errors;
 mod gutter;
 mod text;
 
 use display::*;
 mod display;
+mod rows;
 mod scroll;
+mod wrap;
+
+use rows::Seg;
+use wrap::WrapRows;
 
 /// A colored span of text (e.g. from syntax highlighting).
 #[derive(Debug, Clone, PartialEq)]
@@ -245,6 +251,8 @@ struct Row {
 struct RowSpan<'a> {
     start: usize,
     end: usize,
+    /// Its line goes on in the next row (wrapped): what starts at `end` is that row's.
+    continues: bool,
     top: f32,
     x0: f32,
     width: f32,
@@ -364,6 +372,24 @@ pub struct EditorView {
     lens_rects: Vec<(Rect, usize, usize)>,
     /// The font advance the scroll was last clamped for (a zoom changes the width in pixels).
     width_advance: f32,
+    /// Lines wrap at the text's width ([`ui_components::TextOptions::word_wrap`]).
+    wrap: bool,
+    /// The columns a wrapped row holds (from the last frame's width; 0: none yet).
+    wrap_columns: usize,
+    /// The wrapped rows, while lines wrap.
+    wrap_rows: WrapRows,
+    /// The loaded line's parts as wrapped, and what they were made for (the document, its
+    /// version, the line, the columns, the tab width): a line wrapped once, whatever asks for
+    /// its rows.
+    wrap_parts: Vec<Range<usize>>,
+    wrap_parts_for: Option<(kernel::DocumentId, u64, usize, usize, u32)>,
+    /// The line in `line`: its document, version and number (what its parts are for).
+    loaded: Option<(kernel::DocumentId, u64, usize)>,
+    /// The visible rows' parts of their lines (beside `lines`).
+    segs: Vec<Seg>,
+    /// Where the row drawn now starts in its line's display (its glyphs' bytes are from
+    /// there): 0 but for a wrapped line's later rows.
+    row_base: usize,
     /// How many times [`Self::longest_line`] was worked out (the tests check it's not
     /// per frame).
     #[cfg(test)]
@@ -433,6 +459,14 @@ impl EditorView {
             bulb_rect: None,
             lens_rects: Vec::new(),
             width_advance: 0.0,
+            wrap: false,
+            wrap_columns: 0,
+            wrap_rows: WrapRows::default(),
+            wrap_parts: Vec::new(),
+            wrap_parts_for: None,
+            loaded: None,
+            segs: Vec::new(),
+            row_base: 0,
             #[cfg(test)]
             width_scans: 0,
         }
@@ -470,6 +504,7 @@ impl EditorView {
     fn load_line(&mut self, doc: &Document, line: usize) {
         let buffer = doc.buffer();
         buffer.write_line(line, &mut self.line);
+        self.loaded = Some((doc.id(), doc.version(), line));
         self.line_inlays.clear();
         if self.inlays.is_empty() {
             return;
@@ -525,9 +560,9 @@ impl EditorView {
         let lh = self.line_height();
         let first_row = (self.scroll_y / lh).floor().max(0.0) as u32;
         let rows = (self.bounds.size.height / lh).ceil() as u32 + 1;
-        let first = folds.line_of(first_row) as usize;
-        let last =
-            (folds.line_of(first_row + rows) as usize).min(buffer.line_count().saturating_sub(1));
+        let first = self.line_of_row(folds, first_row) as usize;
+        let last = (self.line_of_row(folds, first_row + rows) as usize)
+            .min(buffer.line_count().saturating_sub(1));
         buffer.line_start(first)..buffer.line_end(last)
     }
 
@@ -541,9 +576,9 @@ impl EditorView {
         let lh = layout.line_height;
         let first_row = (self.scroll_y / lh).floor().max(0.0) as u32;
         let rows = (self.bounds.size.height / lh).ceil() as u32 + 1;
-        let first = folds.line_of(first_row) as usize;
-        let last =
-            (folds.line_of(first_row + rows) as usize).min(buffer.line_count().saturating_sub(1));
+        let first = self.line_of_row(folds, first_row) as usize;
+        let last = (self.line_of_row(folds, first_row + rows) as usize)
+            .min(buffer.line_count().saturating_sub(1));
         let columns = ((self.scroll_x + self.bounds.size.width) / layout.advance.max(1.0)).ceil()
             as usize
             + 2;
@@ -681,10 +716,19 @@ impl EditorView {
         palette: &Palette,
     ) -> (usize, usize) {
         let layout = self.layout(text, doc, palette);
-        let line = self.line_at_y(p.y, doc, folds, &layout) as usize;
+        self.refresh_rows(doc, folds);
+        let (line, k) = self.row_at_y(p.y, doc, folds, &layout);
+        let line = line as usize;
         let x = p.x - self.bounds.min_x() - layout.text_left + self.scroll_x;
         let col = (x / layout.advance.max(1.0)).round().max(0.0) as usize;
-        (line, col)
+        if k == 0 {
+            return (line, col);
+        }
+        // A wrapped line's later row: its columns go on from where the row starts.
+        self.load_line(doc, line);
+        let seg = self.seg_of(doc, k);
+        let tab = doc.tab_width();
+        (line, col + source_to_display_with(&self.line, seg.from, tab, &self.line_inlays))
     }
 
     /// The line of the collapsed region whose label (`⋯`) is under point `p`.
@@ -703,18 +747,40 @@ impl EditorView {
     ) -> usize {
         let layout = self.layout(text, doc, palette);
         let buffer = doc.buffer();
-        let line = self.line_at_y(p.y, doc, folds, &layout) as usize;
-        let x = p.x - self.bounds.min_x() - layout.text_left + self.scroll_x;
-        if x <= 0.0 {
-            return buffer.line_start(line);
-        }
+        self.refresh_rows(doc, folds);
+        let (line, k) = self.row_at_y(p.y, doc, folds, &layout);
+        let line = line as usize;
         self.load_line(doc, line);
+        let seg = self.seg_of(doc, k);
+        let x = p.x - self.bounds.min_x() - layout.text_left + self.scroll_x;
+        buffer.line_start(line) + self.byte_in_row(text, doc, palette, seg, x)
+    }
+
+    /// The byte of the line in `self.line` at `x` from the start of its row `seg` (past a
+    /// row's end that isn't the line's: its last character, the next row starting at it).
+    fn byte_in_row(
+        &mut self,
+        text: &mut TextSystem,
+        doc: &Document,
+        palette: &Palette,
+        seg: Seg,
+        x: f32,
+    ) -> usize {
+        if x <= 0.0 {
+            return seg.from;
+        }
         let tab = doc.tab_width();
         expand_tabs_with(&self.line, usize::MAX, tab, &self.line_inlays, &mut self.display);
         let font = self.font(palette);
         let shaped = text.shape_line(&self.display, &font);
-        let disp = shaped.byte_at(x, self.display.len());
-        buffer.line_start(line) + display_to_source_with(&self.line, disp, tab, &self.line_inlays)
+        // On a wrapped line's row: from where the row starts.
+        let base = source_to_display_with(&self.line, seg.from, tab, &self.line_inlays);
+        let disp = shaped.byte_at(x + shaped.x_at(base), self.display.len());
+        let mut at = display_to_source_with(&self.line, disp, tab, &self.line_inlays).max(seg.from);
+        if !seg.last && at >= seg.to {
+            at = self.line[..seg.to].char_indices().next_back().map_or(seg.from, |(i, _)| i);
+        }
+        at
     }
 
     /// The primary cursor's rectangle, for positioning the IME window.
@@ -729,12 +795,13 @@ impl EditorView {
         let buffer = doc.buffer();
         let head = doc.selections().primary().head;
         let line = buffer.line_of(head);
+        self.refresh_rows(doc, folds);
+        let (row, seg) = self.row_of_offset(doc, folds, head);
         self.load_line(doc, line);
-        let x = self.x_in_line(text, doc, head - buffer.line_start(line));
+        let x = self.x_in_row(text, doc, seg, head - buffer.line_start(line));
         Rect::new(
             self.bounds.min_x() + layout.text_left + x - self.scroll_x,
-            self.bounds.min_y() + folds.row_of(line as u32) as f32 * layout.line_height
-                - self.scroll_y,
+            self.bounds.min_y() + row as f32 * layout.line_height - self.scroll_y,
             layout.caret_width,
             layout.line_height,
         )
@@ -760,10 +827,19 @@ impl EditorView {
         // font's glyph).
         let widest =
             widest.max(self.longest_line.value().map_or(0, |w| w.0) as f32 * f.layout.advance);
-        self.max_scroll_x = (widest - f.text_area.size.width + f.layout.advance * 8.0).max(0.0);
+        // Wrapped, every row fits: nothing to scroll sideways.
+        self.max_scroll_x = if self.wraps() {
+            0.0
+        } else {
+            (widest - f.text_area.size.width + f.layout.advance * 8.0).max(0.0)
+        };
         self.paint_ruler(&f, highlights, palette);
         // The code and its line numbers aren't read as loose texts (a token at a time): the
-        // editor is told as a text area of its own (plan 93d, part two).
+        // editor is told as a text area of its own.
+        if ui_kit::access::recording() {
+            let node = self.described(&f, deco.folds, text, palette);
+            ui_kit::access::node(|| node);
+        }
         ui_kit::access::silent(|| {
             self.paint_gutter(&f, text, scene, palette);
             self.paint_text(&f, text, scene, palette);
@@ -800,11 +876,24 @@ impl EditorView {
             (b.size.width - layout.gutter_width - lane).max(0.0),
             b.size.height,
         );
+        // Lines wrap at the text's width (a column kept for the wrap's mark): no
+        // horizontal scroll then.
+        self.wrap_columns = if self.wrap {
+            ((text_area.size.width / layout.advance.max(1.0)).floor() as usize).saturating_sub(2)
+        } else {
+            0
+        };
+        self.refresh_rows(doc, folds);
+        if self.wraps() {
+            self.scroll_x = 0.0;
+            self.max_scroll_x = 0.0;
+        }
         // The horizontal range comes from the whole document: its widest line,
         // cached, so the bar doesn't come and go as a long line scrolls in and out of view.
         // When that width changes (the long line deleted, a region folded), the scroll is
         // brought back within it before anything is placed.
-        let doc_width = self.document_width(doc, folds, layout.advance);
+        let doc_width =
+            if self.wraps() { None } else { self.document_width(doc, folds, layout.advance) };
         if let Some(width) = doc_width {
             let max = (width - text_area.size.width + layout.advance * 8.0).max(0.0);
             self.max_scroll_x = max;
@@ -814,13 +903,10 @@ impl EditorView {
         let max_columns =
             ((self.scroll_x + text_area.size.width) / layout.advance).ceil() as usize + 2;
 
-        // Visible rows → document lines.
+        // Visible rows → document lines (and the part of each a wrapped row shows).
         let first_row = (self.scroll_y / layout.line_height).floor().max(0.0) as u32;
         let row_count = (b.size.height / layout.line_height).ceil() as u32 + 1;
-        let total_rows = folds.visible_rows(doc.buffer().line_count() as u32);
-        self.lines.clear();
-        self.lines
-            .extend((first_row..(first_row + row_count).min(total_rows)).map(|r| folds.line_of(r)));
+        self.fill_rows(doc, folds, first_row, row_count);
         Frame {
             doc,
             deco,
@@ -880,11 +966,6 @@ impl EditorView {
         Some(columns as f32 * advance)
     }
 
-    /// The visible row showing document line `line`.
-    fn visible_row(&self, line: usize) -> Option<usize> {
-        self.lines.binary_search(&(line as u32)).ok()
-    }
-
     /// The current line, for each cursor without a selection; the lines a module highlights.
     fn paint_current_lines(&self, f: &Frame<'_>, scene: &mut Scene, palette: &Palette) {
         let (b, buffer) = (f.bounds, f.doc.buffer());
@@ -910,8 +991,10 @@ impl EditorView {
                 }
             }
         }
+        // Every row of the line (a wrapped one's too).
         for sel in f.doc.selections().iter().filter(|s| s.is_empty()) {
-            if let Some(i) = self.visible_row(buffer.line_of(sel.head)) {
+            let line = buffer.line_of(sel.head) as u32;
+            for (i, _) in self.lines.iter().enumerate().filter(|(_, l)| **l == line) {
                 background.quad(Quad::filled(
                     Rect::new(b.min_x(), f.row_top(i), b.size.width, f.layout.line_height),
                     palette.current_line,
@@ -928,7 +1011,11 @@ impl EditorView {
         self.buckets.resize_with(self.lines.len(), Vec::new);
         self.buckets.iter_mut().for_each(Vec::clear);
         for (index, span) in f.deco.colors.iter().enumerate() {
-            let first = self.starts.partition_point(|&s| s <= span.range.start).saturating_sub(1);
+            // The first row of the line the span starts on (a wrapped line's rows share its
+            // start).
+            let last = self.starts.partition_point(|&s| s <= span.range.start).saturating_sub(1);
+            let line_start = self.starts.get(last).copied().unwrap_or(0);
+            let first = self.starts.partition_point(|&s| s < line_start);
             for (i, start) in self.starts.iter().enumerate().skip(first) {
                 if *start >= span.range.end && i > first {
                     break;
@@ -959,19 +1046,28 @@ impl EditorView {
         self.indents.clear();
         for i in 0..self.lines.len() {
             let line = self.lines[i] as usize;
-            self.load_line(f.doc, line);
-            self.indents.push(indent_width(&self.line, tab));
-            expand_tabs_with(&self.line, f.max_columns, tab, &self.line_inlays, &mut self.display);
+            let base = self.load_row(f.doc, i, f.max_columns);
+            let seg = self.seg(i);
+            // A wrapped line's later rows: no guides (their text starts at the left).
+            self.indents.push(if seg.first { indent_width(&self.line, tab) } else { Some(0) });
             let shaped = text.shape_line(&self.display, &f.font);
             widest = widest.max(shaped.width);
-            let (start, end) = (buffer.line_start(line), buffer.line_end(line));
+            let line_start = buffer.line_start(line);
+            let (start, end) = if seg.first && seg.last {
+                (line_start, buffer.line_end(line))
+            } else {
+                let to = if seg.last { buffer.line_end(line) } else { line_start + seg.to };
+                (line_start + seg.from, to)
+            };
             let inlays = &self.line_inlays;
             let x_of = |offset: usize| {
-                shaped.x_at(source_to_display_with(&self.line, offset - start, tab, inlays))
+                let display = source_to_display_with(&self.line, offset - line_start, tab, inlays);
+                shaped.x_at(display.saturating_sub(base))
             };
             let row = RowSpan {
                 start,
                 end,
+                continues: !seg.last,
                 top: f.row_top(i),
                 x0: f.x0,
                 width: shaped.width,
@@ -1027,10 +1123,15 @@ impl EditorView {
     }
 
     fn line_at_y(&self, y: f32, doc: &Document, folds: &Folds, layout: &Layout) -> u32 {
+        self.row_at_y(y, doc, folds, layout).0
+    }
+
+    /// The line and which of its rows is at `y` (the last row's below the text).
+    fn row_at_y(&self, y: f32, doc: &Document, folds: &Folds, layout: &Layout) -> (u32, u32) {
         let row = ((y - self.bounds.min_y() + self.scroll_y) / layout.line_height).floor().max(0.0)
             as u32;
-        let rows = folds.visible_rows(doc.buffer().line_count() as u32);
-        folds.line_of(row.min(rows.saturating_sub(1)))
+        let rows = self.total_rows(doc, folds);
+        self.row_at(folds, row.min(rows.saturating_sub(1)))
     }
 
     fn font(&self, palette: &Palette) -> Font {
@@ -1066,6 +1167,12 @@ impl EditorView {
     /// `self.line`. Shaped up to a step of [`X_STEP`] columns past it (from the shaping cache:
     /// the whole line for an ordinary one, not a new prefix per column), so a caret on a
     /// minified file's one long line doesn't shape it whole on every frame.
+    /// The x of byte `col` of the line in `self.line`, from the start of its row `seg`.
+    fn x_in_row(&mut self, text: &mut TextSystem, doc: &Document, seg: Seg, col: usize) -> f32 {
+        let x = self.x_in_line(text, doc, col);
+        if seg.from == 0 { x } else { x - self.x_in_line(text, doc, seg.from) }
+    }
+
     fn x_in_line(&mut self, text: &mut TextSystem, doc: &Document, col: usize) -> f32 {
         let tab = doc.tab_width();
         let disp = source_to_display_with(&self.line, col, tab, &self.line_inlays);
@@ -1123,7 +1230,8 @@ fn push_selections(
     let (start, end, layout, x_of) = (row.start, row.end, row.layout, row.x_of);
     for sel in doc.selections().iter().filter(|s| !s.is_empty()) {
         let r = sel.range();
-        if r.end < start || r.start > end || current_match == Some(&r) {
+        let after = if row.continues { r.start >= end } else { r.start > end };
+        if r.end < start || after || current_match == Some(&r) {
             continue;
         }
         let a = x_of(r.start.max(start));

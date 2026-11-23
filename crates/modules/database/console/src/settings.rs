@@ -267,6 +267,7 @@ pub fn profile_limits() -> (usize, usize) {
 
 /// The values in use; `u64::MAX` until configured (the defaults then).
 static FETCH: AtomicU64 = AtomicU64::new(u64::MAX);
+
 static STOP: AtomicBool = AtomicBool::new(true);
 static MEMORY: AtomicU64 = AtomicU64::new(u64::MAX);
 static HISTORY_KEPT: AtomicU64 = AtomicU64::new(u64::MAX);

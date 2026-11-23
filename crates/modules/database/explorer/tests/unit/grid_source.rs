@@ -202,6 +202,7 @@ fn loaded(rows: usize) -> Setup {
 fn edits_overlay_the_rows_and_mark_them() {
     let mut s = loaded(5);
     assert!(s.source.editing().allowed());
+    assert_eq!(s.source.can_edit(), s.source.editing().allowed(), "can_edit agrees");
     s.source.set(0, 1, CellValue::Text("Ana".into())).unwrap();
     assert_eq!(s.source.cell(0, 1), CellRef::Text("Ana"));
     assert_eq!(s.source.mark(0, 1), CellMark::Modified);
@@ -233,10 +234,12 @@ fn a_submit_clears_the_edits_and_a_conflict_keeps_them() {
     s.driver.db.lock().unwrap().affected = vec![("UPDATE".into(), 0)];
     s.source.submit(set);
     assert!(!s.source.editing().allowed(), "editing waits");
+    assert_eq!(s.source.can_edit(), s.source.editing().allowed(), "can_edit agrees");
     s.settle();
     assert!(matches!(s.source.take_outcome(), Some(Err(DbError::Conflict(_)))));
     assert_eq!(s.source.pending(), 1);
     assert!(s.source.editing().allowed());
+    assert_eq!(s.source.can_edit(), s.source.editing().allowed(), "can_edit agrees");
     s.driver.db.lock().unwrap().affected.clear();
     let set = s.source.change_set().unwrap();
     s.source.submit(set);
@@ -250,14 +253,17 @@ fn editing_is_refused_with_a_reason() {
     let mut s = loaded(3);
     s.source.block(Some("save first".into()));
     assert_eq!(s.source.editing(), Editing::ReadOnly("save first".into()));
+    assert_eq!(s.source.can_edit(), s.source.editing().allowed(), "can_edit agrees");
     assert!(s.source.set(0, 1, CellValue::Null).is_err());
     assert!(s.source.insert(None).is_none());
     s.source.block(None);
     s.source.abilities.read_only = true;
     assert!(!s.source.editing().allowed());
+    assert_eq!(s.source.can_edit(), s.source.editing().allowed(), "can_edit agrees");
     s.source.abilities.read_only = false;
     s.source.abilities.view = true;
     assert!(!s.source.editing().allowed());
+    assert_eq!(s.source.can_edit(), s.source.editing().allowed(), "can_edit agrees");
 }
 
 #[test]

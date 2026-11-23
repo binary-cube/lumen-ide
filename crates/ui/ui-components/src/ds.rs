@@ -23,6 +23,7 @@ mod controls;
 mod dropdown;
 mod feedback;
 mod number;
+mod place;
 mod progress;
 mod scroll;
 mod text;
@@ -33,15 +34,20 @@ pub use controls::*;
 pub use dropdown::*;
 pub use feedback::*;
 pub use number::*;
+pub use place::*;
 pub use progress::*;
 pub use scroll::*;
 pub use text::*;
 
-/// Spacing, in logical pixels (4 / 8 scale).
+/// How faintly a band set apart from what it's under is tinted (the text's alpha): a
+/// footer, a bar, a group's card.
+pub const BAND_TINT: f32 = 0.022;
+
 /// The space between a popover (pickers, menus opened from a button or the status bar)
 /// and what it is anchored to (logical pixels): the same everywhere.
 pub const POPOVER_GAP: f32 = 10.0;
 
+/// Spacing, in logical pixels (4 / 8 scale).
 pub mod space {
     pub const XS: f32 = 4.0;
     pub const SM: f32 = 8.0;
@@ -408,61 +414,64 @@ pub fn divider_vertical(layer: &mut Layer, ctx: &Ctx<'_>, x: f32, y0: f32, y1: f
     layer.quad(Quad::filled(Rect::new(x, y0, ctx.line(), y1 - y0), ctx.fade(ctx.palette.border)));
 }
 
-/// A vertical separator that fades: the border color at its middle, transparent toward
-/// both ends (whole-pixel steps, no gradient needed from the renderer).
-pub fn divider_vertical_faded(layer: &mut Layer, ctx: &Ctx<'_>, x: f32, y0: f32, y1: f32) {
-    const STEPS: usize = 24;
-    let len = y1 - y0;
+/// A line of `color` along `from..from + len`, drawn in `steps` whole-pixel pieces, each
+/// as strong as `strength` says at its middle (0 at its start … 1 at its end): the faded
+/// separators' one drawing, no gradient needed from the renderer. `piece` turns a run
+/// `(start, end)` into its rectangle.
+fn faded_line(
+    layer: &mut Layer,
+    (from, len, steps): (f32, f32, usize),
+    color: Rgba,
+    strength: impl Fn(f32) -> f32,
+    piece: impl Fn(f32, f32) -> Rect,
+) {
     if len <= 0.0 {
         return;
     }
-    let color = ctx.fade(ctx.palette.border);
-    let mut top = y0.round();
-    for i in 0..STEPS {
-        let bottom = (y0 + len * (i + 1) as f32 / STEPS as f32).round();
-        if bottom > top {
-            // From 0 at the ends to 1 at the middle, easing in (a sine's arch).
-            let t = (i as f32 + 0.5) / STEPS as f32;
-            let k = (std::f32::consts::PI * t).sin();
-            layer.quad(Quad::filled(
-                Rect::new(x, top, ctx.line(), bottom - top),
-                color.with_alpha(color.a * k * k),
-            ));
+    let mut start = from.round();
+    for i in 0..steps {
+        let end = (from + len * (i + 1) as f32 / steps as f32).round();
+        if end > start {
+            let k = strength((i as f32 + 0.5) / steps as f32);
+            layer.quad(Quad::filled(piece(start, end), color.with_alpha(color.a * k * k)));
         }
-        top = bottom;
+        start = end;
     }
+}
+
+/// From 0 at the ends to 1 at the middle, easing in (a sine's arch).
+fn arch(t: f32) -> f32 {
+    (std::f32::consts::PI * t).sin()
+}
+
+/// A vertical separator that fades: the border color at its middle, transparent toward
+/// both ends.
+pub fn divider_vertical_faded(layer: &mut Layer, ctx: &Ctx<'_>, x: f32, y0: f32, y1: f32) {
+    /// Its pieces.
+    const STEPS: usize = 24;
+    let color = ctx.fade(ctx.palette.border);
+    let line = ctx.line();
+    faded_line(layer, (y0, y1 - y0, STEPS), color, arch, |top, bottom| {
+        Rect::new(x, top, line, bottom - top)
+    });
 }
 
 /// A horizontal separator that fades: the border color at its middle, transparent toward
-/// both ends (whole-pixel steps, no gradient needed from the renderer) — the horizontal
-/// [`divider_vertical_faded`] (between a strip's groups of buttons).
+/// both ends — the horizontal [`divider_vertical_faded`] (between a strip's groups of
+/// buttons).
 pub fn divider_horizontal_faded(layer: &mut Layer, ctx: &Ctx<'_>, x0: f32, x1: f32, y: f32) {
+    /// Its pieces (a short line: fewer).
     const STEPS: usize = 12;
-    let len = x1 - x0;
-    if len <= 0.0 {
-        return;
-    }
     let color = ctx.fade(ctx.palette.border);
     let (y, thick) = (y.round(), ctx.line());
-    let mut left = x0.round();
-    for i in 0..STEPS {
-        let right = (x0 + len * (i + 1) as f32 / STEPS as f32).round();
-        if right > left {
-            // From 0 at the ends to 1 at the middle, easing in (a sine's arch).
-            let t = (i as f32 + 0.5) / STEPS as f32;
-            let k = (std::f32::consts::PI * t).sin();
-            layer.quad(Quad::filled(
-                Rect::new(left, y, right - left, thick),
-                color.with_alpha(color.a * k * k),
-            ));
-        }
-        left = right;
-    }
+    faded_line(layer, (x0, x1 - x0, STEPS), color, arch, |left, right| {
+        Rect::new(left, y, right - left, thick)
+    });
 }
 
 /// A horizontal separator at `y` from `x0` to `x1` that fades: `color` at its start (right
-/// after what it follows: a caption), transparent toward its end (whole-pixel steps, no
-/// gradient needed from the renderer). The usual color is `palette.border`.
+/// after what it follows: a caption), transparent toward its end. The usual color is
+/// `palette.border`.
 pub fn divider_faded_right(
     layer: &mut Layer,
     ctx: &Ctx<'_>,
@@ -471,26 +480,18 @@ pub fn divider_faded_right(
     y: f32,
     color: Rgba,
 ) {
+    /// Its pieces.
     const STEPS: usize = 24;
-    let len = x1 - x0;
-    if len <= 0.0 {
-        return;
-    }
     let color = ctx.fade(color);
     let (y, thick) = (y.round(), ctx.line());
-    let mut left = x0.round();
-    for i in 0..STEPS {
-        let right = (x0 + len * (i + 1) as f32 / STEPS as f32).round();
-        if right > left {
-            // From 1 at the start to 0 at the end, easing out (strongest near the start).
-            let k = 1.0 - (i as f32 + 0.5) / STEPS as f32;
-            layer.quad(Quad::filled(
-                Rect::new(left, y, right - left, thick),
-                color.with_alpha(color.a * k * k),
-            ));
-        }
-        left = right;
-    }
+    // From 1 at the start to 0 at the end, easing out (strongest near the start).
+    faded_line(
+        layer,
+        (x0, x1 - x0, STEPS),
+        color,
+        |t| 1.0 - t,
+        |left, right| Rect::new(left, y, right - left, thick),
+    );
 }
 
 /// What a part of a view draws with: its layer, the text system and the design system's

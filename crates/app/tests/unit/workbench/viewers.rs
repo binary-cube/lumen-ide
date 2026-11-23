@@ -976,3 +976,77 @@ fn a_view_s_asked_menu_opens_under_its_button() {
     assert!(workbench_model::WorkbenchHost::view_command(&mut wb, "more"));
     assert!(wb.context_menu.is_open(), "opened after the command");
 }
+
+/// A view told the window's focus: at its first frame, then each time it changes (never
+/// again while it stays).
+struct FocusTold(Arc<std::sync::Mutex<Vec<bool>>>);
+
+impl ui_workbench::Viewer for FocusTold {
+    fn paint(&mut self, _: ui_workbench::ViewerPaint<'_>) {}
+    fn set_window_focused(&mut self, focused: bool) {
+        self.0.lock().unwrap().push(focused);
+    }
+}
+
+#[test]
+fn a_view_is_told_the_window_s_focus_when_it_changes() {
+    let mut wb = workbench();
+    let told: Arc<std::sync::Mutex<Vec<bool>>> = Arc::default();
+    let mut doc = Document::new("");
+    doc.mark_saved(PathBuf::from("/virtual/focus"));
+    let mut tab = Tab::new(doc, wb.code_font.clone(), None, LanguageId::PLAIN_TEXT);
+    tab.viewer = Some(TabViewer::new(
+        Box::new(FocusTold(Arc::clone(&told))),
+        "test",
+        ui_workbench::ViewerKind::Replace,
+        ViewMode::Preview,
+    ));
+    wb.push_tab(tab);
+    let mut text = TextSystem::new();
+    wb.set_decorations_window(true, true, false);
+    wb.paint(&mut text, &mut Scene::default());
+    wb.paint(&mut text, &mut Scene::default());
+    wb.set_decorations_window(false, true, false);
+    wb.paint(&mut text, &mut Scene::default());
+    wb.set_decorations_window(true, true, false);
+    wb.paint(&mut text, &mut Scene::default());
+    assert_eq!(*told.lock().unwrap(), [true, false, true]);
+}
+
+/// A view told how text is shown: at its first frame, then only when it changes.
+struct TextTold(Arc<std::sync::Mutex<Vec<bool>>>);
+
+impl ui_workbench::Viewer for TextTold {
+    fn paint(&mut self, _: ui_workbench::ViewerPaint<'_>) {}
+    fn set_text_options(&mut self, options: &ui_workbench::TextOptions) {
+        self.0.lock().unwrap().push(options.word_wrap);
+    }
+}
+
+#[test]
+fn a_view_is_told_how_text_is_shown_when_it_changes() {
+    let _turn =
+        crate::text_options::TEST_TURN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut wb = workbench();
+    let told: Arc<std::sync::Mutex<Vec<bool>>> = Arc::default();
+    let mut doc = Document::new("");
+    doc.mark_saved(PathBuf::from("/virtual/text-options"));
+    let mut tab = Tab::new(doc, wb.code_font.clone(), None, LanguageId::PLAIN_TEXT);
+    tab.viewer = Some(TabViewer::new(
+        Box::new(TextTold(Arc::clone(&told))),
+        "test",
+        ui_workbench::ViewerKind::Replace,
+        ViewMode::Preview,
+    ));
+    wb.push_tab(tab);
+    let mut text = TextSystem::new();
+    let before = crate::text_options::current();
+    wb.paint(&mut text, &mut Scene::default());
+    wb.paint(&mut text, &mut Scene::default());
+    assert_eq!(told.lock().unwrap().len(), 1, "told once at first");
+    crate::text_options::set(ui_workbench::TextOptions { word_wrap: !before.word_wrap });
+    wb.paint(&mut text, &mut Scene::default());
+    crate::text_options::set(before);
+    let told = told.lock().unwrap().clone();
+    assert!(told.len() >= 2 && told[1] == !before.word_wrap, "told the change: {told:?}");
+}

@@ -141,3 +141,41 @@ fn a_lane_draws_its_block_by_the_pointers_state() {
     b.paint_lane(&mut layer, none, &look);
     assert_eq!(layer.quads.len(), 2, "nothing to scroll: no block");
 }
+
+/// A bar in a window that fades (a modal, a menu appearing) fades with it; the same bar
+/// drawn plainly is as it was.
+#[test]
+fn a_bar_fades_with_its_window() {
+    let palette = Palette::dark();
+    let area = Rect::new(0.0, 0.0, 500.0, 400.0);
+    let quads = |fade: Option<f32>| {
+        let mut e = EdgeScrollbar::default();
+        let mut scene = Scene::default();
+        match fade {
+            None => e.paint(&mut scene, &palette, 1.0, area, 4000.0, 0.0),
+            Some(o) => {
+                let ctx = crate::ds::Ctx::new(&palette, 1.0).with_opacity(o);
+                e.paint_in(&mut scene, &ctx, area, 4000.0, 0.0);
+            }
+        }
+        scene.layers().iter().flat_map(|l| l.quads.iter().map(|q| q.color.a)).collect::<Vec<_>>()
+    };
+    let (plain, whole, half) = (quads(None), quads(Some(1.0)), quads(Some(0.5)));
+    assert!(!plain.is_empty());
+    assert_eq!(plain, whole);
+    for (a, b) in plain.iter().zip(&half) {
+        assert!((b - a * 0.5).abs() < 1e-4);
+    }
+}
+
+/// To a screen reader: a bar that can scroll is a scrollbar, its value the share scrolled.
+#[test]
+fn a_bar_tells_how_far_it_scrolled() {
+    let mut e = EdgeScrollbar::default();
+    let recording = ui_kit::access::begin();
+    let area = Rect::new(0.0, 0.0, 500.0, 400.0);
+    e.paint(&mut Scene::default(), &Palette::dark(), 1.0, area, 4000.0, 1800.0);
+    let frame = recording.take();
+    let bar = frame.nodes().iter().find(|n| n.role == ui_kit::access::Role::ScrollBar);
+    assert_eq!(bar.and_then(|b| b.value.as_deref()), Some("50%"));
+}

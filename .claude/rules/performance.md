@@ -13,6 +13,23 @@ Part of the project's rules: [index](project-conventions.md). Related: [writing 
 - **Exists only while used**: views, engines, previews are made when first needed and let go
   when closed or hidden long enough; nothing loaded before it's needed. Memory has budgets
   (e.g. response bodies per project), the oldest let go to disk.
+- **Nothing moves unseen**: a part not drawn now (hidden, a figure the selection lacks, a
+  page scrolled away) starts no transition and says it isn't animating (`Chart::forget`
+  when it stops being drawn); `is_animating` is true only while something visibly changes.
+  The app paces an animation's frames by the display: a frame that showed nothing new
+  waits a display's frame (`ANIMATION_FLOOR`) before the next, so a part wrongly saying
+  it moves costs ~120 frames a second at worst, never an unpaced loop. A test holds it
+  where a view updates on a clock (the Task Manager's ticking detail).
+- **Moving is not waiting**: `is_animating` means something visibly changes every frame
+  (a transition, a drag scrolling). Work going on (a worker, a measure, a git operation, a
+  program's first output) is `is_loading` (a loader's pace); a pause to wait out (typing,
+  a save after a change) is a `frame_deadline` (one frame then); a result from a worker
+  wakes the window (its waker), never frames asked until it's here. A worker gone without
+  its answer (`Disconnected`) ends the wait.
+- **What asks for frames is walked in one place** (`Workbench::each_frame_asker`, only
+  what's on screen); a new part is added there by name. A part saying it moves while
+  frames show nothing is named in the log (`UnseenMotion`) and by the snapshots
+  (`moving: …`; a scene meant to move says `MOVES=1`).
 - **Measure before choosing**, and write the numbers in the commit or the plan.
 - **Never I/O, waking or calling out under a lock**: a lock only moves data in or out;
   writing to a process goes through a thread of its own fed by a channel, a wake happens

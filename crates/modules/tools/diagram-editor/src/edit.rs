@@ -205,13 +205,6 @@ pub fn snap_move(
     (dx, dy, guides)
 }
 
-/// The box around `a` and `b`.
-pub(crate) fn union(a: Rect, b: Rect) -> Rect {
-    let (x0, y0) = (a.min_x().min(b.min_x()), a.min_y().min(b.min_y()));
-    let (x1, y1) = (a.max_x().max(b.max_x()), a.max_y().max(b.max_y()));
-    Rect::new(x0, y0, x1 - x0, y1 - y0)
-}
-
 #[cfg(test)]
 #[path = "../tests/unit/edit.rs"]
 mod tests;

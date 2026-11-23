@@ -187,6 +187,30 @@ pub const STATUS: f32 = 38.0;
 /// The worker a response is made readable on.
 pub const THREAD: &str = "http-view";
 
+/// The mark at a wrapped row's end (its line goes on below).
+const WRAP_END: &str = "↩";
+
+/// Each of `lines`' first row when they wrap at `columns`, one more at the end (all of
+/// them): a line no longer than the columns is one row, not read again.
+fn first_rows(lines: &Lines, columns: usize) -> Vec<u32> {
+    let mut firsts = Vec::with_capacity(lines.len() + 1);
+    let mut parts = Vec::new();
+    let mut at: u32 = 0;
+    for i in 0..lines.len() {
+        firsts.push(at);
+        let line = lines.shown(i);
+        let rows = if line.len() <= columns / 4 {
+            1
+        } else {
+            ui_components::text_options::wrap_rows(line, columns, 4, &mut parts);
+            parts.len() as u32
+        };
+        at = at.saturating_add(rows);
+    }
+    firsts.push(at);
+    firsts
+}
+
 /// A text by its lines: one allocation, where each line starts.
 #[derive(Debug, Default)]
 struct Lines {
@@ -267,6 +291,11 @@ pub struct ResponseView {
     page_id: u128,
     page: Option<Arc<str>>,
     paging: Pending<Option<String>>,
+    /// Lines wrap at the body's width ([`ui_components::TextOptions::word_wrap`]).
+    wrap: bool,
+    /// While wrapping: each line's first row, for the lines (their text's place and
+    /// length) and the columns they were made for; one more at the end, all of them.
+    wrapped: (Option<(usize, usize, usize)>, Vec<u32>),
 }
 
 impl std::fmt::Debug for ResponseView {
@@ -292,6 +321,8 @@ impl ResponseView {
             page_id: kernel::id::new_uuid(),
             page: None,
             paging: Pending::default(),
+            wrap: false,
+            wrapped: (None, Vec::new()),
         };
         view.refresh();
         view
@@ -513,33 +544,82 @@ impl Viewer for ResponseView {
         };
         let font = ds.code_font(-1.0);
         self.row_h = (font.size * 1.55).round();
-        let content = lines.len() as f32 * self.row_h + px(16.0);
+        // Wrapping: each line's rows at the body's width (made again when either changes).
+        let (left, right) = (body.min_x() + px(12.0), body.max_x() - px(8.0));
+        let advance = text.metrics(&font).advance.max(1.0);
+        let columns = if self.wrap {
+            (((right - left) / advance).floor() as usize).saturating_sub(1)
+        } else {
+            0
+        };
+        let key = (lines.text.as_ptr() as usize, lines.text.len(), columns);
+        if columns > 0 && self.wrapped.0 != Some(key) {
+            self.wrapped = (Some(key), first_rows(lines, columns));
+        }
+        let firsts = if columns > 0 { self.wrapped.1.as_slice() } else { &[] };
+        let first_of = |i: usize| firsts.get(i).map_or(i, |&r| r as usize);
+        let content = first_of(lines.len()) as f32 * self.row_h + px(16.0);
         // Coming: its end followed.
         if matches!(self.shown, Shown::Streaming(_)) {
             self.scroll = f32::MAX;
         }
         self.scroll = self.scroll.clamp(0.0, (content - body.size.height).max(0.0));
         let layer = scene.push_layer(Some(body));
-        let first = (self.scroll / self.row_h) as usize;
-        let visible = (body.size.height / self.row_h) as usize + 2;
-        for i in (first..lines.len()).take(visible) {
+        let row = (self.scroll / self.row_h) as usize;
+        let first = if firsts.is_empty() {
+            row
+        } else {
+            firsts.partition_point(|&f| f as usize <= row).saturating_sub(1)
+        };
+        let bottom = self.scroll + body.size.height;
+        let mut parts = Vec::new();
+        for i in first..lines.len() {
+            let top = body.min_y() + px(8.0) + first_of(i) as f32 * self.row_h - self.scroll;
+            if top - body.min_y() > bottom - self.scroll + self.row_h {
+                break;
+            }
             let line = lines.shown(i);
-            let top = body.min_y() + px(8.0) + i as f32 * self.row_h - self.scroll;
-            let baseline = ds::optical_baseline(top, self.row_h, &font);
-            draw_code(
-                layer,
-                text,
-                CodeLine {
-                    source: line,
-                    extension,
-                    font: &font,
-                    x: body.min_x() + px(12.0),
-                    baseline,
-                    palette,
-                    max_x: body.max_x() - px(8.0),
-                },
-            );
+            let spec = |baseline| CodeLine {
+                source: line,
+                extension,
+                font: &font,
+                x: left,
+                baseline,
+                palette,
+                max_x: right,
+            };
+            if columns == 0 {
+                draw_code(layer, text, spec(ds::optical_baseline(top, self.row_h, &font)));
+                continue;
+            }
+            ui_components::text_options::wrap_rows(line, columns, 4, &mut parts);
+            for (k, part) in parts.iter().enumerate() {
+                let row_top = top + k as f32 * self.row_h;
+                let baseline = ds::optical_baseline(row_top, self.row_h, &font);
+                if parts.len() == 1 {
+                    draw_code(layer, text, spec(baseline));
+                    continue;
+                }
+                ui_components::code_tokens::draw_code_part(
+                    layer,
+                    text,
+                    spec(baseline),
+                    part.clone(),
+                );
+                // The line goes on below: the wrap's mark after this row's text.
+                if k + 1 < parts.len() {
+                    let width = text.shape_line(&line[part.clone()], &font).width;
+                    let mark = text.shape_line(WRAP_END, &font);
+                    let color = palette.text_muted.with_alpha(0.6);
+                    ui_kit::draw_text(layer, &mark, left + width + px(4.0), baseline, color);
+                }
+            }
         }
+    }
+
+    /// Word wrap: the body's lines go on in rows under them.
+    fn set_text_options(&mut self, options: &ui_components::TextOptions) {
+        self.wrap = options.word_wrap;
     }
 
     fn poll(&mut self) -> bool {

@@ -30,22 +30,6 @@ fn number(v: f64) -> String {
     }
 }
 
-/// About `count` round steps over `lo..hi`: the step and the first tick.
-fn ticks(lo: f64, hi: f64, count: usize) -> Vec<f64> {
-    let span = (hi - lo).abs().max(f64::EPSILON);
-    let raw = span / count.max(1) as f64;
-    let mag = 10f64.powf(raw.log10().floor());
-    let step =
-        [1.0, 2.0, 2.5, 5.0, 10.0].iter().map(|m| m * mag).find(|s| *s >= raw).unwrap_or(raw);
-    let mut out = Vec::new();
-    let mut t = (lo / step).ceil() * step;
-    while t <= hi + step * 1e-9 && out.len() < 64 {
-        out.push(if t.abs() < step * 1e-9 { 0.0 } else { t });
-        t += step;
-    }
-    out
-}
-
 /// A rectangle between two corners, in any order.
 fn between(a: Point, b: Point) -> Rect {
     Rect::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
@@ -371,7 +355,7 @@ pub fn xychart(c: &XyChart, look: &Look, measure: &mut dyn Measure) -> Scene {
             (lo, hi)
         }
     });
-    let ticks = ticks(lo, hi, 6);
+    let ticks = charts_model::scale::ticks_within(lo, hi, 6);
     let tick_w =
         ticks.iter().map(|t| text_size(measure, &number(*t), size, false).0).fold(0.0, f32::max);
     let cat_w = categories.iter().map(|t| text_size(measure, t, size, false).0).fold(0.0, f32::max);

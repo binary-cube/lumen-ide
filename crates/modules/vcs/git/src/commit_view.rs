@@ -41,6 +41,7 @@ mod selection;
 mod syntax;
 mod text_selection;
 mod view;
+mod wrap;
 
 /// The extension of the view's virtual tab.
 pub const EXTENSION: &str = "view-commit";
@@ -204,6 +205,8 @@ pub struct CommitView {
     lines: std::collections::BTreeSet<(usize, usize)>,
     line_anchor: Option<(usize, usize)>,
     diff_overflow: f32,
+    /// The changes' lines wrap at the code's width ([`ui_components::TextOptions`]).
+    wrap: bool,
     panes: [Rect; 3],
     /// Docked in the Git window: the repository's places beside the screen, read in the
     /// background with the lists; their rows (the sections and folders folded), where they

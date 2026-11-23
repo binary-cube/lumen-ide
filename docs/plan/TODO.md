@@ -5,6 +5,42 @@ făcute se șterg.
 
 ## Următorul (cerut)
 
+- **Windows: decupajele urâte peste pagina motorului web** (raportat 2026-11-23, cu captură).
+  Peste editorul de diagrame (o pagină a motorului web al sistemului), pastilele de resurse
+  fixate în colț (CPU, RAM, GPU și pinul) apar înconjurate de pete albastre mari, rotunjite
+  și deplasate. Forma lor trebuie să fie scoasă exact din pagină, ca să se vadă pastilele
+  peste ea (`StatusPopover::shapes` și `resource_pills`: dreptunghiuri și colțuri, în pixeli
+  fizici).
+  - **De verificat:** cum se aplică forma pe fereastra motorului web pe Windows (regiunea
+    ferestrei copil): unitățile (fizic față de logic, scara monitorului), colțurile (o
+    elipsă în loc de un dreptunghi rotunjit), culoarea care umple ce e decupat (accentul în
+    loc de transparent sau de fundalul pastilei), poziția față de fereastră.
+  - Pe macOS de comparat: acolo arată corect?
+  - **Făcut (2026-11-23):** codul de decupare recitit (poziția față de pagină, rândurile,
+    colțurile, pixelii fizici) pare corect; fără Windows nu se poate vedea ce face sistemul.
+    Jurnalul spune acum, la `debug`, zona paginii, fiecare gaură cerută (în pixelii paginii)
+    și caseta regiunii puse (`GetRgnBox`). **De făcut pe Windows:** pornit cu
+    `EDITOR_LOG=debug`, pastilele fixate peste editorul de diagrame, liniile „a page's hole
+    cut” / „a page's region set” din jurnal arată unde e nepotrivirea.
+
+- **Windows: „Open with” deschide altă instanță a aplicației** (raportat 2026-11-23). Un
+  fișier deschis cu „Open with” → aplicația, apoi alt fișier la fel: se deschide o
+  aplicație nouă, în loc să ajungă la cea care rulează (`instance::claim`). Instanța e
+  găsită după un hash FNV al drumului executabilului (`executable_tag`, după
+  `canonicalize`), pe un pipe numit după el și după utilizator.
+  - **Bănuiala:** pe Windows drumurile nu țin cont de literele mari și mici, dar hash-ul
+    ține. „Open with” sau scurtătura de pe desktop pot porni programul cu alt drum: altă
+    scriere a literelor, un drum scurt 8.3, `\\?\` în față. Atunci pipe-ul are alt nume.
+  - **Făcut (2026-11-23):** drumul adus la o formă unică înainte de hash pe Windows
+    (`instance::one_form`: fără `\\?\`, `\\?\UNC\`, `/` ca `\`, litere mici, fără separator
+    la capăt; testat); același hash numește și canalul dintre instanțe (`peers`). Jurnalul
+    spune canalul (`tag`) ascultat („listening for later starts”) și cel căutat („handed to
+    the running instance”).
+  - **Rămas:** confirmarea pe Windows (dacă tot pornește o instanță nouă: cele două
+    `tag`-uri din jurnal spun dacă e alt nume sau altă cauză).
+  - **De verificat:** dacă a doua pornire chiar încearcă (jurnalul „handed to the running
+    instance”); dacă primul proces ascultă încă după ce și-a deschis fereastra.
+
 - **Fișierele foarte lungi, analizate și sparte** (cerut 2026-11-20, după profilare). De
   găsit fișierele cele mai lungi din `crates/` (de numărat liniile, cele peste ~800 întâi),
   apoi pentru fiecare: ce face, dacă face optim (nimic pe firul interfeței, nimic refăcut pe

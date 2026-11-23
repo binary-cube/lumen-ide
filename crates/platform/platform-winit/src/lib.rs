@@ -96,7 +96,8 @@ pub(crate) enum UserEvent {
     /// The system's accessibility: its tree asked for, a node acted on, a screen reader gone.
     Access(accesskit_winit::Event),
     /// A window's accessibility tree, made by the app's last frame.
-    AccessTree(WindowId, accesskit::TreeUpdate),
+    /// A tree's update, for the system's ask it was made for.
+    AccessTree(WindowId, u64, accesskit::TreeUpdate),
 }
 
 impl From<accesskit_winit::Event> for UserEvent {
@@ -194,10 +195,15 @@ impl Window for WinitWindow {
         Some(self.access_asked.load(std::sync::atomic::Ordering::Relaxed)).filter(|&n| n > 0)
     }
 
-    fn update_access(&self, frame: &platform_api::access::Frame) {
-        let update = access_bridge::tree_update(frame, &self.window.title());
+    fn update_access(
+        &self,
+        frame: &platform_api::access::Frame,
+        previous: Option<&platform_api::access::Frame>,
+    ) {
+        let ask = self.access_asked.load(std::sync::atomic::Ordering::Relaxed);
+        let update = access_bridge::tree_update(frame, &self.window.title(), previous);
         if let Ok(proxy) = self.proxy.lock() {
-            let _ = proxy.send_event(UserEvent::AccessTree(self.window.id(), update));
+            let _ = proxy.send_event(UserEvent::AccessTree(self.window.id(), ask, update));
         }
     }
 
@@ -742,9 +748,9 @@ impl Handler {
                         &window,
                         self.proxy.clone(),
                     ),
-                    asked: Arc::default(),
+                    asks: access_bridge::Asks::default(),
                 };
-                let access_asked = Arc::clone(&access.asked);
+                let access_asked = Arc::clone(&access.asks.asked);
                 let id = window.id();
                 // Without IME, dead keys (e.g. composed diacritics) don't work on macOS.
                 window.set_ime_allowed(true);
@@ -987,7 +993,7 @@ impl ApplicationHandler<UserEvent> for Handler {
                     // A screen reader came: a frame makes the tree.
                     Asked::InitialTreeRequested => {
                         if let Some(state) = self.state(window_id) {
-                            state.access.asked();
+                            state.access.asks.asked();
                             state.window.request_redraw();
                         }
                     }
@@ -998,13 +1004,15 @@ impl ApplicationHandler<UserEvent> for Handler {
                     }
                     Asked::AccessibilityDeactivated => {
                         if let Some(state) = self.state(window_id) {
-                            state.access.left();
+                            state.access.asks.left();
                         }
                     }
                 }
             }
-            UserEvent::AccessTree(id, update) => {
-                if let Some(state) = self.state(id) {
+            UserEvent::AccessTree(id, ask, update) => {
+                if let Some(state) = self.state(id)
+                    && state.access.asks.current(ask)
+                {
                     state.access.adapter.update_if_active(|| update);
                 }
             }

@@ -152,9 +152,9 @@ pub trait Window: fmt::Debug {
         None
     }
     /// The window's accessibility tree, as the last frame made it (told only when it
-    /// changed).
-    fn update_access(&self, frame: &access::Frame) {
-        let _ = frame;
+    /// changed): only what changed since `previous` (the tree told last), or whole (`None`).
+    fn update_access(&self, frame: &access::Frame, previous: Option<&access::Frame>) {
+        let _ = (frame, previous);
     }
     /// Opens another window in the same process (with the first window's options); it
     /// reaches the app via [`Application::window_opened`].

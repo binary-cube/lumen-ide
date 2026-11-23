@@ -277,7 +277,9 @@ impl Viewer for SwitchDialog {
         }
     }
 
-    fn is_animating(&self) -> bool {
+    /// Its operation running shows as loading (its progress at a loader's pace), never as
+    /// motion asking every frame the display could draw.
+    fn is_loading(&self) -> bool {
         self.running.is_some()
     }
 

@@ -281,7 +281,22 @@ pub struct DateRangePicker {
     rect: Rect,
     /// Two months shown (else one: narrow).
     pub two: bool,
+    /// The texts it draws, kept for what they say (written again only when that changes).
+    texts: PickerTexts,
 }
+
+/// What the picker writes as it's drawn, kept: the fields' hint (the format in upper case,
+/// under the format's hash), a month's title, and the footer's words (under the messages'
+/// generation and the range).
+#[derive(Debug, Default)]
+struct PickerTexts {
+    hint: Option<(u64, String)>,
+    title: String,
+    footer: Option<(FooterKey, [String; 3])>,
+}
+
+/// What the footer says depends on: the messages, the range, today.
+type FooterKey = (u64, Option<Date>, Option<Date>, Date);
 
 impl std::fmt::Debug for DateRangePicker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -311,6 +326,7 @@ impl DateRangePicker {
             hits: Vec::new(),
             rect: Rect::default(),
             two: true,
+            texts: PickerTexts::default(),
             presets,
             locale,
         };
@@ -604,15 +620,15 @@ impl DateRangePicker {
         self.two = px(Self::size(true).0) <= room;
         let (w, h) = Self::size(self.two);
         let (w, h) = (px(w).min(room), px(h));
-        let gap = px(ds::POPOVER_GAP);
-        let below = anchor.max_y() + px(4.0);
-        let y = if below + h <= view.max_y() - gap {
-            below
-        } else {
-            (anchor.min_y() - px(4.0) - h).max(view.min_y() + px(4.0))
+        let place = ds::PopoverPlace {
+            side: ds::PopoverSide::Below,
+            right: false,
+            gap: px(ds::POPOVER_GAP),
+            margin: px(8.0),
+            bottom: px(ds::POPOVER_GAP),
         };
-        let x = anchor.min_x().min(view.max_x() - w - px(8.0)).max(view.min_x() + px(8.0));
-        let rect = Rect::new(x.round(), y.round(), w.round(), h.round());
+        let (at, _) = ds::popover_rect(anchor, (w, h), view, place);
+        let rect = Rect::new(at.min_x().round(), at.min_y().round(), w.round(), h.round());
         self.rect = rect;
         self.hits.clear();
         self.hits.push((rect, Part::Inside));
@@ -687,7 +703,12 @@ impl DateRangePicker {
         let arrow = text.shape_line("→", &ds.ui_font(0.0));
         let field_w = ((right - left - arrow.width - px(24.0)) / 2.0).max(px(80.0)).min(px(200.0));
         let h = px(FIELDS_H);
-        let placeholder = self.locale.format.to_uppercase();
+        let format = kernel::hash::fnv64(&self.locale.format);
+        if self.texts.hint.as_ref().is_none_or(|(seen, _)| *seen != format) {
+            self.texts.hint = Some((format, self.locale.format.to_uppercase()));
+        }
+        let hint = self.texts.hint.take().unwrap_or_default();
+        let placeholder = &hint.1;
         for (i, field) in [PickerField::From, PickerField::To].into_iter().enumerate() {
             let x = left + i as f32 * (field_w + arrow.width + px(24.0));
             let r = Rect::new(x, y, field_w, h);
@@ -702,7 +723,7 @@ impl DateRangePicker {
                 style.border_focused = p.danger;
             }
             let input = if field == PickerField::From { &self.from } else { &self.to };
-            input.paint(layer, text, r, self.field == Some(field), &placeholder, &style);
+            input.paint(layer, text, r, self.field == Some(field), placeholder, &style);
             self.hits.push((r, if field == PickerField::From { Part::From } else { Part::To }));
             if i == 0 {
                 draw_text(
@@ -714,6 +735,7 @@ impl DateRangePicker {
                 );
             }
         }
+        self.texts.hint = Some(hint);
     }
 
     fn paint_month(
@@ -730,8 +752,14 @@ impl DateRangePicker {
         let width = cell * 7.0;
         // The header: ‹ Month Year ›.
         let strong = ds.ui_font(-0.5).with_weight(Font::SEMIBOLD);
-        let name = self.locale.months.get(month.month as usize - 1).cloned().unwrap_or_default();
-        let title = text.shape_line(&format!("{name} {}", month.year), &strong);
+        let name = self.locale.months.get(month.month as usize - 1).map_or("", String::as_str);
+        let title = &mut self.texts.title;
+        title.clear();
+        {
+            use std::fmt::Write;
+            let _ = write!(title, "{name} {}", month.year);
+        }
+        let title = text.shape_line(title, &strong);
         draw_text(
             layer,
             &title,
@@ -760,8 +788,8 @@ impl DateRangePicker {
         let wy = y + px(HEADER_H);
         for c in 0..7u32 {
             let wd = ((self.locale.week_start + c) % 7) as usize;
-            let label = self.locale.weekdays.get(wd).cloned().unwrap_or_default();
-            let shaped = text.shape_line(&label, &small);
+            let label = self.locale.weekdays.get(wd).map_or("", String::as_str);
+            let shaped = text.shape_line(label, &small);
             let cx = x + c as f32 * cell + (cell - shaped.width) / 2.0;
             draw_text(
                 layer,
@@ -842,7 +870,7 @@ impl DateRangePicker {
             } else {
                 p.text
             };
-            let shaped = text.shape_line(&day.day.to_string(), &font);
+            let shaped = text.shape_line(day_label(day.day), &font);
             draw_text(
                 layer,
                 &shaped,
@@ -862,13 +890,21 @@ impl DateRangePicker {
         let top = rect.max_y() - px(FOOTER_H);
         ds::divider(layer, ds, rect.min_x(), rect.max_x(), top);
         let mid = top + px(FOOTER_H) / 2.0;
-        let hint = match (self.start, self.end) {
-            (None, _) => i18n::t("time.picker_pick_first"),
-            (Some(_), None) => i18n::t("time.picker_pick_last"),
-            (Some(a), Some(b)) => self.locale.range((a, b), self.today),
-        };
+        let key = (i18n::generation(), self.start, self.end, self.today);
+        if self.texts.footer.as_ref().is_none_or(|(seen, _)| *seen != key) {
+            let hint = match (self.start, self.end) {
+                (None, _) => i18n::t("time.picker_pick_first"),
+                (Some(_), None) => i18n::t("time.picker_pick_last"),
+                (Some(a), Some(b)) => self.locale.range((a, b), self.today),
+            };
+            let words = [hint, i18n::t("time.picker_apply"), i18n::t("time.picker_cancel")];
+            self.texts.footer = Some((key, words));
+        }
+        let footer = self.texts.footer.take();
+        let [hint, apply, cancel] =
+            footer.as_ref().map_or([""; 3], |(_, w)| w.each_ref().map(String::as_str));
         let small = ds.ui_font(-1.0);
-        let shaped = text.shape_line(&hint, &small);
+        let shaped = text.shape_line(hint, &small);
         draw_text(
             layer,
             &shaped,
@@ -876,8 +912,7 @@ impl DateRangePicker {
             ds::optical_baseline(top, px(FOOTER_H), &small),
             p.text_muted,
         );
-        let (apply, cancel) = (i18n::t("time.picker_apply"), i18n::t("time.picker_cancel"));
-        let bw = ds::primary_width(text, ds, &[&apply, &cancel]);
+        let bw = ds::primary_width(text, ds, &[apply, cancel]);
         let bh = px(ds::BUTTON_H);
         let apply_r = Rect::new(rect.max_x() - px(PAD) - bw, (mid - bh / 2.0).round(), bw, bh);
         let cancel_r = Rect::new(apply_r.min_x() - px(8.0) - bw, apply_r.min_y(), bw, bh);
@@ -886,7 +921,7 @@ impl DateRangePicker {
             text,
             ds,
             cancel_r,
-            &cancel,
+            cancel,
             true,
             self.hover == Some(Part::Cancel),
         );
@@ -895,12 +930,13 @@ impl DateRangePicker {
             text,
             ds,
             apply_r,
-            &apply,
+            apply,
             self.can_apply(),
             self.hover == Some(Part::Apply),
         );
         self.hits.push((cancel_r, Part::Cancel));
         self.hits.push((apply_r, Part::Apply));
+        self.texts.footer = footer;
     }
 
     /// A field has the keys (typing goes to it).
@@ -990,6 +1026,16 @@ impl crate::control::Control for RangePart<'_> {
     fn command(&mut self, id: &str) -> bool {
         self.picker.command(id)
     }
+}
+
+/// A day of the month as written (`1`…`31`), from a table: no text made for each cell of a
+/// month drawn every frame.
+fn day_label(day: u32) -> &'static str {
+    const DAYS: [&str; 32] = [
+        "", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15", "16",
+        "17", "18", "19", "20", "21", "22", "23", "24", "25", "26", "27", "28", "29", "30", "31",
+    ];
+    DAYS.get(day as usize).copied().unwrap_or("")
 }
 
 #[cfg(test)]

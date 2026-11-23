@@ -50,7 +50,7 @@ impl BackdropStyle {
             opacity: None,
             blur: DEFAULT_BLUR,
             theme: spec,
-            brightness: luminance(window),
+            brightness: window.luminance(),
         };
         style.apply(spec);
         style
@@ -174,11 +174,6 @@ impl Default for SurfaceStyle {
     fn default() -> Self {
         Self::resolve(SurfaceSpec::default())
     }
-}
-
-/// A color's relative brightness (0 black … 1 white), to tell a dark theme from a light one.
-fn luminance(c: Rgba) -> f32 {
-    0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b
 }
 
 #[cfg(test)]

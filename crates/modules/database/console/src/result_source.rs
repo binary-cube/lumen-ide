@@ -691,6 +691,16 @@ impl GridSource for ResultSource {
         }
     }
 
+    fn can_edit(&self) -> bool {
+        self.view.as_ref().is_some_and(|view| {
+            !self.rights.read_only
+                && self.rights.edit_rows
+                && view.refused.is_none()
+                && !view.submitting
+                && matches!(view.editing, Editability::Ready(_))
+        })
+    }
+
     fn mark(&self, row: u64, column: usize) -> CellMark {
         if row >= NEW_ROWS {
             return if self.edits.new_row(row).is_some() {

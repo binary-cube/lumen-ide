@@ -103,6 +103,15 @@ impl Rect {
         let y1 = self.max_y().min(other.max_y());
         (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
     }
+
+    /// The smallest rectangle holding both.
+    pub fn union(&self, other: &Rect) -> Rect {
+        let x0 = self.min_x().min(other.min_x());
+        let y0 = self.min_y().min(other.min_y());
+        let x1 = self.max_x().max(other.max_x());
+        let y1 = self.max_y().max(other.max_y());
+        Rect::new(x0, y0, x1 - x0, y1 - y0)
+    }
 }
 
 #[cfg(test)]

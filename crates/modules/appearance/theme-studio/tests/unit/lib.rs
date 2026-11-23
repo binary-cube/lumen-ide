@@ -681,6 +681,11 @@ fn the_effects_performance_is_set_and_the_preview_moves_only_when_asked() {
     assert!(!studio.is_loading(), "no input (or none for a while)");
     studio.hover(Point::new(1.0, 1.0));
     assert!(studio.is_loading());
+    // The window in the background: still; back in front: moving again.
+    studio.set_window_focused(false);
+    assert!(!studio.is_loading(), "another program has the keyboard");
+    studio.set_window_focused(true);
+    assert!(studio.is_loading());
     let _ = click_on(&mut studio, Hit::PreviewMoving(false));
     assert!(!studio.is_loading());
     // Let go (the caches' purge).

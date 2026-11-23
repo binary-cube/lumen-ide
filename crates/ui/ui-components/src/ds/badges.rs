@@ -142,6 +142,9 @@ pub struct Badge<'a> {
     pub lead: Option<&'a str>,
     /// The muted run's font; `None`: the label's.
     pub lead_font: Option<&'a Font>,
+    /// The icon's size and color asked before its icon was given (applied when it is, so
+    /// the order of the calls doesn't matter).
+    icon_wanted: (Option<f32>, Option<Rgba>),
 }
 
 impl<'a> Badge<'a> {
@@ -167,6 +170,7 @@ impl<'a> Badge<'a> {
             icon: None,
             lead: None,
             lead_font: None,
+            icon_wanted: (None, None),
         }
     }
 
@@ -256,12 +260,14 @@ impl<'a> Badge<'a> {
 
     /// Icon `name` of `icons` before its text, 12 high, in the label's color.
     pub fn icon(mut self, icons: &'a icons::Icons, name: &'a str) -> Self {
-        self.icon = Some(BadgeIcon { icons, name, size: BADGE_ICON, color: None });
+        let (size, color) = self.icon_wanted;
+        self.icon = Some(BadgeIcon { icons, name, size: size.unwrap_or(BADGE_ICON), color });
         self
     }
 
     /// Its icon `size` high (logical pixels).
     pub fn icon_size(mut self, size: f32) -> Self {
+        self.icon_wanted.0 = Some(size);
         if let Some(icon) = &mut self.icon {
             icon.size = size;
         }
@@ -270,6 +276,7 @@ impl<'a> Badge<'a> {
 
     /// Its icon in `color`, apart from the label's.
     pub fn icon_color(mut self, color: Rgba) -> Self {
+        self.icon_wanted.1 = Some(color);
         if let Some(icon) = &mut self.icon {
             icon.color = Some(color);
         }
@@ -484,7 +491,7 @@ impl<'a> Avatar<'a> {
                 (Font::new(ctx.palette.ui_font.clone(), size).with_weight(Font::BOLD), Rgba::WHITE)
             }
         };
-        let shaped = text.shape_line(&initials(self.name), &font);
+        let shaped = text.shape_line(Initials::of(self.name).as_str(), &font);
         let baseline = match self.look {
             AvatarLook::Tinted => optical_baseline(rect.min_y(), side, &font),
             AvatarLook::Solid => {
@@ -538,8 +545,9 @@ pub fn dot_badge(layer: &mut Layer, ctx: &Ctx<'_>, at: Point, badge: DotBadge) -
     let ring = ctx.px(2.0).max(1.0);
     let rect = Rect::new((at.x - d / 2.0).round(), (at.y - d / 2.0).round(), d, d);
     let outer = Rect::new(rect.min_x() - ring, rect.min_y() - ring, d + 2.0 * ring, d + 2.0 * ring);
-    layer.quad(Quad::filled(outer, outline).rounded(outer.size.height / 2.0));
-    layer.quad(Quad::filled(rect, if lit { Rgba::WHITE } else { tone }).rounded(d / 2.0));
+    layer.quad(Quad::filled(outer, ctx.fade(outline)).rounded(outer.size.height / 2.0));
+    let fill = if lit { Rgba::WHITE } else { tone };
+    layer.quad(Quad::filled(rect, ctx.fade(fill)).rounded(d / 2.0));
     rect
 }
 
@@ -594,26 +602,42 @@ pub fn file_row(
     let (top, h) = (rect.min_y(), rect.size.height);
     let mark = text.shape_line(row.mark, &small.clone().with_weight(Font::SEMIBOLD));
     let mark_x = rect.min_x() + ctx.px(4.0);
-    draw_text(layer, &mark, mark_x, optical_baseline(top, h, &small), row.color);
+    draw_text(layer, &mark, mark_x, optical_baseline(top, h, &small), ctx.fade(row.color));
     let mut right = rect.max_x();
     if let Some((tag, tone)) = row.tag {
-        let tag = ellipsize(text, tag, &ctx.ui_font(-1.5), (rect.size.width * 0.4).max(0.0));
+        // Cut only when it doesn't fit (a text made only then).
+        let (tag_font, tag_room) = (ctx.ui_font(-1.5), (rect.size.width * 0.4).max(0.0));
+        let cut;
+        let tag = if text.shape_line(tag, &tag_font).width <= tag_room {
+            tag
+        } else {
+            cut = ellipsize(text, tag, &tag_font, tag_room);
+            cut.as_str()
+        };
         if !tag.is_empty() {
             let mid = top + h / 2.0;
-            let spec = BadgeSpec { label: &tag, x: right, mid, align_right: true, tone };
+            let spec = BadgeSpec { label: tag, x: right, mid, align_right: true, tone };
             right = badge(layer, text, ctx, spec).min_x() - ctx.px(space::MD);
         }
     }
     let (folder, name) = row.path.rsplit_once('/').unwrap_or(("", row.path));
     let x = rect.min_x() + ctx.px(26.0);
-    let name = ellipsize(text, name, &font, (right - x).max(0.0));
-    let shaped = text.shape_line(&name, &font);
-    draw_text(layer, &shaped, x, optical_baseline(top, h, &font), ctx.palette.text);
-    let fx = x + shaped.width + ctx.px(space::MD);
+    let baseline = optical_baseline(top, h, &font);
+    let (name_w, _) = draw_ellipsized(
+        layer,
+        text,
+        name,
+        &font,
+        (x, baseline),
+        (right - x).max(0.0),
+        ctx.fade(ctx.palette.text),
+    );
+    let fx = x + name_w + ctx.px(space::MD);
     if !folder.is_empty() && right - fx > ctx.px(24.0) {
         let folder = ellipsize_middle(text, folder, &small, right - fx);
         let shaped = text.shape_line(&folder, &small);
-        draw_text(layer, &shaped, fx, optical_baseline(top, h, &small), ctx.palette.text_muted);
+        let muted = ctx.fade(ctx.palette.text_muted);
+        draw_text(layer, &shaped, fx, optical_baseline(top, h, &small), muted);
     }
 }
 
@@ -997,8 +1021,11 @@ pub fn change_badge_look(
     }
 }
 
+/// A sign's ink on a light fill: nearly black.
+const SIGN_DARK: Rgba = Rgba::rgb(0x1f2329);
+
 /// The sign's color over `fill`: white on a dark fill, nearly black on a light one.
 pub fn sign_on(fill: Rgba) -> Rgba {
     let luminance = 0.2126 * fill.r + 0.7152 * fill.g + 0.0722 * fill.b;
-    if luminance > 0.6 { Rgba::rgb(0x1f2329) } else { Rgba::WHITE }
+    if luminance > 0.6 { SIGN_DARK } else { Rgba::WHITE }
 }

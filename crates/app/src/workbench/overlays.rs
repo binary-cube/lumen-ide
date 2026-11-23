@@ -103,6 +103,8 @@ impl Workbench {
     pub fn take_settings_embedder(&mut self) {
         let embedder = self.support.embeddings.iter().find_map(|e| e.embedder());
         self.settings.set_embedder(embedder);
+        // Its search's vectors made in the background wake the window when they're here.
+        self.settings.set_waker(self.waker.as_ref().map(|w| Arc::clone(&w.0)));
     }
 
     pub fn open_settings(&mut self, model: SettingsModel) {
@@ -320,6 +322,12 @@ impl Workbench {
 
     pub fn tab_index(&self, id: kernel::DocumentId) -> Option<usize> {
         self.tabs.iter().position(|t| t.doc.id() == id)
+    }
+
+    /// What a screen reader calls the control at `p` that shows no text of its own: its
+    /// tooltip and the keys it says.
+    pub(crate) fn access_tip(&self, p: Point) -> Option<(String, Option<String>)> {
+        self.tooltip_at(p).map(|tip| (tip.label, tip.shortcut))
     }
 
     /// The tooltip of the element under the mouse: the bar buttons, the panel buttons, the

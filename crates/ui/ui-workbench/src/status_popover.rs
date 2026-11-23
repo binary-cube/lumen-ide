@@ -16,7 +16,7 @@ use icons::Icons;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Quad, Scene};
 use text_layout::TextSystem;
-use ui_components::chart::{self, Plot};
+use ui_components::charts::spark::{self, Plot};
 use ui_kit::{draw_icon, draw_text};
 
 use crate::anim::Appear;
@@ -28,7 +28,8 @@ use crate::palette::Palette;
 pub enum PopoverRow {
     /// A label and its value; a click runs `action`, when it has one.
     Value { label: String, value: String, action: Option<&'static str>, icon: Option<&'static str> },
-    /// A label, the values over time as a graph (on a scale up to `max`), the value now.
+    /// A label, the values over time as a graph (on a scale up to `max`), the value now;
+    /// under the mouse, a value then (`format`ted, a sample every `step` seconds).
     Series {
         label: String,
         plot: Plot,
@@ -36,6 +37,8 @@ pub enum PopoverRow {
         color: Rgba,
         value: String,
         icon: Option<&'static str>,
+        format: fn(f32) -> String,
+        step: u32,
     },
 }
 
@@ -105,8 +108,15 @@ pub struct StatusPopover {
     shapes: Vec<(Rect, f32)>,
     hovered: Option<&'static str>,
     hover_pin: bool,
+    /// Its graphs' areas, as last drawn.
+    graphs: Vec<Rect>,
     /// The values' column at its widest since it opened (physical): it never narrows.
     value_room: f32,
+    /// Where the mouse is over it, and the reading drawn there (a graph's area and its text).
+    mouse: Option<Point>,
+    reading: Option<(Rect, String)>,
+    /// The graph's column under the mouse, as last told (a move within it draws nothing).
+    reading_at: Option<(usize, usize)>,
 }
 
 impl StatusPopover {
@@ -206,13 +216,29 @@ impl StatusPopover {
         })
     }
 
-    /// The mouse at `p`: `true` if what's lit changed.
+    /// The mouse at `p`: `true` if what's lit changed (a graph's reading moved to another
+    /// column too).
     pub fn hover(&mut self, p: Point) -> bool {
         let row = self.rows.iter().find(|(r, _)| r.contains(p)).map(|(_, a)| *a);
         let pin = self.pin.is_some_and(|r| r.contains(p));
         let changed = row != self.hovered || pin != self.hover_pin;
         (self.hovered, self.hover_pin) = (row, pin);
-        changed
+        self.mouse = Some(p);
+        // Over a graph: which of its columns (one pixel column, physical).
+        let at = self
+            .graphs
+            .iter()
+            .enumerate()
+            .find(|(_, r)| r.contains(p))
+            .map(|(i, r)| (i, (p.x - r.min_x()).max(0.0) as usize));
+        let moved = at != self.reading_at;
+        self.reading_at = at;
+        changed || moved
+    }
+
+    /// The reading under the mouse, as a tooltip (`12 s ago: 3,4%`).
+    pub fn reading_tip(&self, p: Point) -> Option<(Rect, String)> {
+        self.reading.clone().filter(|(r, _)| r.contains(p))
     }
 
     /// Over something it runs (the hand cursor).
@@ -341,6 +367,8 @@ impl StatusPopover {
         pinnable: bool,
     ) {
         self.rows.clear();
+        self.graphs.clear();
+        self.reading = None;
         self.pin = None;
         self.shapes.clear();
         let Some((_, anchor)) = self.open else { return };
@@ -427,7 +455,7 @@ impl StatusPopover {
                     .icon("pin")
                     .icon_size(HEADER_PIN_ICON)
                     .rest_tone(ds::Tone::Neutral)
-                    .on(self.pinned)
+                    .toggle(self.pinned)
                     .hovered(self.hover_pin);
                 ds::button(layer, text, icons, &ctx, button, spec);
                 self.pin = Some(button);
@@ -468,7 +496,7 @@ impl StatusPopover {
                     draw_text(layer, &shaped, right - shaped.width, baseline, ctx.fade(color));
                     top += h;
                 }
-                PopoverRow::Series { label, plot, max, color, value, icon } => {
+                PopoverRow::Series { label, plot, max, color, value, icon, format, step } => {
                     let h = px(SERIES_H);
                     // Its icon in its graph's color: the two read together.
                     if let Some(id) = icon.and_then(|i| icons.id(i)) {
@@ -492,7 +520,24 @@ impl StatusPopover {
                         (right - value_w - px(16.0)) - (left + label_w + px(16.0)),
                         h - px(16.0),
                     );
-                    chart::sparkline(layer, &ctx, graph, plot, *color, chart::Style::Steps, *max);
+                    spark::sparkline(layer, &ctx, graph, plot, *color, spark::Style::Steps, *max);
+                    // Under the mouse: a thin guide, and the value then for its tooltip.
+                    if let Some(m) = self.mouse.filter(|m| graph.contains(*m))
+                        && let Some(reading) = plot.reading(graph, m.x)
+                    {
+                        let guide =
+                            Rect::new(m.x.round(), graph.min_y(), ctx.line(), graph.size.height);
+                        layer.quad(Quad::filled(guide, ctx.fade(palette.text.with_alpha(0.35))));
+                        let value = format(reading.value);
+                        let ago = reading.ago * (*step).max(1) as usize;
+                        let said = if ago == 0 {
+                            i18n::tr!("status.reading_now", value = value)
+                        } else {
+                            i18n::tr!("status.reading_ago", seconds = ago, value = value)
+                        };
+                        self.reading = Some((graph, said));
+                    }
+                    self.graphs.push(graph);
                     top += h;
                 }
             }

@@ -130,3 +130,12 @@ fn locales_have_each_key_once_and_the_same_keys() {
     assert!(only(&ro, &en).is_empty(), "only in ro: {:?}", only(&ro, &en));
     assert!(only(&en, &ro).is_empty(), "only in en: {:?}", only(&en, &ro));
 }
+
+/// A catalog added moves the generation (texts kept under it are made again); the language
+/// set moves it too (the same `bump`, not set here: the other tests share the language).
+#[test]
+fn the_generation_moves_with_the_messages() {
+    let before = generation();
+    register("test-generation", "test_generation = \"x\"");
+    assert!(generation() > before);
+}

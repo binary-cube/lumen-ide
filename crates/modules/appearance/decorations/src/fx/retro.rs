@@ -5,6 +5,13 @@ use super::*;
 /// A glitch's length (seconds).
 pub const GLITCH_LIFE: f32 = 0.3;
 
+/// The effects' own colors when they're given none: a screen's red and cyan fringes, a
+/// glitch's two.
+const CRT_RED: Rgba = Rgba::rgb(0xff3b6b);
+const CRT_CYAN: Rgba = Rgba::rgb(0x3bd6ff);
+const GLITCH_FIRST: Rgba = Rgba::rgb(0xff2b6b);
+const GLITCH_SECOND: Rgba = Rgba::rgb(0x2bd6ff);
+
 /// The time between glitches (seconds), for a density.
 pub fn glitch_period(density: f32) -> f32 {
     18.0 - 12.0 * density.clamp(0.0, 1.0)
@@ -113,8 +120,8 @@ impl CrtPainter {
         let level =
             (1.0 - age / GLITCH_LIFE) * if (age * 40.0) as i32 % 2 == 0 { 1.0 } else { 0.6 };
         let kk = k.rem_euclid(1 << 20) as u32;
-        let red = e.colors.get(1).copied().unwrap_or(Rgba::rgb(0xff3b6b));
-        let cyan = e.colors.get(2).copied().unwrap_or(Rgba::rgb(0x3bd6ff));
+        let red = e.colors.get(1).copied().unwrap_or(CRT_RED);
+        let cyan = e.colors.get(2).copied().unwrap_or(CRT_CYAN);
         let a = (e.opacity * 1.2 * level).min(1.0);
         let band = |layer: &mut Layer, y: f32, h: f32, c: Rgba| {
             if curved {
@@ -179,8 +186,8 @@ pub fn paint_glitch(e: &EffectSpec, f: &FxFrame<'_>, layer: &mut Layer) {
     if a < 0.005 {
         return;
     }
-    let first = e.colors.first().copied().unwrap_or(Rgba::rgb(0xff2b6b));
-    let second = e.colors.get(1).copied().unwrap_or(Rgba::rgb(0x2bd6ff));
+    let first = e.colors.first().copied().unwrap_or(GLITCH_FIRST);
+    let second = e.colors.get(1).copied().unwrap_or(GLITCH_SECOND);
     let bright = e.colors.get(2).copied().unwrap_or(Rgba::WHITE);
     let bands = 2 + (3.0 * e.size).round() as u32;
     let split = ((2.0 + 4.0 * e.size) * f.scale).round();

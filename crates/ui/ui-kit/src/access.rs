@@ -8,7 +8,7 @@
 
 use std::cell::{Cell, RefCell};
 
-pub use platform_api::access::{Described, Frame, Node, NodeId, Role, State};
+pub use platform_api::access::{Described, Frame, Node, NodeId, Place, Role, State, TextLines};
 
 /// How much of a text's size stands above its baseline (the rest below): its box as a
 /// screen reader shows it.
@@ -32,6 +32,7 @@ impl Recording {
     /// The tree made, handed over (the controls without a name named by their line).
     pub fn take(self) -> Frame {
         let mut frame = FRAME.with(|f| std::mem::take(&mut *f.borrow_mut()));
+        frame.join_pieces();
         frame.name_from_labels();
         frame
     }
@@ -60,6 +61,13 @@ pub fn recording() -> bool {
     ON.with(Cell::get)
 }
 
+/// The group open now is a `role` (a tree's fold drawn inside its row says nothing of its
+/// own: the row tells it).
+#[inline]
+pub fn inside(role: Role) -> bool {
+    recording() && FRAME.with(|f| f.borrow().open_role() == Some(role))
+}
+
 /// The node `describe` tells, put under the group open now (nothing while no tree is made).
 #[inline]
 pub fn node(describe: impl FnOnce() -> Described) -> Option<NodeId> {
@@ -74,13 +82,44 @@ pub fn node(describe: impl FnOnce() -> Described) -> Option<NodeId> {
 /// digit, a ✓ or an arrow, is drawing, not text; nothing inside [`silent`]).
 #[inline]
 pub fn text(line: &text_layout::ShapedLine, x: f32, baseline: f32) {
+    text_shown(line, (x, line.width), baseline);
+}
+
+/// A line of text of which only `(x, width)` shows (cut with "…", scrolled in a field): read
+/// whole — what the eye can't see whole the ear still hears — where it shows.
+#[inline]
+pub fn text_shown(line: &text_layout::ShapedLine, (x, width): (f32, f32), baseline: f32) {
     if !recording() || SILENT.with(Cell::get) > 0 || !line.text.chars().any(char::is_alphanumeric) {
         return;
     }
     let top = baseline - line.size * ASCENT_SHARE;
-    let bounds = kernel::Rect::new(x, top, line.width, line.size);
+    let bounds = kernel::Rect::new(x, top, width.max(0.0), line.size);
     let label = Described::new(Role::Label, std::sync::Arc::clone(&line.text), bounds);
     FRAME.with(|f| f.borrow_mut().add(label));
+}
+
+/// Texts not read as labels while the guard lives (a drawing made of letters told once
+/// otherwise): [`silent`] for a paint a closure can't hold.
+#[derive(Debug)]
+#[must_use = "texts are silent until this is dropped"]
+pub struct Silenced(bool);
+
+impl Drop for Silenced {
+    fn drop(&mut self) {
+        if self.0 {
+            SILENT.with(|s| s.set(s.get().saturating_sub(1)));
+        }
+    }
+}
+
+/// Texts silent until the guard is dropped (nothing while no tree is made).
+#[inline]
+pub fn silenced() -> Silenced {
+    let on = recording();
+    if on {
+        SILENT.with(|s| s.set(s.get() + 1));
+    }
+    Silenced(on)
 }
 
 /// `paint` run with its texts not read as labels (a code editor's tokens, said otherwise).
@@ -93,6 +132,29 @@ pub fn silent<R>(paint: impl FnOnce() -> R) -> R {
     let painted = paint();
     SILENT.with(|s| s.set(s.get().saturating_sub(1)));
     painted
+}
+
+/// A group opened by [`open`]: what's put while it lives goes under it; dropped, it closes.
+#[derive(Debug)]
+#[must_use = "the group closes when this is dropped"]
+pub struct Opened(());
+
+impl Drop for Opened {
+    fn drop(&mut self) {
+        FRAME.with(|f| f.borrow_mut().close());
+    }
+}
+
+/// The group `describe` tells opened until the guard returned is dropped (a long paint that
+/// a closure can't hold, borrowing what's around it); `None` while no tree is made.
+#[inline]
+pub fn open(describe: impl FnOnce() -> Described) -> Option<Opened> {
+    if !recording() {
+        return None;
+    }
+    let group = describe();
+    FRAME.with(|f| f.borrow_mut().open(group));
+    Some(Opened(()))
 }
 
 /// `paint` run with the group `describe` tells open: what it puts goes under it.

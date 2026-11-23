@@ -390,9 +390,20 @@ pub struct TreeTable {
     resizing: Option<(usize, f32, f32)>,
     /// The tree's column's width wanted, and what it was worked out for.
     tree_width: Option<((u64, u32), f32)>,
+    /// The texts a number is written in, kept from frame to frame (nothing allocated once
+    /// they've grown).
+    numbers: NumberText,
+    /// What the last press did, kept for its owner when it's a part of a form
+    /// ([`Self::take_event`]).
+    event: Option<TableEvent>,
 }
 
 impl TreeTable {
+    /// What the last press did, told once (its owner holds it among its controls).
+    pub fn take_event(&mut self) -> Option<TableEvent> {
+        self.event.take()
+    }
+
     pub fn new(columns: Vec<TableColumn>) -> Self {
         Self { columns, scale: 1.0, ..Self::default() }
     }
@@ -987,36 +998,33 @@ impl TreeTable {
         // The header.
         {
             let layer = scene.push_layer(Some(self.header));
-            layer.quad(Quad::filled(self.header, p.text.with_alpha(0.03)));
+            crate::table::header_band(layer, &ds, self.header);
             let title_font = ds.ui_font(-1.0).with_weight(Font::SEMIBOLD);
             for (i, c) in self.columns.iter().enumerate() {
                 let (x, w) = self.xs[i];
                 let x = x - self.hscroll;
                 let r = Rect::new(x, self.header.min_y(), w, self.header.size.height);
+                let _told = crate::table::column_header(&c.title, r, Some(i));
                 if matches!(self.hover, Some(Hit::Header(h)) if h == i) && c.tip.is_some() {
-                    layer.quad(Quad::filled(r, p.text.with_alpha(0.04)));
+                    crate::table::header_hover(layer, &ds, r);
                 }
-                let room = w - px(16.0);
-                let title = ds::ellipsize(text, &c.title, &title_font, room.max(0.0));
-                let shaped = text.shape_line(&title, &title_font);
+                let room = (w - px(16.0)).max(0.0);
                 let tx = match c.align {
                     Align::Left => x + px(if i == 0 { 10.0 } else { 8.0 }),
-                    Align::Right => x + w - px(8.0) - shaped.width,
+                    Align::Right => {
+                        x + w - px(8.0) - ds::ellipsized_width(text, &c.title, &title_font, room)
+                    }
                 };
                 let base = ds::optical_baseline(r.min_y(), r.size.height, &title_font);
-                draw_text(layer, &shaped, tx.round(), base, p.text_muted);
+                let at = (tx.round(), base);
+                ds::draw_ellipsized(layer, text, &c.title, &title_font, at, room, p.text_muted);
                 if i + 1 < self.columns.len() {
                     let dragged = matches!(self.hover, Some(Hit::Edge(e)) if e == i + 1)
                         || self.resizing.is_some_and(|(e, ..)| e == i + 1);
-                    let color = if dragged { p.accent } else { p.border };
-                    let edge = (x + w).round() - ds.line();
-                    layer.quad(Quad::filled(
-                        Rect::new(edge, r.min_y() + px(6.0), ds.line(), r.size.height - px(12.0)),
-                        color,
-                    ));
+                    crate::table::header_edge(layer, &ds, x + w - ds.line() / 2.0, r, dragged);
                 }
             }
-            ds::divider(layer, &ds, b.min_x(), b.max_x(), self.header.max_y() - ds.line());
+            crate::table::header_rule(layer, &ds, self.header);
         }
         if self.rows.is_empty() {
             let area = Rect::new(
@@ -1031,17 +1039,34 @@ impl TreeTable {
         }
         // The rows in view.
         let range = TreeList::new(self.row_h, shown).visible(self.scroll, self.body.size.height);
-        let rows: Vec<usize> = self.shown_rows()[range.clone()].to_vec();
+        // The rows in view read from the rows shown (made once per change), never copied.
+        self.shown_rows();
         let layer = scene.push_layer(Some(self.body));
         let hovered_row = match self.hover {
             Some(Hit::Row { row, .. }) => Some(row),
             _ => None,
         };
-        for (k, &row) in rows.iter().enumerate() {
-            let slot = range.start + k;
+        let mut numbers = std::mem::take(&mut self.numbers);
+        for slot in range {
+            let Some(&row) = self.shown.value().and_then(|v| v.get(slot)) else { continue };
             let y = (self.body.min_y() + slot as f32 * self.row_h - self.scroll).round();
             let full = Rect::new(b.min_x(), y, b.size.width, self.row_h);
             let r = &self.rows[row];
+            // To a screen reader: the row as a tree's item named by its first cell (made only
+            // while a tree is), its other cells read under it.
+            let name = match r.cells.first().map(|c| &c.value) {
+                Some(CellValue::Text(spans)) if ui_kit::access::recording() => {
+                    spans.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join(" ")
+                }
+                _ => String::new(),
+            };
+            let _row = tree::item(tree::Item {
+                name: &name,
+                bounds: full,
+                level: self.depth(row),
+                expanded: self.children[row].then(|| self.open[row]),
+                selected: self.selected == Some(row),
+            });
             if let Some(ink) = r.tint {
                 layer.quad(Quad::filled(full, ink.color(p).with_alpha(0.08)));
             }
@@ -1147,10 +1172,11 @@ impl TreeTable {
                     CellPlace { left, room, mid: cell_mid, top: y, height: self.row_h, align },
                     cell,
                     &fonts,
-                    r.marked && column == 0,
+                    (r.marked && column == 0, &mut numbers),
                 );
             }
         }
+        self.numbers = numbers;
         let content = self.content_height(shown);
         self.bar.paint(scene, p, scale, self.body, content, self.scroll);
     }
@@ -1199,7 +1225,7 @@ fn paint_cell(
     at: CellPlace,
     cell: &TableCell,
     fonts: &Fonts<'_>,
-    marked: bool,
+    (marked, numbers): (bool, &mut NumberText),
 ) {
     let (layer, text, icons, ds) = (&mut *pen.layer, &mut *pen.text, pen.icons, &pen.ds);
     let p = ds.palette;
@@ -1208,63 +1234,85 @@ fn paint_cell(
     match &cell.value {
         CellValue::Empty => {}
         CellValue::Text(spans) => {
-            // Each piece after the one before, the last ones cut to the room.
-            let mut pieces: Vec<(String, &Font, Rgba, SpanStyle)> = Vec::new();
-            let mut used = 0.0;
-            for (i, span) in spans.iter().enumerate() {
-                let (font, color) = match span.style {
-                    SpanStyle::Normal if marked && i == 0 => (fonts.strong, p.text),
-                    SpanStyle::Normal => (fonts.normal, p.text),
-                    SpanStyle::Strong => (fonts.strong, p.text),
-                    SpanStyle::Muted => (fonts.normal, p.text_muted),
-                    SpanStyle::Code => (fonts.code, p.text_muted),
-                    SpanStyle::Ink(ink) => (fonts.strong, ink.color(p)),
-                    SpanStyle::Pill(ink) => (fonts.small, pill_color(ink, p)),
-                };
-                let pill = matches!(span.style, SpanStyle::Pill(_));
+            // Each piece after the one before, the last ones cut to the room: measured
+            // first (how many fit, how wide), then drawn — nothing kept between the two.
+            let look = |i: usize, style: SpanStyle| match style {
+                SpanStyle::Normal if marked && i == 0 => (fonts.strong, p.text),
+                SpanStyle::Normal => (fonts.normal, p.text),
+                SpanStyle::Strong => (fonts.strong, p.text),
+                SpanStyle::Muted => (fonts.normal, p.text_muted),
+                SpanStyle::Code => (fonts.code, p.text_muted),
+                SpanStyle::Ink(ink) => (fonts.strong, ink.color(p)),
+                SpanStyle::Pill(ink) => (fonts.small, pill_color(ink, p)),
+            };
+            // A piece's gap before it, its pill's padding, and the room it may take.
+            let place = |i: usize, style: SpanStyle, used: f32| {
                 let gap = if i > 0 { px(6.0) } else { 0.0 };
-                let pad = if pill { px(12.0) } else { 0.0 };
-                let left = at.room - used - gap - pad;
+                let pad = if matches!(style, SpanStyle::Pill(_)) { px(12.0) } else { 0.0 };
+                (gap, pad, at.room - used - gap - pad)
+            };
+            let (mut used, mut count) = (0.0, 0);
+            for (i, span) in spans.iter().enumerate() {
+                let (gap, pad, left) = place(i, span.style, used);
                 if left < px(12.0) {
                     break;
                 }
-                let shown = ds::ellipsize(text, &span.text, font, left);
-                let w = text.shape_line(&shown, font).width + pad;
-                pieces.push((shown, font, color, span.style));
-                used += gap + w;
+                let (font, _) = look(i, span.style);
+                used += gap + ds::ellipsized_width(text, &span.text, font, left) + pad;
+                count = i + 1;
             }
             let mut x = match at.align {
                 Align::Left => at.left,
                 Align::Right => at.left + at.room - used,
             };
-            for (i, (shown, font, color, style)) in pieces.iter().enumerate() {
-                if i > 0 {
-                    x += px(6.0);
-                }
-                let shaped = text.shape_line(shown, font);
-                if let SpanStyle::Pill(ink) = style {
+            let mut drawn = 0.0;
+            for (i, span) in spans.iter().take(count).enumerate() {
+                let (gap, _, left) = place(i, span.style, drawn);
+                let (font, color) = look(i, span.style);
+                x += gap;
+                let width = ds::ellipsized_width(text, &span.text, font, left);
+                if let SpanStyle::Pill(ink) = span.style {
                     let fill = match ink {
                         Ink::Tone(Tone::Neutral) => p.text.with_alpha(PILL_NEUTRAL_FILL),
                         ink => ink.color(p).with_alpha(PILL_FILL),
                     };
-                    ds::Badge::new(shown)
+                    // Its label as it is, a copy cut short only when it doesn't fit.
+                    let cut;
+                    let label = if text.shape_line(&span.text, font).width <= left + 0.5 {
+                        span.text.as_str()
+                    } else {
+                        cut = ds::ellipsize(text, &span.text, font, left);
+                        cut.as_str()
+                    };
+                    ds::Badge::new(label)
                         .font(font)
-                        .color(*color)
+                        .color(color)
                         .fill(fill)
                         .size(ds::BadgeSize::Custom(PILL_H))
                         .pad(PILL_PAD)
                         .baseline(ds::BadgeBaseline::At(base_of(font)))
                         .paint(layer, text, ds, x, at.mid);
-                    x += shaped.width + px(2.0 * PILL_PAD);
-                    continue;
+                    x += width + px(2.0 * PILL_PAD);
+                } else {
+                    let base = base_of(font);
+                    ds::draw_ellipsized(
+                        layer,
+                        text,
+                        &span.text,
+                        font,
+                        (x.round(), base),
+                        left,
+                        color,
+                    );
+                    x += width;
                 }
-                draw_text(layer, &shaped, x.round(), base_of(font), *color);
-                x += shaped.width;
+                drawn += gap
+                    + width
+                    + if matches!(span.style, SpanStyle::Pill(_)) { px(12.0) } else { 0.0 };
             }
         }
         CellValue::Number { value, decimals, unit } => {
-            let n = number_text(*value, *decimals);
-            let shaped = text.shape_line(&n, fonts.normal);
+            let shaped = text.shape_line(numbers.write(*value, *decimals), fonts.normal);
             let unit_shaped = unit.as_ref().map(|u| text.shape_line(u, fonts.normal));
             let unit_w = unit_shaped.as_ref().map_or(0.0, |u| u.width + px(4.0));
             let w = shaped.width + unit_w;
@@ -1332,26 +1380,110 @@ fn paint_cell(
     }
 }
 
+/// The texts a number is written in ([`number_text`]'s), kept by whoever writes many.
+#[derive(Debug, Default)]
+struct NumberText {
+    shown: String,
+    digits: String,
+}
+
+impl NumberText {
+    /// `value` written as [`number_text`] writes it, in the kept texts.
+    fn write(&mut self, value: f64, decimals: u8) -> &str {
+        use std::fmt::Write;
+        let (shown, digits) = (&mut self.shown, &mut self.digits);
+        shown.clear();
+        if !value.is_finite() {
+            let _ = write!(shown, "{value}");
+            return shown;
+        }
+        digits.clear();
+        let _ = write!(digits, "{:.*}", decimals as usize, value.abs());
+        let (int, frac) = match digits.split_once('.') {
+            Some((i, f)) => (i, f.trim_end_matches('0')),
+            None => (digits.as_str(), ""),
+        };
+        if value < 0.0 && (int != "0" || !frac.is_empty()) {
+            shown.push('-');
+        }
+        for (i, c) in int.chars().enumerate() {
+            if i > 0 && (int.len() - i) % 3 == 0 {
+                shown.push('\u{2009}');
+            }
+            shown.push(c);
+        }
+        if !frac.is_empty() {
+            shown.push('.');
+            shown.push_str(frac);
+        }
+        shown
+    }
+}
+
 /// `value` with its thousands grouped by a thin space and at most `decimals` decimals (the
 /// trailing zeros dropped): `12 340`, `0.42`, `1 204.5`.
 pub fn number_text(value: f64, decimals: u8) -> String {
-    if !value.is_finite() {
-        return value.to_string();
+    NumberText::default().write(value, decimals).to_owned()
+}
+
+/// A tree table as one of a view's controls: the same input as its own methods, what a press
+/// did kept for [`TreeTable::take_event`].
+impl crate::control::Control for TreeTable {
+    fn area(&self) -> Option<Rect> {
+        let all = Rect::new(
+            self.header.min_x(),
+            self.header.min_y(),
+            self.header.size.width.max(self.body.size.width),
+            self.body.max_y() - self.header.min_y(),
+        );
+        (all.size.width > 0.0 && all.size.height > 0.0).then_some(all)
     }
-    let text = format!("{:.*}", decimals as usize, value.abs());
-    let (int, frac) = match text.split_once('.') {
-        Some((i, f)) => (i.to_owned(), f.trim_end_matches('0').to_owned()),
-        None => (text, String::new()),
-    };
-    let mut grouped = String::new();
-    for (i, c) in int.chars().enumerate() {
-        if i > 0 && (int.len() - i) % 3 == 0 {
-            grouped.push('\u{2009}');
+
+    fn press(&mut self, p: Point, clicks: u32) -> crate::control::Press {
+        use crate::control::Press;
+        let held = self.bar.contains(p) || matches!(self.hit(p), Some(Hit::Edge(_)));
+        self.event = TreeTable::press(self, p, clicks);
+        if held { Press::Held } else { Press::Took }
+    }
+
+    fn drag(&mut self, p: Point) -> bool {
+        TreeTable::drag(self, p)
+    }
+
+    fn release(&mut self) -> bool {
+        TreeTable::release(self)
+    }
+
+    fn hover(&mut self, p: Option<Point>) -> bool {
+        match p {
+            Some(p) => TreeTable::hover(self, p),
+            None => self.leave(),
         }
-        grouped.push(c);
     }
-    let sign = if value < 0.0 && (int != "0" || !frac.is_empty()) { "-" } else { "" };
-    if frac.is_empty() { format!("{sign}{grouped}") } else { format!("{sign}{grouped}.{frac}") }
+
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.cursor_at(p)
+    }
+
+    fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        TreeTable::scroll(self, dx, dy)
+    }
+
+    fn focusable(&self) -> bool {
+        true
+    }
+
+    fn key(&mut self, key: ViewerKey, _reach: crate::tool_panel::KeyReach) -> bool {
+        TreeTable::key(self, key)
+    }
+
+    fn char_key(&mut self, key: char) -> bool {
+        TreeTable::char_key(self, key)
+    }
+
+    fn tooltip(&self, p: Point) -> Option<Tip> {
+        self.tooltip_at(p)
+    }
 }
 
 #[cfg(test)]

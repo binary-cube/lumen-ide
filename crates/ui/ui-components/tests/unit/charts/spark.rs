@@ -120,34 +120,6 @@ fn every_column_reads_its_bucket() {
 }
 
 #[test]
-fn two_series_in_a_time_chart_with_a_reading() {
-    let palette = Palette::dark();
-    let ds = Ctx::new(&palette, 1.0);
-    let mut text = TextSystem::new();
-    let a: Vec<f32> = (0..60).map(|i| (i % 7) as f32).collect();
-    let b: Vec<f32> = (0..60).map(|i| (i % 5) as f32 * 2.0).collect();
-    let rect = Rect::new(0.0, 0.0, 240.0, 80.0);
-    let plot_a = Plot::build(Samples::new(&a), 60, 240, Reduce::Max);
-    let plot_b = Plot::build(Samples::new(&b), 60, 240, Reduce::Max);
-    let series = [
-        ChartSeries { plot: &plot_a, color: series_color(&palette, Series::Network) },
-        ChartSeries { plot: &plot_b, color: series_color(&palette, Series::Disk) },
-    ];
-    let max = scale_for(plot_a.peak.max(plot_b.peak), 1.0);
-    assert_eq!(max, 10.0);
-    let mut scene = Scene::default();
-    let layer = scene.push_layer(None);
-    let chart = TimeChart { series: &series, max, max_label: "10", hover: Some(120.0) };
-    let area = time_chart(layer, &mut text, &ds, rect, &chart);
-    assert!(area.size.height < rect.size.height, "the label above the plot");
-    let colors: Vec<Rgba> = scene.layers()[0].quads.iter().map(|q| q.color).collect();
-    assert!(colors.contains(&series[0].color) && colors.contains(&series[1].color));
-    // The hover's two dots, round.
-    let dots = scene.layers()[0].quads.iter().filter(|q| q.corner_radius > 0.0).count();
-    assert_eq!(dots, 2);
-}
-
-#[test]
 fn the_scale_rounds_up_nicely() {
     for (v, nice) in [
         (0.0, 1.0),

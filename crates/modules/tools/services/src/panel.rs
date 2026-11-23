@@ -127,6 +127,8 @@ pub struct ServicesPanel {
     active_tab: HashMap<Key, ServiceId>,
     /// The views of the shown node's tabs, made when first shown.
     views: HashMap<ServiceId, Box<dyn Viewer>>,
+    /// How text is shown, as the app told it: given to each view, those made later too.
+    text_options: ui_components::TextOptions,
     /// The project's dragged sizes, given to each view made (its splitters' places).
     sizes: Option<workbench_model::LayoutSizes>,
     /// The keys go to the view (clicked into), not the tree.
@@ -189,6 +191,7 @@ impl ServicesPanel {
             tabs_of: None,
             active_tab: HashMap::new(),
             views: HashMap::new(),
+            text_options: ui_components::TextOptions::default(),
             sizes: None,
             in_view: false,
             dragging_view: false,
@@ -370,6 +373,7 @@ impl ServicesPanel {
             if let Some(sizes) = &self.sizes {
                 view.set_data(sizes);
             }
+            view.set_text_options(&self.text_options);
             self.views.insert(id, view);
         }
         self.views.get_mut(&id)
@@ -707,6 +711,14 @@ impl Drop for ServicesPanel {
 }
 
 impl ToolPanel for ServicesPanel {
+    /// How text is shown: handed to its views (the ones made later get it when made).
+    fn set_text_options(&mut self, options: &ui_components::TextOptions) {
+        self.text_options = *options;
+        for view in self.views.values_mut() {
+            view.set_text_options(options);
+        }
+    }
+
     fn update(&mut self, _ctx: &PanelContext<'_>) {}
 
     fn set_data(&mut self, data: &dyn std::any::Any) {

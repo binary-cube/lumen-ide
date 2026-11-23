@@ -1,0 +1,17 @@
+[package]
+name = "charts-model"
+description = "Charts as data: what a chart shows (its kind, series, options), the rows it's made from, their grouping and aggregation, scales and ticks, and the geometry of each mark for a size — with what's under a point. No drawing."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+i18n.workspace = true
+kernel.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

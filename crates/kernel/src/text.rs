@@ -122,6 +122,35 @@ pub fn line_of(text: &str, offset: usize) -> u32 {
     text.as_bytes()[..offset.min(text.len())].iter().filter(|b| **b == b'\n').count() as u32
 }
 
+/// `text` pasted (or typed) into a one-line field: its lines joined by a space (blank ones
+/// left out, a `\r\n` one break; a break alone is a space), a tab a space (words a table's
+/// cell kept apart stay apart), other control characters dropped. Borrows when it has none.
+pub fn pasted_line(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.chars().any(char::is_control) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut broke = false;
+    for c in text.chars() {
+        match c {
+            '\n' | '\r' => broke = true,
+            '\t' => out.push(' '),
+            c if c.is_control() => {}
+            c => {
+                if broke && !out.is_empty() && !out.ends_with(' ') {
+                    out.push(' ');
+                }
+                broke = false;
+                out.push(c);
+            }
+        }
+    }
+    if out.is_empty() && broke {
+        out.push(' ');
+    }
+    std::borrow::Cow::Owned(out)
+}
+
 /// `text` written on one line, for a message, a tooltip or a label shaped as a single line:
 /// each run of whitespace (newlines and tabs included) becomes one space and the ends are
 /// trimmed. Borrows when nothing changes (the usual case: no allocation).

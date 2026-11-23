@@ -10,7 +10,8 @@ use icons::Icons;
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
-use ui_components::chart::{Plot, Reduce, Samples, Style, sparkline};
+use ui_components::charts::spark::{Plot, Reduce, Samples};
+use ui_components::charts::{Chart, ChartLook};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::metric_card::{CardForm, CardSeries, MetricCard, metric_card};
 use ui_components::table;
@@ -63,9 +64,6 @@ pub enum Cell {
 
 /// A metric card: its label, value, line under it, chart, color, chart's top.
 pub type Card<'a> = (&'a str, String, String, Option<&'a Plot>, Rgba, f32);
-
-/// A timeline's series: its label, its plot, color, top, values per sample, unit.
-pub type Series<'a> = (&'a str, &'a Plot, Rgba, f32, &'a [f32], &'a str);
 
 /// Where the page is drawn and what it found.
 pub struct Page<'a, 'c> {
@@ -291,106 +289,25 @@ impl Page<'_, '_> {
         self.y += h + self.px(GAP);
     }
 
-    /// The timeline: the CPU (an area) and the frames (a second one under it) over the
-    /// recording, a time axis under both, and under the mouse a line with what was then.
-    pub fn timeline(&mut self, series: &[Series<'_>], seconds: f64) {
+    /// The timeline: the recording's series (CPU, frames, network, disk) each in its lane
+    /// along one time axis — the app's one chart, its tooltip telling every series at the
+    /// moment under the mouse.
+    pub fn timeline(&mut self, chart: &mut Chart, look: &ChartLook, lanes: usize) {
         let ds = self.ds;
-        let p = ds.palette;
-        let lane = self.px(TIMELINE_H) / series.len().max(1) as f32;
+        let lane = self.px(TIMELINE_H) / lanes.max(1) as f32;
         let axis_h = self.px(24.0);
-        let h = lane * series.len() as f32 + axis_h + self.px(20.0);
+        let h = lane * lanes.max(1) as f32 + axis_h + self.px(20.0);
         let r = Rect::new(self.x, self.y, self.width, h);
-        let label_w = self.px(140.0);
-        let chart = Rect::new(
-            r.min_x() + label_w,
+        let area = Rect::new(
+            r.min_x() + self.px(14.0),
             r.min_y() + self.px(10.0),
-            r.size.width - label_w - self.px(14.0),
-            lane * series.len() as f32,
+            (r.size.width - self.px(28.0)).max(1.0),
+            (h - self.px(20.0)).max(1.0),
         );
-        let (text, mouse) = (&mut *self.text, self.mouse);
         let layer = self.scene.push_layer(Some(self.clip));
         Self::card(layer, ds, r);
-        let small = ds.ui_font(-1.5);
-        for (i, (label, plot, color, max, _, _)) in series.iter().enumerate() {
-            let lane_r = Rect::new(
-                chart.min_x(),
-                chart.min_y() + i as f32 * lane,
-                chart.size.width,
-                lane - ds.px(6.0),
-            );
-            layer.quad(Quad::filled(lane_r, p.text.with_alpha(0.02)).rounded(ds.px(radius::SM)));
-            sparkline(layer, ds, lane_r, plot, *color, Style::Steps, *max);
-            let base = ds::optical_baseline(lane_r.min_y(), ds.px(20.0), &small);
-            ds::draw_ellipsized(
-                layer,
-                text,
-                label,
-                &small,
-                (r.min_x() + ds.px(14.0), base),
-                label_w - ds.px(20.0),
-                p.text_muted,
-            );
-        }
-        // The time axis: a mark every few seconds (about eight along it).
-        let step = nice_step(seconds / 8.0);
-        // Too narrow for a chart: no axis (its marks would have nowhere to go).
-        let step = if chart.size.width > 0.0 { step } else { 0.0 };
-        let mut at = 0.0;
-        let axis_y = chart.max_y() + ds.px(4.0);
-        while at <= seconds + 1e-6 && step > 0.0 {
-            let x = chart.min_x() + (at / seconds.max(1e-9)) as f32 * chart.size.width;
-            layer.quad(Quad::filled(
-                Rect::new(x.round(), chart.min_y(), ds.line(), chart.size.height),
-                p.text.with_alpha(0.06),
-            ));
-            let label = super::words::length(at);
-            let shaped = text.shape_line(&label, &small);
-            let lx = (x - shaped.width / 2.0).min(chart.max_x() - shaped.width).max(chart.min_x());
-            ui_kit::draw_text(layer, &shaped, lx, axis_y + ds.px(14.0), p.text_muted);
-            at += step;
-        }
-        // The mouse over it: a line, and what each series was then.
-        if let Some(m) = mouse.filter(|m| chart.contains(*m)) {
-            let x = m.x.round();
-            layer.quad(Quad::filled(
-                Rect::new(x, chart.min_y(), ds.line().max(1.0), chart.size.height),
-                p.accent,
-            ));
-            let share = ((m.x - chart.min_x()) / chart.size.width).clamp(0.0, 1.0);
-            let mut lines = vec![super::words::length(seconds * f64::from(share))];
-            for (label, _, _, _, values, unit) in series {
-                if values.is_empty() {
-                    continue;
-                }
-                let i = ((values.len() - 1) as f32 * share).round() as usize;
-                lines.push(format!("{label}: {:.1}{unit}", values[i.min(values.len() - 1)]));
-            }
-            let font = ds.ui_font(-1.0);
-            let w = lines.iter().map(|l| text.shape_line(l, &font).width).fold(0.0, f32::max)
-                + ds.px(20.0);
-            let lh = ds.px(18.0);
-            let tip_h = lh * lines.len() as f32 + ds.px(12.0);
-            let tx = if x + ds.px(12.0) + w > chart.max_x() {
-                x - ds.px(12.0) - w
-            } else {
-                x + ds.px(12.0)
-            };
-            let tip = Rect::new(tx, chart.min_y(), w, tip_h);
-            ds::surface_with(layer, ds, tip, ds::Elevation::Low, radius::SM, p.popup_background);
-            for (i, line) in lines.iter().enumerate() {
-                let shaped = text.shape_line(line, &font);
-                let base =
-                    ds::optical_baseline(tip.min_y() + ds.px(6.0) + lh * i as f32, lh, &font);
-                ui_kit::draw_text(
-                    layer,
-                    &shaped,
-                    tip.min_x() + ds.px(10.0),
-                    base,
-                    if i == 0 { p.text_muted } else { p.text },
-                );
-            }
-        }
-        self.timeline = Some(chart);
+        chart.paint(layer, self.text, ds, look, area);
+        self.timeline = Some(area);
         self.y += h + self.px(GAP);
     }
 
@@ -588,13 +505,6 @@ impl Page<'_, '_> {
         }
         self.y += h + self.px(GAP);
     }
-}
-
-/// A round step for a time axis near `want` seconds (1, 2, 5, 10, 15, 30 s, 1, 2, 5, 10 min…).
-pub fn nice_step(want: f64) -> f64 {
-    const STEPS: [f64; 12] =
-        [1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0];
-    STEPS.iter().copied().find(|s| *s >= want).unwrap_or(3600.0)
 }
 
 /// A plot of `values` on `columns` buckets (the highest in each: a spike stays seen).

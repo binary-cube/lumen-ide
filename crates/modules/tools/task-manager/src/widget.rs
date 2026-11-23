@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use i18n::{t, tr};
 use text_layout::TextSystem;
-use ui_components::chart::{PlotCache, Samples, scale_for};
+use ui_components::charts::spark::{PlotCache, Samples, scale_for};
 use ui_components::ds::Ctx;
 use ui_components::metric_card::{CardSeries, MetricCard, glass_metric_card};
 use ui_components::screen_widgets::{

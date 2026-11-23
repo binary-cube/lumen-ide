@@ -12,8 +12,6 @@ use ui_components::{KeyReach, PressMods, ViewerKey};
 use super::DiagramView;
 use crate::edit::{self, Guide, Handle};
 
-use crate::edit::union;
-
 /// The mouse pressed and moving.
 #[derive(Debug, Clone)]
 pub(super) enum Gesture {
@@ -116,7 +114,7 @@ impl DiagramView {
         let k = self.k();
         let (dx, dy) = ((to.x - from.x) / k, (to.y - from.y) / k);
         let boxes = self.chosen_boxes();
-        let Some(moving) = boxes.iter().map(|(_, r)| *r).reduce(union) else {
+        let Some(moving) = boxes.iter().map(|(_, r)| *r).reduce(|a, b| a.union(&b)) else {
             return (dx, dy, Vec::new());
         };
         let chosen = self.chosen();

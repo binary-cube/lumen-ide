@@ -17,14 +17,45 @@ pub fn chevron_icon(expanded: bool) -> &'static str {
     if expanded { "chevron-down" } else { "chevron-right" }
 }
 
-/// The chevron of a node that folds, in `at` (nothing when the icon set has none). To a
-/// screen reader it's the tree's item, open or folded, named by the text on its row.
-pub fn chevron(layer: &mut Layer, icons: &Icons, at: Rect, expanded: bool, color: Rgba) {
-    ui_kit::access::node(|| {
-        let mut node = ui_kit::access::Described::new(ui_kit::access::Role::TreeItem, "", at);
-        node.state.expanded = Some(expanded);
+/// A tree's row as a screen reader reads it (see [`item`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Item<'a> {
+    /// What its row says (an entry's name).
+    pub name: &'a str,
+    /// The whole row.
+    pub bounds: Rect,
+    /// Its depth (the top level is 0).
+    pub level: usize,
+    /// Open or folded; `None`: nothing under it.
+    pub expanded: Option<bool>,
+    pub selected: bool,
+}
+
+/// A tree's row told as one item (its name, its depth, open or not, chosen) while the guard
+/// returned lives (drop it once the row is painted): its texts that say its name are its
+/// own, its others (a note) read under it, its chevron says nothing more.
+pub fn item(row: Item<'_>) -> Option<ui_kit::access::Opened> {
+    ui_kit::access::open(|| {
+        use ui_kit::access::{Described, Role};
+        let mut node = Described::new(Role::TreeItem, row.name, row.bounds)
+            .level(row.level)
+            .selected(row.selected);
+        node.state.expanded = row.expanded;
         node
-    });
+    })
+}
+
+/// The chevron of a node that folds, in `at` (nothing when the icon set has none). To a
+/// screen reader it's the tree's item, open or folded, named by the text on its row — unless
+/// it's drawn in a row told whole ([`item`]).
+pub fn chevron(layer: &mut Layer, icons: &Icons, at: Rect, expanded: bool, color: Rgba) {
+    if !ui_kit::access::inside(ui_kit::access::Role::TreeItem) {
+        ui_kit::access::node(|| {
+            let mut node = ui_kit::access::Described::new(ui_kit::access::Role::TreeItem, "", at);
+            node.state.expanded = Some(expanded);
+            node
+        });
+    }
     if let Some(id) = icons.id(chevron_icon(expanded)) {
         ui_kit::draw_icon(layer, icons, id, at, color);
     }

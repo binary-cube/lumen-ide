@@ -11,8 +11,7 @@ pub const NAMES: [&str; 8] = ["red", "orange", "yellow", "green", "teal", "blue"
 
 /// The theme is dark (its editor's background is).
 pub fn is_dark(palette: &Palette) -> bool {
-    let c = palette.editor_background;
-    0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b < 0.5
+    palette.editor_background.luminance() < 0.5
 }
 
 /// Named color `name` (one of [`NAMES`]) in the shade that reads on `palette`'s
@@ -39,8 +38,7 @@ pub fn named(name: &str, palette: &Palette) -> Option<Rgba> {
 /// A color for `key` (a user's name, a group's), the same each time, among the named ones
 /// (not gray), in the theme's shade: avatars told apart at a glance.
 pub fn for_key(key: &str, palette: &Palette) -> Rgba {
-    let hash =
-        key.bytes().fold(2_166_136_261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16_777_619));
+    let hash = kernel::hash::fnv32(key);
     let colorful = &NAMES[..NAMES.len() - 1];
     let name = colorful[(hash % colorful.len() as u32) as usize];
     named(name, palette).unwrap_or(palette.accent)
@@ -51,8 +49,7 @@ pub fn for_key(key: &str, palette: &Palette) -> Rgba {
 pub fn project(name: &str) -> Rgba {
     const COLORS: [u32; 8] =
         [0xd9774b, 0x9b6ad6, 0x5b8def, 0x4fa37a, 0xc95f8e, 0x3d9ba8, 0xb08a3e, 0x7a7fe0];
-    let hash =
-        name.bytes().fold(2_166_136_261u32, |h, b| (h ^ u32::from(b)).wrapping_mul(16_777_619));
+    let hash = kernel::hash::fnv32(name);
     Rgba::rgb(COLORS[(hash % COLORS.len() as u32) as usize])
 }
 

@@ -78,6 +78,8 @@ pub struct ButtonSpec<'a> {
     /// Turned on (a toggle's state, a header's main action): shown in the accent, a little
     /// stronger under the mouse.
     pub on: bool,
+    /// A toggle (two states, `on` its own): told so to a screen reader, on or off.
+    pub toggle: bool,
     /// Its action running: a spinner in its icon's place (or before its label), not lit.
     pub busy: bool,
     /// It opens a menu ("Export ▾"): a chevron after its content, counted by
@@ -146,6 +148,7 @@ impl<'a> ButtonSpec<'a> {
             tone: None,
             rest_tone: None,
             on: false,
+            toggle: false,
             busy: false,
             menu: false,
             enabled: true,
@@ -215,6 +218,14 @@ impl<'a> ButtonSpec<'a> {
 
     pub fn on(mut self, on: bool) -> Self {
         self.on = on;
+        self
+    }
+
+    /// A toggle in state `on` (shown as [`Self::on`]; to a screen reader a toggle button,
+    /// pressed or not).
+    pub fn toggle(mut self, on: bool) -> Self {
+        self.on = on;
+        self.toggle = true;
         self
     }
 
@@ -370,7 +381,7 @@ impl<'a> ButtonSpec<'a> {
 /// From how lit a fractional hover is its content in its lit color.
 const LIT_AT: f32 = 0.5;
 /// Below this a fractional busy's spinner would be a speck: none.
-const SPINNER_FROM: f32 = 0.05;
+pub(super) const SPINNER_FROM: f32 = 0.05;
 
 /// The sizes a ghost or soft button comes in (logical pixels): a tab's ×, a bar's icon, a
 /// view's bar, a compact header's, a roomy bar's, the tool strip's.
@@ -584,8 +595,17 @@ impl ButtonSpec<'_> {
     fn described(&self, rect: Rect) -> ui_kit::access::Described {
         use ui_kit::access::{Described, Role};
         let name = self.label.unwrap_or_default();
-        let mut node = Described::new(Role::Button, name, rect).disabled(!self.enabled);
-        node.state.selected = self.on;
+        let role = if self.toggle { Role::ToggleButton } else { Role::Button };
+        let mut node = Described::new(role, name, rect).disabled(!self.enabled);
+        if self.toggle {
+            node = node.checked(self.on);
+        } else {
+            node.state.selected = self.on;
+        }
+        // The key in its cap is said with it, not read after it as a text.
+        if let Some(key) = self.key {
+            node = node.shortcut(key);
+        }
         if self.menu {
             node.state.expanded = Some(false);
         }
@@ -813,7 +833,7 @@ fn round_filled(
 }
 
 /// How much white a filled button takes under the mouse.
-const FILLED_HOVER_MIX: f32 = 0.12;
+pub(super) const FILLED_HOVER_MIX: f32 = 0.12;
 
 /// A ghost, soft or raised button: its back (lit, on, the soft fill, the surface), then
 /// its content.

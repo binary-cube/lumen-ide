@@ -19,6 +19,8 @@ command-model.workspace = true
 i18n.workspace = true
 tracing.workspace = true
 ui-components.workspace = true
+# What a result's rows are lent to a pane over them as (plan 94).
+charts-model.workspace = true
 # The data extractors a result copies and exports with.
 extractors.workspace = true
 workspace.workspace = true

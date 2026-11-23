@@ -109,6 +109,7 @@ impl Workbench {
                 project: None,
                 dragging: false,
                 parked_since: None,
+                text_told: 0,
             };
             // What it kept of itself last time (the project's session: a splitter's place).
             if let Some(memento) = self.tools.mementos.get(tool) {

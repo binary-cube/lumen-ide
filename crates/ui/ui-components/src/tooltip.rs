@@ -63,6 +63,9 @@ pub struct Tooltips {
 /// middle (a field across the window: where the eyes are).
 const WIDE: f32 = 280.0;
 
+/// The arrow between a tooltip and its item (logical pixels).
+const ARROW: f32 = 7.0;
+
 impl Tooltips {
     /// The mouse is at `p` (physical): a wide item's tooltip shows by it.
     pub fn pointer(&mut self, p: kernel::Point) {
@@ -168,7 +171,7 @@ impl Tooltips {
         let pill =
             ds::tooltip(layer, text, &ctx, anchor, &tip.label, tip.shortcut.as_deref(), bounds);
         // Its arrow: between the pill and the element, on the element's middle.
-        let (arrow, x) = (ctx.px(7.0), anchor.min_x() + anchor.size.width / 2.0);
+        let (arrow, x) = (ctx.px(ARROW), anchor.min_x() + anchor.size.width / 2.0);
         let (top, bottom) = if pill.min_y() >= anchor.max_y() {
             (anchor.max_y(), pill.min_y())
         } else {

@@ -35,6 +35,9 @@ pub struct PickerItem {
     pub icon: Option<&'static str>,
     /// The table's cells after the first column (the name's): see [`TableRows`].
     pub cells: Vec<String>,
+    /// The label's characters matched by what was typed (byte positions, in order): drawn
+    /// in the accent by the rows that show them ([`PathRows`]).
+    pub marks: Vec<usize>,
 }
 
 impl PickerItem {
@@ -72,6 +75,85 @@ pub trait PickerRows: std::fmt::Debug + Send {
     fn paint_header(&self, _p: &mut RowPaint<'_, '_>, _area: Rect) {}
     /// Item's content in `content` (its row but the room kept for `↵` and the check).
     fn paint_row(&self, p: &mut RowPaint<'_, '_>, item: &PickerItem, content: Rect);
+    /// What a row's tooltip says (`None`: none).
+    fn tooltip(&self, _item: &PickerItem) -> Option<String> {
+        None
+    }
+    /// Whether the list widens past its field for these rows (their names read whole).
+    /// Rows that fit any width (a path shortened, told whole in its tooltip) keep the
+    /// field's width: the list never grows and shrinks as its rows change while typing.
+    fn widens(&self) -> bool {
+        true
+    }
+}
+
+/// Rows of paths (folders, files): the name first, the characters typed lit in the accent;
+/// its folder after it, muted, cut in the middle when it doesn't fit; the whole path in the
+/// tooltip. Nothing allocated as they're drawn.
+#[derive(Debug, Default)]
+pub struct PathRows;
+
+/// The room between a path's name and its folder (logical pixels).
+const PATH_GAP: f32 = 10.0;
+
+impl PickerRows for PathRows {
+    fn prepare(&mut self, _: &mut TextSystem, _: &Ctx<'_>, _: &[PickerItem], _: f32) {}
+
+    /// Its paths shorten to the field's width (told whole in the tooltip).
+    fn widens(&self) -> bool {
+        false
+    }
+
+    fn paint_row(&self, p: &mut RowPaint<'_, '_>, item: &PickerItem, content: Rect) {
+        let (ctx, pal) = (p.ctx, p.ctx.palette);
+        let px = |v: f32| ctx.px(v);
+        let mid = content.min_y() + content.size.height / 2.0;
+        let mut x = content.min_x();
+        if let Some(id) = item.icon.and_then(|i| p.icons.id(i)) {
+            let (s, is) = (px(20.0), px(14.0));
+            let at = Rect::new(x + (s - is) / 2.0, (mid - is / 2.0).round(), is, is);
+            ui_kit::draw_icon(p.layer, p.icons, id, at, ctx.fade(pal.text_muted));
+            x += px(LEAD);
+        }
+        let path = item.label.trim_end_matches('/');
+        let (folder, name, from) = match path.rfind('/') {
+            Some(i) => (&path[..i], &path[i + 1..], i + 1),
+            None => ("", path, 0),
+        };
+        let font = name_font(ctx);
+        let base = ds::optical_baseline(content.min_y(), content.size.height, &font);
+        let marks = ds::Marks { at: &item.marks, color: ctx.fade(pal.accent), from };
+        let room = (content.max_x() - x).max(0.0);
+        let (w, _) = ds::draw_ellipsized_marked(
+            p.layer,
+            p.text,
+            name,
+            &font,
+            (x, base),
+            room,
+            (ctx.fade(pal.text), marks),
+        );
+        let fx = x + w + px(PATH_GAP);
+        if folder.is_empty() || content.max_x() - fx < px(24.0) {
+            return;
+        }
+        let small = ctx.ui_font(-1.5);
+        let base = ds::optical_baseline(content.min_y(), content.size.height, &small);
+        let muted = ctx.fade(pal.text_muted);
+        ds::draw_ellipsized_middle(
+            p.layer,
+            p.text,
+            folder,
+            &small,
+            (fx, base),
+            content.max_x() - fx,
+            muted,
+        );
+    }
+
+    fn tooltip(&self, item: &PickerItem) -> Option<String> {
+        Some(item.label.clone())
+    }
 }
 
 /// The avatar (or icon) and the name (the leading part of every row).
@@ -91,15 +173,32 @@ fn paint_lead(p: &mut RowPaint<'_, '_>, item: &PickerItem, content: Rect, name_r
     }
     let lead = if item.avatar || item.icon.is_some() { px(LEAD) } else { 0.0 };
     let font = name_font(ctx);
-    let name = ds::ellipsize(p.text, &item.label, &font, name_room - lead);
-    let shaped = p.text.shape_line(&name, &font);
     let base = ds::optical_baseline(content.min_y(), content.size.height, &font);
-    draw_text(p.layer, &shaped, content.min_x() + lead, base, pal.text);
+    let at = (content.min_x() + lead, base);
+    ds::draw_ellipsized(p.layer, p.text, &item.label, &font, at, name_room - lead, pal.text);
 }
 
-/// What its keys at the bottom do: pick, select, close.
-fn hint_labels() -> (String, String, String) {
-    (i18n::t("picker.hint_pick"), i18n::t("picker.hint_select"), i18n::t("picker.hint_close"))
+/// What its keys at the bottom do: pick, select, close — written once per language, shared
+/// by every picker.
+fn hint_labels() -> std::sync::Arc<[String; 3]> {
+    use std::sync::{Arc, Mutex};
+    static KEPT: Mutex<Option<(u64, Arc<[String; 3]>)>> = Mutex::new(None);
+    let now = i18n::generation();
+    let Ok(mut kept) = KEPT.lock() else {
+        return Arc::new(
+            ["picker.hint_pick", "picker.hint_select", "picker.hint_close"].map(i18n::t),
+        );
+    };
+    match &*kept {
+        Some((seen, labels)) if *seen == now => labels.clone(),
+        _ => {
+            let labels = Arc::new(
+                ["picker.hint_pick", "picker.hint_select", "picker.hint_close"].map(i18n::t),
+            );
+            *kept = Some((now, labels.clone()));
+            labels
+        }
+    }
 }
 
 /// The room an avatar or an icon takes before the name (logical pixels).
@@ -139,10 +238,9 @@ impl PickerRows for ItemRows {
             return;
         }
         let small = p.ctx.ui_font(-1.5);
-        let detail = ds::ellipsize(p.text, &item.detail, &small, content.max_x() - x);
-        let shaped = p.text.shape_line(&detail, &small);
         let base = ds::optical_baseline(content.min_y(), content.size.height, &small);
-        draw_text(p.layer, &shaped, x, base, p.ctx.palette.text_muted);
+        let (room, muted) = (content.max_x() - x, p.ctx.palette.text_muted);
+        ds::draw_ellipsized(p.layer, p.text, &item.detail, &small, (x, base), room, muted);
     }
 }
 
@@ -340,8 +438,18 @@ impl Picker {
         chosen: Option<usize>,
         lit_first: bool,
     ) {
+        self.open_suggestions_with(items, (chosen, lit_first), Box::new(ItemRows::default()));
+    }
+
+    /// [`Self::open_suggestions`], its rows drawn by `rows` ([`PathRows`] for paths).
+    pub fn open_suggestions_with(
+        &mut self,
+        items: Vec<PickerItem>,
+        (chosen, lit_first): (Option<usize>, bool),
+        rows: Box<dyn PickerRows>,
+    ) {
         let any = !items.is_empty();
-        self.start(items, chosen.into_iter().collect(), false, Box::new(ItemRows::default()));
+        self.start(items, chosen.into_iter().collect(), false, rows);
         self.suggest = true;
         self.moved = any && (chosen.is_some() || lit_first);
     }
@@ -533,8 +641,7 @@ impl Picker {
 
     /// Text pasted into the search: on one line (its breaks made spaces).
     pub fn paste(&mut self, text: &str) -> bool {
-        let line = text.split(['\n', '\r']).filter(|l| !l.is_empty()).collect::<Vec<_>>();
-        self.text_input(&line.join(" "))
+        self.text_input(&kernel::text::pasted_line(text))
     }
 
     /// What's selected in the search (copied).
@@ -592,15 +699,23 @@ impl Picker {
         let lead = if self.items.iter().any(|i| i.avatar || i.icon.is_some()) { 40.0 } else { 0.0 };
         let least = if self.searches() { 260.0 } else { 180.0 };
         // Its keys at the bottom read whole too.
-        let (pick, select, close) = hint_labels();
+        let labels = hint_labels();
+        let [pick, select, close] = &*labels;
         let hints: [ui_kit::KeyHint<'_>; 3] =
-            [(&["↑", "↓"], &pick), (&["↵"], &select), (&["esc"], &close)];
+            [(&["↑", "↓"], pick), (&["↵"], select), (&["esc"], close)];
         let keys = ui_kit::key_hints_width(text, &hints, &ctx.palette.key_hints(ctx.scale));
         let width = (widest + ctx.px(18.0 + lead + 76.0 + 14.0 + 12.0))
             .max(keys + ctx.px(28.0))
             .max(ctx.px(least));
         self.natural = Some((key, width));
         width
+    }
+
+    /// The tooltip of the row at `p`, as its rows say ([`PickerRows::tooltip`]).
+    pub fn tooltip_at(&self, p: Point) -> Option<crate::Tip> {
+        let (rect, at) = self.rows.iter().find(|(r, _)| r.contains(p))?;
+        let item = self.items.get(*self.shown.get(*at)?)?;
+        Some(crate::Tip::new(*rect, self.render.0.tooltip(item)?))
     }
 
     /// The cursor over it: a hand on a row, the text cursor in the search, the arrow
@@ -680,8 +795,9 @@ impl Picker {
         let visible = wanted.min(if down { below } else { above });
         let height = chrome + visible as f32 * self.row_h;
         // As wide as its field, never narrower than its rows need (one opened from a button:
-        // the `+`), within its bounds.
-        let width = anchor.size.width.max(self.natural_width(text, ctx)).min(bounds.size.width);
+        // the `+`), within its bounds; rows that fit any width keep the field's (paths).
+        let least = if self.render.0.widens() { self.natural_width(text, ctx) } else { 0.0 };
+        let width = anchor.size.width.max(least).min(bounds.size.width);
         let top = if down { anchor.max_y() + gap } else { anchor.min_y() - gap - height };
         let left = anchor.min_x().min(bounds.max_x() - width).max(bounds.min_x());
         let r = Rect::new(left, top, width, height);
@@ -703,13 +819,14 @@ impl Picker {
         }
         // The keys, at the bottom.
         let footer = Rect::new(r.min_x(), r.max_y() - footer_h, r.size.width, footer_h);
-        layer.quad(Quad::filled(footer, ctx.fade(p.text.with_alpha(0.022))));
+        layer.quad(Quad::filled(footer, ctx.fade(p.text.with_alpha(ds::BAND_TINT))));
         ds::divider(layer, ctx, r.min_x(), r.max_x(), footer.min_y());
-        let (pick, select, close) = hint_labels();
+        let labels = hint_labels();
+        let [pick, select, close] = &*labels;
         let style = p.key_hints(ctx.scale);
         let room = footer.size.width - px(28.0);
         let full: [ui_kit::KeyHint<'_>; 3] =
-            [(&["↑", "↓"], &pick), (&["↵"], &select), (&["esc"], &close)];
+            [(&["↑", "↓"], pick), (&["↵"], select), (&["esc"], close)];
         // Narrow: the keys alone (what they do left out), else nothing.
         let bare: [ui_kit::KeyHint<'_>; 3] = [(&["↑", "↓"], ""), (&["↵"], ""), (&["esc"], "")];
         let hints = [&full[..], &bare[..]]
@@ -764,56 +881,67 @@ impl Picker {
         let rows = scene.push_layer(Some(list));
         let first = (scroll / self.row_h) as usize;
         let count = (list.size.height / self.row_h) as usize + 2;
-        let shown: Vec<(usize, usize)> =
-            self.shown.iter().copied().enumerate().skip(first).take(count).collect();
+        // The rows in view, by their place among those shown (read in place, never copied).
+        let in_view = first..(first + count).min(self.shown.len());
         let right = list.max_x() - px(14.0);
-        for (at, i) in shown {
-            let top = list.min_y() + at as f32 * self.row_h - scroll;
-            let row = Rect::new(
-                list.min_x() + px(6.0),
-                top + px(1.0),
-                list.size.width - px(12.0),
-                self.row_h - px(2.0),
-            );
-            let lit = at == self.highlight && (!self.suggest || self.moved);
-            // As the git log's lists: the row under the keys (or the mouse) a shade darker.
-            ds::RowHighlight::new(false, lit || self.hover == Some(at))
-                .hover(ds::HoverFill::Faint(ROW_LIT))
-                .paint(rows, ctx, row);
-            let mid = top + self.row_h / 2.0;
-            // On the right: the check on the chosen one, `↵` on the one under the keys.
-            if self.chosen.contains(&i)
-                && let Some(id) = icons.id("check")
-            {
-                let cs = px(14.0);
-                let at = Rect::new(right - cs, (mid - cs / 2.0).round(), cs, cs);
-                ui_kit::draw_icon(rows, icons, id, at, p.accent);
+        // To a screen reader: a list of all its rows, the ones shown under it.
+        let total = self.shown.len();
+        let list_node = move || {
+            ui_kit::access::Described::new(ui_kit::access::Role::List, "", list).count(total)
+        };
+        ui_kit::access::group(list_node, || {
+            for at in in_view {
+                let i = self.shown[at];
+                let top = list.min_y() + at as f32 * self.row_h - scroll;
+                let row = Rect::new(
+                    list.min_x() + px(6.0),
+                    top + px(1.0),
+                    list.size.width - px(12.0),
+                    self.row_h - px(2.0),
+                );
+                let lit = at == self.highlight && (!self.suggest || self.moved);
+                // As the git log's lists: the row under the keys (or the mouse) a shade darker.
+                ds::RowHighlight::new(false, lit || self.hover == Some(at))
+                    .hover(ds::HoverFill::Faint(ROW_LIT))
+                    .paint(rows, ctx, row);
+                let mid = top + self.row_h / 2.0;
+                // On the right: the check on the chosen one, `↵` on the one under the keys.
+                if self.chosen.contains(&i)
+                    && let Some(id) = icons.id("check")
+                {
+                    let cs = px(14.0);
+                    let at = Rect::new(right - cs, (mid - cs / 2.0).round(), cs, cs);
+                    ui_kit::draw_icon(rows, icons, id, at, p.accent);
+                }
+                if lit {
+                    let at = if self.checks() { right - px(22.0) } else { right };
+                    let hint: [ui_kit::KeyHint<'_>; 1] = [(&["↵"], "")];
+                    let w = ui_kit::key_hints_width(text, &hint, &style);
+                    let cap = Rect::new((at - w).round(), top, w, self.row_h);
+                    paint_key_hints(rows, text, &hint, cap, &style);
+                }
+                let content = Rect::new(content_x - px(6.0), top, content_w + px(6.0), self.row_h);
+                let mut pen = RowPaint { layer: &mut *rows, text: &mut *text, icons, ctx };
+                // A list's item to a screen reader, named by its label (its texts, drawn in it,
+                // are that name), chosen when checked.
+                let item = &self.items[i];
+                let described = || {
+                    use ui_kit::access::{Described, Role};
+                    Described::new(Role::ListItem, item.label.as_str(), row)
+                        .key(i as u64)
+                        .index(at)
+                        .selected(self.chosen.contains(&i))
+                        .focused(lit)
+                };
+                ui_kit::access::group(described, || {
+                    self.render.0.paint_row(&mut pen, item, content)
+                });
+                if let Some(visible_row) = row.intersect(&list) {
+                    self.rows.push((visible_row, at));
+                }
             }
-            if lit {
-                let at = if self.checks() { right - px(22.0) } else { right };
-                let hint: [ui_kit::KeyHint<'_>; 1] = [(&["↵"], "")];
-                let w = ui_kit::key_hints_width(text, &hint, &style);
-                let cap = Rect::new((at - w).round(), top, w, self.row_h);
-                paint_key_hints(rows, text, &hint, cap, &style);
-            }
-            let content = Rect::new(content_x - px(6.0), top, content_w + px(6.0), self.row_h);
-            let mut pen = RowPaint { layer: &mut *rows, text: &mut *text, icons, ctx };
-            // A list's item to a screen reader, named by its label (its texts, drawn in it,
-            // are that name), chosen when checked.
-            let item = &self.items[i];
-            let described = || {
-                use ui_kit::access::{Described, Role};
-                Described::new(Role::ListItem, item.label.as_str(), row)
-                    .key(i as u64)
-                    .selected(self.chosen.contains(&i))
-                    .focused(lit)
-            };
-            ui_kit::access::group(described, || self.render.0.paint_row(&mut pen, item, content));
-            if let Some(visible_row) = row.intersect(&list) {
-                self.rows.push((visible_row, at));
-            }
-        }
-        self.bar.paint(scene, p, ctx.scale, list, content, scroll);
+        });
+        self.bar.paint_in(scene, ctx, list, content, scroll);
     }
 }
 
@@ -832,6 +960,10 @@ impl Picker {
 /// An open list is a control over everything: a press outside it closes it (it's hit
 /// anywhere while open), the keys and the text go to it.
 impl crate::control::Control for Picker {
+    fn tooltip(&self, p: Point) -> Option<crate::Tip> {
+        self.tooltip_at(p)
+    }
+
     fn area(&self) -> Option<kernel::Rect> {
         self.open.then_some(self.area)
     }

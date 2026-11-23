@@ -105,8 +105,10 @@ impl Compare {
         let px = |v: f32| ds.px(v);
         let green = p.terminal_ansi[2];
         let red = p.danger;
+        let wrap = if self.wraps() { self.wrap_columns[which] } else { 0 };
         for (ri, row) in rows.iter().enumerate().skip(grid.first).take(grid.visible) {
-            let y = (self.list.min_y() + ri as f32 * self.row_h - self.scroll).round();
+            let y = (self.list.min_y() + self.row_top(ri) - self.scroll).round();
+            let height = self.row_height(ri);
             let base = ds::optical_baseline(y, self.row_h, &grid.font);
             let changed = row.change.is_some();
             let is_current = row.change == Some(self.current);
@@ -154,6 +156,8 @@ impl Compare {
                     col,
                     y,
                     row_h: self.row_h,
+                    height,
+                    wrap,
                     number,
                     source,
                     tint,
@@ -166,7 +170,7 @@ impl Compare {
             );
             // Border of the current difference.
             if pass == Pass::Back && is_current && changed {
-                layer.quad(Quad::filled(Rect::new(col.min_x(), y, px(3.0), self.row_h), p.accent));
+                layer.quad(Quad::filled(Rect::new(col.min_x(), y, px(3.0), height), p.accent));
             }
         }
     }
@@ -214,7 +218,7 @@ impl Compare {
         shown.extend(hovered.filter(|&c| c != self.current));
         for change in shown {
             let Some(&row) = self.change_rows.get(change) else { continue };
-            let y = (self.list.min_y() + row as f32 * self.row_h - self.scroll).round();
+            let y = (self.list.min_y() + self.row_top(row) - self.scroll).round();
             if y + self.row_h < self.list.min_y() || y > self.list.max_y() {
                 continue;
             }
@@ -227,11 +231,13 @@ impl Compare {
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
         overview.quad(Quad::filled(self.overview, p.text.with_alpha(0.025)));
-        let total = self.rows.len().max(1) as f32;
+        // Along the rows' height (wrapped rows taller), as the thumb is.
+        let total = self.rows_height().max(self.row_h).max(1.0);
         for (i, &row) in self.change_rows.iter().enumerate() {
             let len = self.rows[row..].iter().take_while(|r| r.change == Some(i)).count().max(1);
-            let y = self.overview.min_y() + row as f32 / total * self.overview.size.height;
-            let h = (len as f32 / total * self.overview.size.height).max(px(3.0));
+            let (top, bottom) = (self.row_top(row), self.row_top(row + len));
+            let y = self.overview.min_y() + top / total * self.overview.size.height;
+            let h = ((bottom - top) / total * self.overview.size.height).max(px(3.0));
             let color = if i == self.current { p.accent } else { p.accent.with_alpha(0.45) };
             overview.quad(
                 Quad::filled(
@@ -439,7 +445,7 @@ impl Compare {
         for (label, hit, on) in items.iter().rev() {
             let spec = ButtonSpec::new(ButtonKind::Soft)
                 .label(label)
-                .on(*on)
+                .toggle(*on)
                 .hovered(self.hover == Some(*hit));
             let w = ds::button_width(text, ds, &spec, h);
             let r = Rect::new(x - w, mid - h / 2.0, w, h);
@@ -484,6 +490,8 @@ pub(crate) fn paint_cell(pen: Pen<'_, '_>, spec: CellSpec<'_>) {
         col,
         y,
         row_h,
+        height,
+        wrap,
         number,
         source,
         tint,
@@ -495,7 +503,7 @@ pub(crate) fn paint_cell(pen: Pen<'_, '_>, spec: CellSpec<'_>) {
     } = spec;
     let p: &Palette = ds.palette;
     if pass == Pass::Back {
-        let cell = Rect::new(col.min_x(), y, col.size.width, row_h);
+        let cell = Rect::new(col.min_x(), y, col.size.width, height);
         if let Some(tint) = tint {
             layer.quad(Quad::filled(cell, tint));
         }
@@ -528,34 +536,64 @@ pub(crate) fn paint_cell(pen: Pen<'_, '_>, spec: CellSpec<'_>) {
     let x0 = col.min_x() + number_w - hscroll;
     let inline = inline.and_then(|(range, color)| Some((tab_shifted(source, range)?, color)));
     let source = source.replace('\t', "    ");
-    // The changed part of the line, slightly more intense.
-    if let Some((range, color)) = inline
-        && range.end > range.start
-        && range.end <= source.len()
-        && source.is_char_boundary(range.start)
-        && source.is_char_boundary(range.end)
-    {
-        let before = text.shape_line(&source[..range.start], font).width;
-        let width = text.shape_line(&source[range], font).width;
-        layer.quad(
-            Quad::filled(
-                Rect::new(x0 + before, y + ds.px(2.0), width, row_h - ds.px(4.0)),
-                color.with_alpha(0.22),
-            )
-            .rounded(ds.px(3.0)),
-        );
+    // Its rows: one, or the parts it wraps into at `wrap` columns.
+    let mut parts = Vec::new();
+    if wrap > 0 {
+        ui_components::text_options::wrap_rows(&source, wrap, 4, &mut parts);
+    } else {
+        parts.push(0..source.len());
     }
-    ui_components::draw_code(
-        layer,
-        text,
-        ui_components::CodeLine {
+    let max_x = col.max_x() - ds.px(6.0);
+    for (k, part) in parts.iter().enumerate() {
+        let top = y + k as f32 * row_h;
+        let baseline = base + k as f32 * row_h;
+        // The changed part of the line (its share of this row), slightly more intense.
+        if let Some((range, color)) = &inline {
+            let (from, to) = (range.start.max(part.start), range.end.min(part.end));
+            if to > from
+                && to <= source.len()
+                && source.is_char_boundary(from)
+                && source.is_char_boundary(to)
+            {
+                let before = text.shape_line(&source[part.start..from], font).width;
+                let width = text.shape_line(&source[from..to], font).width;
+                layer.quad(
+                    Quad::filled(
+                        Rect::new(x0 + before, top + ds.px(2.0), width, row_h - ds.px(4.0)),
+                        color.with_alpha(0.22),
+                    )
+                    .rounded(ds.px(3.0)),
+                );
+            }
+        }
+        let line = ui_components::CodeLine {
             source: &source,
             extension,
             font,
             x: x0,
-            baseline: base,
+            baseline,
             palette: p,
-            max_x: col.max_x() - ds.px(6.0),
-        },
-    );
+            max_x,
+        };
+        if parts.len() == 1 {
+            ui_components::draw_code(layer, text, line);
+            continue;
+        }
+        ui_components::draw_code_part(layer, text, line, part.clone());
+        // The line goes on below: the wrap's mark after this row's text.
+        if k + 1 < parts.len() {
+            let width = text.shape_line(&source[part.clone()], font).width;
+            let mark = text.shape_line(WRAP_END, font);
+            draw_text(
+                layer,
+                &mark,
+                x0 + width + ds.px(4.0),
+                baseline,
+                p.text_muted.with_alpha(0.6),
+            );
+        }
+    }
 }
+
+/// The mark at a wrapped row's end (its line goes on below).
+const WRAP_END: &str = "↩";

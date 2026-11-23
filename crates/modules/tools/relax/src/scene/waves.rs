@@ -95,6 +95,16 @@ pub fn row_heights(x0: f32, dx: f32, n: usize, z: f32, t: f32, out: &mut Vec<f32
     }
 }
 
+/// The scene's own colors (its sky, its lights, its warm glow): a picture's, whatever the
+/// theme.
+const OWN_COLORS: SceneColors = SceneColors {
+    sky_top: Rgba::rgb(0x0a0720),
+    sky_bottom: Rgba::rgb(0x3b1d4f),
+    horizon: Rgba::rgb(0x8a3f7a),
+    lights: [Rgba::rgb(0x5fe6ff), Rgba::rgb(0xff6fd8), Rgba::rgb(0xffb070), Rgba::rgb(0xa58bff)],
+    warm: Rgba::rgb(0xffb070),
+    dark: true,
+};
 impl Waves {
     fn horizon(&self) -> f32 {
         self.bounds.min_y() + HORIZON * self.bounds.size.height
@@ -112,19 +122,7 @@ impl RelaxScene for Waves {
     }
 
     fn own_colors(&self) -> SceneColors {
-        SceneColors {
-            sky_top: Rgba::rgb(0x0a0720),
-            sky_bottom: Rgba::rgb(0x3b1d4f),
-            horizon: Rgba::rgb(0x8a3f7a),
-            lights: [
-                Rgba::rgb(0x5fe6ff),
-                Rgba::rgb(0xff6fd8),
-                Rgba::rgb(0xffb070),
-                Rgba::rgb(0xa58bff),
-            ],
-            warm: Rgba::rgb(0xffb070),
-            dark: true,
-        }
+        OWN_COLORS
     }
 
     fn resize(&mut self, bounds: Rect, scale: f32) {

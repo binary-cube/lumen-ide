@@ -29,6 +29,10 @@ pub const RESOURCES_PINNED: Setting<bool> = Setting::new("status", "resources_pi
 /// A line break at the end of saved files (`[editor] final_newline`).
 pub const FINAL_NEWLINE: Setting<bool> = Setting::new("editor", "final_newline", || true);
 
+/// Lines longer than a view go on in rows under them, wherever text is shown (`[editor]
+/// word_wrap`, off by default).
+pub const WORD_WRAP: Setting<bool> = Setting::new("editor", "word_wrap", || false);
+
 /// Parameter names shown inside the code at calls (inlay hints, `[editor] inlay_hints`).
 pub const INLAY_HINTS: Setting<bool> = Setting::new("editor", "inlay_hints", || true);
 

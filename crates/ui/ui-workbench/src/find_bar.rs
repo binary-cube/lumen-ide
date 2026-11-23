@@ -331,7 +331,7 @@ impl FindBar {
             let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
                 .label(label)
                 .rest_tone(ds::Tone::Neutral)
-                .on(active)
+                .toggle(active)
                 .hovered(look.hover == Some(hit));
             ds::button(layer, text, look.icons, &look.ctx(), r, spec);
             self.hits.push((r, hit));

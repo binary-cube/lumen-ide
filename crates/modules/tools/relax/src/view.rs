@@ -96,6 +96,8 @@ pub struct RelaxView {
     time_checked: Option<Instant>,
     /// The widgets on it (made at the first paint), and what they're given.
     widgets: Option<ScreenWidgets>,
+    /// The widgets' palette (the theme's, on glass), with the theme it was made from.
+    screen_palette: Option<(u64, ui_components::Palette)>,
     widget_context: WidgetContext,
 }
 
@@ -141,6 +143,7 @@ impl RelaxView {
             time: None,
             time_checked: None,
             widgets: None,
+            screen_palette: None,
             widget_context: WidgetContext::default(),
         }
     }
@@ -278,8 +281,14 @@ impl RelaxView {
         if !widgets.is_empty() {
             // On the app's dark glass, whatever the sky: its words white, as on its card.
             let tint = Rgba::WHITE;
-            let palette = screen_palette(ctx.palette, tint);
-            let ds = Ctx { opacity: 1.0 - veil, ..Ctx::new(&palette, ctx.scale) };
+            // The widgets' palette, made again only for another theme (it's a whole theme:
+            // never cloned each frame of a scene that moves all the time).
+            let stamp = ui_components::screen_widgets::palette_stamp(ctx.palette, tint);
+            if self.screen_palette.as_ref().is_none_or(|(s, _)| *s != stamp) {
+                self.screen_palette = Some((stamp, screen_palette(ctx.palette, tint)));
+            }
+            let Some((_, palette)) = &self.screen_palette else { return };
+            let ds = Ctx { opacity: 1.0 - veil, ..Ctx::new(palette, ctx.scale) };
             let look = GlassLook { tint, opacity: 1.0 - veil, night: true };
             let pen =
                 ScreenPen { scene: ctx.scene, text: ctx.text, icons: ctx.icons, ds: &ds, look };

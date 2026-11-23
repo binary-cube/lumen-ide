@@ -39,7 +39,7 @@ impl TermColors {
             Colors::Classic => Self { ansi: CLASSIC.map(Rgba::rgb), ..theme },
             Colors::HighContrast => {
                 let dark = luminance(theme.background) < 0.18;
-                let text = if dark { Rgba::WHITE } else { Rgba::rgb(0x000000) };
+                let text = if dark { Rgba::WHITE } else { Rgba::BLACK };
                 let readable = |c: Rgba| toward(c, text, theme.background);
                 Self {
                     foreground: text,

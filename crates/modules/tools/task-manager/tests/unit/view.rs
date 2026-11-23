@@ -859,3 +859,44 @@ fn the_wheel_scrolls_the_part_under_the_mouse() {
     assert_eq!((view.scroll, view.detail_scroll), (0.0, 20.0), "over the rows: the list");
     assert!(!view.scroll(0.0, -30.0), "at its top");
 }
+
+/// A part's detail open while the history ticks: its charts not shown (figures the part
+/// doesn't have) don't move unseen, and the one shown slides without a transition — so
+/// once its first look has appeared, a second's new values ask for no animation frames
+/// (they spun the processor at thousands of frames a second).
+#[test]
+fn a_ticking_detail_asks_no_animation_frames() {
+    use ui_components::Viewer;
+    let now = std::time::Instant::now();
+    let part = |cpu: f32| {
+        let mut l = Line::new("Interface", "app", MODULES, None);
+        l.cpu = cpu;
+        l.threads = 0;
+        l
+    };
+    let frame = |cpu| Frame { lines: vec![part(cpu)], ..Frame::default() };
+    let mut history = crate::collector::history::History::new(
+        std::time::Duration::from_secs(60),
+        std::time::Duration::from_secs(1),
+    );
+    history.record(&frame(20.0), now);
+    let mut view = TaskManager::default();
+    view.set_all(false);
+    view.history = Some(Arc::new(std::sync::Mutex::new(history)));
+    view.take_frame(frame(20.0));
+    let key = view.frame.lines[0].key.clone();
+    view.select(&key);
+    let mut pen = Pen::new();
+    pen.paint(&mut view, 900.0, 600.0, 1.0);
+    // Its first look appears (a moment), then it's still.
+    std::thread::sleep(std::time::Duration::from_millis(350));
+    pen.paint(&mut view, 900.0, 600.0, 1.0);
+    for second in 1..4u64 {
+        let cpu = 20.0 + second as f32;
+        let at = now + std::time::Duration::from_secs(second);
+        view.history.as_ref().unwrap().lock().unwrap().record(&frame(cpu), at);
+        view.take_frame(frame(cpu));
+        pen.paint(&mut view, 900.0, 600.0, 1.0);
+        assert!(!view.is_animating(), "second {second}: new values, no animation");
+    }
+}

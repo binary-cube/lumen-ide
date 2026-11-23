@@ -66,7 +66,7 @@ impl TaskManager {
                     let hits = &mut self.hits;
                     let mut area: Option<Rect> = None;
                     ds::segmented_with(layer, text, ds, spec, |i, r| {
-                        area = Some(area.map_or(r, |a| union(a, r)));
+                        area = Some(area.map_or(r, |a| a.union(&r)));
                         hits.push((r, Hit::Scope(i == 1)))
                     });
                     self.stops.push((area.unwrap_or(rect), Focus::Tool(tool)));
@@ -87,7 +87,7 @@ impl TaskManager {
                     let hits = &mut self.hits;
                     let mut area: Option<Rect> = None;
                     ds::segmented_with(layer, text, ds, spec, |i, r| {
-                        area = Some(area.map_or(r, |a| union(a, r)));
+                        area = Some(area.map_or(r, |a| a.union(&r)));
                         hits.push((r, Hit::Grouping(offered[i])))
                     });
                     self.stops.push((area.unwrap_or(rect), Focus::Tool(tool)));
@@ -96,7 +96,7 @@ impl TaskManager {
                     let hit = Hit::FilterIcon;
                     let on = !self.filter.text().is_empty();
                     let drawn = ds::square_button(ds, (rect.min_x(), mid), button_size::LARGE);
-                    let spec = quiet_icon("search").hovered(self.hover == Some(hit)).on(on);
+                    let spec = quiet_icon("search").hovered(self.hover == Some(hit)).toggle(on);
                     ds::button(layer, text, icons, ds, drawn, spec);
                     self.hits.push((rect, hit));
                     self.stops.push((drawn, Focus::Tool(tool)));
@@ -109,8 +109,9 @@ impl TaskManager {
                 Tool::Pause => {
                     let icon = if self.paused { "play" } else { "pause" };
                     let drawn = ds::square_button(ds, (rect.min_x(), mid), button_size::LARGE);
-                    let spec =
-                        quiet_icon(icon).hovered(self.hover == Some(Hit::Pause)).on(self.paused);
+                    let spec = quiet_icon(icon)
+                        .hovered(self.hover == Some(Hit::Pause))
+                        .toggle(self.paused);
                     ds::button(layer, text, icons, ds, drawn, spec);
                     self.hits.push((rect, Hit::Pause));
                     self.stops.push((drawn, Focus::Tool(tool)));
@@ -247,11 +248,4 @@ impl TaskManager {
         self.hits.push((pill, hit));
         pill
     }
-}
-
-/// The rectangle holding both.
-fn union(a: Rect, b: Rect) -> Rect {
-    let (x0, y0) = (a.min_x().min(b.min_x()), a.min_y().min(b.min_y()));
-    let (x1, y1) = (a.max_x().max(b.max_x()), a.max_y().max(b.max_y()));
-    Rect::new(x0, y0, x1 - x0, y1 - y0)
 }

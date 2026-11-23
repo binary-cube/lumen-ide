@@ -3,6 +3,11 @@
 
 use super::*;
 
+/// The mark at a wrapped row's end (its line goes on below) and at the start of the rows
+/// after it, in the gutter.
+pub(super) const WRAP_END: &str = "↩";
+pub(super) const WRAP_GOES_ON: &str = "↪";
+
 impl EditorView {
     /// The indent guides: a thin line at each indentation level of the visible rows (blank
     /// rows continue their block's), the cursor's block's brighter — in the theme's colors.
@@ -100,25 +105,49 @@ impl EditorView {
         scene: &mut Scene,
         palette: &Palette,
     ) {
-        let tab = f.doc.tab_width();
         self.pills.clear();
         self.lens_rects.clear();
         let content = scene.push_layer(Some(f.text_area));
         for i in 0..self.lines.len() {
             let line = self.lines[i];
-            self.load_line(f.doc, line as usize);
+            let seg = self.seg(i);
+            self.row_base = self.load_row(f.doc, i, f.max_columns);
             let start = f.doc.buffer().line_start(line as usize);
-            workbench_model::concealment::mask(&mut self.line, start, f.deco.concealed);
-            expand_tabs_with(&self.line, f.max_columns, tab, &self.line_inlays, &mut self.display);
+            // What a module hides is masked in the line, then its row's part taken again.
+            if !f.deco.concealed.is_empty() {
+                workbench_model::concealment::mask(&mut self.line, start, f.deco.concealed);
+                self.row_base = self.reload_row_display(f.doc, i, f.max_columns);
+            }
             let row = Row { line, top: f.row_top(i), baseline: f.row_baseline(i) };
             let shaped = text.shape_line(&self.display, &f.font);
             self.fill_row_colors(f, i, palette);
             self.push_glyphs(f, content, &shaped, row.baseline, palette);
             self.restyle_glyphs(f, (content, text), &shaped, row.baseline, palette);
             self.paint_inlays(f, content, text, &shaped, row, palette);
+            if !seg.last {
+                // The line goes on in the next row: the wrap's mark after this one's text.
+                self.paint_wrap_mark(f, content, text, row, shaped.width, palette);
+                continue;
+            }
             let end = self.paint_fold_label(f, content, text, row, shaped.width, palette);
             self.paint_lens(f, content, text, row, end, palette);
         }
+        self.row_base = 0;
+    }
+
+    /// The mark at a wrapped row's end (its line goes on below): muted, after its text.
+    fn paint_wrap_mark(
+        &self,
+        f: &Frame<'_>,
+        content: &mut render_api::Layer,
+        text: &mut TextSystem,
+        row: Row,
+        width: f32,
+        palette: &Palette,
+    ) {
+        let mark = text.shape_line(WRAP_END, &f.font);
+        let x = (f.x0 + width + f.layout.advance * 0.4).round();
+        draw_text(content, &mark, x, row.baseline, palette.text_muted.with_alpha(0.6));
     }
 
     /// The row's inlay hints: their labels in the room made for them, as small muted chips.
@@ -154,6 +183,11 @@ impl EditorView {
                 self.line_inlays.iter().filter(|(o, _)| *o == at).map(|(_, c)| c).sum();
             let from = after - same + taken;
             taken += columns;
+            // Another row's (a wrapped line's): not this one.
+            let Some(from) = from.checked_sub(self.row_base).filter(|f| *f < self.display.len())
+            else {
+                continue;
+            };
             let (x0, x1) = (shaped.x_at(from), shaped.x_at(from + columns));
             if f.x0 + x1 < f.text_area.min_x() || f.x0 + x0 > f.text_area.max_x() {
                 continue;
@@ -251,11 +285,12 @@ impl EditorView {
             let tab = f.doc.tab_width();
             build_display_map_with(&self.line, tab, &self.line_inlays, &mut self.disp_to_src);
         }
+        let base = self.row_base;
         content.glyphs.extend(shaped.glyphs.iter().map(|g| {
             let src = if has_tabs {
-                self.disp_to_src.get(g.start).map_or(len, |&s| s as usize)
+                self.disp_to_src.get(g.start + base).map_or(len, |&s| s as usize)
             } else {
-                g.start
+                g.start + base
             };
             GlyphInstance {
                 key: g.key,
@@ -280,11 +315,12 @@ impl EditorView {
             return;
         }
         let has_tabs = self.line.contains('\t') || !self.line_inlays.is_empty();
+        let base = self.row_base;
         let src_of = |display: usize| {
             if has_tabs {
-                self.disp_to_src.get(display).map_or(usize::MAX, |&s| s as usize)
+                self.disp_to_src.get(display + base).map_or(usize::MAX, |&s| s as usize)
             } else {
-                display
+                display + base
             }
         };
         let face_of =
@@ -425,14 +461,15 @@ impl EditorView {
         let id = std::ptr::from_ref(self) as u64;
         for (n, sel) in f.doc.selections().iter().enumerate() {
             let line = buffer.line_of(sel.head);
-            let Some(i) = self.visible_row(line) else { continue };
-            self.load_line(f.doc, line);
             let column = sel.head - buffer.line_start(line);
-            let x = self.x_in_line(text, f.doc, column);
+            let Some(i) = self.visible_row_of(line, column) else { continue };
+            self.load_line(f.doc, line);
+            let seg = self.seg(i);
+            let x = self.x_in_row(text, f.doc, seg, column);
             // The character's cell (a block covers it): up to the next one, else a space.
             let next = (column < buffer.line_len(line)).then(|| {
                 let after = document::domain::movement::next_grapheme(buffer, sel.head);
-                self.x_in_line(text, f.doc, after - buffer.line_start(line))
+                self.x_in_row(text, f.doc, seg, after - buffer.line_start(line))
             });
             let width = next.map_or(layout.advance, |n| (n - x).max(1.0));
             let cell = Rect::new((f.x0 + x).round(), f.row_top(i), width, layout.line_height);
@@ -463,9 +500,11 @@ impl EditorView {
         let (doc, buffer, layout) = (f.doc, f.doc.buffer(), &f.layout);
         let head = doc.selections().primary().head;
         let line = buffer.line_of(head);
-        if let Some(i) = self.visible_row(line) {
+        let column = head - buffer.line_start(line);
+        if let Some(i) = self.visible_row_of(line, column) {
             self.load_line(doc, line);
-            let x = (f.x0 + self.x_in_line(text, doc, head - buffer.line_start(line))).round();
+            let seg = self.seg(i);
+            let x = (f.x0 + self.x_in_row(text, doc, seg, column)).round();
             let shaped = text.shape_line(&preedit, &f.font);
             let top = f.row_top(i);
             let layer = scene.push_layer(Some(f.text_area));

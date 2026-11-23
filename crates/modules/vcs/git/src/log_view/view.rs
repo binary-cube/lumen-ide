@@ -551,13 +551,17 @@ impl Viewer for LogView {
     }
 
     fn is_animating(&self) -> bool {
-        // Typing in the text filter: frames until it applies.
-        self.controls.is_animating() || self.bar.typed_at.is_some()
+        self.controls.is_animating()
     }
 
-    /// Its scrollbars fading in or out: a frame when they next change.
+    /// Its scrollbars fading in or out: a frame when they next change; the typed filter's
+    /// pause over: one frame then, to apply it (none meanwhile).
     fn frame_deadline(&self) -> Option<std::time::Instant> {
-        self.controls.next_frame()
+        let typed = self.bar.typed_at.map(|t| t + super::filters::TYPING_PAUSE);
+        match (self.controls.next_frame(), typed) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
     }
 
     fn is_loading(&self) -> bool {

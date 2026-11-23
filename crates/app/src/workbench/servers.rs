@@ -701,8 +701,14 @@ impl Workbench {
         }
         if self.data.served.hover.as_ref().is_some_and(|(d, at, _)| *d == doc && *at == word) {
             // Past its grace: nothing from it yet, the built-in engine's card (the server's
-            // answer is kept for the word when it comes).
-            return Some((!self.served_hover_waiting()).then_some(None));
+            // answer is kept for the word when it comes). Its grace let go here too: the
+            // card shown and no frame asked for it are one fact, whichever looked at the
+            // clock first (this or the frame's `after_grace`).
+            if self.served_hover_waiting() {
+                return Some(None);
+            }
+            self.data.served.hover_grace = None;
+            return Some(Some(None));
         }
         let reply = self.ask_server(word, |s, at| s.hover(at))?;
         self.data.served.hover = Some((doc, word, reply));

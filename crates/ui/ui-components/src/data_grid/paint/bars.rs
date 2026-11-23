@@ -1,5 +1,7 @@
 //! Painting the bars around the table: toolbar, filters, find, bottom.
 
+use std::sync::Arc;
+
 use super::*;
 
 impl<S: GridSource> DataGrid<S> {
@@ -26,30 +28,20 @@ impl<S: GridSource> DataGrid<S> {
         let slow = self.loading_since.is_some_and(|t| t.elapsed().as_millis() > 400);
         // `1–500 of 12,345`, the total clickable when it's an estimate (counted then).
         let font = ds.ui_font(-0.5);
-        let span = match self.paging.span(known.or(total.approximate()), rows) {
-            Some((a, b)) if rows > 0 => format!("{}–{}", grouped(a), grouped(b)),
-            _ => "0".to_owned(),
-        };
-        let of = match total {
-            Total::Known(n) => i18n::tr!("grid.of", total = grouped(n)),
-            Total::Estimate(n) => i18n::tr!("grid.of_estimate", total = grouped(n)),
-            Total::Pending => i18n::t("grid.of_pending"),
-            Total::AtLeast(n) => i18n::tr!("grid.of_more", total = grouped(n)),
-            Total::Unknown => String::new(),
-        };
+        // The bar's texts, written again only when what they say changes (the page, the
+        // total, the page's size, the changes waiting, the language).
+        let shown = self.paging.span(known.or(total.approximate()), rows).filter(|_| rows > 0);
+        let key = (i18n::generation(), shown, total, self.paging.size, pending);
+        let texts = self.bar_texts.get_or_update(key, || Arc::new(BarTexts::new(key))).clone();
+        let (span, of, size_label) = (&texts.span, &texts.of, &texts.size);
         let span_font = font.clone().with_weight(Font::SEMIBOLD);
-        let span_shaped = text.shape_line(&span, &span_font);
-        let of_shaped = (!of.is_empty()).then(|| text.shape_line(&of, &font));
-        let size_label = match self.paging.size {
-            Some(n) => i18n::tr!("grid.page_size", count = n),
-            None => i18n::t("grid.page_all"),
-        };
+        let span_shaped = text.shape_line(span, &span_font);
+        let of_shaped = (!of.is_empty()).then(|| text.shape_line(of, &font));
         let small = ds.ui_font(-1.0);
-        let size_shaped = text.shape_line(&size_label, &small);
+        let size_shaped = text.shape_line(size_label, &small);
         let chevron = px(12.0);
-        let submit = (pending > 0).then(|| {
-            let label = i18n::tr!("grid.submit", count = pending);
-            let w = (text.shape_line(&label, &ds::button_font(ds)).width + px(24.0)).round();
+        let submit = texts.submit.as_deref().map(|label| {
+            let w = (text.shape_line(label, &ds::button_font(ds)).width + px(24.0)).round();
             (label, w)
         });
         // The data extractor's pill: its name and a chevron (rounded up: rounded down, its
@@ -71,7 +63,7 @@ impl<S: GridSource> DataGrid<S> {
             size_w: size_shaped.width + chevron + px(26.0),
             submit_w: submit.as_ref().map_or(0.0, |(_, w)| *w),
         };
-        let laid = self.toolbar.get_or_update(spec, || toolbar::layout(&spec)).clone();
+        let laid = self.toolbar.get_or_update(spec, || Arc::new(toolbar::layout(&spec))).clone();
         self.collapsed.clone_from(&laid.collapsed);
 
         let base = ds::optical_baseline(bar.min_y(), bar.size.height, &font);
@@ -99,7 +91,7 @@ impl<S: GridSource> DataGrid<S> {
                         draw_fitted(
                             layer,
                             text,
-                            &span,
+                            span,
                             &span_font,
                             (x.round(), laid.range_room, base),
                             p.text,
@@ -118,7 +110,7 @@ impl<S: GridSource> DataGrid<S> {
                     // An estimate is a link: pressed, the rows are counted.
                     let r = Rect::new(x - px(4.0), mid - px(12.0), w + px(8.0), px(24.0));
                     let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
-                        .label(&of)
+                        .label(of)
                         .strong()
                         .tone(ds::Tone::Accent)
                         .hover_tint(ds::Tone::Accent)
@@ -133,7 +125,7 @@ impl<S: GridSource> DataGrid<S> {
                     // Its choices are the app's menu (open there, not here).
                     let open = false;
                     let hovered = self.hover == Some(Hit::PageSize);
-                    toolbar_dropdown(layer, text, icons, ds, r, (&size_label, open, hovered));
+                    toolbar_dropdown(layer, text, icons, ds, r, (size_label, open, hovered));
                     self.hits.push((r, Hit::PageSize));
                     continue;
                 }
@@ -178,7 +170,7 @@ impl<S: GridSource> DataGrid<S> {
                 .icon(icon)
                 .enabled(enabled)
                 .hovered(self.hover == Some(hit))
-                .on(on);
+                .toggle(on);
             let r = grid_button(layer, text, icons, ds, (x, mid), spec);
             if enabled {
                 self.hits.push((r, hit));
@@ -264,11 +256,11 @@ impl<S: GridSource> DataGrid<S> {
                 _ => self.order_error.clone(),
             };
             let input = if field == Field::Where { &self.where_input } else { &self.order_input };
+            // The source's own hint, else the usual one (written once per language).
+            let usual = self.hints.get_or_update(i18n::generation(), Hints::new).clone();
             let placeholder = match field {
-                Field::Where => {
-                    self.source.filter_hint().unwrap_or_else(|| i18n::t("grid.where_hint"))
-                }
-                _ => i18n::t("grid.order_hint"),
+                Field::Where => self.source.filter_hint().map_or(usual.filter.clone(), Arc::from),
+                _ => usual.order.clone(),
             };
             let focused = self.field == Some(field);
             // The field's frame drawn here; the text inside, clear of the × button.
@@ -288,8 +280,15 @@ impl<S: GridSource> DataGrid<S> {
             style.border_focused = Rgba::TRANSPARENT;
             // The hint cut to the field (the field scrolls typed text itself).
             let room = inner.size.width - lead - 2.0 * style.padding;
-            let placeholder = ds::ellipsize(text, &placeholder, &style.font, room.max(0.0));
-            input.paint(layer, text, inner, focused, &placeholder, &style);
+            let room = room.max(0.0);
+            let cut;
+            let placeholder = if text.shape_line(&placeholder, &style.font).width <= room + 0.5 {
+                &*placeholder
+            } else {
+                cut = ds::ellipsize(text, &placeholder, &style.font, room);
+                cut.as_str()
+            };
+            input.paint(layer, text, inner, focused, placeholder, &style);
             draw_text(
                 layer,
                 &keyword_shaped,
@@ -439,25 +438,19 @@ impl<S: GridSource> DataGrid<S> {
     ) {
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
-        layer.quad(Quad::filled(bar, p.text.with_alpha(0.022)));
+        layer.quad(Quad::filled(bar, p.text.with_alpha(ds::BAND_TINT)));
         ds::divider(layer, ds, bar.min_x(), bar.max_x(), bar.min_y());
         let font = ds.ui_font(-1.0);
         let base = ds::optical_baseline(bar.min_y(), bar.size.height, &font);
         let mut x = bar.min_x() + px(14.0);
         let status = self.source.status();
-        let left = match (&status, self.source.total()) {
-            (SourceStatus::Failed(why), _) => Some((why.clone(), p.danger)),
-            (_, Total::Known(n)) => {
-                Some((i18n::tr!("grid.rows", count = n, shown = grouped(n)), p.text_muted))
-            }
-            (_, Total::Estimate(n)) => {
-                Some((i18n::tr!("grid.rows_estimate", count = n, shown = grouped(n)), p.text_muted))
-            }
-            (_, Total::Pending) => Some((i18n::t("grid.counting"), p.text_muted)),
-            (_, Total::AtLeast(n)) => {
-                Some((i18n::tr!("grid.rows_more", count = n, shown = grouped(n)), p.text_muted))
-            }
-            (_, Total::Unknown) => None,
+        // How many rows, written once per total and language; a failure's reason as it is.
+        let total = self.source.total();
+        let count =
+            self.rows_line.get_or_update((i18n::generation(), total), || rows_line(total)).clone();
+        let left: Option<(&str, Rgba)> = match &status {
+            SourceStatus::Failed(why) => Some((why.as_str(), p.danger)),
+            _ => count.as_deref().map(|line| (line, p.text_muted)),
         };
         let mut right = bar.max_x() - px(14.0);
         // The selection's figures on the right.
@@ -482,10 +475,9 @@ impl<S: GridSource> DataGrid<S> {
             right -= px(16.0);
         }
         if let Some((line, color)) = left {
-            let line = ds::ellipsize(text, &line, &font, (right - x).max(0.0));
-            let shaped = text.shape_line(&line, &font);
-            draw_text(layer, &shaped, x, base, color);
-            x += shaped.width;
+            let room = (right - x).max(0.0);
+            let (width, _) = ds::draw_ellipsized(layer, text, line, &font, (x, base), room, color);
+            x += width;
         }
         if self.query.filter.is_some() && !matches!(status, SourceStatus::Failed(_)) {
             let tag = i18n::t("grid.filtered");
@@ -533,4 +525,72 @@ fn toolbar_dropdown(
         ds::DropdownSpec { value, open, hovered, enabled: true, note: None, placeholder: None };
     let look = ds::DropdownLook { compact: true, ..ds::DropdownLook::default() };
     ds::dropdown_styled(layer, text, icons, ds, r, (spec, look));
+}
+
+/// The fields' usual hints, written once per language.
+#[derive(Debug)]
+pub(in crate::data_grid) struct Hints {
+    filter: Arc<str>,
+    order: Arc<str>,
+    /// What a cell left to its column's default shows.
+    pub(in crate::data_grid) default: Arc<str>,
+}
+
+impl Hints {
+    pub(in crate::data_grid) fn new() -> Arc<Self> {
+        let (filter, order) = (i18n::t("grid.where_hint"), i18n::t("grid.order_hint"));
+        let default = i18n::t("grid.default");
+        Arc::new(Self { filter: filter.into(), order: order.into(), default: default.into() })
+    }
+}
+
+/// How many rows the source has, as the bottom bar says it (`None`: not known at all).
+fn rows_line(total: Total) -> Option<Arc<str>> {
+    let line = match total {
+        Total::Known(n) => i18n::tr!("grid.rows", count = n, shown = grouped(n)),
+        Total::Estimate(n) => i18n::tr!("grid.rows_estimate", count = n, shown = grouped(n)),
+        Total::Pending => i18n::t("grid.counting"),
+        Total::AtLeast(n) => i18n::tr!("grid.rows_more", count = n, shown = grouped(n)),
+        Total::Unknown => return None,
+    };
+    Some(line.into())
+}
+
+/// What the toolbar says about the page, made once for what it depends on.
+#[derive(Debug)]
+pub(in crate::data_grid) struct BarTexts {
+    /// `1–500`.
+    span: String,
+    /// `of 12,345` (empty: the total isn't known at all).
+    of: String,
+    /// The page's size (`500 rows`, `All`).
+    size: String,
+    /// "Submit (3)" while changes wait.
+    submit: Option<String>,
+}
+
+/// What [`BarTexts`] are made from: the messages' generation, the rows shown, the total,
+/// the page's size, the changes waiting.
+pub(in crate::data_grid) type BarKey = (u64, Option<(u64, u64)>, Total, Option<u32>, usize);
+
+impl BarTexts {
+    fn new((_, shown, total, size, pending): BarKey) -> Self {
+        let span = match shown {
+            Some((a, b)) => format!("{}–{}", grouped(a), grouped(b)),
+            None => "0".to_owned(),
+        };
+        let of = match total {
+            Total::Known(n) => i18n::tr!("grid.of", total = grouped(n)),
+            Total::Estimate(n) => i18n::tr!("grid.of_estimate", total = grouped(n)),
+            Total::Pending => i18n::t("grid.of_pending"),
+            Total::AtLeast(n) => i18n::tr!("grid.of_more", total = grouped(n)),
+            Total::Unknown => String::new(),
+        };
+        let size = match size {
+            Some(n) => i18n::tr!("grid.page_size", count = n),
+            None => i18n::t("grid.page_all"),
+        };
+        let submit = (pending > 0).then(|| i18n::tr!("grid.submit", count = pending));
+        Self { span, of, size, submit }
+    }
 }

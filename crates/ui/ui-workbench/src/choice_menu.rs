@@ -264,7 +264,7 @@ impl ChoiceMenu {
         let hints: &[KeyHint<'_>] =
             &[(&["↑", "↓"], &choose), (&["↵"], &self.action), (&["esc"], &close)];
         ds::footer(layer, text, &ctx, foot, hints);
-        self.paint_scrollbar(&frame, bottom, scene, palette);
+        self.paint_scrollbar(&frame, bottom, scene, &ctx);
     }
 
     /// A row's height (logical): two lines when some row has a detail, one otherwise.
@@ -410,13 +410,7 @@ impl ChoiceMenu {
 
     /// The app's scrollbar when the list is longer than what's shown (the list ends at
     /// `bottom`): a row of the list is one of its units, whatever the gaps between groups.
-    fn paint_scrollbar(
-        &mut self,
-        frame: &Frame,
-        bottom: f32,
-        scene: &mut Scene,
-        palette: &Palette,
-    ) {
+    fn paint_scrollbar(&mut self, frame: &Frame, bottom: f32, scene: &mut Scene, ctx: &Ctx<'_>) {
         let count = self.options.len();
         if count <= VISIBLE {
             self.bar = ui_components::EdgeScrollbar::default();
@@ -429,7 +423,7 @@ impl ChoiceMenu {
         self.unit = list.size.height / VISIBLE as f32;
         let content = self.unit * count as f32;
         let offset = self.unit * self.first as f32;
-        self.bar.paint(scene, palette, self.scale, list, content, offset);
+        self.bar.paint_in(scene, ctx, list, content, offset);
     }
 }
 

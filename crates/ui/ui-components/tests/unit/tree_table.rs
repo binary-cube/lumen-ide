@@ -235,3 +235,59 @@ fn signs_outlines_and_folded_notes_are_drawn() {
     // A cell's text as copied keeps the bar's label.
     assert_eq!(TableCell::bar(0.5, Tone::Accent, "412 ms · 48 %").plain(), "412 ms · 48 %");
 }
+
+/// As one of a view's controls: a press chooses (told once by `take_event`), a column's edge
+/// is held while it's dragged, the wheel and the keys reach it, nothing before it's drawn.
+#[test]
+fn as_a_control_it_answers_as_itself() {
+    use crate::control::{Control, Press};
+    let mut text = TextSystem::new();
+    let mut t = table();
+    assert_eq!(Control::area(&t), None, "not drawn: nowhere to be hit");
+    paint(&mut t, &mut text, 1200.0, 600.0);
+    assert!(Control::area(&t).is_some());
+    let (row_h, top) = (ROW_H * SCALE, HEADER_H * SCALE);
+    let a = Point::new(600.0, top + row_h * 0.5);
+    assert_eq!(Control::press(&mut t, a, 1), Press::Took);
+    assert_eq!(t.take_event(), Some(TableEvent::Selected(0)));
+    assert_eq!(t.take_event(), None, "told once");
+    let edge = Point::new(1200.0 - 80.0 * SCALE, top / 2.0);
+    assert_eq!(Control::cursor(&t, edge), Some(ViewerCursor::ResizeHorizontal));
+    assert_eq!(Control::press(&mut t, edge, 1), Press::Held);
+    assert!(Control::drag(&mut t, Point::new(edge.x - 40.0, edge.y)));
+    assert!(Control::release(&mut t));
+    assert_eq!(t.columns()[1].width, 100.0);
+    assert!(Control::key(&mut t, ViewerKey::Down, Default::default()));
+    assert_eq!(t.selected(), Some(1));
+    assert!(Control::hover(&mut t, Some(a)));
+    assert!(Control::hover(&mut t, None), "left: its hover gone");
+}
+
+/// The same frame drawn again (warmed up, its scene kept): nothing allocated, at both
+/// scales.
+#[test]
+fn an_identical_repaint_allocates_nothing() {
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = Scene::default();
+    for scale in [1.0, 2.0] {
+        let mut t = table();
+        let mut frame = |t: &mut TreeTable| {
+            scene.reset(palette.editor_background);
+            t.paint(TablePaint {
+                bounds: Rect::new(0.0, 0.0, 800.0 * scale, 400.0 * scale),
+                scale,
+                text: &mut text,
+                scene: &mut scene,
+                palette: &palette,
+                icons: &icons,
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut t);
+        }
+        let n = crate::allocations::during(|| frame(&mut t));
+        assert_eq!(n, 0, "at {scale}: {n} allocations");
+    }
+}

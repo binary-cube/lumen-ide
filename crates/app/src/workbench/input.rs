@@ -190,23 +190,17 @@ impl Workbench {
         self.tooltips.deadline().into_iter().chain(windows).min()
     }
 
-    /// An animation (e.g. hover on a separator) is in progress: another frame is needed.
+    /// Something on screen moves (a separator's hover, a view's transition): another frame
+    /// is needed. Walked over the parts on screen ([`Self::each_frame_asker`]).
     pub fn animating(&self) -> bool {
-        self.dividers_animating()
-            || self.tool_window_animating()
-            || self.tools.sides.iter().any(|s| s.panel.is_animating())
-            // Every group's editors: another group's scroll strip shrinks back too.
-            || all_tabs(&self.tabs, &self.editors.groups).any(|t| t.view.is_animating())
-            || self
-                .tabs
-                .get(self.active)
-                .and_then(|t| t.viewer.as_ref())
-                .is_some_and(|v| v.viewer.is_animating() || v.split.splitter.is_animating())
-            || self.tooltips.is_animating()
-            || self.chrome.top_bar_reveal.animating()
-            || self.editors.split.animating()
-            || self.toolbars_animating()
-            || Overlay::ALL.into_iter().any(|o| o.slot().animating(self))
+        self.each_frame_asker(|a| {
+            if a.moving {
+                std::ops::ControlFlow::Break(())
+            } else {
+                std::ops::ControlFlow::Continue(())
+            }
+        })
+        .is_break()
     }
 
     /// The active view's loader turns (work going on): frames at a loader's pace.

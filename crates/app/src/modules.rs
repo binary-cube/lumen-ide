@@ -176,6 +176,7 @@ pub fn builtin() -> ModuleRegistry {
     add(&mut registry, Box::new(language_servers::LanguageServersModule), "language_servers");
     add(&mut registry, Box::new(quality::QualityModule), "quality");
     add(&mut registry, Box::new(viewer_image::ImageViewerModule), "viewer_image");
+    add(&mut registry, Box::new(viewer_charts::ChartsModule), "viewer_charts");
     add(&mut registry, Box::new(viewer_markdown::MarkdownViewerModule), "viewer_markdown");
     add(&mut registry, Box::new(emmet::EmmetModule), "emmet");
     add(&mut registry, Box::new(structure::StructureModule), "structure");
@@ -403,6 +404,11 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
     for source in contributions.take::<Arc<dyn contracts::profiling::ProfileSource>>() {
         contracts::profiling::register(source);
     }
+    // The panes the modules offer over a tabular result (a chart): found there by whoever
+    // shows rows (it never names a module).
+    for pane in contributions.take::<Arc<dyn ui_workbench::result_pane::ResultPaneProvider>>() {
+        ui_workbench::result_pane::register(pane);
+    }
     // The tools the modules offer the agents (the MCP server's): found there by whoever
     // serves them (the server never names a module).
     for tool in contributions.take::<Arc<dyn mcp::McpTool>>() {
@@ -469,6 +475,7 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
         settings.push(Arc::new(crate::window_menu::WindowMenuSettings));
     }
     settings.push(Arc::new(crate::insight::InsightSettings));
+    settings.push(Arc::new(crate::text_options::TextSettings));
     // The theme in use's own settings: the first of Appearance's blocks (its place says so),
     // right under the themes (none shown for a theme without any).
     settings.push(Arc::new(crate::theme_options::ThemeOptionSettings));
@@ -655,6 +662,7 @@ pub(crate) fn hide_contributions(
     hidden: &dyn Fn(&extensions::ModuleId) -> bool,
 ) {
     contributions.drop_from::<Arc<dyn ui_workbench::ToolWindowProvider>>(hidden);
+    contributions.drop_from::<Arc<dyn ui_workbench::result_pane::ResultPaneProvider>>(hidden);
     contributions.drop_from::<workbench_model::CommandContribution>(hidden);
     contributions.drop_from::<workbench_model::MenuContribution>(hidden);
     contributions.drop_from::<workbench_model::ContextMenuItem>(hidden);

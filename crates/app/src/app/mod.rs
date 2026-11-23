@@ -45,6 +45,7 @@ mod splash;
 mod state;
 mod system_sign;
 mod theme;
+mod unseen_motion;
 mod web_views;
 
 #[cfg(feature = "snapshot")]
@@ -86,6 +87,10 @@ enum Final {
 /// A tab closing in progress (the Document context's use case): the remaining ones (may be
 /// waiting for a dialog answer), then what follows.
 type Closing = document::CloseDocuments<Final>;
+
+/// The least time between two frames of an animation that showed nothing new (a display's
+/// frame at 120 Hz): what moves unseen costs at most that rate, never an unpaced loop.
+const ANIMATION_FLOOR: Duration = Duration::from_micros(8_333);
 
 /// The open tabs, as the closing asks about them.
 struct OpenTabs<'a>(&'a Workbench);
@@ -527,10 +532,19 @@ impl EditorApp {
                     let button = self.workbench.maximize_button().filter(|_| !full_screen);
                     window.set_maximize_button(button);
                 }
-                // Transitions (hover on separators) request frames only while they last.
+                // Transitions (hover on separators) request frames only while they last: the
+                // next at once while they show (the display paces what's presented), else a
+                // display's frame later — something saying it moves while nothing changes
+                // must not spin the processor at thousands of frames a second.
                 if self.workbench.animating() {
-                    window.request_redraw();
-                    full_due = frame_start;
+                    if self.frames.last_skipped {
+                        let at = frame_start + ANIMATION_FLOOR;
+                        window.request_redraw_at(at);
+                        full_due = full_due.min(at);
+                    } else {
+                        window.request_redraw();
+                        full_due = frame_start;
+                    }
                 } else if self.workbench.loading() {
                     // A loader turning, a progress bar sweeping: about 30 frames a second
                     // (smooth to the eye; only while work goes on).
@@ -574,12 +588,17 @@ impl EditorApp {
         }
 
         self.workbench.paint_phases.end();
-        access::end(
+        // A change held back (told at most ten times a second): a frame when it's due.
+        let access_due = access::end(
             access,
             &mut self.frames.access,
             self.window.as_deref(),
             &self.window_state.title,
+            |p| self.workbench.access_tip(p),
         );
+        if let Some(at) = access_due {
+            window.request_redraw_at(at);
+        }
         let mut glyphs = WithIcons { text: &mut **text, icons: self.workbench.icons() };
         let painted = frame_start.elapsed();
         // A profile recording's step: the scene handed to the GPU and shown.
@@ -611,6 +630,17 @@ impl EditorApp {
         }
         match result {
             Ok(stats) => {
+                self.frames.last_skipped = stats.skipped;
+                // A part saying it moves while nothing changes: told (once) by its name.
+                let moving = stats.skipped && self.workbench.animating();
+                let workbench = &self.workbench;
+                if let Some(parts) =
+                    self.frames
+                        .unseen_motion
+                        .frame(frame_start, (moving, stats.skipped), || workbench.moving_parts())
+                {
+                    tracing::warn!(?parts, "parts say they move while nothing on screen changes");
+                }
                 self.frames.overlay.record(frame_start.elapsed(), stats);
                 if !stats.skipped {
                     kernel::probe::frame(frame_start.elapsed());

@@ -3,6 +3,10 @@
 Part of the project's rules: [index](project-conventions.md). Related: [modals](modals.md),
 [writing code](code.md), [performance](performance.md), [modules](modules.md).
 
+**How a component is built and how it behaves is written in the UI guide, `docs/ui/`**
+(tokens, anatomy, interaction, recipes, a page per component): read it before making or
+changing one, and keep its page current.
+
 **A view is assembled from `ui-components`, never drawn by hand.** Before painting a
 scrollbar, a list, a field, a menu or a table, look here (and in `ds`): the one component
 everyone uses gives the same look, keys, hover, focus ring and accessibility for free, and a
@@ -49,7 +53,9 @@ every caller has today: a new option never moves a pixel where it isn't asked fo
 | A tree (project tree, a remote's), every fold's chevron | `tree` (`TreeList`, `tree::chevron`, guides) |
 | A tree on columns (rows with depth, folded / opened) | `tree_table::TreeTable` |
 | Columns fitted to a width by priority | `columns` |
-| Charts, sparklines, an icicle (flame graph), a ring | `chart`, `icicle`, `progress_ring` |
+| Every chart (bars, lines, areas, points, bubbles, a pie, a histogram; hover, legend, zoom; theme colors): data prepared by `charts-model`, drawn by `charts::Chart` + `ChartLook` (`ChartParts::bare()` for a widget) | `charts` (`charts::spark::sparkline` for a cell's, a card's, a widget's: quads, no state) |
+| A pane a module offers over another's tabular rows (a chart under a query's result) | `result_pane` (`ResultPaneProvider` contributed, `Lent` rows) |
+| An icicle (flame graph), a ring | `icicle`, `progress_ring` |
 | A metric's card | `metric_card` |
 | A text to read (release notes, details: headings, paragraphs, points), its selection and its right-click menu (`ReadText::menu` / `copied`: Copy, Copy All) | `read_text` (`Block`) |
 | A log's lines (Output) | `log_view` |
@@ -67,6 +73,26 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
 
 ## Generic and agnostic: interaction goes through contracts
 
+- **Agnostic of components, never hard-coded (asked again and again: a rule).** A feature
+  that joins two parts (a chart of a table's selection, a pane over any rows) goes through
+  contracts only:
+  - the part that has the data gives it in a neutral form, knowing nothing of who uses it
+    (the grid's selection as a `charts_model::Tabular`: `DataGrid::picked`);
+  - the part that offers the feature lists what's registered and names none of it
+    (`PaneHost::menu` builds "{pane}: from the selection" for every `ResultPaneProvider`);
+  - the view between them only hands one to the other (`menu_command`), never names a
+    pane, a module, a chart or a column;
+  - a new provider (another pane kind) or a new host (another table) works without a
+    line changed in the others. A `match` on another part's id, a string naming another
+    module, an `if` for one kind of component: a bug, moved behind the contract.
+- **How text is shown is one value, told to every view** (`ui_components::TextOptions`:
+  word wrap, and what comes next as new fields): the app tells each view and panel at its
+  first frame and on each change (`Viewer::set_text_options`, `ToolPanel::set_text_options`);
+  a view drawing text follows it with the shared helpers (`text_options::wrap_rows`,
+  `char_columns`), never a setting read by itself or a wrap of its own. A view that holds
+  other views (the Services panel, a console's results tab) hands the options on, to the
+  ones it makes later too. A line drawn wrapped keeps its colors whole
+  (`draw_code_part`), and a wrapped row's end shows the wrap's mark `↩`.
 - **Code that routes doesn't name what it routes to.** Whoever passes input on (the app to
   its windows over the editor, a view to its parts, a panel to its rows) walks a list of
   parts that answer one contract — never a chain of `if self.completion… if self.dialog…
@@ -163,9 +189,17 @@ Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
     dropdown, a tree's fold): `access::node(|| Described::new(role, "", rect))`; it takes
     the text on its line;
   - a list's or a table's rows carry `.key(index)`, so their identities hold when their
-    names change;
+    names change, and `.index(i)` under a parent saying `.count(n)` (`Role::List`,
+    `Menu`, `Table`: "3 of 10", the rows scrolled away counted);
+  - a tree's row is told whole with `tree::item(tree::Item { name, bounds, level,
+    expanded, selected })`, the guard held while the row paints (its chevron then adds
+    nothing); a paint too long for a closure holds `access::open(…)` the same way;
+  - a field tells its text with `.lines(TextLines { lines, anchor, focus, caret })`, so the
+    screen reader follows its caret; a code editor tells only the lines it shows;
   - a drawing made of letters (an avatar's initials, code tokens told otherwise):
     `access::silent`.
+- **Checked by the snapshots:** `SNAPSHOT_ACCESS=1 scripts/ui-snapshots.sh record|compare`
+  keeps each screen's tree as text and lists the screens whose tree changed.
 - **Nothing costs while no screen reader runs:** the description is a closure, never built
   then. **Never in the tree:** a secret field's text (not even its length), an icon's id as
   a name, anything the user doesn't see.

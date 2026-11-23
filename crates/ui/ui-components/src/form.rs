@@ -248,7 +248,7 @@ pub fn reset_button(
 /// A group of rows: the card behind them (inserted under them once their height is known).
 pub fn group_quad(ctx: &Ctx<'_>, rect: Rect) -> Quad {
     let p = ctx.palette;
-    Quad::filled(rect, ctx.fade(p.text.with_alpha(0.022)))
+    Quad::filled(rect, ctx.fade(p.text.with_alpha(ds::BAND_TINT)))
         .rounded(ctx.px(radius::LG))
         .bordered(ctx.line(), ctx.fade(p.border.with_alpha(0.8)))
 }
@@ -528,7 +528,7 @@ pub fn fold_card_quad(ctx: &Ctx<'_>, rect: Rect, hovered: bool, dragging: bool) 
     } else if hovered {
         (p.text.with_alpha(0.04), p.border)
     } else {
-        (p.text.with_alpha(0.022), p.border.with_alpha(0.8))
+        (p.text.with_alpha(ds::BAND_TINT), p.border.with_alpha(0.8))
     };
     Quad::filled(rect, ctx.fade(fill))
         .rounded(ctx.px(radius::LG))
@@ -721,6 +721,14 @@ impl<'a> Nav<'a> {
     }
 }
 
+/// A category to a screen reader, while the guard lives: a tab naming the page it opens,
+/// chosen while that page shows (its name's text is its own, its number read under it).
+fn nav_node(item: &NavItem<'_>, r: Rect, on: bool) -> Option<ui_kit::access::Opened> {
+    ui_kit::access::open(|| {
+        ui_kit::access::Described::new(ui_kit::access::Role::Tab, item.label, r).selected(on)
+    })
+}
+
 /// A category's row in [`nav_list`] (logical pixels).
 pub const NAV_ROW: f32 = 36.0;
 /// The tabs' height in [`nav_tabs`] (logical pixels).
@@ -765,6 +773,7 @@ pub fn nav_list(
     for (i, item) in items.iter().enumerate() {
         let r = Rect::new(x, top, width, h);
         let on = i == selected;
+        let _told = nav_node(item, r, on);
         crate::ds::RowHighlight::new(on, hovered == Some(i))
             .selected_alpha(NAV_SELECTED)
             .hover(crate::ds::HoverFill::Faint(NAV_HOVER))
@@ -887,6 +896,7 @@ pub fn nav_tabs(
         let w = tab_width(text, ctx, item, named(i));
         let r = Rect::new(tx, y, w, h);
         let on = i == selected;
+        let _told = nav_node(item, r, on);
         crate::ds::RowHighlight::new(false, hovered == Some(i) && !on)
             .radius(radius::SM)
             .hover(crate::ds::HoverFill::Faint(NAV_HOVER))

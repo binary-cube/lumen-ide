@@ -384,9 +384,18 @@ impl TextInput {
         focused: bool,
         placeholder: &str,
     ) -> crate::access::Described {
-        use crate::access::{Described, Role};
+        use crate::access::{Described, Role, TextLines};
         let field = Described::new(Role::TextField, placeholder, bounds).focused(focused);
-        if self.secret || self.masked { field } else { field.value(self.text.as_str()) }
+        if self.secret || self.masked {
+            return field;
+        }
+        let lines = TextLines {
+            lines: vec![bounds],
+            anchor: self.anchor,
+            focus: self.cursor,
+            caret: self.caret_area(),
+        };
+        field.value(self.text.as_str()).lines(lines)
     }
 
     pub fn paint(

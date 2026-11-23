@@ -279,14 +279,7 @@ impl Workbench {
 
     /// A bar's work is going on (its spinner turns).
     pub(super) fn toolbars_loading(&self) -> bool {
-        all_tabs(&self.tabs, &self.editors.groups)
-            .any(|t| t.toolbar.as_ref().is_some_and(|b| b.bar.is_loading()))
-    }
-
-    /// A bar's transition moves (a button widening).
-    pub(super) fn toolbars_animating(&self) -> bool {
-        all_tabs(&self.tabs, &self.editors.groups)
-            .any(|t| t.toolbar.as_ref().is_some_and(|b| b.bar.is_animating()))
+        self.shown_tabs().any(|t| t.toolbar.as_ref().is_some_and(|b| b.bar.is_loading()))
     }
 
     /// The bar of tab `i` lets it close (`false`: it asks first, and closes it itself).

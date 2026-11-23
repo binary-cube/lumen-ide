@@ -485,3 +485,116 @@ duplicare; toate verificate.
   - pe Windows, orice client UI Automation (nu doar un cititor de ecran) pornește
     înregistrarea și nu o mai oprește: de măsurat, eventual o limită de cost;
   - arborele trimis la cel mult ~10 cadre pe secundă în animații, dacă măsurătorile o cer.
+
+## Făcut (2026-11-23): 93d, accesibilitatea (partea a doua)
+
+- **Locul în listă** (`Place` în contract: `index`, `count`, `level`, numărate de la zero):
+  - picker-ul e o listă (`Role::List`) care știe câte rânduri are, inclusiv cele derulate
+    în afara ecranului; fiecare rând își spune locul („3 din 10”);
+  - meniul aplicației e un `Menu`, fără separatori numărați; rândurile au locul lor;
+  - tabelul de date e un `Table` cu numărul total de rânduri, iar rândurile au indexul
+    lor (la sistem: `row_count`, `row_index`).
+- **Rândurile de arbore descrise întregi** (`tree::item`, o gardă ținută cât se desenează
+  rândul): numele, nivelul, deschis sau pliat, ales. Textul numelui (chiar tăiat cu „…”)
+  nu se citește a doua oară, iar o notă de pe rând se citește sub el; chevron-ul din rând
+  nu mai adaugă un nod.
+  - legat în arborele proiectului, în lista fișierelor schimbate (git) și în
+    `TreeTable` (Task Manager, planuri SQL și ce mai folosește componenta);
+  - celelalte arbori desenați de module își păstrează chevron-ul numit după rândul lui
+    (prima parte); pot trece la `tree::item` când sunt atinse.
+- **Câmpurile cu caret** (`TextLines`: cutia fiecărei linii, selecția în octeți, cutia
+  caret-ului):
+  - la sistem devin o rulare de text pe linie (lungimea fiecărui caracter, sfârșitul de
+    linie numărat ca un caracter), plus selecția; cititorul de ecran urmărește caret-ul;
+  - `TextInput` (deci și `SearchField`) le dă; un câmp secret tot nu dă nimic.
+- **Editorul de cod** e un `TextArea` (`editor_view/access.rs`): doar liniile pe care le
+  arată (un fișier lung nu costă mai mult decât unul scurt), cutiile lor, selecția
+  principală, caret-ul. Nu primește valoare de la cititor: ar înlocui tot fișierul.
+  - un focus cerut de cititor pe un câmp care are deja tastatura nu face nimic; altfel
+    click-ul cade pe caret, deci caret-ul nu se mută.
+- **Snapshot-uri:** `SNAPSHOT_ACCESS=1 scripts/ui-snapshots.sh record|compare` păstrează
+  arborele fiecărui ecran ca text și arată ecranele al căror arbore s-a schimbat (cu
+  primele linii diferite). Textul arată și locul (`#3 of 10`, `level 2`) și caret-ul.
+- **Teste:** contractul (rolul grupului deschis, locul păstrat, un nume tăiat recunoscut),
+  puntea (rulările pe linii, cu un caracter pe doi octeți, selecția, mărimea listei,
+  locul rândului), picker-ul, rândul de arbore, editorul, punctul de apăsare pe caret.
+
+### Lăsat (partea a doua)
+
+- **Selecția cerută de cititor** (`SetTextSelection`): caret-ul se arată, dar nu poate fi
+  mutat din cititor; se face când cineva o cere la o verificare cu un cititor real.
+- **Arborele trimis parțial și limitat la ~10 cadre pe secundă:** AccessKit compară deja
+  arborele și trimite sistemului doar diferențele. De făcut doar dacă măsurătorile cu un
+  cititor pornit o cer.
+- **Windows, clienții UI Automation care nu sunt cititoare de ecran:** de măsurat pe o
+  mașină cu Windows, cu un astfel de client pornit.
+- **Antetele de coloane ale tabelelor:** celulele se citesc sub rândul lor, fără numele
+  coloanei.
+- **Verificarea manuală:** VoiceOver pe macOS, Narrator / NVDA pe Windows, Orca pe Linux.
+
+### Făcut, după arborii reali (2026-11-23)
+
+Arborii ecranelor `editor`, `dialog`, `menu` și `settings-query`
+(`SNAPSHOT_ACCESS=1 scripts/ui-snapshots.sh record`), citiți ca text, au arătat ce aude de
+fapt cineva cu un cititor de ecran. Reparat:
+
+- **Butoanele doar cu iconiță** (barele laterale, bara de stare, antetele panourilor) erau
+  „buton” fără nume, iar unele își luau titlul de lângă ele („Proiect” pe toate butoanele
+  antetului). Acum fiecare își ia numele și tastele din tooltip-ul lui, din același loc ca
+  pentru mouse (`Frame::name_from_tips`, `Workbench::access_tip`): „Terminal ⌥F12”,
+  „Restrânge tot”, „Închide tabul ⌘W”. Un titlu de lângă un buton nu-l mai numește.
+- **Scurtăturile** (`shortcut` în contract, `keyboard_shortcut` la sistem): rândurile de
+  meniu și butoanele cu tastă („Anulează esc”) le spun odată cu numele, nu ca text separat.
+- **Textul desenat cuvânt cu cuvânt** (un paragraf împachetat, un nume cu potrivirea
+  evidențiată) se citește ca un singur text pe rând (`Frame::join_pieces`), cu spațiu doar
+  între cuvinte.
+- **Tabul editorului** e un tab ales, cu butonul de închidere sub el (nu un text plus un
+  buton cu același nume).
+- **Setările:** categoriile sunt taburi, cea deschisă aleasă (`form::Nav`, deci la fel peste
+  tot unde e folosit); rezultatele căutării sunt o listă cu „n din m”; fereastra e un dialog.
+- **Dialogurile** (setări, proiecte, modalele modulelor) sunt modale pentru sistem: ce e în
+  spate nu se citește cât sunt deschise; titlul desenat în ele nu se citește de două ori.
+- `Rect::union` în `kernel`, în locul a trei copii identice din module (diagrame, Task
+  Manager, pânza).
+
+### Făcut, ce rămăsese din partea a doua (2026-11-23)
+
+- **Selecția cerută de cititor** (`SetTextSelection`): un câmp care își spune textul pe
+  rânduri primește acțiunea. Puntea o aduce ca `Request::Select` (fiecare capăt: rândul, prin
+  identitatea lui `access::run_id` mutată în contract ca s-o știe și aplicația, și caracterul
+  din el). Aplicația îl întoarce în octeții textului (`access::byte_of`), dă câmpului tastatura
+  dacă n-o are și pune selecția (`Workbench::select_in_field`, aliniată la caractere). Ajunge
+  la câmpurile ferestrei cu tastatura (căutările, filtrele, modalele); câmpurile din vederile
+  modulelor rămân pentru o verificare cu un cititor real. Testate: rândul → octetul,
+  cererea în punte, selecția în bara de căutare.
+- **Antetele de coloane:** rolul `ColumnHeader` (în toate tabelele: cele comune, ale grilei, ale
+  tabelului-arbore). Celulele grilei sunt `Cell`, cu locul coloanei lor; același loc îl au
+  antetele, iar puntea îl trimite ca indexul coloanei. Așa o celulă se citește cu numele
+  coloanei ei. Testat.
+- **Arborii din module:** rândurile surselor de date (fereastra și dosarele din modal), ale
+  serviciilor și ale ramurilor git sunt elemente de arbore întregi (`tree::item`: nume,
+  nivel, deschis sau nu, ales). Arborele proiectului și tabelul-arbore o făceau deja.
+  Dosarele de sesiuni (un singur nivel) și grupurile listelor de proiecte rămân descrise de
+  chevronul lor (un element de arbore numit de textul de pe rând). Testat pe servicii.
+- **Arborele trimis parțial și de cel mult 10 ori pe secundă:**
+  - **Măsurat întâi** (build optimizat, `measure_tree` și `measure_tree_cost`, ignorate în
+    testele obișnuite):
+    - un cadru al grilei trece de la 9,5 µs la 57 µs cu arborele lui (277 de noduri);
+    - un arbore de 3 001 noduri (un tabel cu 600 de rânduri) se face întreg în ~0,3 ms, iar
+      AccessKit îl compară apoi nod cu nod;
+    - cât timp ecranul se mișcă (o derulare, o animație), asta se întâmpla de 60 de ori pe
+      secundă.
+  - **Partial:** puntea trimite doar nodurile noi sau schimbate față de arborele trimis data
+    trecută (`tree_update(frame, title, previous)`): un nod la fel, cu aceiași copii, nu mai e
+    nici făcut, nici trimis. Copiii se compară printr-o amprentă (un `u64` pe părinte), nu prin
+    liste; listele de copii se fac doar pentru nodurile trimise. Faptele arborelui (rădăcina)
+    pleacă doar prima dată. Un nod dispărut pleacă odată cu noii copii ai părintelui lui.
+    Măsurat: un nod schimbat din 3 001 costă ~0,22 ms și trimite 3 noduri (fereastra,
+    părintele, nodul), față de 3 001.
+  - **De cel mult 10 ori pe secundă** (`TELL_EVERY`): o schimbare venită mai repede e amânată;
+    aplicația cere un cadru la momentul ei, ca să nu se piardă. O mutare a focusului pleacă
+    imediat. Cititorul care cere arborele din nou primește tot.
+  - Testate: ce pleacă după primul arbore (un nod schimbat, unul adăugat cu părintele lui) și
+    ritmul (o schimbare amânată, cu momentul ei; focusul imediat).
+- **Rămân (nu se pot face fără un Windows și cititoare reale):** clienții UI Automation pe
+  Windows, verificarea manuală cu VoiceOver, Narrator / NVDA și Orca.

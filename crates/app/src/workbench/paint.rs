@@ -40,6 +40,7 @@ impl Workbench {
         }
         // The views told whether they're visible (the Task Manager samples only then).
         self.sync_shown();
+        self.sync_text_options();
         self.paint_phases.mark("shown");
         // A view drawing the whole window (a full-window scene): nothing under it is drawn.
         if self.modal_view_covers() {

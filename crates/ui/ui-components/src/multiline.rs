@@ -27,6 +27,11 @@ struct Snapshot {
 
 /// The most undo steps kept.
 const HISTORY: usize = 200;
+/// The room inside its border, a line's height, and the lane kept for its scrollbar on the
+/// right (logical pixels): the same where it's measured and where it's drawn.
+const PAD: f32 = 10.0;
+const LINE_H: f32 = 20.0;
+const LANE: f32 = 12.0;
 
 #[derive(Debug, Default)]
 pub struct MultilineField {
@@ -61,6 +66,23 @@ pub struct MultilineSpec<'a> {
     /// The first line's length past which a hint shows (`72`: a commit's subject); `None`:
     /// no hint.
     pub subject_limit: Option<usize>,
+}
+
+impl<'a> MultilineSpec<'a> {
+    /// A field showing `placeholder` while empty, without the focus, no hint.
+    pub fn new(placeholder: &'a str) -> Self {
+        Self { placeholder, focused: false, subject_limit: None }
+    }
+
+    /// It has the keys: the caret and the lit border.
+    pub fn focused(self, focused: bool) -> Self {
+        Self { focused, ..self }
+    }
+
+    /// The first line's length past which its hint shows (a commit's subject).
+    pub fn subject_limit(self, limit: usize) -> Self {
+        Self { subject_limit: Some(limit), ..self }
+    }
 }
 
 impl MultilineField {
@@ -479,9 +501,9 @@ impl MultilineField {
         (min, max): (usize, usize),
     ) -> f32 {
         let font = ds.ui_font(0.0);
-        let pad = ds.px(10.0);
-        self.layout(text, &font, (width - pad * 2.0 - ds.px(12.0)).max(1.0));
-        let line_h = ds.px(20.0);
+        let pad = ds.px(PAD);
+        self.layout(text, &font, (width - pad * 2.0 - ds.px(LANE)).max(1.0));
+        let line_h = ds.px(LINE_H);
         let lines = self.lines.len().clamp(min, max);
         lines as f32 * line_h + pad * 2.0
     }
@@ -496,11 +518,27 @@ impl MultilineField {
         rect: Rect,
         spec: MultilineSpec<'_>,
     ) {
+        // To a screen reader: a text area named by its placeholder, its text as its value,
+        // its caret and selection in it (its lines' texts drawn are its own).
+        let _told = ui_kit::access::open(|| {
+            use ui_kit::access::{Described, Role, TextLines};
+            let lines = self.text.split('\n').count();
+            let caret = TextLines {
+                lines: vec![rect; lines],
+                anchor: self.anchor,
+                focus: self.cursor,
+                caret: None,
+            };
+            Described::new(Role::TextArea, spec.placeholder, rect)
+                .value(self.text.as_str())
+                .lines(caret)
+                .focused(spec.focused)
+        });
         let p = ds.palette;
         let px = |v: f32| ds.px(v);
         let font = ds.ui_font(0.0);
-        let pad = px(10.0);
-        let line_h = px(20.0);
+        let pad = px(PAD);
+        let line_h = px(LINE_H);
         self.line_h = line_h;
         let border =
             if spec.focused { p.search_field_border_focused } else { p.search_field_border };
@@ -514,7 +552,7 @@ impl MultilineField {
         let area = Rect::new(
             rect.min_x() + pad,
             rect.min_y() + pad,
-            (rect.size.width - pad * 2.0 - px(12.0)).max(1.0),
+            (rect.size.width - pad * 2.0 - px(LANE)).max(1.0),
             (rect.size.height - pad * 2.0).max(line_h),
         );
         self.area = area;
@@ -617,7 +655,7 @@ impl MultilineField {
                 draw_text(
                     layer,
                     &shaped,
-                    rect.max_x() - pad - px(12.0) - shaped.width,
+                    rect.max_x() - pad - px(LANE) - shaped.width,
                     rect.min_y() + pad * 0.5 + small.size,
                     color,
                 );

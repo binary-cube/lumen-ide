@@ -10,6 +10,7 @@
 # Groups: modals, editor, windows, modules, data, database, settings, chrome, themes (all when
 # omitted), or one case: `case:<name>` (`case:agent-sessions`). `SNAPSHOT_LANG=en`: in
 # English (the README's pictures; Romanian otherwise, as the references were made);
+# `WRAP=1` (in a case): word wrap on, as the setting turns it.
 # `SNAPSHOT_SIZE=1600x1000`: the window that large (logical pixels; 1200x700 otherwise).
 # The sample project, a sample git repository (fixed author and dates: the same hashes every
 # run) and HOME live in a fixed scratch folder, so what's shown matches between runs;
@@ -18,6 +19,9 @@
 # what it cost (draw calls, paint and encode time, lines shaped) written to `gpu.txt` in the
 # folder (record) or listed beside the reference's (compare), and its GPU picture kept
 # (record) or compared pixel for pixel (compare; `SNAPSHOT_GPU_TOLERANCE=<pixels>`).
+# `SNAPSHOT_ACCESS=1`: each screen's accessibility tree (what a screen reader reads) written
+# beside its picture as text (`<name>-<theme>.access.txt`, record) or compared line for line
+# (compare: a screen that lost a name or a role differs).
 # Left out (not the same twice): the Task Manager measured (`TASKS=1`; its made-up
 # scenarios are in), the remote wizard (needs
 # the demo SFTP server), the local history (needs a versions folder).
@@ -435,6 +439,9 @@ cases=(
     "modals|running-wait|DIALOG=running-wait|src/Shop.php"
     "modals|search|SEARCH=total|src/Shop.php"
     "modals|search-place|SEARCH=Shop.php:7:9|src/Shop.php"
+    # The folders suggested under the folder's field: the name first, what's typed lit, its
+    # folder after it.
+    "modals|search-folders|FOLDERS_SAMPLE=1;SEARCH=total⇥sa|src/Shop.php"
     "modals|level|LEVEL=1|src/Shop.php"
     "modals|color|COLOR=1|style.css"
     "modals|menu|MENU=1|src/Shop.php"
@@ -444,6 +451,9 @@ cases=(
     "editor|editor-css||style.css"
     "editor|editor-error||src/Broken.php"
     "editor|editor-fold|FOLD=1|src/Shop.php"
+    "editor|editor-wrap|WRAP=1;SIZE=760x620|src/Shop.php"
+    "editor|editor-wrap-find|WRAP=1;SIZE=760x620;FIND=total|src/Shop.php"
+    "editor|editor-wrap-select|WRAP=1;SIZE=760x620;SELECT=total|src/Shop.php"
     # A TypeScript file answered by the fake language server: its diagnostics and its
     # completion (43a).
     "editor|lsp-completion|LSP=completion|src/Shop.php"
@@ -647,6 +657,8 @@ cases=(
     # its clock stopped: the whole tab (Wide, a terminal selected, its detail on the right),
     # in a split dragged to ~600 / ~400 / ~280 px (Narrow, Compact as a list, Minimal), its
     # detail as a page in a narrow split, the columns' chooser, every project's view.
+    # A folder's sizes: the ring (the shared chart) and the list beside it.
+    "modules|folder-sizes|FOLDERS_SAMPLE=1;COMMAND=folder_sizes.analyze|src/Shop.php"
     "modules|task-manager|TASKS=wide|src/Shop.php"
     "modules|task-manager-split|SPLIT=right;SPLIT_AT=556;TASKS=split|src/Shop.php"
     "modules|task-manager-compact|SPLIT=right;SPLIT_AT=756;TASKS=compact|src/Shop.php"
@@ -846,6 +858,7 @@ for theme in default-dark default-light; do
             [[ "$mode" == record ]] && env+=(EDITOR_SNAPSHOT_GPU_SAVE="$raw") \
                 || env+=(EDITOR_SNAPSHOT_GPU_REFERENCE="$raw")
         fi
+        [[ -n "${SNAPSHOT_ACCESS:-}" ]] && env+=(EDITOR_SNAPSHOT_ACCESS=1)
         count=$((count + 1))
         # A sample put in the project for this case only (the new languages').
         placed=""
@@ -853,6 +866,14 @@ for theme in default-dark default-light; do
             mkdir -p "$(dirname "$project/$file")"
             cp "$work/samples/${file##*/}" "$project/$file"
             placed="$project/$file"
+        fi
+        # Nested folders for the folders suggested (`FOLDERS_SAMPLE=1`), this case only: deep
+        # paths, their names first and their folders after them.
+        if [[ "$vars" == *FOLDERS_SAMPLE=1* ]]; then
+            for d in vendor/twig/twig/src/Sandbox vendor/symfony/form/Flow/StepAccessor \
+                vendor/slevomat vendor/squizlabs storage/framework/sessions; do
+                mkdir -p "$project/$d" && head -c $((${#d} * 900)) /dev/zero > "$project/$d/data.bin"
+            done
         fi
         # Sample agent sessions of the project (Claude Code's files), this case only: a few
         # titles, each last active at another time.
@@ -898,6 +919,7 @@ SESSIONS
             "$bin" --snapshot "$target" ${paths[@]+"${paths[@]}"} >/dev/null 2>"$work/stderr" \
             || {
                 echo "failed: $name ($theme)" >&2
+                tail -n 3 "$work/stderr" | sed 's/^/  /' >&2
                 grep -h '^gpu compare' "$work/stderr" >&2 || true
                 differ=1
                 [[ -n "$placed" ]] && rm -f "$placed"
@@ -922,6 +944,13 @@ SESSIONS
         # And the language server's TypeScript file (43a).
         rm -f "$project/src/cart.ts" "$project/src/card.css" "$project/src/cart.html" "$project/src/shapes.cpp"
         rm -rf "$project/node_modules" "$work/home/.claude"
+        rm -rf "$project/vendor" "$project/storage"
+        # A part still asking for frames after the screen settled (named by the app).
+        moving=$(grep -h '^moving: ' "$work/stderr" | sed 's/^moving: //' || true)
+        if [[ -n "$moving" && "$vars" != *MOVES=1* ]]; then
+            echo "moving: $name ($theme) — $moving"
+            [[ "$mode" == compare ]] && differ=1
+        fi
         if [[ "$mode" == compare ]]; then
             if [[ ! -f "$png" ]]; then
                 echo "no reference: $name ($theme)"
@@ -929,6 +958,17 @@ SESSIONS
             elif ! cmp -s "$png" "$target"; then
                 echo "differs: $name ($theme) — $target"
                 differ=1
+            fi
+            tree="$out/$name-$theme.access.txt"
+            if [[ -n "${SNAPSHOT_ACCESS:-}" ]]; then
+                if [[ ! -f "$tree" ]]; then
+                    echo "no reference tree: $name ($theme)"
+                    differ=1
+                elif ! cmp -s "$tree" "${target%.png}.access.txt"; then
+                    echo "tree differs: $name ($theme)"
+                    diff "$tree" "${target%.png}.access.txt" | head -20 | sed 's/^/  /' || true
+                    differ=1
+                fi
             fi
         fi
     done

@@ -6,12 +6,12 @@
 
 use std::time::Duration;
 
-use kernel::{Point, Rect, Rgba};
-use render_api::{Layer, Quad};
+use kernel::{Point, Rect};
+use render_api::Layer;
 use text_layout::{Font, TextSystem};
 use ui_kit::{KeyHint, draw_text};
 
-use crate::anim::Tween;
+use crate::anim::Appear;
 use crate::control::{Control, Press};
 use crate::ds::{self, Ctx, Elevation, radius};
 use crate::search_field::SearchField;
@@ -91,7 +91,7 @@ pub struct LevelPicker {
     hover: Option<Hit>,
     panel: Rect,
     columns: usize,
-    appear: Option<Tween>,
+    appear: Appear,
 }
 
 impl LevelPicker {
@@ -107,9 +107,7 @@ impl LevelPicker {
         self.scope =
             Some(if choices.file.is_some() { LevelScope::File } else { LevelScope::Project });
         self.selected = 0;
-        let mut appear = Tween::new(0.0, Duration::from_millis(130));
-        appear.retarget(1.0);
-        self.appear = Some(appear);
+        self.appear.start(Duration::from_millis(130));
     }
 
     pub fn close(&mut self) {
@@ -121,8 +119,9 @@ impl LevelPicker {
         self.scale = scale;
     }
 
+    /// Appearing (only while open: closed, it's gone at once and moves for nobody).
     pub fn is_animating(&self) -> bool {
-        self.appear.is_some_and(|a| a.animating())
+        self.is_open() && self.appear.animating()
     }
 
     pub fn contains(&self, p: Point) -> bool {
@@ -264,7 +263,7 @@ impl LevelPicker {
         if !self.open {
             return;
         }
-        let t = self.appear.map_or(1.0, |a| a.value());
+        let t = self.appear.value();
         let ctx = Ctx::new(palette, self.scale).with_opacity(t);
         let px = |v: f32| ctx.px(v);
         let scope = if choices.file_name.is_none() { LevelScope::Project } else { self.scope() };
@@ -287,10 +286,17 @@ impl LevelPicker {
         let grid_h = rows as f32 * chip_h + (rows - 1) as f32 * gap;
         let h = header_h + scope_h + field_h + px(12.0) + grid_h + px(14.0) + footer_h;
         let v = self.viewport;
-        let x = (self.anchor.max_x() - w).clamp(v.min_x() + px(8.0), v.max_x() - w - px(8.0));
+        let place = ds::PopoverPlace {
+            side: ds::PopoverSide::Above,
+            right: true,
+            gap: px(ds::POPOVER_GAP),
+            margin: px(8.0),
+            bottom: 0.0,
+        };
+        let (at, _) = ds::popover_rect(self.anchor, (w, h), v, place);
+        // It rises into place as it appears.
         let lift = (1.0 - t) * px(6.0);
-        let y = (self.anchor.min_y() - px(ds::POPOVER_GAP) - h + lift).max(v.min_y() + px(8.0));
-        let panel = Rect::new(x.round(), y.round(), w, h);
+        let panel = Rect::new(at.min_x().round(), (at.min_y() + lift).round(), w, h);
         self.panel = panel;
         let frame = Frame {
             panel,
@@ -375,14 +381,11 @@ impl LevelPicker {
         layer: &mut Layer,
         ctx: &Ctx<'_>,
     ) {
-        let px = |v: f32| ctx.px(v);
         let p = ctx.palette;
         let (panel, pad, columns) = (frame.panel, frame.pad, frame.columns);
         let (chip_h, gap) = (frame.chip_h, frame.gap);
         let w = panel.size.width;
         let chip_w = ((w - 2.0 * pad - gap * (columns - 1) as f32) / columns as f32).floor();
-        let font = ctx.ui_font(-0.5);
-        let strong = font.clone().with_weight(Font::SEMIBOLD);
         if chips.is_empty() {
             let small = &frame.small;
             let shaped = text.shape_line(&i18n::t("level.nothing"), small);
@@ -402,30 +405,13 @@ impl LevelPicker {
                 chip_w,
                 chip_h,
             );
-            let focused = i == self.selected;
-            let hovered = self.hover == Some(Hit::Chip(i));
-            let (fill, border) = if on {
-                (p.accent, p.accent)
-            } else if focused || hovered {
-                (p.accent.with_alpha(0.10), p.accent.with_alpha(0.6))
-            } else {
-                (p.text.with_alpha(0.035), p.border)
+            let cell = ds::ChoiceCell {
+                label: &label,
+                selected: on,
+                hovered: self.hover == Some(Hit::Chip(i)),
+                active: i == self.selected,
             };
-            layer.quad(
-                Quad::filled(r, ctx.fade(fill))
-                    .rounded(px(radius::MD))
-                    .bordered(ctx.line(), ctx.fade(border)),
-            );
-            let f = if on { &strong } else { &font };
-            let label = ds::ellipsize(text, &label, f, r.size.width - px(14.0));
-            let shaped = text.shape_line(&label, f);
-            draw_text(
-                layer,
-                &shaped,
-                (r.min_x() + (r.size.width - shaped.width) / 2.0).round(),
-                ds::optical_baseline(r.min_y(), chip_h, f),
-                ctx.fade(if on { Rgba::WHITE } else { p.text }),
-            );
+            ds::choice_cell(layer, text, ctx, r, cell);
             self.chips.push((r, level));
             self.hits.push((r, Hit::Chip(i)));
         }

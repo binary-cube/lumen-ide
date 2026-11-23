@@ -1,6 +1,8 @@
-//! Charts made of quads (the renderer draws no paths): a [`sparkline`] — bars, or an area
-//! in steps (a faint fill and a 1.5 px step on top) — for a card or a table's cell, and a
-//! [`time_chart`] with its scale, grid lines and a reading under the mouse ([`Plot::reading`]).
+//! The small charts made of quads only, without state (the renderer draws no paths): what
+//! a table's cell, a card or a screen's widget shows, hundreds a frame, for nothing — a
+//! [`sparkline`]: bars, or an area in steps (a faint fill and a 1.5 px step on top), with
+//! its reading under the mouse ([`Plot::reading`]). A chart someone reads (axes, legend,
+//! tooltips of every series, zoom) is [`super::Chart`].
 //!
 //! The values come as they're kept (a ring's two slices: [`Samples`]), the newest at the
 //! right of `slots` places (an empty history leaves the left blank). More values than
@@ -13,12 +15,10 @@
 //! The series' colors come from [`crate::tag_colors`], in the theme's shade
 //! ([`series_color`]).
 
-use kernel::{Point, Rect, Rgba};
+use kernel::{Rect, Rgba};
 use render_api::{Layer, Quad};
-use text_layout::TextSystem;
-use ui_kit::draw_text;
 
-use crate::ds::{self, Ctx};
+use crate::ds::Ctx;
 use crate::palette::Palette;
 
 /// What a series measures (its color).
@@ -351,93 +351,6 @@ fn steps(layer: &mut Layer, ds: &Ctx<'_>, rect: Rect, plot: &Plot, color: Rgba, 
     }
 }
 
-/// A series of a [`time_chart`].
-#[derive(Debug, Clone, Copy)]
-pub struct ChartSeries<'a> {
-    pub plot: &'a Plot,
-    pub color: Rgba,
-}
-
-/// What a [`time_chart`] draws.
-#[derive(Debug, Clone, Copy)]
-pub struct TimeChart<'a> {
-    /// One or two series (the first drawn first).
-    pub series: &'a [ChartSeries<'a>],
-    /// The scale's top ([`scale_for`]).
-    pub max: f32,
-    /// Its top's label (the scale written with its unit: `20%`, `512 MB`).
-    pub max_label: &'a str,
-    /// The mouse's x over it (its reading drawn: a line and a dot on each series).
-    pub hover: Option<f32>,
-}
-
-/// A chart over time in `rect`: the grid (the base, the middle, the top), the scale's top
-/// written at the top left, the series as areas in steps; under the mouse, a line and each
-/// series' value as a dot. Returns the plot's area (for [`Plot::reading`]).
-pub fn time_chart(
-    layer: &mut Layer,
-    text: &mut TextSystem,
-    ds: &Ctx<'_>,
-    rect: Rect,
-    chart: &TimeChart<'_>,
-) -> Rect {
-    let p = ds.palette;
-    let font = ds.ui_font(-2.5);
-    let label_h = ds.px(14.0);
-    let area = Rect::new(
-        rect.min_x(),
-        rect.min_y() + label_h,
-        rect.size.width,
-        (rect.size.height - label_h).max(0.0),
-    );
-    if area.size.height < 2.0 || area.size.width < 2.0 {
-        return area;
-    }
-    let line = ds.line();
-    // The grid: the top, the middle (faint), the base.
-    for (k, alpha) in [(0.0, 0.10), (0.5, 0.06)] {
-        let y = (area.min_y() + area.size.height * k).round();
-        layer.quad(Quad::filled(
-            Rect::new(area.min_x(), y, area.size.width, line),
-            ds.fade(p.text.with_alpha(alpha)),
-        ));
-    }
-    let shaped = text.shape_line(chart.max_label, &font);
-    draw_text(
-        layer,
-        &shaped,
-        area.min_x(),
-        ds::optical_baseline(rect.min_y(), label_h - ds.px(2.0), &font),
-        ds.fade(p.text_muted),
-    );
-    for s in chart.series {
-        steps(layer, ds, area, s.plot, s.color, chart.max);
-    }
-    crate::ds::divider(layer, ds, area.min_x(), area.max_x(), area.max_y() - line);
-    if let Some(x) = chart.hover
-        && let Some(first) = chart.series.first()
-        && let Some(reading) = first.plot.reading(area, x)
-    {
-        let guide = Rect::new(reading.x, area.min_y(), line, area.size.height);
-        layer.quad(Quad::filled(guide, ds.fade(p.text.with_alpha(0.35))));
-        let dot = ds.px(6.0);
-        for s in chart.series {
-            let Some(value) = s.plot.buckets.get(reading.bucket).copied().flatten() else {
-                continue;
-            };
-            let h = height(value, chart.max, area.size.height, line);
-            let at = Point::new(reading.x, area.max_y() - h);
-            let r = Rect::new((at.x - dot / 2.0).round(), (at.y - dot / 2.0).round(), dot, dot);
-            layer.quad(
-                Quad::filled(r, ds.fade(s.color))
-                    .rounded(dot / 2.0)
-                    .bordered(line, ds.fade(p.editor_background)),
-            );
-        }
-    }
-    area
-}
-
 #[cfg(test)]
-#[path = "../tests/unit/chart.rs"]
+#[path = "../../tests/unit/charts/spark.rs"]
 mod tests;

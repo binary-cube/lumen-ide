@@ -177,6 +177,27 @@ pub fn access_text(frame: &platform_api::access::Frame) -> String {
                 line.push_str(word);
             }
         }
+        if let Some(keys) = &n.shortcut {
+            line.push_str(&format!(" [{keys}]"));
+        }
+        let place = n.place;
+        if let Some(index) = place.index {
+            line.push_str(&format!(" #{index}"));
+        }
+        if let Some(count) = place.count {
+            line.push_str(&format!(" of {count}"));
+        }
+        if let Some(level) = place.level {
+            line.push_str(&format!(" level {level}"));
+        }
+        if let Some(lines) = &n.lines {
+            line.push_str(&format!(
+                " lines {} caret {}..{}",
+                lines.lines.len(),
+                lines.anchor,
+                lines.focus
+            ));
+        }
         out.push_str(&line);
         out.push('\n');
         if let Some(kids) = children.get(&n.id) {

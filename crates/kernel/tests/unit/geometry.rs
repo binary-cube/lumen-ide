@@ -20,3 +20,10 @@ fn contains_is_half_open() {
     assert!(r.contains(Point::new(0.0, 0.0)));
     assert!(!r.contains(Point::new(10.0, 5.0)));
 }
+
+/// The union holds both rectangles and nothing past them.
+#[test]
+fn the_union_holds_both() {
+    let u = Rect::new(0.0, 10.0, 20.0, 5.0).union(&Rect::new(30.0, 0.0, 10.0, 10.0));
+    assert_eq!(u, Rect::new(0.0, 0.0, 40.0, 15.0));
+}

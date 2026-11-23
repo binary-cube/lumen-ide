@@ -103,6 +103,25 @@ pub fn widgets() -> Vec<Arc<dyn ScreenWidget>> {
 
 /// The theme's palette as widgets draw on a screen: its words, muted words and edges in
 /// `tint` (light over a dark sky), the rest (the accent, a chart's series) the theme's.
+/// A fingerprint of a theme (its colors that every look reads first): a palette made from it
+/// is made again only when this changes, never each frame.
+pub fn palette_stamp(palette: &Palette, tint: Rgba) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    for c in [
+        tint,
+        palette.text,
+        palette.text_muted,
+        palette.accent,
+        palette.editor_background,
+        palette.panel_background,
+        palette.border,
+    ] {
+        [c.r, c.g, c.b, c.a].map(f32::to_bits).hash(&mut h);
+    }
+    h.finish()
+}
+
 pub fn screen_palette(palette: &Palette, tint: Rgba) -> Palette {
     Palette {
         text: tint.with_alpha(0.94),

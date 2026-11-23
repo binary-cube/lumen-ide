@@ -67,6 +67,16 @@ pub fn ribbon_at(r: usize, u: f32, t: f32) -> (f32, f32) {
     (middle, half)
 }
 
+/// The scene's own colors (its sky, its lights, its warm glow): a picture's, whatever the
+/// theme.
+const OWN_COLORS: SceneColors = SceneColors {
+    sky_top: Rgba::rgb(0x020a2e),
+    sky_bottom: Rgba::rgb(0x1a46a8),
+    horizon: Rgba::rgb(0x2a66d0),
+    lights: [Rgba::rgb(0xb8dcff), Rgba::rgb(0x7fb6ff), Rgba::rgb(0xd2c4ff), Rgba::rgb(0x9fefff)],
+    warm: Rgba::rgb(0xffe3b0),
+    dark: true,
+};
 impl Ribbon {
     /// The dots placed at the last update.
     pub fn placed(&self) -> &[Placed] {
@@ -92,19 +102,7 @@ impl RelaxScene for Ribbon {
     }
 
     fn own_colors(&self) -> SceneColors {
-        SceneColors {
-            sky_top: Rgba::rgb(0x020a2e),
-            sky_bottom: Rgba::rgb(0x1a46a8),
-            horizon: Rgba::rgb(0x2a66d0),
-            lights: [
-                Rgba::rgb(0xb8dcff),
-                Rgba::rgb(0x7fb6ff),
-                Rgba::rgb(0xd2c4ff),
-                Rgba::rgb(0x9fefff),
-            ],
-            warm: Rgba::rgb(0xffe3b0),
-            dark: true,
-        }
+        OWN_COLORS
     }
 
     fn resize(&mut self, bounds: Rect, scale: f32) {

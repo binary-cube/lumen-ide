@@ -188,6 +188,14 @@ impl ServicesPanel {
         for i in range {
             let row = &self.rows[i];
             let top = origin + i as f32 * h;
+            // To a screen reader: the row a tree's item (its name, depth, open or not, chosen).
+            let _item = tree_row::item(tree_row::Item {
+                name: &row.label,
+                bounds: Rect::new(b.min_x(), top, b.size.width, h),
+                level: usize::from(row.depth),
+                expanded: row.expandable.then_some(row.expanded),
+                selected: self.selected == Some(row.key),
+            });
             let mid = top + h / 2.0;
             let guide_x = |level: usize| b.min_x() + padding + level as f32 * indent + indent * 0.3;
             tree_row::guides(

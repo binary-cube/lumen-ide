@@ -274,6 +274,15 @@ impl Layer {
         self
     }
 
+    /// [`Self::image`] at `opacity` (a fade); nothing at all when it's not seen.
+    pub fn image_faded(&mut self, image: &ImageData, bounds: Rect, opacity: f32) -> &mut Self {
+        if opacity > 0.001 {
+            let opacity = opacity.min(1.0);
+            self.images.push(ImageInstance { image: image.clone(), bounds, opacity });
+        }
+        self
+    }
+
     pub fn glyph(&mut self, glyph: GlyphInstance) -> &mut Self {
         self.glyphs.push(glyph);
         self

@@ -13,7 +13,7 @@ use render_api::{ImageData, Layer, Quad, Scene};
 use text_layout::TextSystem;
 use ui_kit::{TextInput, TextInputStyle};
 
-use crate::anim::Tween;
+use crate::anim::Appear;
 use crate::ds::{self, Ctx, Elevation, radius};
 use crate::palette::Palette;
 
@@ -96,7 +96,7 @@ pub struct ColorPicker {
     sv_image: Option<(u32, ImageData)>,
     hue_image: Option<ImageData>,
     alpha_image: Option<([u8; 3], ImageData)>,
-    appear: Option<Tween>,
+    appear: Appear,
 }
 
 impl ColorPicker {
@@ -109,8 +109,9 @@ impl ColorPicker {
         self.scale = scale;
     }
 
+    /// Appearing (only while open: closed, it's gone at once and moves for nobody).
     pub fn is_animating(&self) -> bool {
-        self.appear.is_some_and(|a| a.animating())
+        self.is_open() && self.appear.animating()
     }
 
     /// Opens the picker next to `anchor`, with the color and its format from the code.
@@ -131,9 +132,7 @@ impl ColorPicker {
         self.drag = None;
         self.hover = None;
         self.sync_input(colors);
-        let mut appear = Tween::new(0.0, Duration::from_millis(130));
-        appear.retarget(1.0);
-        self.appear = Some(appear);
+        self.appear.start(Duration::from_millis(130));
     }
 
     /// Whether the platform can pick colors from the screen (set once by the app): every
@@ -338,22 +337,25 @@ impl ColorPicker {
         if !self.open {
             return;
         }
-        let t = self.appear.map_or(1.0, |a| a.value());
+        let t = self.appear.value();
         let ctx = Ctx::new(palette, self.scale).with_opacity(t);
         let px = |v: f32| ctx.px(v);
         let (w, h) = (px(284.0), px(356.0));
         let v = self.viewport;
         // Below the color's line (which stays visible), aligned with the swatch; above if it
         // doesn't fit below.
-        let x = self.anchor.min_x().min(v.max_x() - w - px(8.0)).max(v.min_x() + px(8.0));
-        let below = self.anchor.max_y() + px(ds::POPOVER_GAP);
-        let y = if below + h <= v.max_y() - px(8.0) {
-            below + (1.0 - t) * px(6.0)
-        } else {
-            (self.anchor.min_y() - px(ds::POPOVER_GAP) - h - (1.0 - t) * px(6.0))
-                .max(v.min_y() + px(8.0))
+        let place = ds::PopoverPlace {
+            side: ds::PopoverSide::Below,
+            right: false,
+            gap: px(ds::POPOVER_GAP),
+            margin: px(8.0),
+            bottom: px(8.0),
         };
-        let card = Rect::new(x.round(), y.round(), w, h);
+        let (at, under) = ds::popover_rect(self.anchor, (w, h), v, place);
+        // It comes toward its anchor as it appears.
+        let lift = (1.0 - t) * px(6.0);
+        let y = if under { at.min_y() + lift } else { at.min_y() - lift };
+        let card = Rect::new(at.min_x().round(), y.round(), w, h);
         self.card = card;
         let layer = scene.push_layer(None);
         ds::surface(layer, &ctx, card, Elevation::Medium, radius::LG);
@@ -672,10 +674,14 @@ struct Card {
     opacity: f32,
 }
 
+/// The squares shown under what's transparent, whatever the theme (what everyone reads as
+/// "see-through"): white and a light gray.
+const CHECKER: (Rgba, Rgba) = (Rgba::rgb(0xffffff), Rgba::rgb(0xd6d6d6));
+
 /// Light and dark squares of `cell` over `r` (behind a translucent color).
 fn checkerboard(layer: &mut Layer, ctx: &Ctx<'_>, r: Rect, cell: f32) {
-    layer.quad(Quad::filled(r, ctx.fade(Rgba::rgb(0xffffff))));
-    let dark = ctx.fade(Rgba::rgb(0xd6d6d6));
+    layer.quad(Quad::filled(r, ctx.fade(CHECKER.0)));
+    let dark = ctx.fade(CHECKER.1);
     let (cols, rows) =
         ((r.size.width / cell).ceil() as usize, (r.size.height / cell).ceil() as usize);
     for row in 0..rows {

@@ -434,6 +434,10 @@ impl EditorApp {
             cmd::ZOOM_RESET => self.workbench.zoom_reset(),
             cmd::EDITOR_FULL => self.workbench.toggle_editor_full(true, true),
             cmd::EDITOR_FULL_WIDTH => self.workbench.toggle_editor_full(true, false),
+            cmd::WORD_WRAP => {
+                crate::text_options::toggle_word_wrap(crate::config::settings());
+                true
+            }
             cmd::EDITOR_FULL_HEIGHT => self.workbench.toggle_editor_full(false, true),
             cmd::FULL_SCREEN => {
                 window.toggle_fullscreen();

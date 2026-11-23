@@ -125,7 +125,7 @@ impl TaskManager {
     /// A chart's reading at `x` as a tooltip's text (`12 s ago: 3.4%`).
     fn reading_tip(
         &self,
-        plot: &ui_components::chart::Plot,
+        plot: &ui_components::charts::spark::Plot,
         area: kernel::Rect,
         x: f32,
         metric: Metric,
@@ -177,15 +177,17 @@ impl Viewer for TaskManager {
         if self.confirmed() {
             return true;
         }
+        let charts = self.poll_detail_charts();
         let latest = self.subscription.as_ref().and_then(|s| s.tables.take());
-        match latest {
+        let ticked = match latest {
             Some(tick) => {
                 let shown = !self.paused;
                 self.take(tick);
                 shown
             }
             None => false,
-        }
+        };
+        ticked || charts
     }
 
     /// Its filter has the keys: typed text goes there (elsewhere a typed character opens
@@ -361,7 +363,17 @@ impl Viewer for TaskManager {
         self.mouse = Some(p);
         let part = self.with_controls(|c, parts| c.hover(parts, Some(p)));
         self.hover = self.hit(p);
-        part || self.on_filter_clear(p)
+        // The detail's charts: the one under the mouse told, the others left.
+        let over = match self.hover {
+            Some(Hit::DetailChart(m)) => Some(m as usize),
+            _ => None,
+        };
+        let mut charts = false;
+        for (i, chart) in self.plots.detail_charts.iter_mut().enumerate() {
+            charts |= chart.hover((over == Some(i)).then_some(p));
+        }
+        part || charts
+            || self.on_filter_clear(p)
             || matches!(self.hover, Some(h) if !matches!(h, Hit::Filter | Hit::PopoverArea | Hit::CardChart(_) | Hit::DetailChart(_)))
             || self.controls.hovered() == Some(DIVIDER)
     }
@@ -395,7 +407,7 @@ impl Viewer for TaskManager {
                 self.reading_tip(self.plots.cards[metric as usize].plot(), anchor, p.x, metric)?
             }
             Hit::DetailChart(metric) => {
-                self.reading_tip(self.plots.detail[metric as usize].plot(), anchor, p.x, metric)?
+                return self.plots.detail_charts[metric as usize].tooltip(p);
             }
             Hit::Row(item) => {
                 let (_, row) = self.cut.iter().find(|(r, i)| *i == item && r.contains(p))?;
@@ -429,9 +441,10 @@ impl Viewer for TaskManager {
         self.paused.then(|| i18n::t("tasks.state_paused"))
     }
 
-    /// A part moving (the separator's handle easing), as of the last paint.
+    /// A part moving (the separator's handle easing, a chart appearing or lit), as of the
+    /// last paint.
     fn is_animating(&self) -> bool {
-        self.controls.is_animating()
+        self.controls.is_animating() || self.plots.detail_charts.iter().any(|c| c.animating())
     }
 
     /// The first look not come yet: its loader turns.
@@ -466,6 +479,9 @@ impl Viewer for TaskManager {
             self.waker_given = true;
         }
         self.focused = ctx.focused;
+        for chart in &mut self.plots.detail_charts {
+            chart.set_waker(&ctx.waker);
+        }
         self.draw(ctx.scene, ctx.text, ctx.icons, ctx.palette, ctx.bounds, ctx.scale);
         self.with_controls(|c, parts| c.settle(parts));
     }

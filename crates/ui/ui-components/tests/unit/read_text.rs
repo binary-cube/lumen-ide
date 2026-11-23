@@ -105,3 +105,21 @@ fn its_menu_copies_the_selection_or_all_of_it() {
     assert_eq!(read.copied(COPY_ALL).as_deref(), Some("What's new\n\n• One table look"));
     assert_eq!(read.copied("other"), None);
 }
+
+/// Hovered: its scrollbar widens under the mouse (a frame asked), and narrows when it leaves;
+/// the text's cursor over the text only.
+#[test]
+fn its_bar_lights_under_the_mouse() {
+    use crate::control::Control;
+    let mut text = TextSystem::new();
+    let blocks = (0..60).map(|i| Block::new(BlockKind::Paragraph, format!("Line {i}"))).collect();
+    let mut read = ReadText::new(blocks);
+    let area = Rect::new(0.0, 0.0, 400.0, 200.0);
+    painted(&mut read, &mut text, area);
+    let on_bar = Point::new(area.max_x() - 3.0, 20.0);
+    assert!(read.hover(on_bar), "the bar widens");
+    assert!(!read.hover(on_bar), "still on it: nothing new");
+    assert!(read.hover(Point::new(40.0, 20.0)), "left: it narrows");
+    assert_eq!(Control::cursor(&read, Point::new(12.0, 10.0)), Some(crate::ViewerCursor::Text));
+    assert_eq!(Control::cursor(&read, Point::new(390.0, 190.0)), None, "past the text");
+}

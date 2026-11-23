@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// A balloon's string: a light grey, whatever the theme.
+const STRING: Rgba = Rgba::rgb(0x9aa0aa);
+
 /// A butterfly: its home, how far it roams, how long it rests and flies, its color.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Butterfly {
@@ -209,7 +212,7 @@ impl BalloonPainter {
 
     pub fn paint(&self, e: &EffectSpec, f: &FxFrame<'_>, layer: &mut Layer) {
         let alpha = (e.opacity * 2.0).min(1.0);
-        let string = Rgba::rgb(0x9aa0aa).with_alpha((e.opacity * 1.4).min(1.0));
+        let string = STRING.with_alpha((e.opacity * 1.4).min(1.0));
         let r0 = balloon_radius(e, f.scale);
         for b in &self.balloons {
             let Some(sprite) = self.sprites.get(usize::from(b.color) * 2 + usize::from(b.size))

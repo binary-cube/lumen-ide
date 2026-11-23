@@ -22,3 +22,20 @@ fn the_channel_is_named_after_the_executable() {
     assert_ne!(fnv(Path::new("/a/editor")), fnv(Path::new("/b/editor")));
     assert_eq!(executable_tag().unwrap().len(), 16);
 }
+
+/// On Windows every spelling of the program's path is one channel: the long-path prefix,
+/// either slash, any case, a trailing separator; elsewhere a path is as it is.
+#[test]
+fn a_path_has_one_form_on_windows() {
+    let one = one_form(r"C:\Program Files\Editor\editor.exe", true);
+    for other in [
+        r"\\?\C:\Program Files\Editor\editor.exe",
+        r"c:\program files\editor\EDITOR.EXE",
+        "C:/Program Files/Editor/editor.exe",
+        r"C:\Program Files\Editor\editor.exe\",
+    ] {
+        assert_eq!(one_form(other, true), one, "{other}");
+    }
+    assert_eq!(one_form(r"\\?\UNC\server\share\editor.exe", true), r"\\server\share\editor.exe");
+    assert_eq!(one_form("/Apps/Editor", false), "/Apps/Editor", "elsewhere: as it is");
+}

@@ -42,8 +42,9 @@ impl AboutView {
         self.scale = scale;
     }
 
+    /// Appearing (only while open: closed, it's gone at once and moves for nobody).
     pub fn is_animating(&self) -> bool {
-        self.appear.animating()
+        self.is_open() && self.appear.animating()
     }
 
     /// A click while open: only the `esc` button closes the window (the key does too); the

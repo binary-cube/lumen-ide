@@ -8,7 +8,6 @@
 //! Nothing runs before it's asked: the tab reads what's kept when it opens, measures only
 //! then or on Refresh, and lets everything go when it closes (a measure going on stops).
 
-pub mod donut;
 pub mod report;
 pub mod scan;
 mod view;
@@ -96,16 +95,22 @@ impl ViewerProvider for Provider {
     }
 }
 
-/// The folder the tree's menu was opened on (else the project's), measured in a tab.
+/// The folder the tree's menu was opened on (else the project's: a file in front, the
+/// palette's command, measures the whole project), measured in a tab.
 struct Analyze;
+
+/// The folder measured: the context's when it's a folder, else the project's.
+fn measured(host: &dyn WorkbenchHost) -> Option<std::path::PathBuf> {
+    host.context().folder().map(Path::to_path_buf).or_else(|| host.project_root())
+}
 
 impl CommandHandler for Analyze {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.target_path().is_some() || host.project_root().is_some()
+        measured(host).is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
-        let Some(folder) = host.target_path().or_else(|| host.project_root()) else {
+        let Some(folder) = measured(host) else {
             return false;
         };
         let name = kernel::paths::file_name(&folder);

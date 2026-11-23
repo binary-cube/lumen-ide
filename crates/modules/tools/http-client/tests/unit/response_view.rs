@@ -176,3 +176,15 @@ fn the_tests_tab_says_each_test_and_the_log() {
     assert_eq!(lines[1], "✗ id — no id");
     assert_eq!(&lines[lines.len() - 2..], ["a", "b"], "a log's lines each its own");
 }
+
+/// Wrapped, each line's first row: a short line one row, a long one the rows it needs.
+#[test]
+fn a_body_s_long_lines_take_their_rows() {
+    let long = "\"key\": \"value\", ".repeat(20);
+    let lines = Lines::new(format!("{{\n{long}\n}}"));
+    let firsts = first_rows(&lines, 40);
+    assert_eq!(firsts.len(), 4);
+    assert_eq!(firsts[1], 1);
+    assert!(firsts[2] - firsts[1] > 1, "the long line takes rows: {firsts:?}");
+    assert_eq!(firsts[3], firsts[2] + 1);
+}

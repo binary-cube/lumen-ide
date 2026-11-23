@@ -12,7 +12,7 @@ use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
 use ui_kit::draw_text;
 
-use crate::chart::{self, Plot, Style};
+use crate::charts::spark::{self, Plot, Style};
 use crate::ds::{self, Ctx, radius};
 
 /// A series on a card.
@@ -42,6 +42,39 @@ pub struct MetricCard<'a> {
     pub active: bool,
     /// It has the keyboard.
     pub focused: bool,
+}
+
+impl<'a> MetricCard<'a> {
+    /// A card of `label` showing `value` and `series` up to `max`: no line under it, no
+    /// warning, not lit.
+    pub fn new(label: &'a str, value: &'a str, series: &'a [CardSeries<'a>], max: f32) -> Self {
+        let (sub, warning, hovered, active, focused) = (None, false, false, false, false);
+        Self { label, value, sub, warning, series, max, hovered, active, focused }
+    }
+
+    /// The line under it.
+    pub fn line_under(self, sub: &'a str) -> Self {
+        Self { sub: Some(sub), ..self }
+    }
+
+    /// A threshold passed.
+    pub fn warning(self, warning: bool) -> Self {
+        Self { warning, ..self }
+    }
+
+    pub fn hovered(self, hovered: bool) -> Self {
+        Self { hovered, ..self }
+    }
+
+    /// The table is sorted by its metric.
+    pub fn active(self, active: bool) -> Self {
+        Self { active, ..self }
+    }
+
+    /// It has the keyboard.
+    pub fn focused(self, focused: bool) -> Self {
+        Self { focused, ..self }
+    }
 }
 
 /// How it's drawn.
@@ -104,6 +137,24 @@ pub fn glass_metric_card(
     full(layer, text, icons, ds, rect, card)
 }
 
+/// A full card's padding, its label's line (from the top, its height), its value's height,
+/// and the heights under which it lays its label and value on one row, with the line under
+/// them still shown from the second (logical pixels).
+const PAD: f32 = 12.0;
+const LABEL_TOP: f32 = 9.0;
+const LABEL_H: f32 = 16.0;
+const VALUE_H: f32 = 26.0;
+const SHORT_BELOW: f32 = 88.0;
+const SHORT_SUB_FROM: f32 = 76.0;
+
+/// A pill's padding, its sparkline's width, least / most height and the room kept over and
+/// under it together, and the width it's shown from (logical pixels).
+const PILL_PAD: f32 = 10.0;
+const PILL_SPARK_W: f32 = 28.0;
+const PILL_SPARK_H: (f32, f32) = (8.0, 18.0);
+const PILL_SPARK_ROOM: f32 = 16.0;
+const PILL_SPARK_FROM: f32 = 96.0;
+
 fn full(
     layer: &mut Layer,
     text: &mut TextSystem,
@@ -114,17 +165,17 @@ fn full(
 ) -> CardAreas {
     let p = ds.palette;
     let px = |v: f32| ds.px(v);
-    let pad = px(12.0);
+    let pad = px(PAD);
     let x0 = rect.min_x() + pad;
     let inner = (rect.size.width - 2.0 * pad).max(0.0);
     let label_font = ds.ui_font(-1.5).with_weight(Font::SEMIBOLD);
     let small = ds.ui_font(-1.5);
     // Short cards: the label and the value on one row; the line under them when there's
     // height for it.
-    let short = rect.size.height < px(88.0);
-    let short_sub = short && rect.size.height >= px(76.0) && card.sub.is_some();
-    let label_top = rect.min_y() + px(9.0);
-    let label_h = px(16.0);
+    let short = rect.size.height < px(SHORT_BELOW);
+    let short_sub = short && rect.size.height >= px(SHORT_SUB_FROM) && card.sub.is_some();
+    let label_top = rect.min_y() + px(LABEL_TOP);
+    let label_h = px(LABEL_H);
     let base = ds::optical_baseline(label_top, label_h, &label_font);
     // The legend on the right of the label (two series).
     let mut legend_x = x0 + inner;
@@ -175,7 +226,7 @@ fn full(
             ds.fade(p.text_muted),
         );
         let value_top = label_top + label_h + px(2.0);
-        let value_h = px(26.0);
+        let value_h = px(VALUE_H);
         let vb = ds::optical_baseline(value_top, value_h, &value_font);
         let shown = value_shaped.width.min(inner);
         ds::draw_ellipsized(layer, text, card.value, &value_font, (x0, vb), inner, ds.fade(p.text));
@@ -193,7 +244,7 @@ fn full(
     };
     let chart = Rect::new(x0, chart_top, inner, (rect.max_y() - px(8.0) - chart_top).max(0.0));
     for s in card.series {
-        chart::sparkline(layer, ds, chart, s.plot, s.color, Style::Steps, card.max);
+        spark::sparkline(layer, ds, chart, s.plot, s.color, Style::Steps, card.max);
     }
     CardAreas { value: value_area, chart }
 }
@@ -235,18 +286,19 @@ fn pill(
 ) -> CardAreas {
     let p = ds.palette;
     let px = |v: f32| ds.px(v);
-    let pad = px(10.0);
+    let pad = px(PILL_PAD);
     let label_font = ds.ui_font(-2.0).with_weight(Font::SEMIBOLD);
     let value_font = ds.ui_font(-0.5).with_weight(Font::SEMIBOLD);
-    let spark_w = px(28.0);
-    let spark_h = (rect.size.height - px(16.0)).clamp(px(8.0), px(18.0));
+    let spark_w = px(PILL_SPARK_W);
+    let (least, most) = PILL_SPARK_H;
+    let spark_h = (rect.size.height - px(PILL_SPARK_ROOM)).clamp(px(least), px(most));
     let spark = Rect::new(
         rect.max_x() - pad - spark_w,
         (rect.min_y() + (rect.size.height - spark_h) / 2.0).round(),
         spark_w,
         spark_h,
     );
-    let room_for_spark = rect.size.width >= px(96.0);
+    let room_for_spark = rect.size.width >= px(PILL_SPARK_FROM);
     let right = if room_for_spark { spark.min_x() - px(6.0) } else { rect.max_x() - pad };
     let x0 = rect.min_x() + pad;
     let base = ds::optical_baseline(rect.min_y(), rect.size.height, &value_font);
@@ -267,7 +319,7 @@ fn pill(
     let chart = if room_for_spark { spark } else { Rect::default() };
     if room_for_spark {
         for s in card.series.iter().take(1) {
-            chart::sparkline(layer, ds, spark, s.plot, s.color, Style::Bars, card.max);
+            spark::sparkline(layer, ds, spark, s.plot, s.color, Style::Bars, card.max);
         }
     }
     CardAreas { value, chart }

@@ -36,11 +36,14 @@ pub enum Start {
 pub fn claim(paths: &[PathBuf]) -> Start {
     let Some(tag) = executable_tag() else { return Start::Run };
     if hand_over(&tag, paths) {
-        tracing::info!(paths = paths.len(), "handed to the running instance");
+        tracing::info!(paths = paths.len(), tag = %tag, "handed to the running instance");
         return Start::Handed;
     }
-    if let Err(e) = listen(&tag) {
-        tracing::warn!(error = %e, "can't listen for later starts");
+    // Its channel's tag in the log: a start that didn't reach the running one shows here
+    // whether it looked for the same.
+    match listen(&tag) {
+        Ok(()) => tracing::info!(tag = %tag, "listening for later starts"),
+        Err(e) => tracing::warn!(tag = %tag, error = %e, "can't listen for later starts"),
     }
     Start::Run
 }
@@ -64,12 +67,27 @@ fn executable_tag() -> Option<String> {
     Some(format!("{:016x}", fnv(&exe)))
 }
 
-/// A stable hash of a path (FNV-1a: the same in every run, unlike `DefaultHasher`'s seed).
+/// A stable hash of a path (FNV-1a: the same in every run, unlike `DefaultHasher`'s seed),
+/// of its one written form: on Windows the same program may be started by another spelling
+/// of its path (a shortcut's, "Open with"'s), all of them one channel.
 pub(crate) fn fnv(path: &Path) -> u64 {
-    path.as_os_str()
-        .as_encoded_bytes()
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
+    kernel::hash::fnv64(one_form(&path.to_string_lossy(), cfg!(windows)))
+}
+
+/// `path` written one way: on Windows (`windows`), without the long-path prefix (`\\?\`,
+/// `\\?\UNC\` as `\\`), with `\` only, in lower case (its paths ignore it), with no
+/// separator at its end; elsewhere as it is.
+pub(crate) fn one_form(path: &str, windows: bool) -> String {
+    if !windows {
+        return path.to_owned();
+    }
+    let path = path.replace('/', "\\");
+    let path = match path.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => path.strip_prefix(r"\\?\").map_or(path.clone(), str::to_owned),
+    };
+    let path = path.trim_end_matches('\\');
+    path.to_lowercase()
 }
 
 /// The local channel of instance `tag`: a named pipe of the user (Windows), else a socket

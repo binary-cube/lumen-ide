@@ -5,7 +5,7 @@ use super::overlay_stack::{OverlayKind, OverlaySlot};
 use super::*;
 use render_api::Scene;
 use std::collections::VecDeque;
-use ui_workbench::chart::{Plot, Reduce, Samples, Series};
+use ui_workbench::charts::spark::{Plot, Reduce, Samples, Series};
 use ui_workbench::status_popover::{PopoverHit, PopoverRow};
 
 /// The item standing for the file's details (its window lists them).
@@ -83,6 +83,13 @@ impl OverlaySlot for StatusPopoverSlot {
 
     /// Its pin's: what a click does.
     fn tooltip_at(&self, wb: &Workbench, p: Point) -> Option<ui_workbench::Tip> {
+        // A graph's value under the mouse (the tip follows it along the graph).
+        if let Some((graph, said)) = wb.status_popover.reading_tip(p) {
+            return Some(ui_workbench::Tip::new(
+                Rect::new(p.x - 1.0, graph.min_y(), 2.0, graph.size.height),
+                said,
+            ));
+        }
         let at = wb.status_popover.pin_at(p)?;
         Some(ui_workbench::Tip::new(at, tr!("status.pin")))
     }
@@ -326,6 +333,9 @@ impl Workbench {
             );
         }
         if !image {
+            right.push(self.word_wrap_item(crate::text_options::current().word_wrap));
+        }
+        if !image {
             // The file's details in one item (its language's icon, in its color): its window
             // tells them all (and switches the engine, where there's a choice).
             let indent = match doc.indent() {
@@ -349,6 +359,23 @@ impl Workbench {
                     .menu_label(tr!("status.file_details")),
             );
         }
+    }
+
+    /// Word wrap's item (`on`: it's on): lit with its label while on, muted while off, its
+    /// tooltip saying which; a click runs the View menu's command.
+    pub(super) fn word_wrap_item(&self, on: bool) -> StatusItem {
+        let (label, color) = if on {
+            (tr!("status.wrap_on"), self.palette.accent)
+        } else {
+            (String::new(), self.palette.text_muted)
+        };
+        let tip = if on { tr!("status.wrap_on_detail") } else { tr!("status.wrap_off_detail") };
+        StatusItem::named(&self.icons, "text-wrap", label)
+            .colored(color)
+            .clickable(crate::commands::WORD_WRAP.0)
+            .with_tooltip(tip)
+            .menu_label(tr!("command.view_word_wrap"))
+            .spare()
     }
 
     /// The file's details as its window's rows: the language, what answers it (a row that
@@ -641,7 +668,7 @@ impl Workbench {
     fn push_resource_items(&self, right: &mut Vec<StatusItem>) {
         let Some((sample, gpu)) = &self.resources else { return };
         let palette = &self.palette;
-        let color = |s| ui_workbench::chart::series_color(palette, s);
+        let color = |s| ui_workbench::charts::spark::series_color(palette, s);
         let trail = &self.resource_trail;
         let mut bars = vec![
             ((sample.cpu / 100.0).clamp(0.0, 1.0), color(Series::Cpu)),
@@ -665,7 +692,12 @@ impl Workbench {
         let palette = &self.palette;
         let columns = (150.0 * self.scale) as usize;
         let (cpu, ram, gpu_text) = resource_texts(sample, gpu.as_ref());
-        let series = |label: &str, values: &VecDeque<f32>, reduce, s, value: String, floor: f32| {
+        let series = |label: &str,
+                      values: &VecDeque<f32>,
+                      (reduce, format): (Reduce, fn(f32) -> String),
+                      s,
+                      value: String,
+                      floor: f32| {
             let peak = values.iter().copied().fold(0.0_f32, f32::max);
             let icon = match s {
                 Series::Cpu => "cpu",
@@ -678,19 +710,28 @@ impl Workbench {
                 label: tr!(label),
                 plot: Plot::build(Samples::from_slices(values.as_slices()), TRAIL, columns, reduce),
                 max: (peak * 1.2).max(floor),
-                color: ui_workbench::chart::series_color(palette, s),
+                color: ui_workbench::charts::spark::series_color(palette, s),
                 value,
                 icon: Some(icon),
+                format,
+                step: 1,
             }
         };
         let trail = &self.resource_trail;
         let mb = 1_048_576.0;
         let mut rows = vec![
-            series("status.cpu", &trail.cpu, Reduce::Max, Series::Cpu, cpu, 5.0),
-            series("status.ram", &trail.ram, Reduce::Last, Series::Memory, ram, mb),
+            series("status.cpu", &trail.cpu, (Reduce::Max, percent_text), Series::Cpu, cpu, 5.0),
+            series("status.ram", &trail.ram, (Reduce::Last, bytes_text), Series::Memory, ram, mb),
         ];
         if gpu.is_some() {
-            rows.push(series("status.gpu", &trail.gpu, Reduce::Last, Series::Gpu, gpu_text, mb));
+            rows.push(series(
+                "status.gpu",
+                &trail.gpu,
+                (Reduce::Last, bytes_text),
+                Series::Gpu,
+                gpu_text,
+                mb,
+            ));
         }
         // What the system's monitor adds to the app's figure: the programs it started (the
         // terminals' shells and what runs in them, language servers, agents). A click: the
@@ -721,7 +762,7 @@ impl Workbench {
     pub(super) fn resource_pills(&self) -> Vec<ui_workbench::status_popover::Pill> {
         let Some((sample, gpu)) = &self.resources else { return Vec::new() };
         let (cpu, ram, gpu_text) = resource_texts(sample, gpu.as_ref());
-        let color = |s| ui_workbench::chart::series_color(&self.palette, s);
+        let color = |s| ui_workbench::charts::spark::series_color(&self.palette, s);
         let pill = |label: &str, value: String, s| ui_workbench::status_popover::Pill {
             label: tr!(label),
             value,
@@ -861,6 +902,16 @@ fn resource_texts(
         memory_text(sample.ram_bytes),
         gpu.map_or_else(|| "—".to_owned(), |g| memory_text(g.total())),
     )
+}
+
+/// A share of the CPU as the resources say it (`3,4%`).
+fn percent_text(v: f32) -> String {
+    format!("{v:.1}%").replace('.', ",")
+}
+
+/// Bytes as the resources say them (see [`memory_text`]).
+fn bytes_text(v: f32) -> String {
+    memory_text(v.max(0.0) as u64)
 }
 
 /// An amount of memory as the resources say it: whole MB under a GB (`250 MB`), GB with

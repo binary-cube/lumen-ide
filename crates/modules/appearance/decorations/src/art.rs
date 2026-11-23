@@ -27,6 +27,11 @@ pub struct Canvas {
     hint: Rgba,
 }
 
+/// A bulb's socket (dark green metal) and an ornament's cap (gold): the pictures' own,
+/// whatever the theme.
+const SOCKET: Rgba = Rgba::rgb(0x3b4a3c);
+const GOLD: Rgba = Rgba::rgb(0xc8ae6a);
+
 /// How much of a pixel a shape covers, from its center's signed distance to the edge.
 fn coverage(distance: f32) -> f32 {
     (0.5 - distance).clamp(0.0, 1.0)
@@ -263,7 +268,7 @@ fn bulb(
     if glow > 0.0 {
         canvas.glow(cx, cy, 4.2 * s, color, 0.28 * glow);
     }
-    canvas.capsule(socket, (cx, cy - 1.5 * s), 0.6 * s, Rgba::rgb(0x3b4a3c), 1.0);
+    canvas.capsule(socket, (cx, cy - 1.5 * s), 0.6 * s, SOCKET, 1.0);
     let angle = -(cx - socket.0).atan2(cy - socket.1);
     canvas.ellipse((cx, cy), (1.4 * s, 2.05 * s), angle, 1.0, |u, v| {
         // Brighter in the middle, a little deeper at the rim.
@@ -473,7 +478,7 @@ pub fn ornament(scale: f32, color: Rgba) -> Canvas {
     let (w, h) = ((ORNAMENT_WIDTH * s).ceil() as u32, (ORNAMENT_HEIGHT * s).ceil() as u32);
     let mut canvas = Canvas::new(w, h, color);
     let cx = w as f32 / 2.0;
-    let gold = Rgba::rgb(0xc8ae6a);
+    let gold = GOLD;
     canvas.capsule((cx, 0.0), (cx, 3.6 * s), 0.3 * s, darker(gold, 0.25), 0.9);
     canvas.capsule((cx - 0.9 * s, 4.2 * s), (cx + 0.9 * s, 4.2 * s), 0.75 * s, gold, 1.0);
     let (gy, r) = (9.5 * s, 4.5 * s);

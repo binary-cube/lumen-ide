@@ -43,8 +43,10 @@ impl ProjectSearch {
         let side = px(BUTTON);
         let button = Rect::new(room.max_x() - side, (mid - side / 2.0).round(), side, side);
         let quiet = ButtonSpec::new(ButtonKind::Ghost).rest_tone(Tone::Neutral);
-        let folder =
-            quiet.icon("folder").on(self.narrowed()).hovered(self.scope_hover || self.scope_open);
+        let folder = quiet
+            .icon("folder")
+            .toggle(self.narrowed())
+            .hovered(self.scope_hover || self.scope_open);
         ds::button(layer, text, icons, ctx, button, folder);
         self.scope_button = button;
         let mut x = button.min_x() - px(space::XS);
@@ -55,7 +57,7 @@ impl ProjectSearch {
                 SearchOption::Regex => self.options.regex,
             };
             let r = Rect::new(x - side, button.min_y(), side, side);
-            let spec = quiet.label(label).on(on).hovered(self.option_hover == Some(*option));
+            let spec = quiet.label(label).toggle(on).hovered(self.option_hover == Some(*option));
             ds::button(layer, text, icons, ctx, r, spec);
             self.option_buttons.push((r, *option));
             x = r.min_x() - px(space::XS);
@@ -63,7 +65,7 @@ impl ProjectSearch {
         let replace = Rect::new(x - side, button.min_y(), side, side);
         let spec = quiet
             .icon("replace")
-            .on(self.replace_open)
+            .toggle(self.replace_open)
             .hovered(self.option_hover.is_none() && self.hover_replace);
         ds::button(layer, text, icons, ctx, replace, spec);
         self.replace_button = replace;

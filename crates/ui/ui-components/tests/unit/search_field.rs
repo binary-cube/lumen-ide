@@ -122,3 +122,17 @@ fn a_very_long_paste_stays_inside_the_field() {
         assert!(last < caret.min_x(), "the caret after the last glyph: {last} vs {caret:?}");
     }
 }
+
+/// Hovered: its × lights under the mouse (a frame asked), once; the mouse gone, it's plain.
+#[test]
+fn its_clear_button_lights_under_the_mouse() {
+    use crate::control::Control;
+    let mut field = SearchField::new();
+    field.set_text("abc");
+    painted(&mut field, true);
+    let clear = field.clear_area().expect("its ×").center();
+    assert!(Control::hover(&mut field, Some(clear)));
+    assert!(!Control::hover(&mut field, Some(clear)), "still on it: nothing new");
+    assert!(Control::hover(&mut field, None), "left");
+    assert_eq!(Control::cursor(&field, clear), Some(ViewerCursor::Pointer));
+}

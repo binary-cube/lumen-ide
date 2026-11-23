@@ -170,3 +170,14 @@ fn an_ignored_file_is_found_by_name_and_an_ignored_folder_isnt_walked() {
     assert!(plain.files.iter().all(|m| m.path != ".env.local"), "only where asked for");
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// What a folder suggested matched: its name's start, any case, else its loose match;
+/// nothing when nothing follows the last `/`.
+#[test]
+fn a_folder_s_marks_are_what_was_typed() {
+    assert_eq!(folder_marks("storage", "sto"), [0, 1, 2]);
+    assert_eq!(folder_marks("vendor/twig/src/Sandbox", "sa"), [16, 17]);
+    assert_eq!(folder_marks("src/Controller", "src/ctl"), [4, 7, 10]);
+    assert!(folder_marks("src/Controller", "src/").is_empty());
+    assert!(folder_marks("src", "").is_empty());
+}

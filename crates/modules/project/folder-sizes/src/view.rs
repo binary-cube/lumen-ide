@@ -15,13 +15,14 @@ use std::time::Instant;
 
 use i18n::{t, tr};
 use kernel::{Point, Rect, Rgba};
-use render_api::{ImageData, Quad};
+use render_api::Quad;
 use text_layout::Font;
+use ui_components::charts::{Chart, ChartLook, ChartParts, ValueFormat};
+use ui_components::control::Control;
 use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, button_size, radius};
 use ui_components::{Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerPaint};
 use ui_kit::{draw_icon, draw_text};
 
-use crate::donut::{self, Ring};
 use crate::report::{self, Report};
 use crate::scan::{self, Node, Progress};
 
@@ -40,6 +41,8 @@ pub struct SizesData {
 const SLICES: usize = 8;
 const ROW_H: f32 = 34.0;
 const RING: f32 = 220.0;
+/// The ring's hole, a share of its radius (percent).
+const HOLE: u8 = 58;
 /// A row's bar: its height, its track's alpha of the text and the least a share shows
 /// (logical pixels).
 const BAR_H: f32 = 6.0;
@@ -88,8 +91,11 @@ pub struct SizesView {
     scroll: f32,
     list: Rect,
     row_h: f32,
-    /// The ring as last drawn (made again only when what it shows changes).
-    ring: Option<(Ring, ImageData)>,
+    /// The ring: the shared chart (a pie with a hole), its data made again only when the
+    /// folder shown changes (`shown`, a generation).
+    chart: Chart,
+    shown: u64,
+    charted: Option<u64>,
     ring_at: Rect,
     /// The entry its menu was opened on, and what it asks of the app.
     menu_on: Option<(PathBuf, bool)>,
@@ -181,24 +187,43 @@ impl SizesView {
     /// What the workers brought, taken in: `true` if anything came.
     fn take(&mut self) -> bool {
         let mut changed = false;
-        if let Some(rx) = &self.loading
-            && let Ok(kept) = rx.try_recv()
-        {
-            self.loading = None;
-            changed = true;
-            match kept {
-                Some(kept) => self.show(kept),
-                None => self.measure(),
+        use std::sync::mpsc::TryRecvError;
+        if let Some(rx) = &self.loading {
+            match rx.try_recv() {
+                Ok(kept) => {
+                    self.loading = None;
+                    changed = true;
+                    match kept {
+                        Some(kept) => self.show(kept),
+                        None => self.measure(),
+                    }
+                }
+                // The reader gone without an answer: measured anew (never waited for).
+                Err(TryRecvError::Disconnected) => {
+                    self.loading = None;
+                    changed = true;
+                    self.measure();
+                }
+                Err(TryRecvError::Empty) => {}
             }
         }
-        if let Some(m) = &self.measuring
-            && let Ok(measured) = m.rx.try_recv()
-        {
-            self.measuring = None;
-            changed = true;
-            match measured {
-                Some(measured) => self.show(measured),
-                None => self.failed = self.report.is_none(),
+        if let Some(m) = &self.measuring {
+            match m.rx.try_recv() {
+                Ok(measured) => {
+                    self.measuring = None;
+                    changed = true;
+                    match measured {
+                        Some(measured) => self.show(measured),
+                        None => self.failed = self.report.is_none(),
+                    }
+                }
+                // The measure gone without its result: said so (never waited for).
+                Err(TryRecvError::Disconnected) => {
+                    self.measuring = None;
+                    changed = true;
+                    self.failed = self.report.is_none();
+                }
+                Err(TryRecvError::Empty) => {}
             }
         }
         changed
@@ -217,7 +242,7 @@ impl SizesView {
                 None => break,
             }
         }
-        self.ring = None;
+        self.shown += 1;
     }
 
     /// The names of the folders on the path (the measured one first).
@@ -241,22 +266,15 @@ impl SizesView {
         }
         self.trail.push(i);
         self.scroll = 0.0;
-        self.ring = None;
+        self.shown += 1;
         true
     }
 
     fn hit(&self, p: Point) -> Option<Hit> {
-        if self.ring_at.contains(p) {
-            let shares = self.shares();
-            let (cx, cy) = (
-                self.ring_at.min_x() + self.ring_at.size.width / 2.0,
-                self.ring_at.min_y() + self.ring_at.size.height / 2.0,
-            );
-            if let Some(slice) =
-                donut::hit(&shares, p.x - cx, p.y - cy, self.ring_at.size.width / 2.0)
-            {
-                return Some(Hit::Slice(slice));
-            }
+        if self.ring_at.contains(p)
+            && let Some(slice) = self.chart.slice_at(p)
+        {
+            return Some(Hit::Slice(slice));
         }
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
     }
@@ -284,16 +302,22 @@ impl SizesView {
         self.pending = Some(ViewerAction::WithHost(job));
     }
 
-    /// The ring's shares: the biggest entries, then the rest as one.
-    fn shares(&self) -> Vec<f32> {
-        let Some(node) = self.node() else { return Vec::new() };
-        let mut shares: Vec<f32> =
-            node.children.iter().take(SLICES).map(|c| c.size as f32).collect();
-        let rest: u64 = node.children.iter().skip(SLICES).map(|c| c.size).sum();
-        if rest > 0 {
-            shares.push(rest as f32);
+    /// The ring's slices: the biggest entries by name, then the rest as one (how many,
+    /// their sum).
+    fn slices(&self) -> Option<charts_model::Prepared> {
+        let node = self.node()?;
+        let named = node.children.iter().take(SLICES).map(|c| (c.name.clone(), c.size as f64));
+        let rest: Vec<u64> = node.children.iter().skip(SLICES).map(|c| c.size).collect();
+        let rest = (!rest.is_empty()).then(|| (rest.len(), rest.iter().sum::<u64>() as f64));
+        Some(charts_model::Prepared::slices(named.collect(), rest))
+    }
+
+    /// The slice lit by the list: the row under the mouse's.
+    fn lit_by_row(&self) -> Option<usize> {
+        match self.hover {
+            Some(Hit::Row(r) | Hit::Locate(r)) => Some(self.slice_of(r)),
+            _ => None,
         }
-        shares
     }
 
     /// The slice an entry of the list is in (its own, or the rest's).
@@ -310,16 +334,16 @@ impl SizesView {
     }
 }
 
-/// The slices' colors, from the theme (its accent, then its terminal's colors, the accent's
-/// own hue — blue in most themes — last), the rest muted.
-fn colors(p: &ui_components::Palette, count: usize) -> Vec<Rgba> {
-    let ansi = &p.terminal_ansi;
-    let mut out = vec![p.accent, ansi[2], ansi[3], ansi[5], ansi[6], ansi[1], ansi[4], ansi[11]];
-    out.truncate(SLICES.min(count));
-    if count > SLICES {
-        out.push(p.text_muted.with_alpha(0.45));
+/// The ring's look: the shared chart's, bare (no axes, no legend: the list is its legend),
+/// its tooltip and its lit slice kept; the slices the chart's series colors, the rest
+/// muted.
+fn ring_look(ds: &Ctx<'_>, background: Rgba) -> ChartLook {
+    let look = ChartLook::new(ds, background);
+    let mut colors = [ds.palette.text_muted.with_alpha(0.45); SLICES + 1];
+    for (i, c) in colors.iter_mut().take(SLICES).enumerate() {
+        *c = look.series(i);
     }
-    out
+    look.colors(&colors).parts(ChartParts::bare())
 }
 
 /// `2026-11-15 20:10`, in the user's own time zone.
@@ -341,15 +365,18 @@ impl Viewer for SizesView {
     }
 
     fn poll(&mut self) -> bool {
-        self.take() || self.measuring.is_some()
+        self.take() | self.chart.poll()
     }
 
     fn is_loading(&self) -> bool {
-        self.loading.is_some() || self.measuring.is_some()
+        // The ring's slices being drawn (on a worker) too.
+        self.loading.is_some() || self.measuring.is_some() || self.chart.busy()
     }
 
+    /// Its ring moving (a transition, a slice lit). Reading and measuring aren't motion: they
+    /// show as loading (`is_loading`: the progress line at a loader's pace).
     fn is_animating(&self) -> bool {
-        self.measuring.is_some() || (self.loading.is_some() && self.report.is_none())
+        self.chart.animating()
     }
 
     fn command(&mut self, id: &str) -> bool {
@@ -398,7 +425,7 @@ impl Viewer for SizesView {
             ViewerKey::Backspace | ViewerKey::Left if !self.trail.is_empty() => {
                 self.trail.pop();
                 self.scroll = 0.0;
-                self.ring = None;
+                self.shown += 1;
                 true
             }
             _ => false,
@@ -411,7 +438,7 @@ impl Viewer for SizesView {
             Hit::Crumb(depth) => {
                 self.trail.truncate(depth);
                 self.scroll = 0.0;
-                self.ring = None;
+                self.shown += 1;
             }
             Hit::Locate(i) => {
                 if let Some((path, _)) = self.path_of(i) {
@@ -431,10 +458,21 @@ impl Viewer for SizesView {
     }
 
     fn hover(&mut self, p: Point) -> bool {
+        let on_ring = self.ring_at.contains(p).then_some(p);
+        let ring = Control::hover(&mut self.chart, on_ring);
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed
+        // A row under the mouse lights its slice.
+        let lit = self.chart.set_lit(self.lit_by_row());
+        changed || ring || lit
+    }
+
+    fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
+        if self.ring_at.contains(p) {
+            return Control::tooltip(&self.chart, p);
+        }
+        None
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
@@ -573,28 +611,25 @@ impl Viewer for SizesView {
         y += px(40.0);
 
         let Some(node) = self.node().cloned() else { return };
-        let shares = self.shares();
-        let palette_colors = colors(p, node.children.len());
+        let look = ring_look(&ds, p.editor_background);
 
-        // The ring, its center saying the folder's size.
+        // The ring (the shared chart), its center saying the folder's size.
         let ring_size = px(RING).min(width * 0.4);
         let ring = Rect::new(x0, y, ring_size, ring_size);
         self.ring_at = ring;
-        if !shares.is_empty() {
-            let wanted = Ring {
-                shares,
-                colors: palette_colors.clone(),
-                lit: self.lit(),
-                size: ring_size.round().max(1.0) as u32,
-            };
-            if self.ring.as_ref().is_none_or(|(had, _)| *had != wanted) {
-                let image = wanted.image();
-                self.ring = Some((wanted, image));
-            }
-            if let Some((_, image)) = &self.ring {
-                layer.image(image, ring);
-            }
+        if self.charted != Some(self.shown) {
+            self.charted = Some(self.shown);
+            let data = self.slices().filter(|_| !node.children.is_empty());
+            self.chart.set_data(data.map(Arc::new), self.shown + 1);
+            // Its tooltips say sizes as the list does.
+            let bytes = |_: usize, v: f64| i18n::bytes(v.max(0.0) as u64);
+            self.chart.set_format(Some(ValueFormat(Arc::new(bytes))));
+            self.chart.set_title(&node.name);
+            let ring = charts_model::spec::Options { hole: HOLE, ..Default::default() };
+            self.chart.set_options(ring);
         }
+        self.chart.set_waker(&ctx.waker);
+        self.chart.paint(layer, ctx.text, &ds, &look, ring);
         let big = ds.ui_font(3.0).with_weight(Font::SEMIBOLD);
         let size_line = ctx.text.shape_line(&i18n::bytes(node.size), &big);
         let mid = ring.min_y() + ring.size.height / 2.0;
@@ -643,7 +678,7 @@ impl Viewer for SizesView {
                 self.hits.push((shown, Hit::Row(i)));
             }
             // Its slice's color.
-            let swatch = palette_colors.get(self.slice_of(i)).copied().unwrap_or(p.text_muted);
+            let swatch = look.series(self.slice_of(i));
             rows.quad(
                 Quad::filled(
                     Rect::new(

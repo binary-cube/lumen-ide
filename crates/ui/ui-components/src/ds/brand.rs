@@ -66,7 +66,11 @@ pub fn wordmark(
     let font = mark.font();
     let unit = (mark.size / 40.0).max(0.5);
     let fade = |c: Rgba| c.with_alpha(c.a * mark.opacity);
+    let start = x;
     let mut x = x;
+    // Its letters (each twice: a shadow, then the letter) aren't read one by one: the name
+    // is, once.
+    let _quiet = ui_kit::access::silenced();
     for letter in name.to_uppercase().chars() {
         let shaped = text.shape_line(&letter.to_string(), &font);
         draw_text(
@@ -79,6 +83,11 @@ pub fn wordmark(
         draw_text(layer, &shaped, x, baseline, fade(Rgba::WHITE));
         x += shaped.width + mark.tracking;
     }
+    drop(_quiet);
+    ui_kit::access::node(|| {
+        let bounds = Rect::new(start, baseline - mark.size, (x - start).max(0.0), mark.size * 1.2);
+        ui_kit::access::Described::new(ui_kit::access::Role::Label, name, bounds)
+    });
     x - mark.tracking
 }
 

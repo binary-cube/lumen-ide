@@ -40,6 +40,8 @@ pub fn draw_text_within(
     color: Rgba,
     (left, right): (f32, f32),
 ) {
+    let from = x.max(left);
+    access::text_shown(line, (from, (x + line.width).min(right) - from), baseline);
     layer.glyphs.extend(
         line.glyphs
             .iter()

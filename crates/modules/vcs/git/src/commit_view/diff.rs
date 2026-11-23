@@ -20,6 +20,17 @@ pub(super) struct FileDiff {
     pub(super) colors: Vec<Vec<Vec<syntax::Piece>>>,
     /// Its hunks can be moved one by one (a new, deleted or renamed file goes whole).
     pub(super) partial: bool,
+    /// Which reading of changes it is (never twice: what's kept for it, its wrapped rows,
+    /// is never taken for another's).
+    pub(super) id: u64,
+}
+
+/// The changes' readings counted (each [`FileDiff`]'s id).
+static READINGS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// A new reading's id.
+pub(super) fn reading_id() -> u64 {
+    READINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 impl CommitView {
@@ -55,19 +66,37 @@ impl CommitView {
             return;
         }
         let row_h = px(20.0);
-        let content = diff.rows.len() as f32 * row_h;
-        self.scrolls[DIFF] = self.scrolls[DIFF].min((content - area.size.height).max(0.0));
-        let scroll = self.scrolls[DIFF];
-        let first = (scroll / row_h) as usize;
-        let count = (area.size.height / row_h) as usize + 2;
         let code = ds.code_font(-1.0);
         let small = ds.ui_font(-1.5);
-        let rows = scene.push_layer(Some(area));
         let number_w = px(38.0);
         let (mut widest, right_edge) = (0.0_f32, area.max_x() - px(6.0));
+        // Lines wrapping: at the code's width (a column kept for the wrap's mark).
+        let column = text.shape_line("0", &code).width;
+        let code_from = area.min_x() + px(6.0) + 2.0 * number_w + px(14.0);
+        let columns = if self.wrap {
+            (((right_edge - code_from) / column.max(1.0)).floor() as usize).saturating_sub(1)
+        } else {
+            0
+        };
+        self.code.wrap.refresh(&diff, columns);
+        if self.code.wrap.on() {
+            self.diff_x = 0.0;
+        }
+        let wrap = &self.code.wrap;
+        let content = wrap.total(diff.rows.len()) as f32 * row_h;
+        self.scrolls[DIFF] = self.scrolls[DIFF].min((content - area.size.height).max(0.0));
+        let scroll = self.scrolls[DIFF];
+        let (first, _) = wrap.at((scroll / row_h) as u32);
+        let bottom = scroll + area.size.height;
+        let count =
+            (first..diff.rows.len()).take_while(|&r| wrap.first(r) as f32 * row_h < bottom).count()
+                + 1;
+        let rows = scene.push_layer(Some(area));
+        let mut bands = Vec::new();
         for (at, row) in diff.rows.iter().enumerate().skip(first).take(count) {
-            let y = area.min_y() + at as f32 * row_h - scroll;
-            let band = Rect::new(area.min_x(), y, area.size.width, row_h);
+            let y = area.min_y() + self.code.wrap.first(at) as f32 * row_h - scroll;
+            let height = self.code.wrap.rows(at) as f32 * row_h;
+            let band = Rect::new(area.min_x(), y, area.size.width, height);
             match *row {
                 DiffRow::Hunk(h) => {
                     self.paint_hunk_header(rows, text, icons, ds, (band, &small), (&diff, h))
@@ -127,28 +156,62 @@ impl CommitView {
                         scroll,
                         sideways: self.diff_x,
                     });
-                    if let Some(rect) =
-                        self.code.band(at, clean_columns(line), (code_left, right_edge))
-                    {
-                        rows.quad(Quad::filled(rect, p.accent.with_alpha(0.3)));
+                    let width = clean_columns(line);
+                    self.code.bands(at, width, (code_left, right_edge), &mut bands);
+                    for rect in &bands {
+                        rows.quad(Quad::filled(*rect, p.accent.with_alpha(0.3)));
                     }
+                    // Its rows (one, unless it wraps), each its columns' share of the pieces.
+                    let parts = self.code.wrap.parts(at, width);
                     let mut pen = code_left - self.diff_x;
+                    let mut column_at = 0;
+                    let mut part = 0;
                     for (range, capture) in pieces {
-                        let Some(part) = clean.get(range.clone()) else { continue };
-                        let shaped = text.shape_line(&part.replace('\t', "    "), &code);
+                        let Some(piece) = clean.get(range.clone()) else { continue };
+                        let drawn = piece.replace('\t', "    ");
                         let color = capture
                             .as_deref()
                             .and_then(|name| p.syntax.as_ref()?.capture(name))
                             .unwrap_or(p.text);
-                        ui_kit::draw_text_within(
-                            rows,
-                            &shaped,
-                            pen,
-                            baseline,
-                            color,
-                            (code_left, right_edge),
-                        );
-                        pen += shaped.width;
+                        let mut rest = drawn.as_str();
+                        while !rest.is_empty() {
+                            let end = parts.get(part).map_or(usize::MAX, |(_, end)| *end);
+                            let room = end.saturating_sub(column_at);
+                            let cut = rest.char_indices().nth(room).map_or(rest.len(), |(i, _)| i);
+                            let (now, later) = rest.split_at(cut);
+                            if !now.is_empty() {
+                                let shaped = text.shape_line(now, &code);
+                                let line_y = baseline + part as f32 * row_h;
+                                ui_kit::draw_text_within(
+                                    rows,
+                                    &shaped,
+                                    pen,
+                                    line_y,
+                                    color,
+                                    (code_left, right_edge),
+                                );
+                                pen += shaped.width;
+                                column_at += now.chars().count();
+                            }
+                            rest = later;
+                            if !rest.is_empty() || (column_at >= end && part + 1 < parts.len()) {
+                                if part + 1 >= parts.len() {
+                                    break;
+                                }
+                                // The line goes on below: the wrap's mark, then the next row.
+                                let mark = text.shape_line(WRAP_END, &code);
+                                let line_y = baseline + part as f32 * row_h;
+                                draw_text(
+                                    rows,
+                                    &mark,
+                                    pen + px(4.0),
+                                    line_y,
+                                    p.text_muted.with_alpha(0.6),
+                                );
+                                part += 1;
+                                pen = code_left;
+                            }
+                        }
                     }
                     widest = widest.max(pen + self.diff_x - right_edge);
                 }
@@ -273,6 +336,9 @@ impl CommitView {
 }
 
 /// The columns `line` takes when shown.
+/// The mark at a wrapped row's end (its line goes on below).
+const WRAP_END: &str = "↩";
+
 fn clean_columns(line: &version_control::staging::DiffLine) -> usize {
     text_selection::columns(line.text.trim_end_matches(['\n', '\r']))
 }
@@ -316,5 +382,5 @@ pub(super) fn read_diff(
         rows.extend((0..hunk.lines.len()).map(|l| DiffRow::Line(h, l)));
     }
     let partial = state == Some(FileState::Modified);
-    FileDiff { path, staged, hunks: found, rows, partial, colors }
+    FileDiff { path, staged, hunks: found, rows, partial, colors, id: reading_id() }
 }

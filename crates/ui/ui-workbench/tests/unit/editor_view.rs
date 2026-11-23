@@ -471,3 +471,149 @@ fn the_lane_s_thumb_is_dragged() {
     assert!(view.scrollbar_release());
     assert!(!view.scrollbar_drag(Point::new(thumb.x, thumb.y + 300.0), &doc, &folds));
 }
+
+/// To a screen reader the editor is one text area of the lines it shows (never the whole
+/// file), the caret in them, its tokens and line numbers not read loose; its text can't be
+/// replaced whole.
+#[test]
+fn the_editor_is_a_text_area_of_the_lines_shown() {
+    use ui_kit::access::Role;
+    let mut text = TextSystem::new();
+    let src: String = (0..400).map(|i| format!("line {i}\n")).collect();
+    let mut doc = Document::new(&src);
+    let folds = Folds::default();
+    let mut view = EditorView::new(FontFamily::Monospace);
+    view.set_bounds(Rect::new(0.0, 0.0, 800.0, 300.0), 1.0);
+    // The caret after "li" on the second line.
+    let offset = doc.buffer().line_start(1) + 2;
+    document::commands::click(&mut doc, offset, false, false);
+    let recording = ui_kit::access::begin();
+    paint_once(&mut view, &doc, &folds, &mut text);
+    let frame = recording.take();
+    let area = frame.nodes().iter().find(|n| n.role == Role::TextArea).expect("the editor");
+    let value = area.value.as_deref().expect("its text");
+    assert!(value.starts_with("line 0\nline 1\n"));
+    assert!(!value.contains("line 300"), "only what it shows");
+    let lines = area.lines.as_ref().expect("its lines");
+    assert_eq!(lines.lines.len(), value.split('\n').count());
+    assert_eq!((lines.anchor, lines.focus), ("line 0\n".len() + 2, "line 0\n".len() + 2));
+    assert!(lines.caret.is_some() && area.state.focused);
+    assert!(!area.actions.set_value);
+    assert!(
+        !frame.nodes().iter().any(|n| n.role == Role::Label && n.name.starts_with("line")),
+        "no loose tokens"
+    );
+}
+
+/// A view wrapping lines, a narrow one (its text area about 30 columns).
+fn wrapping(text: &mut TextSystem, doc: &Document, folds: &Folds) -> EditorView {
+    let mut view = EditorView::new(FontFamily::Monospace);
+    view.set_text_options(&ui_components::TextOptions { word_wrap: true });
+    let advance = view.layout(text, doc, &Palette::dark()).advance;
+    let gutter = view.layout(text, doc, &Palette::dark()).gutter_width;
+    let width = gutter + advance * 32.0 + scroll::lane_width(1.0);
+    view.set_bounds(Rect::new(0.0, 0.0, width, 400.0), 1.0);
+    paint_once(&mut view, doc, folds, text);
+    view
+}
+
+/// Word wrap on: a long line takes the rows it needs (each its part of the line, nothing
+/// lost), the later ones without a number but the wrap's marks; nothing scrolls sideways.
+#[test]
+fn a_long_line_wraps_into_rows_with_their_marks() {
+    let mut text = TextSystem::new();
+    let line = "the quick brown fox jumps over the lazy dog and runs far away\nnext";
+    let doc = Document::new(line);
+    let folds = Folds::default();
+    let mut view = wrapping(&mut text, &doc, &folds);
+    assert!(view.wraps());
+    let first = &line[..line.find('\n').unwrap_or(0)];
+    let parts: Vec<&str> = view
+        .segs
+        .iter()
+        .zip(&view.lines)
+        .filter(|(_, l)| **l == 0)
+        .map(|(s, _)| &first[s.from..s.to])
+        .collect();
+    assert!(parts.len() >= 2, "{parts:?}");
+    assert_eq!(parts.concat(), first);
+    assert!(view.segs[0].first && !view.segs[0].last && !view.segs[1].first);
+    assert_eq!(view.max_scroll_x, 0.0);
+    let mut scene = Scene::default();
+    view.paint(&doc, plain(&folds), true, &mut text, &mut scene, &Palette::dark());
+    let font = view.font(&Palette::dark());
+    let mut mark = |m: &str| text.shape_line(m, &font).glyphs[0].key;
+    let (end, goes_on) = (mark(text::WRAP_END), mark(text::WRAP_GOES_ON));
+    let glyphs: Vec<_> =
+        scene.layers().iter().flat_map(|l| l.glyphs.iter().map(|g| g.key)).collect();
+    assert!(glyphs.contains(&end) && glyphs.contains(&goes_on), "both marks drawn");
+    // Off again: one row a line, scrolled sideways as before.
+    view.set_text_options(&ui_components::TextOptions { word_wrap: false });
+    paint_once(&mut view, &doc, &folds, &mut text);
+    assert_eq!(view.lines, [0, 1]);
+}
+
+/// While wrapping, a click on a later row lands in its part of the line; ↓ moves to the
+/// next row at the same place (not the next line), past the last to the end.
+#[test]
+fn clicks_and_moves_follow_the_rows() {
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let line = "the quick brown fox jumps over the lazy dog and runs far away\nnext";
+    let doc = Document::new(line);
+    let folds = Folds::default();
+    let mut view = wrapping(&mut text, &doc, &folds);
+    let seg = view.segs[1];
+    let lh = view.line_height();
+    let left = view.bounds.min_x() + view.layout(&mut text, &doc, &palette).text_left;
+    let at = view.offset_at(Point::new(left + 1.0, lh * 1.5), &doc, &folds, &mut text, &palette);
+    assert_eq!(at, seg.from, "the second row's start");
+    let (down, goal) = view.moved_by_rows(&doc, &folds, &mut text, &palette, 2, None, 1);
+    assert!(view.segs[1].holds(down) && down >= seg.from, "the next row: {down}");
+    let (again, _) = view.moved_by_rows(&doc, &folds, &mut text, &palette, down, Some(goal), 1);
+    assert!(again > down);
+    let rows = i64::from(view.total_rows(&doc, &folds));
+    let (end, _) = view.moved_by_rows(&doc, &folds, &mut text, &palette, 0, None, rows + 5);
+    assert_eq!(end, doc.buffer().len());
+}
+
+/// While wrapping, Home / End go to the row's start and end first; on a line's first
+/// row Home, on its last row End, and a second press are the line's own (`None`).
+#[test]
+fn home_and_end_go_to_the_row_first() {
+    let mut text = TextSystem::new();
+    let line = "the quick brown fox jumps over the lazy dog and runs far away\nnext";
+    let doc = Document::new(line);
+    let folds = Folds::default();
+    let mut view = wrapping(&mut text, &doc, &folds);
+    let second = view.segs[1];
+    let inside = second.from + 2;
+    assert_eq!(view.row_home_end(&doc, &folds, inside, false), Some(second.from));
+    assert_eq!(view.row_home_end(&doc, &folds, second.from, false), None, "a second press");
+    assert_eq!(view.row_home_end(&doc, &folds, 1, false), None, "the first row: the line's");
+    let end = view.row_home_end(&doc, &folds, 1, true).expect("the first row's end");
+    assert!(end < view.segs[0].to && end >= view.segs[0].from);
+    let last_row = view.segs.iter().position(|s| s.last).expect("its last row");
+    let on_last = view.segs[last_row].from + 1;
+    assert_eq!(view.row_home_end(&doc, &folds, on_last, true), None, "the last row: the line's");
+}
+
+/// A very long line while wrapping: its parts are wrapped once, the cursor's row found
+/// among them (never the line wrapped again per row).
+#[test]
+#[allow(clippy::disallowed_methods)] // The budget is measured by the test, not the view.
+fn a_very_long_wrapped_line_stays_quick() {
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let line = "word ".repeat(100_000);
+    let doc = Document::new(&line);
+    let folds = Folds::default();
+    let mut view = wrapping(&mut text, &doc, &folds);
+    let started = std::time::Instant::now();
+    let (row, seg) = view.row_of_offset(&doc, &folds, line.len() - 3);
+    assert!(row > 1000 && seg.last, "the last of many rows: {row}");
+    for _ in 0..50 {
+        view.caret_rect(&doc, &folds, &mut text, &palette);
+    }
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+}

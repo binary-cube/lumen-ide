@@ -57,6 +57,18 @@ pub struct GridColumn {
 }
 
 impl GridColumn {
+    /// The column as a chart reads it (`charts_model`): numbers, moments, text.
+    pub fn chart_column(&self) -> charts_model::Column {
+        let kind = match self.class {
+            CellClass::Integer | CellClass::Decimal => charts_model::ColumnKind::Number,
+            CellClass::DateTime => charts_model::ColumnKind::Time,
+            _ => charts_model::ColumnKind::Text,
+        };
+        charts_model::Column::new(self.name.clone(), kind)
+    }
+}
+
+impl GridColumn {
     /// A nullable, editable column of `class`.
     pub fn new(name: impl Into<String>, type_name: impl Into<String>, class: CellClass) -> Self {
         Self {
@@ -343,6 +355,12 @@ pub trait GridSource: Send {
     /// Whether its rows can be edited now.
     fn editing(&self) -> Editing {
         Editing::ReadOnly(i18n::t("grid.read_only"))
+    }
+    /// Whether its rows can be edited now, without the reason when they can't: asked as the
+    /// grid is drawn, so it reads only what's in memory and writes no text. It must agree
+    /// with [`Self::editing`] (a source that overrides one overrides both).
+    fn can_edit(&self) -> bool {
+        false
     }
     /// What's pending on a cell (a new or deleted row marks all of its cells).
     fn mark(&self, row: u64, column: usize) -> CellMark {

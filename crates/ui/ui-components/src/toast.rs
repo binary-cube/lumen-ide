@@ -142,12 +142,12 @@ pub fn layout_card(text: &mut TextSystem, ctx: &Ctx<'_>, toast: &Toast, width: f
     let count_room = count.as_ref().map_or(0.0, |c| c.width + px(14.0));
     let title_room = (text_width - count_room).max(px(20.0));
     let title: Vec<Arc<ShapedLine>> =
-        wrap_lines(text, &n.title, &title_font, title_room, TITLE_LINES)
+        ds::wrap(text, &n.title, &title_font, title_room, TITLE_LINES)
             .iter()
             .map(|l| text.shape_line(l, &title_font))
             .collect();
     let detail = n.detail.as_deref().map_or_else(Vec::new, |d| {
-        wrap_lines(text, d, &detail_font, text_width, DETAIL_LINES)
+        ds::wrap(text, d, &detail_font, text_width, DETAIL_LINES)
             .iter()
             .map(|l| text.shape_line(l, &detail_font))
             .collect()
@@ -201,39 +201,6 @@ const GLASS_BLUR: f32 = 18.0;
 /// The progress bar's thickness and the space over it (logical pixels).
 const PROGRESS: f32 = 3.0;
 const PROGRESS_TOP: f32 = 8.0;
-
-/// `value` in at most `max` lines of `width`, by words; the last one cut with "…" when
-/// there's more.
-fn wrap_lines(
-    text: &mut TextSystem,
-    value: &str,
-    font: &Font,
-    width: f32,
-    max: usize,
-) -> Vec<String> {
-    let mut lines: Vec<String> = Vec::new();
-    let mut line = String::new();
-    let mut words = value.split_whitespace().peekable();
-    while let Some(word) = words.next() {
-        let candidate = if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
-        if text.shape_line(&candidate, font).width <= width || line.is_empty() {
-            line = candidate;
-            continue;
-        }
-        if lines.len() + 1 == max {
-            // The last line: the rest of it, cut.
-            let rest: Vec<&str> = std::iter::once(word).chain(words.by_ref()).collect();
-            line = format!("{line} {}", rest.join(" "));
-            break;
-        }
-        lines.push(std::mem::replace(&mut line, word.to_owned()));
-    }
-    if !line.is_empty() {
-        lines.push(line);
-    }
-    lines.truncate(max);
-    lines.into_iter().map(|l| ds::ellipsize(text, &l, font, width)).collect()
-}
 
 /// What's under the mouse on the stack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

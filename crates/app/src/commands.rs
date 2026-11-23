@@ -36,6 +36,8 @@ pub const FULL_SCREEN: CommandId = CommandId("view.full_screen");
 pub const EDITOR_FULL: CommandId = CommandId("view.editor_full");
 pub const EDITOR_FULL_WIDTH: CommandId = CommandId("view.editor_full_width");
 pub const EDITOR_FULL_HEIGHT: CommandId = CommandId("view.editor_full_height");
+/// Lines longer than a view go on in rows under them, in every view showing text.
+pub const WORD_WRAP: CommandId = CommandId("view.word_wrap");
 /// The app's menus in the drawer from the window's bar (where it has the button: Windows,
 /// Linux; macOS when asked for).
 pub const MENU: CommandId = CommandId("view.menu");
@@ -309,6 +311,7 @@ pub const SPECS: &[CommandSpec] = &[
     ),
     spec(EDITOR_FULL_WIDTH, "Editor Area: All the Width", at(s::VIEW_SCREEN, 30), &[]),
     spec(EDITOR_FULL_HEIGHT, "Editor Area: All the Height", at(s::VIEW_SCREEN, 40), &[]),
+    spec(WORD_WRAP, "Word Wrap", at(s::VIEW_ZOOM, 40), &["Alt+Z"]),
     // ⌘⇧T is "Reopen Closed Tab"; with the terminal focused, it opens a terminal tab.
     spec(SWITCH_THEME, "Switch Theme", at(s::APPEARANCE_THEME, 10), &["CmdOrCtrl+Alt+T"]),
     spec(CLOSE_NOTIFICATIONS, "Close Notifications", at(s::VIEW_NOTIFICATIONS, 20), &[]),
@@ -1280,6 +1283,7 @@ pub fn menu_icon(id: &str) -> Option<&'static str> {
         FULL_SCREEN | EDITOR_FULL => "maximize-2",
         EDITOR_FULL_WIDTH => "column",
         EDITOR_FULL_HEIGHT => "rows",
+        WORD_WRAP => "text-wrap",
         REOPEN_CLOSED_TAB => "rotate-ccw",
         REVEAL_IN_FILE_MANAGER => "folder-open",
         REVEAL_IN_PROJECT => "crosshair",

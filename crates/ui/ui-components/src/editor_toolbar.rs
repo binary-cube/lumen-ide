@@ -127,13 +127,8 @@ pub struct StatementMark {
 
 /// A statement's text's hash, as [`StatementMark::hash`] holds it.
 pub fn text_hash(text: &str) -> u64 {
-    // FNV-1a: stable, cheap, enough to tell an edited statement from the one that ran.
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    hash
+    // Stable, cheap, enough to tell an edited statement from the one that ran.
+    kernel::hash::fnv64(text)
 }
 
 /// A bar over a file's editor (see the module's doc). Everything but [`Self::paint`] has a

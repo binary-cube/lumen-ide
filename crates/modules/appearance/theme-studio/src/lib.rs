@@ -273,6 +273,9 @@ struct Studio {
     /// The preview: moving (else a still frame), in the light variant (a theme with both),
     /// shown over the panel (narrow).
     preview_still: bool,
+    /// The window is in the background (another program has the keyboard): the preview's
+    /// effects stand still, as the window's own decorations do.
+    window_away: bool,
     preview_light: bool,
     preview_open: bool,
     /// The preview shows a dialog on the draft's backdrop (while that's being changed).

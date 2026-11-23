@@ -24,6 +24,12 @@ workbench-model.workspace = true
 command-model.workspace = true
 # What copied and exported rows become (the data extractors).
 extractors.workspace = true
+# Charts as data (plan 94): laid out there, drawn here in the theme's colors.
+charts-model.workspace = true
+# A chart's lines, areas and slices rasterized smooth off the UI thread.
+vector-tiles.workspace = true
+# A pane's state that couldn't be kept, logged.
+tracing.workspace = true
 # An export as an Excel workbook (XLSX: a zip of XML parts, deflated); already in the tree
 # through the local history.
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

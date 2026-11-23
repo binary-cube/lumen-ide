@@ -47,11 +47,14 @@ fn rows_are_found_by_the_primary_key_then_the_row_id() {
         ..Structure::default()
     };
     assert_eq!(structure.key_kind(), KeyKind::Primary(vec!["id".into()]));
+    assert!(structure.has_key());
     assert_eq!(structure.column("name").map(|c| c.class), Some(TypeClass::Text));
     structure.columns[0].in_key = false;
     assert_eq!(structure.key_kind(), KeyKind::RowId);
+    assert!(structure.has_key());
     structure.rowid = false;
     assert_eq!(structure.key_kind(), KeyKind::None, "no key: only read");
+    assert!(!structure.has_key(), "has_key agrees with key_kind");
     assert_eq!(TableRef::in_schema("public", "users").to_string(), "public.users");
 }
 

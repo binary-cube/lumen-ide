@@ -3,6 +3,9 @@
 
 use super::*;
 
+/// The grey squares of the checkerboard under a transparent color (with white).
+const CHECKER_GREY: Rgba = Rgba::rgb(0xc8c8c8);
+
 impl EditorView {
     /// The line of the color swatch under point `p` (click in the gutter).
     pub fn swatch_at(&self, p: Point) -> Option<u32> {
@@ -91,6 +94,13 @@ impl EditorView {
         self.cursor_lines.sort_unstable();
         for i in 0..self.lines.len() {
             let row = Row { line: self.lines[i], top: f.row_top(i), baseline: f.row_baseline(i) };
+            // A wrapped line's later rows: its change bar goes on, the wrap's mark where the
+            // number would be; the rest is the line's first row's.
+            if !self.seg(i).first {
+                self.paint_change_bar(f, gutter, row, palette);
+                self.paint_wrap_goes_on(f, gutter, text, row, palette);
+                continue;
+            }
             self.paint_line_number(f, gutter, text, row, palette);
             self.paint_annotation(f, gutter, text, row, palette);
             // The bulb takes the swatch's place on its line.
@@ -135,6 +145,21 @@ impl EditorView {
             (bottom - top - 2.0 * inset).max(w).round(),
         );
         gutter.quad(Quad::filled(r, palette.accent.with_alpha(0.85)).rounded(w / 2.0));
+    }
+
+    /// On a wrapped line's later row, where its number would be: the mark that it goes on.
+    fn paint_wrap_goes_on(
+        &self,
+        f: &Frame<'_>,
+        gutter: &mut render_api::Layer,
+        text: &mut TextSystem,
+        row: Row,
+        palette: &Palette,
+    ) {
+        let shaped = text.shape_line(super::text::WRAP_GOES_ON, &f.font);
+        let x = (f.bounds.min_x() + f.layout.gutter_width - f.layout.advance * 2.6 - shaped.width)
+            .round();
+        draw_text(gutter, &shaped, x, row.baseline, palette.gutter_text.with_alpha(0.6));
     }
 
     /// A row's line number, brighter on a cursor's line.
@@ -248,7 +273,7 @@ impl EditorView {
             // Under a transparent color: checkerboard (white / gray).
             gutter.quad(Quad::filled(r, Rgba::WHITE).rounded(radius));
             let half = (size / 2.0).round();
-            let grey = Rgba::rgb(0xc8c8c8);
+            let grey = CHECKER_GREY;
             gutter.quad(Quad::filled(Rect::new(r.min_x(), r.min_y(), half, half), grey));
             gutter.quad(Quad::filled(
                 Rect::new(r.min_x() + half, r.min_y() + half, size - half, size - half),

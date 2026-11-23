@@ -148,7 +148,7 @@ impl LogView {
             let spec = ButtonSpec::new(ButtonKind::Ghost)
                 .label(label)
                 .rest_tone(Tone::Neutral)
-                .on(on)
+                .toggle(on)
                 .hovered(self.hover == Some(hit));
             ds::button(layer, text, icons, ds, r, spec);
             self.hits.push((r, hit));

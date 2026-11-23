@@ -64,3 +64,16 @@ fn a_long_text_is_cut_in_the_middle() {
     // By characters, not bytes.
     assert_eq!(shorten_middle("ăîșțâăîșțâ", 5), "ăî…țâ");
 }
+
+/// Pasted on one line: lines joined by one space (a `\r\n` one break, blank lines left out),
+/// a tab a space, other controls dropped; a line as it is, borrowed.
+#[test]
+fn a_paste_goes_on_one_line() {
+    assert!(matches!(pasted_line("plain text"), std::borrow::Cow::Borrowed("plain text")));
+    assert_eq!(pasted_line("a\r\nb"), "a b");
+    assert_eq!(pasted_line("a\n\n\nb\n"), "a b");
+    // A table's cells (a tab between them) stay apart; a break typed alone is a space.
+    assert_eq!(pasted_line("foo\tbar"), "foo bar");
+    assert_eq!(pasted_line("\n"), " ");
+    assert_eq!(pasted_line("\u{7}x\ty"), "x y");
+}

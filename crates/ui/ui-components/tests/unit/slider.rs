@@ -63,3 +63,30 @@ fn a_click_picks_the_nearest_stop() {
     assert_eq!(area.rect.size.height, height(&compact));
     assert_eq!(height(&compact), 20.0);
 }
+
+/// To a screen reader: a slider, its stop as its value and its place among the stops.
+#[test]
+fn a_slider_tells_its_stop() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let style = SliderStyle::from_palette(&palette);
+    let recording = ui_kit::access::begin();
+    slider(
+        &mut Layer::default(),
+        &mut TextSystem::new(),
+        &ctx,
+        SliderSpec {
+            x: 0.0,
+            top: 0.0,
+            width: 300.0,
+            labels: &["low", "mid", "high"],
+            current: 1,
+            hovered: false,
+            style: &style,
+        },
+    );
+    let frame = recording.take();
+    let s =
+        frame.nodes().iter().find(|n| n.role == ui_kit::access::Role::Slider).expect("the slider");
+    assert_eq!((s.value.as_deref(), s.place.index, s.place.count), (Some("mid"), Some(1), Some(3)));
+}

@@ -42,6 +42,34 @@ pub fn draw_code(layer: &mut Layer, text: &mut TextSystem, spec: CodeLine<'_>) {
     }
 }
 
+/// Draws only bytes `part` of `source` from `x` (a wrapped line's row), colored as the
+/// whole line is (a string broken across rows keeps its color), clipped at `max_x`.
+pub fn draw_code_part(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    spec: CodeLine<'_>,
+    part: std::ops::Range<usize>,
+) {
+    let CodeLine { source, extension, font, x, baseline, palette, max_x } = spec;
+    let style = code_intelligence::code_style::for_extension(extension);
+    let mut x = x;
+    let base = source.as_ptr() as usize;
+    for (token, color) in tokens(source, palette, &style) {
+        let start = token.as_ptr() as usize - base;
+        let (from, to) = (start.max(part.start), (start + token.len()).min(part.end));
+        if from >= to {
+            continue;
+        }
+        if x >= max_x {
+            break;
+        }
+        let Some(piece) = source.get(from..to) else { continue };
+        let shaped = text.shape_line(piece, font);
+        draw_text(layer, &shaped, x, baseline, color);
+        x += shaped.width;
+    }
+}
+
 /// Draws `source` as [`draw_code`] does, but a line too long for `max_x` ends in "…" (in the
 /// color of the piece it cuts) instead of a glyph cut in half: for one-line listings.
 pub fn draw_code_fitted(layer: &mut Layer, text: &mut TextSystem, spec: CodeLine<'_>) {

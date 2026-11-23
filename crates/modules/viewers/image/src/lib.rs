@@ -42,6 +42,9 @@ static MANIFEST: ModuleManifest = ModuleManifest {
     info: extensions::ModuleInfo { icon: "image", ..extensions::ModuleInfo::BUILT_IN },
 };
 
+/// The dark ground under an image (its transparency seen against it).
+const DARK_GROUND: Rgba = Rgba::rgb(0x1e1f22);
+
 const ICONS: &[IconSvg] = &[
     IconSvg { name: "img-zoom-in", svg: include_str!("../svg/img-zoom-in.svg") },
     IconSvg { name: "img-zoom-out", svg: include_str!("../svg/img-zoom-out.svg") },
@@ -549,10 +552,10 @@ impl Viewer for ImageViewer {
         if let Some(visible) = rect.intersect(&ctx.bounds) {
             match self.background {
                 Background::Dark => {
-                    layer.quad(Quad::filled(visible, Rgba::rgb(0x1e1f22)));
+                    layer.quad(Quad::filled(visible, DARK_GROUND));
                 }
                 Background::Light => {
-                    layer.quad(Quad::filled(visible, Rgba::rgb(0xffffff)));
+                    layer.quad(Quad::filled(visible, Rgba::WHITE));
                 }
                 Background::Checker => {
                     let cell = px(8.0).max(4.0);

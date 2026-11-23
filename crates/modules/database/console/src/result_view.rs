@@ -56,6 +56,8 @@ enum Hit {
     Time,
     /// What to know of the rows (its tooltip says it all).
     Note,
+    /// A pane offered over the rows (by its place among the offered).
+    Pane(usize),
 }
 
 /// A result's tab (see the module's doc).
@@ -77,6 +79,12 @@ pub struct ResultView {
     rights_read: bool,
     /// Its parts' state of use (see [`Self::with_controls`]).
     controls: Controls,
+    /// The panes offered over its rows, made once its result is known.
+    panes: Option<crate::result_panes::Panes>,
+    /// A pane's "Save As" is open (its path goes to the pane, not to an export).
+    pane_saving: bool,
+    /// The room under its bar, drawn last.
+    body: Rect,
 }
 
 impl std::fmt::Debug for ResultView {
@@ -107,6 +115,9 @@ impl ResultView {
             rights_read: false,
             // A press on the bar leaves the keys with the grid.
             controls: Controls::sticky(),
+            panes: None,
+            pane_saving: false,
+            body: Rect::default(),
         }
         .with_grid_focused()
     }
@@ -318,6 +329,9 @@ impl ResultView {
     fn ask_export(&mut self, format: ExportFormat) {
         let name = format!("{}.{}", self.grid.source().name(), format.extension());
         self.export_format = Some(format);
+        // The path picked now is the export's (a pane's "Save As" cancelled before it isn't
+        // waiting any more: a cancel sends nothing back).
+        self.pane_saving = false;
         self.action = Some(ViewerAction::Request(AppRequest::PickSavePath {
             start: self.folder.clone(),
             name,
@@ -414,6 +428,48 @@ impl ResultView {
         true
     }
 
+    /// A pane over its rows takes the keys and the text now (its list open).
+    fn pane_captures(&self) -> bool {
+        self.panes.as_ref().is_some_and(|panes| panes.host.captures())
+    }
+
+    /// The panes over its rows: made once its result is known (their states read for its
+    /// statement), then followed (rows lent as they come, all of them fetched when asked).
+    fn follow_panes(&mut self) -> bool {
+        let source = self.grid.source();
+        let Some(view) = source.result() else { return false };
+        if self.panes.is_none() {
+            let root = self
+                .runner
+                .project()
+                .and_then(crate::consoles::consoles)
+                .map(|c| c.root().to_path_buf());
+            self.panes =
+                Some(crate::result_panes::Panes::new(root, &view.statement, &self.runtime));
+            return true;
+        }
+        let Some(panes) = &mut self.panes else { return false };
+        let (changed, request) = panes.poll(view, source.columns(), &self.runner, &self.runtime);
+        match request {
+            Some(ui_components::result_pane::PaneRequest::SaveAs { name }) => {
+                self.pane_saving = true;
+                self.action = Some(ViewerAction::Request(AppRequest::PickSavePath {
+                    start: self.folder.clone(),
+                    name,
+                }));
+            }
+            Some(ui_components::result_pane::PaneRequest::Tell { text, ok }) => {
+                self.told.push(if ok {
+                    Notification::success(text)
+                } else {
+                    Notification::error(text)
+                });
+            }
+            _ => {}
+        }
+        changed
+    }
+
     /// What the bar says of the rows (`None`: nothing to say), and its tooltip.
     fn note(&self) -> Option<(String, String)> {
         let source = self.grid.source();
@@ -487,8 +543,23 @@ impl ResultView {
             self.hits.push((Rect::new(x, bar.min_y(), w, bar.size.height), Hit::Time));
             x += w + px(10.0);
         }
-        // The export, at the right.
+        // The export, at the right; the panes offered left of it.
         let export = button(bar.max_x() - px(8.0) - side);
+        let mut right = export.min_x() - px(2.0);
+        if let Some(panes) = &self.panes {
+            let hovered = match self.hover {
+                Some(Hit::Pane(i)) => Some(i),
+                _ => None,
+            };
+            let mut hits = Vec::new();
+            right = panes.host.paint_buttons(
+                (layer, ctx.text, ctx.icons, &ds),
+                (right, mid, side),
+                hovered,
+                &mut hits,
+            );
+            self.hits.extend(hits.into_iter().map(|(r, i)| (r, Hit::Pane(i))));
+        }
         let spec = ButtonSpec::new(ButtonKind::Ghost)
             .icon("download")
             .enabled(self.export.is_none())
@@ -499,7 +570,7 @@ impl ResultView {
         }
         // What to know of the rows, between.
         if let Some((note, _)) = self.note() {
-            let room = (export.min_x() - px(12.0) - x).max(0.0);
+            let room = (right - px(10.0) - x).max(0.0);
             let h = px(button_size::SMALL);
             let note_spec = |label| {
                 ButtonSpec::new(ButtonKind::Soft)
@@ -632,14 +703,35 @@ impl Viewer for ResultView {
         self.paint_bar(&mut ctx, bar);
         let area =
             Rect::new(b.min_x(), bar.max_y(), b.size.width, (b.max_y() - bar.max_y()).max(0.0));
+        self.body = area;
+        let (grid, pane) = match &mut self.panes {
+            Some(panes) => panes.host.split(area, ctx.scale),
+            None => (area, None),
+        };
         self.grid.paint(GridPaint {
-            bounds: area,
+            bounds: grid,
             scale: ctx.scale,
             text: ctx.text,
             scene: ctx.scene,
             palette: ctx.palette,
             icons: ctx.icons,
         });
+        if let (Some(rect), Some(pane)) = (pane, self.panes.as_mut().and_then(|p| p.host.pane())) {
+            let ds = Ctx::new(ctx.palette, ctx.scale);
+            let layer = ctx.scene.push_layer(Some(rect));
+            layer.quad(Quad::filled(rect, ctx.palette.editor_background));
+            ds::divider(layer, &ds, rect.min_x(), rect.max_x(), rect.min_y());
+            pane.paint(ViewerPaint {
+                bounds: rect,
+                scale: ctx.scale,
+                text: ctx.text,
+                scene: ctx.scene,
+                palette: ctx.palette,
+                icons: ctx.icons,
+                focused: ctx.focused,
+                waker: ctx.waker.clone(),
+            });
+        }
     }
 
     fn poll(&mut self) -> bool {
@@ -655,6 +747,7 @@ impl Viewer for ResultView {
         }
         changed |= self.take_submitted();
         changed |= self.follow_export();
+        changed |= self.follow_panes();
         changed || seen
     }
 
@@ -663,11 +756,16 @@ impl Viewer for ResultView {
     }
 
     fn is_loading(&self) -> bool {
-        self.grid.is_loading()
+        self.grid.is_loading() || self.panes.as_ref().is_some_and(crate::result_panes::Panes::busy)
     }
 
     fn working(&self) -> bool {
         self.is_loading() || self.export.is_some()
+    }
+
+    /// A pane under the grid moves (a chart's transition): frames while it does.
+    fn is_animating(&self) -> bool {
+        self.panes.as_ref().is_some_and(|panes| panes.host.animating())
     }
 
     fn pointer_down(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
@@ -687,8 +785,20 @@ impl Viewer for ResultView {
                 self.ask_export(ExportFormat::chosen(self.grid.project()));
                 return self.action.take();
             }
+            Some(Hit::Pane(i)) => {
+                if let Some(panes) = &mut self.panes {
+                    panes.host.toggle(i);
+                }
+                return None;
+            }
             Some(_) => return None,
             None => {}
+        }
+        if let Some(panes) = &mut self.panes
+            && panes.host.over(p)
+        {
+            panes.host.press(p, clicks);
+            return None;
         }
         // The grid (⇧ / ⌘ extend its choice).
         self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods));
@@ -701,10 +811,17 @@ impl Viewer for ResultView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
+        let body = self.body;
+        if let Some(moved) = self.panes.as_mut().and_then(|panes| panes.host.drag(p, body)) {
+            return moved;
+        }
         self.with_controls(|c, parts| c.drag(parts, p)).is_some_and(|(_, moved)| moved)
     }
 
     fn release(&mut self) -> bool {
+        if let Some(changed) = self.panes.as_mut().and_then(|panes| panes.host.release()) {
+            return changed;
+        }
         self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
     }
 
@@ -712,7 +829,8 @@ impl Viewer for ResultView {
         let hover = self.hit(p);
         let changed = hover != self.hover;
         self.hover = hover;
-        changed | self.with_controls(|c, parts| c.hover(parts, Some(p)))
+        let pane = self.panes.as_mut().is_some_and(|panes| panes.host.hover(p));
+        changed | pane | self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
     fn tooltip_at(&self, p: Point) -> Option<Tip> {
@@ -731,32 +849,49 @@ impl Viewer for ResultView {
                     )
                 }
                 Hit::Note => self.note()?.1,
+                Hit::Pane(i) => return self.panes.as_ref()?.host.button_tip(*i, *r),
             };
             return Some(Tip::new(*r, label));
+        }
+        if let Some(panes) = self.panes.as_ref().filter(|panes| panes.host.over(p)) {
+            return panes.host.tooltip(p);
         }
         self.controls.tooltip_at(p)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if matches!(self.hit(p), Some(Hit::Commit | Hit::Rollback | Hit::Export)) {
+        if matches!(self.hit(p), Some(Hit::Commit | Hit::Rollback | Hit::Export | Hit::Pane(_))) {
             return Some(ViewerCursor::Pointer);
+        }
+        if let Some(panes) = self.panes.as_ref().filter(|panes| panes.host.over(p)) {
+            return panes.host.cursor(p);
         }
         self.controls.cursor_at(p)
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        if self.panes.as_mut().is_some_and(|panes| panes.host.scroll(dx, dy)) {
+            return true;
+        }
         self.with_controls(|c, parts| c.scroll_focused(parts, dx, dy)).is_some()
     }
 
     fn wants_text(&self) -> bool {
-        self.grid.wants_text()
+        self.pane_captures() || self.grid.wants_text()
     }
 
     fn text_input(&mut self, text: &str) -> bool {
+        if self.pane_captures() {
+            return self.panes.as_mut().is_some_and(|panes| panes.host.text(text));
+        }
         self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     fn key(&mut self, c: char) -> bool {
+        // A pane's open list takes what's typed (its search), as text.
+        if self.pane_captures() {
+            return self.text_input(&c.to_string());
+        }
         // The grid's control has no `char_key`: its typing starts here.
         self.grid.type_char(c)
     }
@@ -766,6 +901,9 @@ impl Viewer for ResultView {
     }
 
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
+        if self.pane_captures() {
+            return self.panes.as_mut().is_some_and(|panes| panes.host.key(key, reach));
+        }
         let used = self.with_controls(|c, parts| c.key(parts, key, reach)).is_some();
         self.take_grid_action();
         used
@@ -784,6 +922,12 @@ impl Viewer for ResultView {
             return Some(ui_components::data_grid::export_menu(self.grid.project()));
         }
         let (_, mut entries) = self.with_controls(|c, parts| c.menu(parts, p))?;
+        // On the rows: a pane drawn from the selection, from all of them again, closed.
+        if let Some(panes) = &self.panes
+            && !panes.host.over(p)
+        {
+            entries.extend(panes.host.menu(self.grid.has_picked()));
+        }
         // Its table's data, and the row a key's cell points to (as the data view's).
         if self.grid.source().editable().is_some() {
             entries.push(ViewMenuEntry::Separator);
@@ -806,6 +950,16 @@ impl Viewer for ResultView {
     }
 
     fn command(&mut self, id: &str) -> bool {
+        // A pane's row of the right-click menu (the selection taken only when it's asked).
+        if id.starts_with(ui_components::result_pane::PANE_MENU)
+            && let Some(panes) = &mut self.panes
+        {
+            let grid = &self.grid;
+            let picked = || {
+                grid.picked().map(|p| std::sync::Arc::new(p) as ui_components::result_pane::Lent)
+            };
+            return panes.host.menu_command(id, picked);
+        }
         let used = match id {
             "find" => {
                 self.grid.open_find();
@@ -826,6 +980,16 @@ impl Viewer for ResultView {
                 e.cancel.cancel();
                 true
             }),
+            id if id.starts_with("picked-save:") && self.pane_saving => {
+                self.pane_saving = false;
+                if matches!(
+                    self.action,
+                    Some(ViewerAction::Request(AppRequest::PickSavePath { .. }))
+                ) {
+                    self.action = None;
+                }
+                self.panes.as_mut().is_some_and(|panes| panes.host.command(id))
+            }
             id if id.starts_with("picked-save:") => match self.export_format.take() {
                 Some(chosen) => {
                     if matches!(

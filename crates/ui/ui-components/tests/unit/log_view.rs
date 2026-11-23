@@ -109,10 +109,11 @@ fn soft_wrap_breaks_long_lines_at_the_width() {
     // Narrower: more rows.
     frame(&mut view, &mut text, 700.0, 600.0);
     assert!(view.rows().iter().filter(|(n, _)| *n == 0).count() > first.len());
-    // The wrapping function itself: every piece within the room, nothing lost.
-    let pieces = wrap("abcdefghij klmnop", 5);
-    assert!(pieces.iter().all(|(a, b)| "abcdefghij klmnop"[*a..*b].chars().count() <= 5));
-    assert_eq!(pieces.last().map(|p| p.1), Some(17));
+    // The wrapping is every view's: every piece within the room, nothing lost.
+    let mut pieces = Vec::new();
+    crate::text_options::wrap_rows("abcdefghij klmnop qrstuv", 8, 4, &mut pieces);
+    assert!(pieces.iter().all(|r| "abcdefghij klmnop qrstuv"[r.clone()].chars().count() <= 8));
+    assert_eq!(pieces.last().map(|p| p.end), Some(24));
 }
 
 #[test]

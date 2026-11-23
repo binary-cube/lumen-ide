@@ -392,6 +392,11 @@ impl Viewer for Studio {
         self.animating()
     }
 
+    /// In the background, the preview's effects stand still (back in front, they move on).
+    fn set_window_focused(&mut self, focused: bool) {
+        self.window_away = !focused;
+    }
+
     /// What it holds besides its draft: the effects' painters (their art leaves for the GPU).
     fn purge(&mut self) {
         self.live = None;

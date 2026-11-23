@@ -55,3 +55,41 @@ fn a_folding_node_is_a_tree_item_named_by_its_row() {
     let item = frame.nodes().iter().find(|n| n.role == Role::TreeItem).expect("the item");
     assert_eq!((&*item.name, item.state.expanded), ("src", Some(true)));
 }
+
+/// A row told whole is one item: its name, its depth, open or not, chosen; its name's text
+/// (even cut short) isn't read again, its note is, under it; its chevron adds nothing.
+#[test]
+fn a_row_told_whole_is_one_item_with_its_level() {
+    use ui_kit::access::Role;
+    let icons = Icons::builtin();
+    let mut layer = Layer::default();
+    let mut text = text_layout::TextSystem::new();
+    let font = text_layout::Font::new(text_layout::FontFamily::SansSerif, 13.0);
+    let recording = ui_kit::access::begin();
+    let row = Item {
+        name: "controllers",
+        bounds: Rect::new(0.0, 0.0, 300.0, 22.0),
+        level: 2,
+        expanded: Some(false),
+        selected: true,
+    };
+    let told = item(row);
+    chevron(&mut layer, &icons, Rect::new(30.0, 4.0, 14.0, 14.0), false, Rgba::WHITE);
+    let name = text.shape_line("controll…", &font);
+    ui_kit::draw_text(&mut layer, &name, 50.0, 15.0, Rgba::WHITE);
+    let note = text.shape_line("3 files", &font);
+    ui_kit::draw_text(&mut layer, &note, 200.0, 15.0, Rgba::WHITE);
+    drop(told);
+    let frame = recording.take();
+    let items: Vec<_> = frame.nodes().iter().filter(|n| n.role == Role::TreeItem).collect();
+    assert_eq!(items.len(), 1, "the chevron adds none");
+    let it = items[0];
+    assert_eq!(
+        (&*it.name, it.place.level, it.state.expanded),
+        ("controllers", Some(2), Some(false))
+    );
+    assert!(it.state.selected);
+    let under: Vec<_> =
+        frame.nodes().iter().filter(|n| n.parent == it.id).map(|n| n.name.to_string()).collect();
+    assert_eq!(under, ["3 files"]);
+}

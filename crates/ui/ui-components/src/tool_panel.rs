@@ -123,6 +123,9 @@ impl KeyReach {
 pub struct PanelMemento(pub String);
 
 pub trait ToolPanel: Send {
+    /// How text is shown (word wrap…, [`crate::TextOptions`]): told by the app at its
+    /// first frame and each time it changes; a panel drawing text follows it.
+    fn set_text_options(&mut self, _options: &crate::TextOptions) {}
     /// The new editor context (when the file, the text or the cursor changes).
     fn update(&mut self, ctx: &PanelContext<'_>);
     fn paint(&mut self, ctx: ViewerPaint<'_>);

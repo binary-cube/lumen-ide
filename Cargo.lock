@@ -514,6 +514,7 @@ dependencies = [
  "uuid",
  "vcs-git",
  "version-control",
+ "viewer-charts",
  "viewer-image",
  "viewer-markdown",
  "workbench-model",
@@ -1231,6 +1232,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "charts-model"
+version = "0.0.0"
+dependencies = [
+ "i18n",
+ "kernel",
+ "serde",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1738,6 +1748,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "data-tables"
+version = "0.0.0"
+dependencies = [
+ "charts-model",
+ "i18n",
+ "kernel",
+ "roxmltree 0.21.1",
+ "serde",
+ "serde_json",
+ "yaml-rust2",
+]
+
+[[package]]
 name = "data-url"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1747,6 +1770,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 name = "database"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "extractors",
  "kernel",
  "proptest",
@@ -1756,6 +1780,7 @@ dependencies = [
 name = "database-console"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "chrono",
  "code-intelligence",
  "command-model",
@@ -1812,6 +1837,7 @@ dependencies = [
 name = "database-explorer"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "command-model",
  "database",
  "db-csv",
@@ -2703,6 +2729,7 @@ dependencies = [
 name = "folder-sizes"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "chrono",
  "command-model",
  "extensions",
@@ -7240,6 +7267,7 @@ dependencies = [
 name = "profiler"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "chrono",
  "command-model",
  "contracts",
@@ -9024,6 +9052,7 @@ checksum = "61c41af27dd6d1e27b1b16b489db798443478cef1f06a660c96db617ba5de3b1"
 name = "task-manager"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "command-model",
  "extensions",
  "i18n",
@@ -9905,6 +9934,7 @@ dependencies = [
 name = "ui-components"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "code-intelligence",
  "command-model",
  "diff",
@@ -9918,7 +9948,9 @@ dependencies = [
  "render-api",
  "text-layout",
  "theming",
+ "tracing",
  "ui-kit",
+ "vector-tiles",
  "workbench-model",
 ]
 
@@ -10255,6 +10287,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "viewer-charts"
+version = "0.0.0"
+dependencies = [
+ "charts-model",
+ "command-model",
+ "data-tables",
+ "extensions",
+ "i18n",
+ "icons",
+ "image-decode",
+ "kernel",
+ "languages",
+ "render-api",
+ "serde_json",
+ "settings-model",
+ "text-layout",
+ "tracing",
+ "ui-components",
+ "ui-kit",
+ "workbench-model",
+]
+
+[[package]]
 name = "viewer-image"
 version = "0.0.0"
 dependencies = [
@@ -10276,6 +10331,7 @@ dependencies = [
 name = "viewer-markdown"
 version = "0.0.0"
 dependencies = [
+ "charts-model",
  "command-model",
  "diagram-text",
  "extensions",
@@ -10554,6 +10610,7 @@ dependencies = [
 name = "web-fetch"
 version = "0.0.0"
 dependencies = [
+ "kernel",
  "ureq",
 ]
 

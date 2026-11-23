@@ -36,7 +36,9 @@ pub use copy::{CopyStream, Extractor, cell_of, column_of, copy_text};
 pub use edit::{edit_text, parse_value};
 pub use export::ExportFormat;
 pub use filter::{Compare, GridFilter, ParseError, cycle_sort, parse_order, parse_where};
-pub use grid::{DataGrid, GridAction, GridPaint, ToolCommands, export_menu};
+pub use grid::{
+    DataGrid, GridAction, GridPaint, MOST_PICKED_ROWS, Picked, ToolCommands, export_menu,
+};
 pub use layout::{ColumnLayout, SavedLayout};
 pub use paging::{PAGE_SIZES, Paging};
 pub use paint::grouped;

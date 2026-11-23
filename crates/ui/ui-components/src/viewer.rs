@@ -715,6 +715,14 @@ pub trait Viewer: Send {
     /// only when it changes (a view starts hidden until told); a view that works in the
     /// background while shown (the Task Manager's sampling) pauses on `false`.
     fn set_shown(&mut self, _shown: bool) {}
+    /// The window has the keyboard (`true`) or another program took it (`false`). Told by
+    /// the app when it changes, and to a view at its first frame; what moves only for the
+    /// user's eye (a preview's effects) stands still while the window is in the background,
+    /// as the window's own decorations do.
+    fn set_window_focused(&mut self, _focused: bool) {}
+    /// How text is shown (word wrap…, [`crate::TextOptions`]): told by the app at its
+    /// first frame and each time it changes; a view drawing text follows it.
+    fn set_text_options(&mut self, _options: &crate::TextOptions) {}
     fn paint(&mut self, ctx: ViewerPaint<'_>);
     /// Scroll (physical pixels); `true` if something changed.
     fn scroll(&mut self, _dx: f32, _dy: f32) -> bool {

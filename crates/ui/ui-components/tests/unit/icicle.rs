@@ -233,3 +233,43 @@ fn ten_thousand_nodes_are_laid_out_once_per_width() {
     let scene = paint(&mut icicle, 1600.0);
     assert!(scene.quad_count() > 0);
 }
+
+/// The same frame drawn again (warmed up, its scene kept): nothing allocated.
+#[test]
+fn an_identical_repaint_allocates_nothing() {
+    let mut text = text_layout::TextSystem::new();
+    let palette = Palette::dark();
+    let icons = Icons::builtin();
+    let mut scene = Scene::default();
+    let mut icicle = Icicle::new();
+    icicle.set_nodes(sample());
+    let mut frame = |icicle: &mut Icicle| {
+        scene.reset(palette.editor_background);
+        icicle.paint(IciclePaint {
+            bounds: Rect::new(0.0, 0.0, 800.0, 400.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            clip: None,
+        });
+    };
+    for _ in 0..3 {
+        frame(&mut icicle);
+    }
+    let n = crate::allocations::during(|| frame(&mut icicle));
+    assert_eq!(n, 0, "{n} allocations");
+}
+
+/// Hovered: a bar under the mouse is lit (a frame asked), once; the mouse gone, none is.
+#[test]
+fn a_bar_lights_under_the_mouse() {
+    let mut icicle = Icicle::new();
+    icicle.set_nodes(sample());
+    paint(&mut icicle, 800.0);
+    let on_bar = Point::new(icicle.chart.min_x() + 4.0, icicle.chart.min_y() + 4.0);
+    assert!(icicle.hover(on_bar), "lit");
+    assert!(!icicle.hover(on_bar), "still on it: nothing new");
+    assert!(icicle.leave(), "left");
+}

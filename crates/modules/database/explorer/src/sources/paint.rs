@@ -372,6 +372,14 @@ impl SourcesView {
                 ListRow::Folder { id, depth, open, count } => {
                     let Some(folder) = editor.folder(id) else { continue };
                     let selected = editor.selected_folder == Some(id);
+                    // To a screen reader: a folder of the tree (its name, depth, open or not).
+                    let _item = ui_components::tree::item(ui_components::tree::Item {
+                        name: &folder.name,
+                        bounds: row_rect,
+                        level: usize::from(depth),
+                        expanded: Some(open),
+                        selected,
+                    });
                     let target =
                         drop == Some(Place::Folder(id)) && self.dragging != Some(Item::Folder(id));
                     if target {

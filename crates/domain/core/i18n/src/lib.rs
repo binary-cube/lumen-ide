@@ -66,6 +66,19 @@ static REGISTRY: LazyLock<RwLock<Registry>> = LazyLock::new(|| {
     RwLock::new(registry)
 });
 
+/// Bumped whenever what a message says may change (a catalog added, the language changed):
+/// a text made from messages is kept under it and made again only when it moves.
+static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// What the messages say now, as a number that changes when they may (one atomic read).
+pub fn generation() -> u64 {
+    GENERATION.load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn bump() {
+    GENERATION.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
+
 /// Adds (or replaces) a catalog's messages, e.g. a module's contribution.
 pub fn register(locale: &str, source: &str) {
     if let Ok(mut registry) = REGISTRY.write() {
@@ -74,6 +87,7 @@ pub fn register(locale: &str, source: &str) {
             catalog.insert(key.into_boxed_str(), Entry::new(Cow::Owned(text)));
         }
     }
+    bump();
 }
 
 /// Changes the interface language (e.g. `ro`, `en`).
@@ -81,6 +95,7 @@ pub fn set_locale(locale: &str) {
     if let Ok(mut registry) = REGISTRY.write() {
         locale.clone_into(&mut registry.locale);
     }
+    bump();
 }
 
 pub fn locale() -> String {

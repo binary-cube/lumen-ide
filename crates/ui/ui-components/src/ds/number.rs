@@ -24,6 +24,13 @@ pub fn number_field(
     shown: &str,
     typing: bool,
 ) -> NumberArea {
+    // To a screen reader: a number stepped up or down, named by the text on its line, its
+    // value the number (its − and + and the number drawn not read apart).
+    ui_kit::access::node(|| {
+        use ui_kit::access::{Described, Role};
+        Described::new(Role::SpinButton, "", rect).value(shown)
+    });
+    let _quiet = ui_kit::access::silenced();
     let p = ctx.palette;
     let border = if typing { p.search_field_border_focused } else { p.input_border };
     layer.quad(
@@ -236,6 +243,19 @@ impl ColorSwatch {
 
     /// Drawn in `rect`.
     pub fn paint(&self, layer: &mut Layer, ctx: &Ctx<'_>, rect: Rect) {
+        // To a screen reader: a button (picking its color), named by the text on its line,
+        // its value the color; inside a button (a color's field) that button's, not told
+        // again.
+        if !ui_kit::access::inside(ui_kit::access::Role::Button) {
+            ui_kit::access::node(|| {
+                use ui_kit::access::{Described, Role};
+                let node = Described::new(Role::Button, "", rect).value(self.color.to_hex());
+                match self.ring {
+                    SwatchRing::Around { chosen } => node.checked(chosen),
+                    _ => node,
+                }
+            });
+        }
         if let SwatchRing::Around { chosen } = self.ring {
             let r = ctx.px(self.radius);
             if chosen || self.hovered {
@@ -331,6 +351,13 @@ impl<'a> ColorField<'a> {
         ctx: &Ctx<'_>,
         rect: Rect,
     ) -> Rect {
+        // To a screen reader: one button, its value the color as written (what's drawn in
+        // it, its swatch and its text, says the same: not read again).
+        let _told = ui_kit::access::open(|| {
+            use ui_kit::access::{Described, Role};
+            Described::new(Role::Button, "", rect).value(self.value)
+        });
+        let _quiet = ui_kit::access::silenced();
         let p = ctx.palette;
         let px = |v: f32| ctx.px(v);
         let fill = if self.editing {

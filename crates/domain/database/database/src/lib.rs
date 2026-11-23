@@ -46,6 +46,7 @@ pub mod folders;
 pub mod history;
 pub mod identity;
 pub mod layouts;
+pub mod lent;
 pub mod mysql;
 pub mod navigation;
 pub mod plan;

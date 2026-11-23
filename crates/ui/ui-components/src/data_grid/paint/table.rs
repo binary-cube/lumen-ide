@@ -14,10 +14,20 @@ impl<S: GridSource> DataGrid<S> {
     /// The row numbers' width for the page's last row.
     pub(super) fn gutter_width(&self, text: &mut TextSystem, ds: &Ctx<'_>, rows: u64) -> f32 {
         let last = self.paging.start + rows.max(1);
-        let digits = grouped(last).len().max(2);
+        // The last number's length as written (its digits and their separators).
+        let figures = last.checked_ilog10().map_or(1, |l| l as usize + 1);
+        let digits = (figures + (figures - 1) / 3).max(2);
+        let key = (digits, ds.scale.to_bits());
+        if let Some((seen, width)) = self.gutter.get()
+            && seen == key
+        {
+            return width;
+        }
         let font = ds.code_font(-2.0);
         let w = text.shape_line(&"0".repeat(digits), &font).width;
-        (w + ds.px(22.0)).max(ds.px(44.0)).round()
+        let width = (w + ds.px(22.0)).max(ds.px(44.0)).round();
+        self.gutter.set(Some((key, width)));
+        width
     }
 
     /// Columns not measured yet are fitted to their header and the rows in view; one
@@ -136,13 +146,17 @@ impl<S: GridSource> DataGrid<S> {
         let last = (first + span).min(rows);
         self.request_visible(body.size.height);
         self.measure_columns(text, ds, first, last);
-        let edges: Vec<f32> = self.layout.edges().iter().map(|e| e * ds.scale).collect();
+        // The edges in the buffer kept for them (filled anew, never allocated again).
+        let mut edges = std::mem::take(&mut self.edges);
+        self.layout.edges_into(&mut edges, ds.scale);
         let content_w = edges.last().copied().unwrap_or(0.0);
         let room = body.size.width - gutter;
         self.scroll_x = self.scroll_x.clamp(0.0, (content_w - room + px(12.0)).max(0.0));
         let x0 = body.min_x() + gutter - self.scroll_x;
-        let visible = self.layout.visible();
-        let columns = self.source.columns().to_vec();
+        // The columns shown, in the buffer kept for them; the columns' descriptions read
+        // where needed, never copied (their names are texts).
+        let mut visible = std::mem::take(&mut self.shown_columns);
+        self.layout.visible_into(&mut visible);
 
         // The rows.
         let cells = Rect::new(body.min_x() + gutter, body.min_y(), room, body.size.height);
@@ -150,11 +164,19 @@ impl<S: GridSource> DataGrid<S> {
         let cell_font = ds.ui_font(-0.5);
         let null_font = ds.ui_font(-2.0).with_italic(true);
         let metrics = text.metrics(&cell_font);
-        let mut buffer = String::new();
+        // A cell's text, written in a text kept from frame to frame.
+        let mut buffer = std::mem::take(&mut self.cell_text);
         let selected_fill = p.accent.with_alpha(0.16);
         let find_fill = p.search_match;
         let current_find = self.find.matches.get(self.find.current).copied();
-        let default_label = i18n::t("grid.default");
+        let hints = self.hints.get_or_update(i18n::generation(), Hints::new).clone();
+        let default_label = &hints.default;
+        // To a screen reader: a table of all its rows, the ones shown under it.
+        let table = move || {
+            ui_kit::access::Described::new(ui_kit::access::Role::Table, "", cells)
+                .count(usize::try_from(rows).unwrap_or(usize::MAX))
+        };
+        let table = ui_kit::access::open(table);
         for i in first..last {
             let row_top = body.min_y() + i as f32 * row_h - self.scroll_y;
             // A row to a screen reader: its cells' texts under it, in order.
@@ -166,6 +188,7 @@ impl<S: GridSource> DataGrid<S> {
                     Rect::new(cells.min_x(), row_top, cells.size.width, row_h),
                 )
                 .key(i)
+                .index(usize::try_from(i).unwrap_or(usize::MAX))
             };
             ui_kit::access::group(described, || {
                 let row = self.row_at(i);
@@ -180,6 +203,12 @@ impl<S: GridSource> DataGrid<S> {
                         continue;
                     }
                     let cell = Rect::new(left, top, right - left, row_h);
+                    // A cell to a screen reader: its text under it, its column's place (its
+                    // header said with it).
+                    let _cell = ui_kit::access::open(|| {
+                        ui_kit::access::Described::new(ui_kit::access::Role::Cell, "", cell)
+                            .index(pos)
+                    });
                     let at = CellPos::new(i, pos);
                     let mark = self.source.mark(row, col);
                     match mark {
@@ -216,9 +245,9 @@ impl<S: GridSource> DataGrid<S> {
                                     row_h,
                                     &text.metrics(&null_font),
                                 );
-                                let align = columns[col].align();
+                                let align = self.source.columns()[col].align();
                                 let label = if self.source.is_default(row, col) {
-                                    default_label.as_str()
+                                    &**default_label
                                 } else {
                                     "NULL"
                                 };
@@ -262,7 +291,7 @@ impl<S: GridSource> DataGrid<S> {
                                     &cell_font,
                                     (start, room, baseline),
                                     color,
-                                    columns[col].align(),
+                                    self.source.columns()[col].align(),
                                 );
                             }
                         }
@@ -280,6 +309,7 @@ impl<S: GridSource> DataGrid<S> {
                 }
             });
         }
+        drop(table);
         // The columns' separators.
         crate::table::column_lines(
             layer,
@@ -361,6 +391,8 @@ impl<S: GridSource> DataGrid<S> {
         layer.quad(Quad::filled(numbers, p.text.with_alpha(0.02)));
         let number_font = ds.code_font(-2.0);
         let nm = text.metrics(&number_font);
+        // A row's number, written in a text kept from frame to frame.
+        let mut label = std::mem::take(&mut self.row_label);
         for i in first..last {
             let row = self.row_at(i);
             let top = body.min_y() + i as f32 * row_h - self.scroll_y;
@@ -371,11 +403,13 @@ impl<S: GridSource> DataGrid<S> {
                     p.accent.with_alpha(0.10),
                 ));
             }
-            let label = if i < self.page_rows() {
-                grouped(row + 1)
+            label.clear();
+            if i < self.page_rows() {
+                write_grouped(&mut label, row + 1);
             } else {
-                format!("+{}", i - self.page_rows() + 1)
-            };
+                use std::fmt::Write;
+                let _ = write!(label, "+{}", i - self.page_rows() + 1);
+            }
             let shaped = text.shape_line(&label, &number_font);
             let color = if i >= self.page_rows() {
                 p.vcs_added
@@ -414,6 +448,7 @@ impl<S: GridSource> DataGrid<S> {
                 color,
             );
         }
+        self.row_label = label;
         ds::divider_vertical(layer, ds, numbers.max_x() - ds.line(), body.min_y(), body.max_y());
 
         // The headers.
@@ -427,18 +462,19 @@ impl<S: GridSource> DataGrid<S> {
             room,
             header.size.height,
         )));
-        let name_font = ds.ui_font(-0.5).with_weight(Font::SEMIBOLD);
-        let type_font = ds.ui_font(-2.0);
+        let name_font = crate::table::name_font(ds);
+        let type_font = crate::table::subtitle_font(ds);
         let sort = self.query.sort.clone();
         for (pos, &col) in visible.iter().enumerate() {
             let (left, right) = (x0 + edges[pos], x0 + edges[pos + 1]);
             if right < cells.min_x() || left > cells.max_x() {
                 continue;
             }
-            let c = &columns[col];
+            let c = &self.source.columns()[col];
             let r = Rect::new(left, header.min_y(), right - left, header.size.height);
+            let _told = crate::table::column_header(&c.name, r, Some(pos));
             if self.hover_header == Some(pos) {
-                layer.quad(Quad::filled(r, p.text.with_alpha(0.04)));
+                crate::table::header_hover(layer, ds, r);
             }
             let mut x = left + px(CELL_PAD);
             let mut room = r.size.width - 2.0 * px(CELL_PAD);
@@ -485,7 +521,7 @@ impl<S: GridSource> DataGrid<S> {
                 text,
                 &c.name,
                 &name_font,
-                (x, room.max(0.0), (r.min_y() + px(20.0)).round()),
+                (x, room.max(0.0), crate::table::name_baseline(ds, r.min_y())),
                 p.text,
                 Align::Left,
             );
@@ -495,7 +531,11 @@ impl<S: GridSource> DataGrid<S> {
                 text,
                 &c.type_name,
                 &type_font,
-                (left + px(CELL_PAD), type_room.max(0.0), (r.min_y() + px(36.0)).round()),
+                (
+                    left + px(CELL_PAD),
+                    type_room.max(0.0),
+                    crate::table::subtitle_baseline(ds, r.min_y()),
+                ),
                 p.text_muted,
                 Align::Left,
             );
@@ -582,6 +622,9 @@ impl<S: GridSource> DataGrid<S> {
         } else {
             self.hbar = None;
         }
+        self.edges = edges;
+        self.shown_columns = visible;
+        self.cell_text = buffer;
     }
 
     /// One row transposed: each column's name and value on a line of its own.
@@ -667,7 +710,6 @@ impl<S: GridSource> DataGrid<S> {
         }
 
         let visible = self.layout.visible();
-        let columns = self.source.columns().to_vec();
         let content_h = visible.len() as f32 * row_h;
         self.scroll_y =
             self.scroll_y.clamp(0.0, (content_h - body.size.height + px(10.0)).max(0.0));
@@ -691,7 +733,7 @@ impl<S: GridSource> DataGrid<S> {
             } else if pos % 2 == 1 {
                 layer.quad(Quad::filled(line, p.text.with_alpha(0.018)));
             }
-            let c = &columns[col];
+            let c = &self.source.columns()[col];
             let baseline = ui_kit::centered_baseline(top, row_h, &metrics);
             let mut nx = body.min_x() + px(16.0);
             if c.key

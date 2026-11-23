@@ -218,7 +218,7 @@ impl DiagramView {
                 };
                 let spec = ButtonSpec::new(ButtonKind::Ghost)
                     .icon(tool.icon())
-                    .on(on)
+                    .toggle(on)
                     .enabled(self.tool_enabled(tool));
                 ds::button(layer, ctx.text, ctx.icons, &ds, r, spec);
                 self.tools.push((r, tool));

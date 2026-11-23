@@ -422,10 +422,13 @@ fn edge(way: &[Point], style: &EdgeLook, theme: &Theme, items: &mut Vec<Item>) {
     items.extend(ends);
 }
 
+/// The text on a light fill, whatever the theme: near-black.
+const DARK_INK: Rgba = Rgba::rgb(0x1a1a1a);
+
 /// The default text's color over `fill`: dark on a light fill, the theme's otherwise.
 fn readable_on(fill: Option<Rgba>, theme: &Theme) -> Rgba {
     match fill {
-        Some(f) if 0.299 * f.r + 0.587 * f.g + 0.114 * f.b > 0.6 => Rgba::rgb(0x1a1a1a),
+        Some(f) if 0.299 * f.r + 0.587 * f.g + 0.114 * f.b > 0.6 => DARK_INK,
         _ => theme.text,
     }
 }

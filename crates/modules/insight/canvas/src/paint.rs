@@ -3,6 +3,11 @@
 
 use super::*;
 
+/// A JavaScript file's badge (its language's amber) and the dark bar over the canvas:
+/// the same in either theme.
+const JS_BADGE: Rgba = Rgba::rgb(0xb7791f);
+const DARK_BAR: Rgba = Rgba::rgb(0x1f1f24);
+
 impl Canvas {
     /// One of its actions ([`ACTIONS`]); `None`: not one.
     pub(crate) fn action(&mut self, id: &str) -> Option<bool> {
@@ -235,7 +240,7 @@ impl Canvas {
             Font::new(p.code_font.clone(), font_px(10.5, k)).with_weight(Font::SEMIBOLD);
         let name_font = Font::new(p.ui_font.clone(), font_px(14.0, k)).with_weight(Font::SEMIBOLD);
         let badge = language_badge(&file.language);
-        let badge_color = if badge == "JS" { Rgba::rgb(0xb7791f) } else { p.accent };
+        let badge_color = if badge == "JS" { JS_BADGE } else { p.accent };
         let br = ds::Badge::new(badge)
             .color(badge_color)
             .fill_alpha(LANGUAGE_FILL)
@@ -612,7 +617,7 @@ impl Canvas {
             w.round(),
             h,
         );
-        let dark = Rgba::rgb(0x1f1f24);
+        let dark = DARK_BAR;
         ds::surface(layer, ds, bar, ds::Elevation::Medium, 12.0);
         layer.quad(
             Quad::filled(bar, dark)

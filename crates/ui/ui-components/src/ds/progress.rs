@@ -318,6 +318,16 @@ impl<'a> ProgressBar<'a> {
     /// Drawn in `rect`: the text row at its top (when there's one), the bar at its bottom,
     /// as wide as `rect`.
     pub fn paint(&self, layer: &mut Layer, text: &mut TextSystem, ctx: &Ctx<'_>, rect: Rect) {
+        // To a screen reader: a progress named by its label, how far as its value (none: it
+        // goes on without a known end).
+        let _told = ui_kit::access::open(|| {
+            use ui_kit::access::{Described, Role};
+            let node = Described::new(Role::ProgressBar, self.label.unwrap_or_default(), rect);
+            match self.fraction {
+                Some(f) => node.value(format!("{}%", (f.clamp(0.0, 1.0) * 100.0).round())),
+                None => node,
+            }
+        });
         let px = |v: f32| ctx.px(v);
         let p = ctx.palette;
         if self.has_row() {
@@ -328,9 +338,15 @@ impl<'a> ProgressBar<'a> {
             let value_w = value.as_ref().map_or(0.0, |v| v.width + px(8.0));
             if let Some(label) = self.label {
                 let room = (rect.size.width - value_w).max(0.0);
-                let shown = super::ellipsize(text, label, &font, room);
-                let shaped = text.shape_line(&shown, &font);
-                draw_text(layer, &shaped, row.min_x(), base, ctx.fade(p.text_muted));
+                super::draw_ellipsized(
+                    layer,
+                    text,
+                    label,
+                    &font,
+                    (row.min_x(), base),
+                    room,
+                    ctx.fade(p.text_muted),
+                );
             }
             if let Some(value) = value {
                 let x = (row.max_x() - value.width).round();

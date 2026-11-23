@@ -739,6 +739,15 @@ impl GridSource for TableSource {
         }
     }
 
+    fn can_edit(&self) -> bool {
+        self.blocked.is_none()
+            && !self.submitting
+            && !self.abilities.read_only
+            && !self.abilities.view
+            && self.abilities.edit_rows
+            && self.structure.as_ref().is_some_and(|s| s.has_key())
+    }
+
     fn is_default(&self, row: u64, column: usize) -> bool {
         row >= NEW_ROWS
             && self

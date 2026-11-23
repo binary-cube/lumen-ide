@@ -2,6 +2,11 @@
 
 use super::*;
 
+/// The synthwave sun's own colors when the effect gives none: amber at its top, pink at
+/// its bottom.
+const SUN_TOP: Rgba = Rgba::rgb(0xffb347);
+const SUN_BOTTOM: Rgba = Rgba::rgb(0xff4f8b);
+
 /// A star of a constellation: its home, how it drifts.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Node {
@@ -147,8 +152,8 @@ impl SynthwavePainter {
         );
         self.fan = Some(image(art::grid_fan(w, h, 26, grid, (1.1 * scale * GRID_DETAIL).max(0.6))));
         self.sun = (e.style == "sun").then(|| {
-            let top = e.colors.get(1).copied().unwrap_or(Rgba::rgb(0xffb347));
-            let bottom = e.colors.get(2).copied().unwrap_or(Rgba::rgb(0xff4f8b));
+            let top = e.colors.get(1).copied().unwrap_or(SUN_TOP);
+            let bottom = e.colors.get(2).copied().unwrap_or(SUN_BOTTOM);
             // Half the resolution, stretched into place (its edge stays soft and smooth).
             image(art::sun(band * 0.42 * SUN_DETAIL, top, bottom))
         });

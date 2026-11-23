@@ -86,6 +86,7 @@
   view.zoom_in | Zoom In | CmdOrCtrl+Shift+=
   view.zoom_out | Zoom Out | CmdOrCtrl+Shift+-
   view.zoom_reset | Actual Size (100%) | CmdOrCtrl+Shift+0
+  view.word_wrap | Word Wrap | Alt+Z
   ---
   view.full_screen | Full Screen | F11
   view.editor_full | Editor Area: All the Window | CmdOrCtrl+Shift+F12
@@ -303,6 +304,7 @@
   view.zoom_in | Zoom In | CmdOrCtrl+Shift+=
   view.zoom_out | Zoom Out | CmdOrCtrl+Shift+-
   view.zoom_reset | Actual Size (100%) | CmdOrCtrl+Shift+0
+  view.word_wrap | Word Wrap | Alt+Z
   ---
   view.full_screen | Full Screen | F11
   view.editor_full | Editor Area: All the Window | CmdOrCtrl+Shift+F12
@@ -518,6 +520,7 @@
   view.zoom_in | Zoom In | CmdOrCtrl+Shift+=
   view.zoom_out | Zoom Out | CmdOrCtrl+Shift+-
   view.zoom_reset | Actual Size (100%) | CmdOrCtrl+Shift+0
+  view.word_wrap | Word Wrap | Alt+Z
   ---
   view.full_screen | Full Screen | F11
   view.editor_full | Editor Area: All the Window | CmdOrCtrl+Shift+F12

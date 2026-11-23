@@ -101,25 +101,23 @@ pub fn sway(t: f32) -> (f32, f32) {
     ((t * 0.043).sin() * 0.05, (t * 0.031 + 1.0).sin() * 0.035)
 }
 
+/// The scene's own colors (its sky, its lights, its warm glow): a picture's, whatever the
+/// theme.
+const OWN_COLORS: SceneColors = SceneColors {
+    sky_top: Rgba::rgb(0x03040c),
+    sky_bottom: Rgba::rgb(0x111735),
+    horizon: Rgba::rgb(0x1d2552),
+    lights: [Rgba::rgb(0xe4ecff), Rgba::rgb(0x6f96ff), Rgba::rgb(0xb08cff), Rgba::rgb(0x58d2e0)],
+    warm: Rgba::rgb(0xffd8a0),
+    dark: true,
+};
 impl RelaxScene for Stars {
     fn id(&self) -> &'static str {
         ID
     }
 
     fn own_colors(&self) -> SceneColors {
-        SceneColors {
-            sky_top: Rgba::rgb(0x03040c),
-            sky_bottom: Rgba::rgb(0x111735),
-            horizon: Rgba::rgb(0x1d2552),
-            lights: [
-                Rgba::rgb(0xe4ecff),
-                Rgba::rgb(0x6f96ff),
-                Rgba::rgb(0xb08cff),
-                Rgba::rgb(0x58d2e0),
-            ],
-            warm: Rgba::rgb(0xffd8a0),
-            dark: true,
-        }
+        OWN_COLORS
     }
 
     fn resize(&mut self, bounds: Rect, scale: f32) {

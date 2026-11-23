@@ -25,11 +25,13 @@ use crate::scrollbar::{EdgeScrollbar, ScrollMetrics, Scrollbar, ScrollbarStyle};
 use crate::splitter::Orientation;
 use crate::tool_panel::KeyReach;
 use crate::viewer::{PressMods, ViewMenuEntry, ViewerCursor, ViewerKey};
+pub use picked::{MOST_PICKED_ROWS, Picked};
 
 mod extractor_list;
 mod find_copy;
 mod keys;
 mod menus;
+mod picked;
 mod pointer;
 
 /// Heights and paddings (logical pixels).
@@ -268,6 +270,23 @@ pub(super) struct Find {
 
 /// The grid (see the module's doc), over a source `S`.
 pub struct DataGrid<S: GridSource> {
+    /// The columns' edges as last drawn (physical pixels), a buffer kept from frame to frame.
+    pub(super) edges: Vec<f32>,
+    /// The columns shown as last drawn, a buffer kept from frame to frame.
+    pub(super) shown_columns: Vec<usize>,
+    /// A row's number as last written (a kept text).
+    pub(super) row_label: String,
+    /// A cell's text as last written (a kept text).
+    pub(super) cell_text: String,
+    /// The fields' usual hints, and the bottom bar's count, kept for the language (and the
+    /// total).
+    pub(super) hints: kernel::Memo<u64, std::sync::Arc<super::paint::Hints>>,
+    pub(super) rows_line: kernel::Memo<(u64, super::Total), Option<std::sync::Arc<str>>>,
+    /// The row numbers' width, for the digits and the scale it was measured at.
+    pub(super) gutter: std::cell::Cell<Option<((usize, u32), f32)>>,
+    /// The toolbar's texts about the page, kept for what they say.
+    pub(super) bar_texts:
+        kernel::Memo<super::paint::BarKey, std::sync::Arc<super::paint::BarTexts>>,
     pub(super) source: S,
     pub(super) paging: Paging,
     pub(super) query: GridQuery,
@@ -289,7 +308,7 @@ pub struct DataGrid<S: GridSource> {
     /// One row shown as column – value.
     pub(super) transpose: bool,
     /// The toolbar's layout for its last width and state.
-    pub(super) toolbar: kernel::Memo<ToolbarSpec, ToolbarLayout>,
+    pub(super) toolbar: kernel::Memo<ToolbarSpec, std::sync::Arc<ToolbarLayout>>,
     /// The tools in the "…" menu now.
     pub(super) collapsed: Vec<Tool>,
     /// A menu its toolbar asked for under one of its buttons ("…", the page size): the
@@ -357,7 +376,7 @@ pub struct DataGrid<S: GridSource> {
     pub(super) extract_scroll: f32,
     pub(super) extract_area: Option<Rect>,
     /// The chosen extractor's name, for the catalog's generation it was read at.
-    extract_label: Option<(u64, String)>,
+    extract_label: Option<(u64, std::sync::Arc<str>)>,
 }
 
 impl<S: GridSource> std::fmt::Debug for DataGrid<S> {
@@ -370,6 +389,14 @@ impl<S: GridSource> DataGrid<S> {
     /// A grid over `source`, `page` rows a page (`None`: all of them).
     pub fn new(source: S, page: Option<u32>) -> Self {
         Self {
+            edges: Vec::new(),
+            shown_columns: Vec::new(),
+            row_label: String::new(),
+            cell_text: String::new(),
+            hints: kernel::Memo::default(),
+            rows_line: kernel::Memo::default(),
+            gutter: std::cell::Cell::new(None),
+            bar_texts: kernel::Memo::default(),
             source,
             paging: Paging::new(page),
             query: GridQuery::default(),

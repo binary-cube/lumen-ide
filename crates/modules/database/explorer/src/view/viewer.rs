@@ -89,12 +89,15 @@ impl Viewer for DataView {
         self.take_source_events();
         changed |= self.take_outcome();
         changed |= self.follow_export();
+        changed |= self.follow_panes();
         self.follow_layout();
         changed
     }
 
     fn is_loading(&self) -> bool {
-        self.tables_loading || self.grid.as_ref().is_some_and(DataGrid::is_loading)
+        self.tables_loading
+            || self.grid.as_ref().is_some_and(DataGrid::is_loading)
+            || self.panes.as_ref().is_some_and(|panes| panes.host.busy())
     }
 
     fn working(&self) -> bool {
@@ -103,6 +106,7 @@ impl Viewer for DataView {
 
     fn is_animating(&self) -> bool {
         self.controls.is_animating()
+            || self.panes.as_ref().is_some_and(|panes| panes.host.animating())
     }
 
     fn moved(&mut self, path: &Path) {
@@ -142,6 +146,14 @@ impl Viewer for DataView {
     }
 
     fn pointer_down(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
+        // The pane under the grid (its divider, its own).
+        if self.tab == Tab::Data
+            && let Some(panes) = &mut self.panes
+            && panes.host.over(p)
+        {
+            panes.host.press(p, clicks);
+            return None;
+        }
         // The splitter, the tables' or the structure's scrollbar (when shown), the grid (⇧ / ⌘
         // extend its choice).
         match self.with_controls(|c, parts| c.press_with(parts, p, clicks, mods)) {
@@ -195,6 +207,12 @@ impl Viewer for DataView {
                 self.console(None, false);
                 return self.action.take();
             }
+            Some(Hit::Pane(i)) => {
+                if let Some(panes) = &mut self.panes {
+                    panes.host.toggle(i);
+                }
+                return None;
+            }
             None => {}
         }
         self.action.take()
@@ -205,6 +223,12 @@ impl Viewer for DataView {
     }
 
     fn drag(&mut self, p: Point) -> bool {
+        if let Some(moved) = self.panes.as_mut().and_then(|panes| {
+            let whole = panes.whole;
+            panes.host.drag(p, whole)
+        }) {
+            return moved;
+        }
         let Some((part, moved)) = self.with_controls(|c, parts| c.drag(parts, p)) else {
             return false;
         };
@@ -228,6 +252,9 @@ impl Viewer for DataView {
     }
 
     fn release(&mut self) -> bool {
+        if let Some(changed) = self.panes.as_mut().and_then(|panes| panes.host.release()) {
+            return changed;
+        }
         let released =
             self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed);
         // A column resized or moved: its layout kept.
@@ -248,6 +275,7 @@ impl Viewer for DataView {
             self.counts.want(i, self.open.as_ref().map(|o| &o.client), &self.tables);
         }
         self.hover = hover;
+        changed |= self.panes.as_mut().is_some_and(|panes| panes.host.hover(p));
         changed |= self.with_controls(|c, parts| c.hover(parts, Some(p)));
         changed
     }
@@ -267,6 +295,7 @@ impl Viewer for DataView {
                         Tab::Structure => "database.tip_tab_structure",
                     }),
                 )),
+                Hit::Pane(i) => self.panes.as_ref()?.host.button_tip(i, r),
                 Hit::Console => {
                     Some(Tip::new(r, i18n::t("datasources.tooltip_console")).with_shortcut(
                         ui_components::shortcuts::label(database::console::JUMP_COMMAND),
@@ -302,11 +331,17 @@ impl Viewer for DataView {
                 _ => None,
             };
         }
+        if let Some(panes) = self.panes.as_ref().filter(|panes| panes.host.over(p)) {
+            return panes.host.tooltip(p);
+        }
         // The grid's.
         self.controls.tooltip_at(p)
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        if let Some(panes) = self.panes.as_ref().filter(|panes| panes.host.over(p)) {
+            return panes.host.cursor(p);
+        }
         // Its parts' (the splitter's over the list's edge, the grid's).
         if let Some(cursor) = self.controls.cursor_at(p) {
             return Some(cursor);
@@ -315,6 +350,9 @@ impl Viewer for DataView {
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
+        if self.panes.as_mut().is_some_and(|panes| panes.host.scroll(dx, dy)) {
+            return true;
+        }
         // The part under the mouse (the tables' list, even at its ends: never through to
         // the grid; the grid).
         let over = self.with_controls(|c, parts| {
@@ -332,16 +370,23 @@ impl Viewer for DataView {
     }
 
     fn wants_text(&self) -> bool {
-        self.tab == Tab::Data && self.grid.as_ref().is_some_and(DataGrid::wants_text)
+        self.tab == Tab::Data
+            && (self.pane_captures() || self.grid.as_ref().is_some_and(DataGrid::wants_text))
     }
 
     fn text_input(&mut self, text: &str) -> bool {
+        if self.pane_captures() {
+            return self.panes.as_mut().is_some_and(|panes| panes.host.text(text));
+        }
         self.with_controls(|c, parts| c.text(parts, text)).is_some()
     }
 
     /// A character typed on the grid (no field has the keys): the cell's editor starts.
     /// The grid's control has no `char_key`: its typing starts here.
     fn key(&mut self, c: char) -> bool {
+        if self.pane_captures() {
+            return self.text_input(&c.to_string());
+        }
         self.tab == Tab::Data && self.grid.as_mut().is_some_and(|g| g.type_char(c))
     }
 
@@ -352,6 +397,9 @@ impl Viewer for DataView {
     fn edit_key_with(&mut self, key: ViewerKey, reach: KeyReach) -> bool {
         if self.tab != Tab::Data {
             return false;
+        }
+        if self.pane_captures() {
+            return self.panes.as_mut().is_some_and(|panes| panes.host.key(key, reach));
         }
         self.with_controls(|c, parts| c.key(parts, key, reach)).is_some()
     }
@@ -374,6 +422,13 @@ impl Viewer for DataView {
             return self.list_menu(None);
         }
         let (_, mut entries) = self.with_controls(|c, parts| c.menu(parts, p))?;
+        // On the rows: a pane drawn from the selection, from all of them again, closed.
+        if self.tab == Tab::Data
+            && let (Some(panes), Some(grid)) = (&self.panes, &self.grid)
+            && !panes.host.over(p)
+        {
+            entries.extend(panes.host.menu(grid.has_picked()));
+        }
         // A key's cell (the engine's, or one accepted in the relations diagram): its row.
         if self.reference().is_some() {
             entries.push(ViewMenuEntry::Separator);
@@ -386,6 +441,17 @@ impl Viewer for DataView {
     }
 
     fn command(&mut self, id: &str) -> bool {
+        // A pane's row of the right-click menu (the selection taken only when it's asked).
+        if id.starts_with(ui_components::result_pane::PANE_MENU)
+            && let Some(panes) = &mut self.panes
+        {
+            let grid = &self.grid;
+            let picked = || {
+                let picked = grid.as_ref()?.picked()?;
+                Some(Arc::new(picked) as ui_components::result_pane::Lent)
+            };
+            return panes.host.menu_command(id, picked);
+        }
         let used = match id {
             "find" if self.tab == Tab::Data => self.grid.as_mut().is_some_and(|g| {
                 g.open_find();
@@ -446,6 +512,16 @@ impl Viewer for DataView {
                 e.cancel();
                 true
             }),
+            id if id.starts_with("picked-save:") && self.pane_saving => {
+                self.pane_saving = false;
+                if matches!(
+                    self.action,
+                    Some(ViewerAction::Request(AppRequest::PickSavePath { .. }))
+                ) {
+                    self.action = None;
+                }
+                self.panes.as_mut().is_some_and(|panes| panes.host.command(id))
+            }
             id if id.starts_with("picked-save:") => match self.export_format.take() {
                 Some(chosen) => {
                     // Chosen (a snapshot gives it directly): the dialog isn't asked again.

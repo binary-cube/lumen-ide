@@ -222,3 +222,22 @@ fn its_search_is_the_shared_field_with_its_clear_button() {
     assert_eq!(tree.query.text(), "");
     assert_eq!(shown(&tree).len(), all, "emptied: every file back");
 }
+
+/// Hovered: a row under the mouse is lit (a frame asked), once; another row lights instead.
+#[test]
+fn a_row_lights_under_the_mouse() {
+    let mut tree = sample();
+    let mut text = text_layout::TextSystem::new();
+    let palette = crate::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let ds = crate::ds::Ctx::new(&palette, 1.0);
+    let area = Rect::new(0.0, 0.0, 400.0, 300.0);
+    tree.paint(&mut render_api::Scene::default(), &mut text, &icons, &ds, (area, true), None);
+    let rows: Vec<Rect> =
+        tree.hits.iter().map(|(r, _)| *r).filter(|r| r.size.width > 200.0).collect();
+    assert!(rows.len() >= 2, "rows drawn");
+    let (a, b) = (rows[0].center(), rows[1].center());
+    assert!(tree.hover(a));
+    assert!(!tree.hover(a), "still on it: nothing new");
+    assert!(tree.hover(b), "another row");
+}

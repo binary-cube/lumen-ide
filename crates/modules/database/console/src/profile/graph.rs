@@ -1209,11 +1209,7 @@ fn paint_card(
 
 /// A pill's words on a tint of `color`: the color itself, deepened on a light theme.
 fn readable_on(color: Rgba, p: &Palette) -> Rgba {
-    if p.is_dark() {
-        color.mix(Rgba::rgb(0xffffff), 0.15)
-    } else {
-        color.mix(Rgba::rgb(0x000000), 0.25)
-    }
+    if p.is_dark() { color.mix(Rgba::WHITE, 0.15) } else { color.mix(Rgba::BLACK, 0.25) }
 }
 
 fn paint_folded(

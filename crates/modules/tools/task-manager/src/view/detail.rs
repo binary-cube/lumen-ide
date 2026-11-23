@@ -10,7 +10,7 @@ use kernel::Rect;
 use render_api::{Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_components::LayerPainter;
-use ui_components::chart::{ChartSeries, Samples, TimeChart, time_chart};
+use ui_components::charts::{ChartLook, ChartMotion, ChartParts, Update, ValueFormat};
 use ui_components::ds::{self, BadgeSpec, ButtonKind, ButtonSpec, Ctx, Tone, radius};
 use ui_kit::draw_text;
 
@@ -24,6 +24,10 @@ use workbench_model::ActionTarget;
 
 /// A stat's dot in its metric's color (logical pixels).
 const STAT_DOT: f32 = 6.0;
+
+/// The room kept on the right of the detail's scrolled content for its scrollbar (logical
+/// pixels): the bar's width and a gap before it.
+const SCROLL_LANE: f32 = 14.0;
 
 impl TaskManager {
     pub(super) fn paint_detail(
@@ -207,6 +211,9 @@ impl TaskManager {
         let content_top = body.min_y() - self.detail_scroll.round();
         let pen = &mut LayerPainter::new(scene.push_layer(Some(body)), text, icons, *ds);
         let mut y = content_top + px(4.0);
+        // What scrolls leaves its scrollbar a lane of its own on the right, always (the
+        // layout doesn't move when the bar shows).
+        let inner = (inner - px(SCROLL_LANE)).max(0.0);
         y = self.paint_facts(pen, (x0, inner, y), line);
         y = self.paint_stats(pen, x0, inner, y, layout.stat_columns);
         y = self.paint_charts(pen, (x0, inner, y), &layout, body);
@@ -343,6 +350,7 @@ impl TaskManager {
             }
         }
         if count == 0 {
+            self.plots.detail_charts.iter_mut().for_each(ui_components::charts::Chart::forget);
             return y;
         }
         let columns = layout.chart_columns.min(count);
@@ -350,12 +358,8 @@ impl TaskManager {
         let w = ((inner - gap * (columns - 1) as f32) / columns as f32).floor();
         let title_h = px(20.0);
         let h = layout.chart_height + title_h;
-        self.update_detail_plots(w.max(1.0) as usize);
+        self.update_detail_plots();
         let title_font = ds.ui_font(-1.5).with_weight(Font::SEMIBOLD);
-        let hover = match (self.hover, self.mouse) {
-            (Some(Hit::DetailChart(m)), Some(mouse)) => Some((m, mouse.x)),
-            _ => None,
-        };
         for (i, chart) in charts.iter().flatten().enumerate() {
             let (row, col) = (i / columns, i % columns);
             let r = Rect::new(x0 + col as f32 * (w + gap), y + row as f32 * (h + gap), w, h);
@@ -380,64 +384,102 @@ impl TaskManager {
                 .find(|s| s.metric == Some(first))
                 .map_or("", |s| s.now.as_str());
             right_text(pen.layer, pen.text, now, &ds.ui_font(-1.5), r.max_x(), base, p.text);
-            let plot_a = self.plots.detail[first as usize].plot();
-            let series_a = ChartSeries { plot: plot_a, color: summary::color(p, first) };
-            let series_b = second.map(|m| ChartSeries {
-                plot: self.plots.detail[m as usize].plot(),
-                color: summary::color(p, m),
-            });
-            let both = [series_a, series_b.unwrap_or(series_a)];
-            let series = if series_b.is_some() { &both[..] } else { &both[..1] };
             let scale = |m: Metric| self.texts.detail.scales[m as usize];
-            let (max, max_label) = match second {
-                Some(m) if scale(m) > scale(first) => {
-                    (scale(m), &self.texts.detail.scale_labels[m as usize])
-                }
-                _ => (scale(first), &self.texts.detail.scale_labels[first as usize]),
+            let max = match second {
+                Some(m) if scale(m) > scale(first) => scale(m),
+                _ => scale(first),
             };
             let area = Rect::new(r.min_x(), r.min_y() + title_h, r.size.width, layout.chart_height);
-            let chart_hover = hover.filter(|(m, _)| *m == first).map(|(_, x)| x);
-            let plotted = time_chart(
-                pen.layer,
-                pen.text,
-                ds,
-                area,
-                &TimeChart { series, max, max_label, hover: chart_hover },
-            );
+            let colors =
+                [summary::color(p, first), second.map_or(p.accent, |m| summary::color(p, m))];
+            let look = ChartLook::new(ds, p.editor_background)
+                .colors(&colors[..1 + usize::from(second.is_some())])
+                .parts(ChartParts {
+                    x_axis: false,
+                    y_axis: true,
+                    grid: true,
+                    legend: second.is_some(),
+                    hover: true,
+                    zoom: false,
+                })
+                // A live history slides every second: no transition between its looks.
+                .motion(ChartMotion { update: Update::None, ..ChartMotion::default() });
+            let chart = &mut self.plots.detail_charts[first as usize];
+            chart.set_y_range(Some((0.0, f64::from(max))));
+            chart.paint(pen.layer, pen.text, ds, &look, area);
+            let plotted = chart.geometry().plot;
             // Its reading only where it's in view (the rest is scrolled out).
             if let Some(visible) = plotted.intersect(&clip) {
                 self.hits.push((visible, Hit::DetailChart(first)));
+            }
+        }
+        // The charts not shown for this part let go of their drawing (they don't move unseen).
+        for (i, chart) in self.plots.detail_charts.iter_mut().enumerate() {
+            if !charts.iter().flatten().any(|(first, _)| *first as usize == i) {
+                chart.forget();
             }
         }
         let rows = count.div_ceil(columns);
         y + rows as f32 * (h + gap) + px(4.0)
     }
 
-    /// The detail's plots (the selected part's), aggregated again only for new values,
-    /// another part or another width.
-    fn update_detail_plots(&mut self, columns: usize) {
+    /// The detail's charts' data (the selected part's history), made again only for a new
+    /// history or another part (their layout follows their size on their own).
+    fn update_detail_plots(&mut self) {
         let Some(history) = self.history.clone() else { return };
         let Some(key) = self.selected.as_deref() else { return };
         let history = history.lock().unwrap_or_else(PoisonError::into_inner);
         let generation = history.generation().wrapping_mul(1_000_003) ^ self.selection_epoch;
-        let slots = history.capacity();
-        let stale = Metric::ALL.iter().any(|m| {
-            self.plots.detail[*m as usize].is_stale(generation, slots, columns, summary::reduce(*m))
-        });
-        if !stale {
+        if self.plots.detail_seen == Some(generation) {
             return;
         }
+        self.plots.detail_seen = Some(generation);
         let trace = history.part(key);
-        for m in Metric::ALL {
-            let samples =
-                trace.map_or_else(Samples::default, |t| Samples::from_slices(t.get(m).as_slices()));
-            self.plots.detail[m as usize].get(
-                generation,
-                samples,
-                slots,
-                columns,
-                summary::reduce(m),
+        let step = super::preferences().interval.max(1) as f64;
+        for (first, second) in DETAIL_CHARTS {
+            let values = |m: Metric| {
+                trace
+                    .map_or_else(Vec::new, |t| t.get(m).iter().map(f64::from).collect::<Vec<f64>>())
+            };
+            let firsts = values(first);
+            let n = firsts.len();
+            // The newest at the right: its moments counted back from now.
+            let times: Vec<f64> = (0..n).map(|i| (i as f64 - (n as f64 - 1.0)) * step).collect();
+            let labels = times
+                .iter()
+                .map(|&t| {
+                    if t >= 0.0 {
+                        i18n::t("tasks.chart_moment_now")
+                    } else {
+                        i18n::tr!("tasks.chart_moment_ago", seconds = (-t) as u64)
+                    }
+                })
+                .collect();
+            // Each series named as the detail's figures name its metric.
+            let name = |m: Metric| {
+                self.texts
+                    .detail
+                    .stats
+                    .iter()
+                    .find(|s| s.metric == Some(m))
+                    .map_or_else(String::new, |s| s.label.clone())
+            };
+            let mut series = vec![(name(first), firsts)];
+            if let Some(m) = second {
+                series.push((name(m), values(m)));
+            }
+            let data = charts_model::Prepared::over_time(
+                charts_model::ChartKind::Area,
+                labels,
+                times,
+                series,
             );
+            let chart = &mut self.plots.detail_charts[first as usize];
+            chart.set_format(Some(ValueFormat(Arc::new(move |s, v| {
+                let metric = if s == 0 { first } else { second.unwrap_or(first) };
+                super::texts::value(metric, v as f32)
+            }))));
+            chart.set_data(Some(Arc::new(data)), generation);
         }
     }
 
@@ -504,6 +546,11 @@ impl TaskManager {
         for (name, cpu) in &self.texts.detail.threads {
             let base = ds::optical_baseline(y, row, &mono);
             let cw = pen.text.shape_line(cpu, &mono).width;
+            // A thread the system named nothing: said so, muted (not a blank row).
+            let (name, color) = match name.trim() {
+                "" => (self.texts.labels.thread_unnamed.as_str(), p.text_muted),
+                named => (named, p.text),
+            };
             ds::draw_ellipsized(
                 pen.layer,
                 pen.text,
@@ -511,7 +558,7 @@ impl TaskManager {
                 &mono,
                 (x0, base),
                 (inner - cw - px(12.0)).max(0.0),
-                p.text,
+                color,
             );
             right_text(pen.layer, pen.text, cpu, &mono, x0 + inner, base, p.text_muted);
             y += row;
@@ -650,5 +697,25 @@ impl TaskManager {
             y += px(36.0);
         }
         y + px(4.0)
+    }
+}
+
+/// The detail's charts: a metric each, the network's with the disk's.
+const DETAIL_CHARTS: [(Metric, Option<Metric>); 4] = [
+    (Metric::Cpu, None),
+    (Metric::Memory, None),
+    (Metric::Gpu, None),
+    (Metric::Net, Some(Metric::Disk)),
+];
+
+impl TaskManager {
+    /// The detail charts' masks rasterized meanwhile (their lines and areas): `true` to draw
+    /// again.
+    pub(super) fn poll_detail_charts(&mut self) -> bool {
+        let mut changed = false;
+        for chart in &mut self.plots.detail_charts {
+            changed |= chart.poll();
+        }
+        changed
     }
 }

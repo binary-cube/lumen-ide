@@ -996,13 +996,17 @@ impl Viewer for TerminalView {
         }
     }
 
-    /// A part of a line at the bottom waiting for its gesture to end: frames until it snaps;
-    /// its loader turning while its first output comes.
+    /// A part of a line at the bottom waiting for its gesture to end: frames until it snaps.
     fn is_animating(&self) -> bool {
+        self.grid.display_offset == 0
+            && self.smooth.partial()
+            && self.last_wheel.is_some_and(|at| at.elapsed() < SNAP_AFTER)
+    }
+
+    /// Its loader turning while its first output comes (at a loader's pace, not every frame
+    /// the display could draw; its end wakes it: `frame_deadline`).
+    fn is_loading(&self) -> bool {
         self.settling.is_some()
-            || self.grid.display_offset == 0
-                && self.smooth.partial()
-                && self.last_wheel.is_some_and(|at| at.elapsed() < SNAP_AFTER)
     }
 
     /// The shell exited (`exit`; its tab stays when the settings say so), or was asked to

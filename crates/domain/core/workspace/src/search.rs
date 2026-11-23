@@ -318,6 +318,37 @@ pub fn complete_folders(folders: &[String], typed: &str, limit: usize) -> Vec<St
     out
 }
 
+/// Where folder `path` (one [`complete_folders`] gave for `typed`) matches what was typed:
+/// the byte positions in `path` of its name's characters that matched — its first ones
+/// when the name starts with what follows the last `/`, else those of the loose match.
+/// Empty when nothing follows the last `/`.
+pub fn folder_marks(path: &str, typed: &str) -> Vec<usize> {
+    let typed = typed.trim().trim_start_matches('/');
+    let partial = typed.rsplit_once('/').map_or(typed, |(_, p)| p);
+    if partial.is_empty() {
+        return Vec::new();
+    }
+    let trimmed = path.trim_end_matches('/');
+    let from = trimmed.rfind('/').map_or(0, |i| i + 1);
+    let name = &trimmed[from..];
+    // Its start, character by character (any case).
+    let mut marks = Vec::new();
+    let mut chars = name.char_indices();
+    let starts = partial.chars().all(|q| match chars.next() {
+        Some((i, c)) if c.to_lowercase().eq(q.to_lowercase()) => {
+            marks.push(from + i);
+            true
+        }
+        _ => false,
+    });
+    if starts {
+        return marks;
+    }
+    let query: Vec<char> =
+        partial.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase).collect();
+    fuzzy(name, &query).map_or_else(Vec::new, |(_, at)| at.into_iter().map(|b| from + b).collect())
+}
+
 /// Matching first in the file name (counts much more), then in the whole path.
 fn score_path(path: &str, query: &[char]) -> Option<FileMatch> {
     let name_start = path.rfind('/').map_or(0, |i| i + 1);

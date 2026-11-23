@@ -74,6 +74,11 @@ impl ActionContext {
         Self::new(place, Vec::new())
     }
 
+    /// The first target when it's a folder (as the tree knows it: the disk isn't asked).
+    pub fn folder(&self) -> Option<&Path> {
+        self.targets.first().filter(|t| t.is_dir).map(|t| t.path.as_path())
+    }
+
     /// The first target's path (most actions take one).
     pub fn path(&self) -> Option<&Path> {
         self.targets.first().map(|t| t.path.as_path())

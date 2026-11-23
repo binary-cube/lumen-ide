@@ -19,6 +19,8 @@ pub(super) struct ModalView {
     dragging: bool,
     /// The view's virtual extension (which one it is).
     pub(super) extension: String,
+    /// The text options' generation its viewer was last told (0: never).
+    pub(super) text_told: u64,
 }
 
 impl std::fmt::Debug for ModalView {
@@ -91,6 +93,7 @@ impl Workbench {
             popover,
             dragging: false,
             extension: extension.to_owned(),
+            text_told: 0,
         });
         true
     }

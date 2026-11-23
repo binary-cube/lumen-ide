@@ -700,7 +700,8 @@ fn a_started_program_s_first_output_is_let_run_unseen() {
     let now = std::time::Instant::now();
     view.settling = Some(Settling { started: now, last: now });
     assert!(!view.poll(), "still coming: nothing to draw yet");
-    assert!(view.settling.is_some() && view.is_animating(), "the loader turns");
+    assert!(view.settling.is_some() && view.is_loading(), "the loader turns (a loader's pace)");
+    assert!(!view.is_animating(), "not every frame the display could draw");
     assert_eq!(view.frame_deadline(), Some(now + SETTLE_QUIET));
     let earlier = now - SETTLE_QUIET * 2;
     view.settling = Some(Settling { started: earlier, last: earlier });

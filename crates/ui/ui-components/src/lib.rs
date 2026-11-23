@@ -9,7 +9,7 @@ pub mod anim;
 pub mod backdrop;
 pub mod card_preview;
 pub mod changed_files;
-pub mod chart;
+pub mod charts;
 pub mod code_tokens;
 pub mod color_picker;
 pub mod columns;
@@ -34,6 +34,7 @@ pub mod palette;
 pub mod picker;
 pub mod progress_ring;
 pub mod read_text;
+pub mod result_pane;
 pub mod screen_widgets;
 pub mod scroll_state;
 pub mod scrollbar;
@@ -47,6 +48,7 @@ pub mod splitter;
 pub mod tab_strip;
 pub mod table;
 pub mod tag_colors;
+pub mod text_options;
 pub mod toast;
 pub mod tool_panel;
 pub mod tool_window;
@@ -58,7 +60,7 @@ pub mod viewer;
 pub use anim::Tween;
 pub use backdrop::{BackdropRole, BackdropStyle};
 pub use card_preview::{CardPaint, CardPreview};
-pub use code_tokens::{CodeLine, draw_code};
+pub use code_tokens::{CodeLine, draw_code, draw_code_part};
 pub use color_picker::{ColorPick, ColorPicker, PICKER_EXTENSION, PickerAction};
 pub use date_range::{Date, DateLocale, DateRangePicker, PickerEvent, Preset};
 pub use editor_toolbar::{
@@ -85,6 +87,7 @@ pub use services::{
 pub use severity::Level;
 pub use slider::{SliderArea, SliderSpec, SliderStyle, slider};
 pub use splitter::{Orientation, Splitter, SplitterStyle};
+pub use text_options::TextOptions;
 pub use toast::{StackPlace, ToastHit, ToastStack};
 pub use tool_panel::{
     KeyReach, PanelButton, PanelContext, PanelMemento, Problem, ToolPanel, ToolPanelAction, Usage,
@@ -102,3 +105,8 @@ pub use viewer::{
     ViewerKind, ViewerPaint, ViewerPriority, ViewerProvider, WebEvent, WebPage, WebSource,
     WithHost,
 };
+
+/// The tests' counting allocator (a frame drawn again must allocate nothing).
+#[cfg(test)]
+#[path = "../tests/unit/allocations.rs"]
+pub(crate) mod allocations;

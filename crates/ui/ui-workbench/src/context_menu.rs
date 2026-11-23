@@ -419,126 +419,141 @@ impl ContextMenu {
         let layer = scene.push_layer(Some(p));
         let mut top = p.min_y() + pad;
         let open_child = self.child.as_ref().map(|(i, _)| *i);
-        for (i, entry) in self.entries.iter().enumerate() {
-            let (label, shortcut, icon, submenu, on, look) = match entry {
-                MenuEntry::Separator => {
-                    let y = (top + separator_h / 2.0).round();
-                    ds::divider(layer, &ctx, p.min_x() + px(10.0), p.max_x() - px(10.0), y);
-                    top += separator_h;
-                    continue;
-                }
-                MenuEntry::Item { label, shortcut, icon, on, look, .. } => {
-                    (label, shortcut.as_deref(), icon, false, *on, *look)
-                }
-                MenuEntry::Submenu { label, icon, .. } => {
-                    (label, None, icon, true, None, RowLook::default())
-                }
-            };
-            let row = Rect::new(p.min_x() + pad, top, p.size.width - pad * 2.0, row_h);
-            let selected = (self.selected == Some(i) || open_child == Some(i)) && !look.disabled;
-            // A menu's row to a screen reader: its whole label, greyed out, checked or on,
-            // a submenu's open or not (its texts drawn in it are its own).
-            ui_kit::access::node(|| {
-                use ui_kit::access::{Described, Role};
-                let mut node = Described::new(Role::MenuItem, label.as_str(), row)
-                    .disabled(look.disabled)
-                    .focused(selected);
-                node.state.checked = on.or(look.checked.then_some(true));
-                if submenu {
-                    node.state.expanded = Some(open_child == Some(i));
-                }
-                node
-            });
-            // A greyed-out row: its icon, label and keys faded.
-            let dim = |c: kernel::Rgba| if look.disabled { c.with_alpha(c.a * 0.45) } else { c };
-            let (label_ink, icon_ink) = row_ink(look, selected, palette);
-            ds::RowHighlight::new(selected, false)
-                .selected_alpha(ROW_LIT)
-                .radius(radius::SM)
-                .paint(layer, &ctx, row);
-            if let Some(rgb) = look.swatch {
-                // A label's color: a dot in the icon's place.
-                let size = px(12.0);
-                let dot = Rect::new(
-                    row.min_x() + px(10.5),
-                    (top + (row_h - size) / 2.0).round(),
-                    size,
-                    size,
-                );
-                layer.quad(Quad::filled(dot, ctx.fade(dim(kernel::Rgba::rgb(rgb)))).rounded(size));
-            } else if let Some(id) = icon.and_then(|name| icons.id(name)) {
-                let size = px(15.0);
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(
-                        row.min_x() + px(9.0),
+        // To a screen reader: a menu of its rows (its separators aren't any).
+        let total = self.entries.iter().filter(|e| !matches!(e, MenuEntry::Separator)).count();
+        let menu =
+            move || ui_kit::access::Described::new(ui_kit::access::Role::Menu, "", p).count(total);
+        ui_kit::access::group(menu, || {
+            let mut index = 0;
+            for (i, entry) in self.entries.iter().enumerate() {
+                let (label, shortcut, icon, submenu, on, look) = match entry {
+                    MenuEntry::Separator => {
+                        let y = (top + separator_h / 2.0).round();
+                        ds::divider(layer, &ctx, p.min_x() + px(10.0), p.max_x() - px(10.0), y);
+                        top += separator_h;
+                        continue;
+                    }
+                    MenuEntry::Item { label, shortcut, icon, on, look, .. } => {
+                        (label, shortcut.as_deref(), icon, false, *on, *look)
+                    }
+                    MenuEntry::Submenu { label, icon, .. } => {
+                        (label, None, icon, true, None, RowLook::default())
+                    }
+                };
+                let row = Rect::new(p.min_x() + pad, top, p.size.width - pad * 2.0, row_h);
+                let selected =
+                    (self.selected == Some(i) || open_child == Some(i)) && !look.disabled;
+                // A menu's row to a screen reader: its whole label, its keys, greyed out,
+                // checked or on, a submenu's open or not (its texts drawn in it are its own).
+                ui_kit::access::node(|| {
+                    use ui_kit::access::{Described, Role};
+                    let mut node = Described::new(Role::MenuItem, label.as_str(), row)
+                        .index(index)
+                        .disabled(look.disabled)
+                        .focused(selected);
+                    node.state.checked = on.or(look.checked.then_some(true));
+                    // Its keys said with it, not read after it as a text of their own.
+                    node.shortcut = shortcut.map(std::sync::Arc::from);
+                    if submenu {
+                        node.state.expanded = Some(open_child == Some(i));
+                    }
+                    node
+                });
+                // A greyed-out row: its icon, label and keys faded.
+                let dim =
+                    |c: kernel::Rgba| if look.disabled { c.with_alpha(c.a * 0.45) } else { c };
+                let (label_ink, icon_ink) = row_ink(look, selected, palette);
+                ds::RowHighlight::new(selected, false)
+                    .selected_alpha(ROW_LIT)
+                    .radius(radius::SM)
+                    .paint(layer, &ctx, row);
+                if let Some(rgb) = look.swatch {
+                    // A label's color: a dot in the icon's place.
+                    let size = px(12.0);
+                    let dot = Rect::new(
+                        row.min_x() + px(10.5),
                         (top + (row_h - size) / 2.0).round(),
                         size,
                         size,
-                    ),
-                    ctx.fade(dim(icon_ink)),
-                );
-            }
-            // A file's long name keeps its start, its end and its extension.
-            let fitted = ds::ellipsize_file(text, label, &font, max_label);
-            let shaped = text.shape_line(&fitted, &font);
-            draw_text(
-                layer,
-                &shaped,
-                row.min_x() + icon_w,
-                ds::optical_baseline(top, row_h, &font),
-                ctx.fade(dim(label_ink)),
-            );
-            if let Some(on) = on {
-                let x = (row.max_x() - px(10.0) - px(ds::SMALL_SWITCH_W)).round();
-                ds::small_switch(layer, &ctx, x, top + row_h / 2.0, on);
-            } else if let Some(key) = shortcut {
-                let shaped = text.shape_line(key, &key_font);
+                    );
+                    layer.quad(
+                        Quad::filled(dot, ctx.fade(dim(kernel::Rgba::rgb(rgb)))).rounded(size),
+                    );
+                } else if let Some(id) = icon.and_then(|name| icons.id(name)) {
+                    let size = px(15.0);
+                    draw_icon(
+                        layer,
+                        icons,
+                        id,
+                        Rect::new(
+                            row.min_x() + px(9.0),
+                            (top + (row_h - size) / 2.0).round(),
+                            size,
+                            size,
+                        ),
+                        ctx.fade(dim(icon_ink)),
+                    );
+                }
+                // A file's long name keeps its start, its end and its extension.
+                let fitted = ds::ellipsize_file(text, label, &font, max_label);
+                let shaped = text.shape_line(&fitted, &font);
                 draw_text(
                     layer,
                     &shaped,
-                    (row.max_x() - px(10.0) - shaped.width).round(),
-                    ds::optical_baseline(top, row_h, &key_font),
-                    ctx.fade(dim(palette.text_muted)),
+                    row.min_x() + icon_w,
+                    ds::optical_baseline(top, row_h, &font),
+                    ctx.fade(dim(label_ink)),
                 );
-            } else if look.checked
-                && let Some(id) = icons.id("check")
-            {
-                // The choice made: a ✓ at the row's end.
-                let size = px(14.0);
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(
-                        (row.max_x() - px(9.0) - size).round(),
-                        (top + (row_h - size) / 2.0).round(),
-                        size,
-                        size,
-                    ),
-                    ctx.fade(dim(palette.text)),
-                );
+                if let Some(on) = on {
+                    let x = (row.max_x() - px(10.0) - px(ds::SMALL_SWITCH_W)).round();
+                    ds::small_switch(layer, &ctx, x, top + row_h / 2.0, on);
+                } else if let Some(key) = shortcut {
+                    let shaped = text.shape_line(key, &key_font);
+                    draw_text(
+                        layer,
+                        &shaped,
+                        (row.max_x() - px(10.0) - shaped.width).round(),
+                        ds::optical_baseline(top, row_h, &key_font),
+                        ctx.fade(dim(palette.text_muted)),
+                    );
+                } else if look.checked
+                    && let Some(id) = icons.id("check")
+                {
+                    // The choice made: a ✓ at the row's end.
+                    let size = px(14.0);
+                    draw_icon(
+                        layer,
+                        icons,
+                        id,
+                        Rect::new(
+                            (row.max_x() - px(9.0) - size).round(),
+                            (top + (row_h - size) / 2.0).round(),
+                            size,
+                            size,
+                        ),
+                        ctx.fade(dim(palette.text)),
+                    );
+                }
+                if submenu && let Some(id) = icons.id("chevron-right") {
+                    let size = px(13.0);
+                    draw_icon(
+                        layer,
+                        icons,
+                        id,
+                        Rect::new(
+                            (row.max_x() - px(8.0) - size).round(),
+                            (top + (row_h - size) / 2.0).round(),
+                            size,
+                            size,
+                        ),
+                        ctx.fade(if selected { palette.text } else { palette.text_muted }),
+                    );
+                }
+                self.rows.push((row, i));
+                top += row_h;
+                index += 1;
             }
-            if submenu && let Some(id) = icons.id("chevron-right") {
-                let size = px(13.0);
-                draw_icon(
-                    layer,
-                    icons,
-                    id,
-                    Rect::new(
-                        (row.max_x() - px(8.0) - size).round(),
-                        (top + (row_h - size) / 2.0).round(),
-                        size,
-                        size,
-                    ),
-                    ctx.fade(if selected { palette.text } else { palette.text_muted }),
-                );
-            }
-            self.rows.push((row, i));
-            top += row_h;
-        }
+        });
         if let Some((_, child)) = &mut self.child {
             child.paint(icons, text, scene, palette);
         }

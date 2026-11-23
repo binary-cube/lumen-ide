@@ -146,7 +146,7 @@ impl Tiles {
         for (a, b) in before.items.iter().zip(&now.items) {
             if a != b {
                 for r in [shape(a), shape(b)] {
-                    dirty = Some(dirty.map_or(r, |d| crate::edit::union(d, r)));
+                    dirty = Some(dirty.map_or(r, |d| d.union(&r)));
                 }
             }
         }

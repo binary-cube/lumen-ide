@@ -14,7 +14,7 @@ pub fn footer_in_card(
     radius: f32,
 ) {
     let r = ctx.px(radius).min(rect.size.height);
-    let fill = ctx.fade(ctx.palette.text.with_alpha(0.022));
+    let fill = ctx.fade(ctx.palette.text.with_alpha(super::BAND_TINT));
     // Square above the corners, rounded below them (no overlap: the fill is translucent).
     let layer = scene.push_layer(Some(rect));
     let top = Rect::new(rect.min_x(), rect.min_y(), rect.size.width, rect.size.height - r);
@@ -47,7 +47,7 @@ pub fn footer(
     rect: Rect,
     hints: &[KeyHint<'_>],
 ) -> f32 {
-    layer.quad(Quad::filled(rect, ctx.fade(ctx.palette.text.with_alpha(0.022))));
+    layer.quad(Quad::filled(rect, ctx.fade(ctx.palette.text.with_alpha(super::BAND_TINT))));
     divider(layer, ctx, rect.min_x(), rect.max_x(), rect.min_y());
     let row = Rect::new(
         rect.min_x() + ctx.px(space::LG + 2.0),
@@ -75,7 +75,7 @@ pub fn modal_footer_bar<'s>(
     let layer = scene.push_layer(Some(foot));
     layer.quad(Quad::filled(
         Rect::new(foot.min_x(), foot.min_y(), foot.size.width, ctx.line()),
-        p.card_border,
+        ctx.fade(p.card_border),
     ));
     let corner = ctx.px(radius::XL) - ctx.line();
     let tint = Rect::new(
@@ -84,7 +84,7 @@ pub fn modal_footer_bar<'s>(
         foot.size.width,
         foot.size.height + corner - ctx.line(),
     );
-    layer.quad(Quad::filled(tint, p.text.with_alpha(0.022)).rounded(corner));
+    layer.quad(Quad::filled(tint, ctx.fade(p.text.with_alpha(super::BAND_TINT))).rounded(corner));
     layer
 }
 
@@ -248,6 +248,13 @@ pub fn loader(
 ) -> Rect {
     let p = ctx.palette;
     let size = ctx.px(loader.size);
+    // To a screen reader: something under way (a progress without a known end), named by
+    // what it says.
+    ui_kit::access::node(|| {
+        use ui_kit::access::{Described, Role};
+        let at = Rect::new(x, mid - size / 2.0, size, size);
+        Described::new(Role::ProgressBar, loader.text.unwrap_or_default(), at)
+    });
     let mut right = x;
     if loader.spinner {
         loader_spinner(layer, ctx, (x, mid), loader);

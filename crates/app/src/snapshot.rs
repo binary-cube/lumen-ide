@@ -625,6 +625,10 @@ pub fn prepare(
     }
     // The theme's decorations as a still frame (the same every run).
     workbench.set_decorations_window(false, true, true);
+    // Word wrap on (`WRAP=1`): every view told so at its first frame, as the setting would.
+    if flag("WRAP") {
+        crate::text_options::set(ui_workbench::TextOptions { word_wrap: true });
+    }
     // The user's backdrop over the theme's (`BACKDROP=glass:6:20`: the style, the blur in
     // pixels, the tint in percent; each optional).
     if let Some(backdrop) = var("BACKDROP") {
@@ -716,7 +720,8 @@ pub fn render(
     }
     // Appear animations (menus, modals) end and views finish loading (a document's images)
     // before the capture: the same picture every run.
-    let (animations, loads) =
+    // What appears once loaded (a chart's slices fading in) has its second from then.
+    let (mut animations, loads) =
         (Instant::now() + Duration::from_secs(1), Instant::now() + Duration::from_secs(3));
     // The first frame painted, kept for `EDITOR_SNAPSHOT_PARTIAL` (a frame before this one).
     let mut previous = Scene::default();
@@ -724,8 +729,28 @@ pub fn render(
     while (workbench.animating() && Instant::now() < animations)
         || (workbench.loading() && Instant::now() < loads)
     {
+        if workbench.loading() {
+            animations = animations.max(Instant::now() + Duration::from_secs(1));
+        }
         std::thread::sleep(Duration::from_millis(16));
+        // What the views' work brought meanwhile taken, as the app does every frame.
+        workbench.poll_viewers();
         workbench.paint(&mut text, &mut Scene::default());
+    }
+    // Still moving past every transition's end: given a little longer, then whatever still
+    // says it moves is named (`moving: …`): the snapshots list the screens where a part
+    // keeps asking for frames (on purpose: a scene that moves; else a part to mend).
+    if workbench.animating() {
+        let until = Instant::now() + SETTLE_MOVING;
+        while workbench.animating() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(16));
+            workbench.poll_viewers();
+            workbench.paint(&mut text, &mut Scene::default());
+        }
+        let parts = workbench.moving_parts();
+        if !parts.is_empty() {
+            eprintln!("moving: {}", parts.join(", "));
+        }
     }
     // The settings' content scrolled by the wheel (`SETTINGS_SCROLL=<px>`, in steps of
     // 120 px, a frame painted after each).
@@ -779,7 +804,9 @@ pub fn render(
         // written beside the picture (`<out>.access.txt`).
         let access = flag("ACCESS").then(ui_kit::access::begin);
         workbench.paint(&mut text, &mut scene);
-        if let Some(frame) = access.map(ui_kit::access::Recording::take) {
+        if let Some(mut frame) = access.map(ui_kit::access::Recording::take) {
+            // As the app tells it: a control without a text of its own named by its tooltip.
+            frame.name_from_tips(|bounds| workbench.access_tip(bounds.center()));
             let path = out.with_extension("access.txt");
             std::fs::write(&path, crate::snapshot_gpu::access_text(&frame))
                 .with_context(|| format!("cannot write {}", path.display()))?;
@@ -1666,6 +1693,10 @@ impl Steps<'_> {
         settle(200);
     }
 }
+
+/// How long a screen still moving after its transitions is watched before what moves is
+/// named (longer than any transition).
+const SETTLE_MOVING: Duration = Duration::from_millis(1500);
 
 /// Lets animations and background work progress.
 fn settle(ms: u64) {

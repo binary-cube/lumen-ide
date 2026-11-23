@@ -242,7 +242,7 @@ impl Control for PanelPart<'_> {
     /// an option's: what it does.
     fn tooltip(&self, p: Point) -> Option<Tip> {
         if self.panel.on_suggestions(p) {
-            return None;
+            return self.panel.suggestion_tooltip(p);
         }
         let button = self.panel.scope_button();
         if button.contains(p) {

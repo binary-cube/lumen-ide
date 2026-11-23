@@ -3,7 +3,7 @@
 //! the focus ring, the pill; nothing allocated once its texts were shaped.
 
 use super::*;
-use crate::chart::{Reduce, Samples};
+use crate::charts::spark::{Reduce, Samples};
 use render_api::Scene;
 
 fn plot() -> Plot {

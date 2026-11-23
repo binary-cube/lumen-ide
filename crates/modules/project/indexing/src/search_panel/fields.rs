@@ -3,7 +3,7 @@
 use super::*;
 use ui_components::KeyReach;
 use ui_components::control::Press;
-use ui_components::picker::{PickerEvent, PickerItem};
+use ui_components::picker::{PathRows, PickerEvent, PickerItem};
 
 impl ProjectSearch {
     /// The folder searched in: `folder` (relative to the project; empty: all of it), its row
@@ -151,16 +151,18 @@ impl ProjectSearch {
             self.suggestion_list.close();
             return;
         }
+        // Each as a path: its name first, what was typed lit in it, its folder after.
         let items = self
             .suggestions
             .iter()
             .map(|folder| PickerItem {
                 label: folder.clone(),
                 icon: Some("folder"),
+                marks: workspace::search::folder_marks(folder, &typed),
                 ..PickerItem::default()
             })
             .collect();
-        self.suggestion_list.open_suggestions(items, None, true);
+        self.suggestion_list.open_suggestions_with(items, (None, true), Box::new(PathRows));
     }
 
     #[cfg(test)]
@@ -193,6 +195,11 @@ impl ProjectSearch {
         self.scope.set_text(&format!("{folder}/"));
         self.scope.end(false);
         true
+    }
+
+    /// The tooltip of the folder suggested at `p` (its whole path).
+    pub fn suggestion_tooltip(&self, p: Point) -> Option<ui_components::Tip> {
+        self.has_suggestions().then(|| self.suggestion_list.tooltip_at(p)).flatten()
     }
 
     /// `p` is on the folders suggested (their list, over the results).

@@ -986,6 +986,23 @@ fn a_button_tells_what_it_is_as_it_is_drawn() {
     assert!(nodes[1].state.disabled && !nodes[1].actions.press);
 }
 
+/// A button's key is said with it, not read after it as a text of its own.
+#[test]
+fn a_button_s_key_is_its_shortcut() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let r = Rect::new(0.0, 0.0, 160.0, 32.0);
+    let recording = ui_kit::access::begin();
+    let spec = ButtonSpec::new(ButtonKind::Secondary).label("Cancel").key("esc");
+    button(&mut Layer::default(), &mut text, &icons, &ctx, r, spec);
+    let frame = recording.take();
+    let names: Vec<_> = frame.nodes().iter().map(|n| n.name.to_string()).collect();
+    assert_eq!(names, ["Cancel"]);
+    assert_eq!(frame.nodes()[0].shortcut.as_deref(), Some("esc"));
+}
+
 /// A switch, a checkbox and a radio tell their state as they're drawn: on or off, a
 /// checkbox's group partly chosen, a switch off limits greyed out.
 #[test]
@@ -1544,4 +1561,207 @@ fn a_ringed_dot_is_cut_out_of_what_it_stands_on() {
     assert!(layer.quads[0].bounds.size.width > dot.size.width, "the ring");
     let centers: Vec<_> = layer.quads.iter().map(|q| q.bounds.center()).collect();
     assert!(centers.iter().all(|c| (c.x - 20.0).abs() <= 1.0 && (c.y - 20.0).abs() <= 1.0));
+}
+
+/// The dialog's and the bars' buttons tell a screen reader what they are: a button named by
+/// its label, greyed out while off, its key said with it; their labels aren't read again.
+#[test]
+fn the_older_buttons_tell_what_they_are() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    let r = Rect::new(0.0, 0.0, 120.0, 32.0);
+    let recording = ui_kit::access::begin();
+    primary_button(&mut layer, &mut text, &ctx, r, "Save", true, false);
+    secondary_button(&mut layer, &mut text, &ctx, r, "Cancel", false, false);
+    let spec = KeyButtonSpec {
+        right: 300.0,
+        mid: 50.0,
+        label: "Delete",
+        key: "↵",
+        enabled: true,
+        hovered: false,
+        danger: true,
+    };
+    primary_button_with_key(&mut layer, &mut text, &ctx, spec);
+    let frame = recording.take();
+    let nodes = frame.nodes();
+    let names: Vec<_> = nodes.iter().map(|n| (n.role, n.name.to_string())).collect();
+    assert_eq!(
+        names,
+        [
+            (Role::Button, "Save".into()),
+            (Role::Button, "Cancel".into()),
+            (Role::Button, "Delete".into())
+        ]
+    );
+    assert!(nodes[1].state.disabled);
+    assert_eq!(nodes[2].shortcut.as_deref(), Some("↵"));
+}
+
+/// Progress, headings, a group's choices and the loader tell a screen reader what they are.
+#[test]
+fn progress_headings_choices_and_the_loader_are_told() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    let recording = ui_kit::access::begin();
+    let bar =
+        ProgressBar { fraction: Some(0.42), label: Some("Indexing"), ..ProgressBar::default() };
+    bar.paint(&mut layer, &mut text, &ctx, Rect::new(0.0, 0.0, 200.0, 30.0));
+    section_title_in(
+        &mut layer,
+        &mut text,
+        &ctx,
+        (0.0, 40.0, 300.0),
+        "Appearance",
+        Some("The theme"),
+    );
+    choice(
+        &mut layer,
+        &mut text,
+        &ctx,
+        ChoiceSpec { x: 0.0, mid: 100.0, label: "Dark", selected: true, hovered: false },
+    );
+    loader(&mut layer, &mut text, &ctx, 0.0, 140.0, &Loader::with_text("Loading"));
+    let frame = recording.take();
+    let find = |role| frame.nodes().iter().find(|n| n.role == role).expect("a node");
+    let p = find(Role::ProgressBar);
+    assert_eq!((&*p.name, p.value.as_deref()), ("Indexing", Some("42%")));
+    assert_eq!(&*find(Role::Heading).name, "Appearance");
+    let c = find(Role::Radio);
+    assert_eq!((&*c.name, c.state.checked), ("Dark", Some(true)));
+    assert!(frame.nodes().iter().any(|n| n.role == Role::ProgressBar && &*n.name == "Loading"));
+    let labels: Vec<_> = frame
+        .nodes()
+        .iter()
+        .filter(|n| n.role == Role::Label)
+        .map(|n| n.name.to_string())
+        .collect();
+    assert!(
+        !labels.iter().any(|l| l == "Indexing" || l == "Appearance" || l == "Dark"),
+        "{labels:?}"
+    );
+}
+
+/// A choice in a grid's cell: filled in the accent when in force (its label white), tinted
+/// under the mouse or the keys, its label centered and cut to the cell.
+#[test]
+fn a_choice_cell_fills_its_cell() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let r = Rect::new(10.0, 10.0, 80.0, 28.0);
+    let cell = |selected, active| ChoiceCell { label: "8.3", selected, hovered: false, active };
+    let mut on = Layer::default();
+    choice_cell(&mut on, &mut text, &ctx, r, cell(true, false));
+    assert_eq!(on.quads[0].color, palette.accent);
+    assert!(on.glyphs.iter().all(|g| g.color == Rgba::WHITE));
+    let mut keyed = Layer::default();
+    choice_cell(&mut keyed, &mut text, &ctx, r, cell(false, true));
+    assert_eq!(keyed.quads[0].color, palette.accent.with_alpha(0.10));
+    // Centered: as much room on its left as on its right.
+    let first = keyed.glyphs.first().map_or(0.0, |g| g.origin.x);
+    let w = text.shape_line("8.3", &ctx.ui_font(-0.5)).width;
+    assert!(((first - r.min_x()) - (r.max_x() - first - w)).abs() <= 1.0);
+    // A long label stays inside.
+    let mut long = Layer::default();
+    let label = "a version far too long for its cell";
+    choice_cell(&mut long, &mut text, &ctx, r, ChoiceCell { label, ..cell(false, false) });
+    assert!(long.glyphs.iter().all(|g| g.origin.x < r.max_x()));
+}
+
+/// A badge's icon size and color hold whichever comes first, the icon or them.
+#[test]
+fn a_badge_s_icon_options_hold_in_any_order() {
+    let icons = icons::Icons::builtin();
+    let before = Badge::new("x").icon_size(9.0).icon_color(Rgba::WHITE).icon(&icons, "check");
+    let after = Badge::new("x").icon(&icons, "check").icon_size(9.0).icon_color(Rgba::WHITE);
+    for b in [before, after] {
+        let icon = b.icon.expect("its icon");
+        assert_eq!((icon.size, icon.color), (9.0, Some(Rgba::WHITE)));
+    }
+}
+
+/// The specs' builders: `new` the usual state, each method one field.
+#[test]
+fn the_specs_build_from_new() {
+    let c = ChoiceSpec::new(4.0, 20.0, "Dark").selected(true);
+    assert_eq!((c.x, c.mid, c.label, c.selected, c.hovered), (4.0, 20.0, "Dark", true, false));
+    let labels = ["A", "B"];
+    let s = SegmentedSpec::new(200.0, 16.0, &labels).selected(1).hovered(Some(0));
+    assert_eq!((s.right, s.selected, s.hovered), (200.0, 1, Some(0)));
+    let st = StepperSpec::new((0.0, 300.0), 20.0, &labels).current(1);
+    assert_eq!((st.x, st.width, st.current), (0.0, 300.0, 1));
+    let r = RadioCardSpec::new(Rect::new(0.0, 0.0, 10.0, 10.0), "T", "D").hovered(true);
+    assert_eq!((r.title, r.detail, r.selected, r.hovered), ("T", "D", false, true));
+    let d = DropdownSpec::new("local").note("3").placeholder("none").enabled(false);
+    assert_eq!(
+        (d.value, d.note, d.placeholder, d.enabled, d.open),
+        ("local", Some("3"), Some("none"), false, false)
+    );
+    let look = DropdownLook::default().prefix("Tx:").compact(true);
+    assert_eq!((look.prefix, look.compact, look.dot), (Some("Tx:"), true, None));
+}
+
+/// A name's initials: the first letters of its first two words, else its first two, in
+/// upper case (a letter that grows doesn't overflow), `?` for none.
+#[test]
+fn initials_of_a_name() {
+    assert_eq!(initials("docker.acme.test"), "DA");
+    assert_eq!(initials("www-data"), "WD");
+    assert_eq!(initials("root"), "RO");
+    assert_eq!(initials("ßeta"), "SSE");
+    assert_eq!(initials("--"), "?");
+    assert_eq!(Initials::of("élan vital").as_str(), "ÉV");
+}
+
+/// To a screen reader: a number field a spin button with its number, a color's field and
+/// swatch buttons with their color (what's drawn in them not read again), a wizard's steps
+/// a list (the one under way chosen, those done checked), a toggle a toggle button.
+#[test]
+fn the_rest_of_the_controls_tell_what_they_are() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut layer = Layer::default();
+    let recording = ui_kit::access::begin();
+    number_field(&mut layer, &mut text, &ctx, Rect::new(0.0, 0.0, 120.0, 28.0), "14", false);
+    ColorField::new(Rgba::rgb(0x3b82f6), "#3b82f6").paint(
+        &mut layer,
+        &mut text,
+        &icons,
+        &ctx,
+        Rect::new(0.0, 40.0, 160.0, 28.0),
+    );
+    let labels = ["Source", "Tables", "Done"];
+    stepper(&mut layer, &mut text, &ctx, StepperSpec::new((0.0, 600.0), 100.0, &labels).current(1));
+    let toggle = ButtonSpec::new(ButtonKind::Ghost).label("Aa").toggle(true);
+    button(&mut layer, &mut text, &icons, &ctx, Rect::new(0.0, 140.0, 40.0, 28.0), toggle);
+    let frame = recording.take();
+    let n = frame.nodes();
+    let spin = n.iter().find(|n| n.role == Role::SpinButton).expect("a spin button");
+    assert_eq!(spin.value.as_deref(), Some("14"));
+    assert!(
+        !n.iter().any(|n| n.role == Role::Label && &*n.name == "14"),
+        "its number not read again"
+    );
+    let color = n.iter().find(|n| n.role == Role::Button && n.value.as_deref() == Some("#3b82f6"));
+    assert!(color.is_some(), "the color's field");
+    assert_eq!(
+        n.iter().filter(|n| n.role == Role::Button && n.value.is_some()).count(),
+        1,
+        "its swatch not again"
+    );
+    let steps: Vec<_> = n.iter().filter(|n| n.role == Role::ListItem).collect();
+    assert_eq!(steps.len(), 3);
+    assert_eq!((steps[0].state.checked, steps[1].state.selected), (Some(true), true));
+    let t = n.iter().find(|n| n.role == Role::ToggleButton).expect("a toggle");
+    assert_eq!((&*t.name, t.state.checked), ("Aa", Some(true)));
 }

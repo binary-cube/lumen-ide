@@ -204,9 +204,12 @@ fn paint_preview_toast(
     draw_text(layer, &label, r.min_x() + px(30.0), ds::optical_baseline(r.min_y(), h, ui), c("fg"));
 }
 
+/// A token the draft has no color for: a neutral grey, seen in either theme.
+const MISSING: Rgba = Rgba::rgb(0x888888);
+
 /// A token's color in the draft (grey when it has none).
 pub(crate) fn draft_color(draft: &ThemeDraft, key: &str) -> Rgba {
-    draft.get(key).unwrap_or(Rgba::rgb(0x888888))
+    draft.get(key).unwrap_or(MISSING)
 }
 
 /// The preview's window: the background, the sidebar with its files, the editor card and

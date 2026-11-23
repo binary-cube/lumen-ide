@@ -188,8 +188,9 @@ impl Dialog {
         self.scale = scale;
     }
 
+    /// Appearing (only while open: closed, it's gone at once and moves for nobody).
     pub fn is_animating(&self) -> bool {
-        self.appear.animating()
+        self.is_open() && self.appear.animating()
     }
 
     /// The button under `p` (its id) or cancel (click outside the card).
@@ -495,7 +496,7 @@ impl Dialog {
             let shaped = text.shape_line(name, &style.body);
             draw_text(rows, &shaped, rx, baseline, ctx.fade(palette.text));
         }
-        self.list_bar.paint(scene, palette, ctx.scale, boxed, content, self.list_scroll);
+        self.list_bar.paint_in(scene, ctx, boxed, content, self.list_scroll);
         #[cfg(test)]
         {
             self.list_bottom = boxed.max_y();

@@ -206,12 +206,7 @@ impl DiskCache {
 
 /// A URL's file name: a hash of it (FNV-1a, stable across runs).
 fn stem(url: &str) -> String {
-    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-    for b in url.as_bytes() {
-        h ^= u64::from(*b);
-        h = h.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{h:016x}")
+    format!("{:016x}", kernel::hash::fnv64(url))
 }
 
 #[cfg(test)]

@@ -13,6 +13,8 @@ doctest = false
 kernel.workspace = true
 # A dialect as the data extractors write SQL by (`extract`).
 extractors.workspace = true
+# What a result's rows are lent as (`lent`: a chart over them).
+charts-model.workspace = true
 
 [features]
 # `profile::testing::ProfileBuilder` for other crates' tests (the drivers', the console's).

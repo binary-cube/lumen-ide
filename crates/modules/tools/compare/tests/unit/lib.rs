@@ -676,3 +676,41 @@ fn the_toolbar_s_buttons_are_hit_as_drawn() {
     assert!(area(&c, Hit::ByHand).is_some(), "on: still a toggle");
     assert!(area(&c, Hit::Save).is_some(), "written by hand: saved as written");
 }
+
+/// Word wrap on: a long line takes several rows on its side (the row as tall on both), no
+/// scroll across; a press on its second row lands past where that row starts.
+#[test]
+fn long_lines_wrap_in_their_column() {
+    let long = "the quick brown fox jumps over the lazy dog ".repeat(6);
+    let mut c = compare(&format!("{long}\nshort\n"), &format!("{long}x\nshort\n"));
+    c.set_text_options(&ui_components::TextOptions { word_wrap: true });
+    let mut text = text_layout::TextSystem::new();
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut paint = |c: &mut Compare| {
+        let mut scene = render_api::Scene::default();
+        c.paint(ViewerPaint {
+            bounds: kernel::Rect::new(0.0, 0.0, 700.0, 500.0),
+            scale: 1.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+            focused: true,
+            waker: None,
+        });
+    };
+    paint(&mut c);
+    assert!(c.wraps());
+    assert!(c.row_height(0) > c.row_h, "the long line's row is taller");
+    assert_eq!(c.row_top(1), c.row_height(0), "the next row under all of it");
+    assert!(c.across.iter().all(|a| a.max == 0.0), "nothing scrolls across");
+    let second = kernel::Point::new(c.code_x[0] + 2.0, c.list.min_y() + c.row_h * 1.5);
+    let at = c.text_pos(0, second);
+    assert_eq!(at.row, 0);
+    assert!(at.col > 10, "on the second row of the line: {}", at.col);
+    // Off: one row each, as before.
+    c.set_text_options(&ui_components::TextOptions { word_wrap: false });
+    paint(&mut c);
+    assert_eq!(c.row_height(0), c.row_h);
+}

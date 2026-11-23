@@ -11,9 +11,10 @@ use std::cell::RefCell;
 
 use kernel::Rect;
 use windows_sys::Win32::Foundation::HWND;
+use windows_sys::Win32::Foundation::RECT;
 use windows_sys::Win32::Graphics::Gdi::{
-    CombineRgn, CreateEllipticRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, RGN_DIFF,
-    SetWindowRgn,
+    CombineRgn, CreateEllipticRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, GetRgnBox,
+    RGN_DIFF, SetWindowRgn,
 };
 
 /// A page's holes: its host window and the holes last told.
@@ -133,7 +134,21 @@ impl Holes {
                     CombineRgn(region, region, cut, RGN_DIFF);
                     DeleteObject(cut);
                 }
+                // What was asked and where it landed (the page's own pixels): a hole out of
+                // place shows here.
+                tracing::debug!(
+                    area = ?(left, top, width, height),
+                    hole = ?(x0, y0, x1, y1),
+                    radius,
+                    "a page's hole cut"
+                );
             }
+            let mut kept = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            GetRgnBox(region, &mut kept);
+            tracing::debug!(
+                region = ?(kept.left, kept.top, kept.right, kept.bottom),
+                "a page's region set"
+            );
             if SetWindowRgn(self.hwnd, region, 1) == 0 {
                 DeleteObject(region);
                 return;

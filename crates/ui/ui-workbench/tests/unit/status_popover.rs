@@ -187,3 +187,49 @@ fn the_way_to_a_window_left_of_its_item_keeps_it() {
     assert!(!popover.keeps(Point::new(item.center().x, panel.min_y() - 20.0)), "above: not");
     assert!(!popover.keeps(Point::new(panel.min_x() - 20.0, item.min_y() - 2.0)), "left: not");
 }
+
+/// A graph's value under the mouse: a guide drawn there and a tooltip saying the value then
+/// in its unit; a move within the same column draws nothing again.
+#[test]
+fn a_graph_tells_its_value_under_the_mouse() {
+    use ui_components::charts::spark::{Plot, Reduce, Samples};
+    let (mut ts, palette) = (TextSystem::new(), Palette::dark());
+    let viewport = Rect::new(0.0, 0.0, 1200.0, 800.0);
+    let item = Rect::new(900.0, 772.0, 200.0, 20.0);
+    let values: Vec<f32> = (0..60).map(|i| i as f32).collect();
+    let row = || PopoverRow::Series {
+        label: "CPU".into(),
+        plot: Plot::build(Samples::new(&values), 60, 150, Reduce::Max),
+        max: 100.0,
+        color: palette.accent,
+        value: "59%".into(),
+        icon: None,
+        format: |v| format!("{v:.0}%"),
+        step: 1,
+    };
+    let mut popover = StatusPopover::default();
+    popover.open("status.resources", item);
+    let paint = |popover: &mut StatusPopover, ts: &mut TextSystem| {
+        popover.paint(
+            &mut Scene::default(),
+            ts,
+            &Icons::builtin(),
+            &palette,
+            1.0,
+            viewport,
+            768.0,
+            &[row()],
+            None,
+            false,
+        );
+    };
+    paint(&mut popover, &mut ts);
+    let graph = popover.graphs[0];
+    let at = Point::new(graph.max_x() - 1.6, graph.center().y);
+    assert!(popover.hover(at), "a reading to draw");
+    paint(&mut popover, &mut ts);
+    let (_, said) = popover.reading_tip(at).expect("a reading");
+    assert!(said.contains("59%"), "{said}");
+    assert!(!popover.hover(Point::new(at.x + 0.2, at.y - 1.0)), "the same column");
+    assert!(popover.reading_tip(Point::new(10.0, 10.0)).is_none());
+}

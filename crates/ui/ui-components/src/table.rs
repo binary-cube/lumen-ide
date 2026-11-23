@@ -39,7 +39,7 @@ pub fn subtitle_font(ctx: &Ctx<'_>) -> Font {
 
 /// The header's band behind the names.
 pub fn header_band(layer: &mut Layer, ctx: &Ctx<'_>, header: Rect) {
-    layer.quad(Quad::filled(header, ctx.palette.text.with_alpha(0.03)));
+    layer.quad(Quad::filled(header, ctx.fade(ctx.palette.text.with_alpha(0.03))));
 }
 
 /// The header's band at the top of a table with rounded corners (`radius`, physical): its
@@ -53,7 +53,7 @@ pub fn header_band_rounded(
     radius: f32,
 ) {
     let r = radius.min(header.size.height / 2.0);
-    let fill = ctx.palette.text.with_alpha(0.03);
+    let fill = ctx.fade(ctx.palette.text.with_alpha(0.03));
     let corners = Rect::new(header.min_x(), header.min_y(), header.size.width, r);
     let round = Rect::new(header.min_x(), header.min_y(), header.size.width, 2.0 * r);
     scene.push_layer(Some(corners)).quad(Quad::filled(round, fill).rounded(r));
@@ -88,6 +88,52 @@ pub struct HeaderCell<'a> {
     pub pad: f32,
 }
 
+impl<'a> HeaderCell<'a> {
+    /// The header of `name` in `rect`, at the rule's padding (`ctx`'s [`CELL_PAD`]): no
+    /// subtitle, left-aligned, muted, not sorted, not under the mouse.
+    pub fn new(ctx: &Ctx<'_>, rect: Rect, name: &'a str) -> Self {
+        Self {
+            rect,
+            name,
+            subtitle: "",
+            right: false,
+            hovered: false,
+            sorted: None,
+            strong: false,
+            pad: ctx.px(CELL_PAD),
+        }
+    }
+
+    /// Muted, under the name (its type, its unit).
+    pub fn subtitle(self, subtitle: &'a str) -> Self {
+        Self { subtitle, ..self }
+    }
+
+    /// Numbers: right-aligned, the names too.
+    pub fn right(self, right: bool) -> Self {
+        Self { right, ..self }
+    }
+
+    pub fn hovered(self, hovered: bool) -> Self {
+        Self { hovered, ..self }
+    }
+
+    /// Sorted by it: descending or not.
+    pub fn sorted(self, sorted: Option<bool>) -> Self {
+        Self { sorted, ..self }
+    }
+
+    /// Its name in full color.
+    pub fn strong(self, strong: bool) -> Self {
+        Self { strong, ..self }
+    }
+
+    /// Its own room between its edges and its texts (physical pixels).
+    pub fn pad(self, pad: f32) -> Self {
+        Self { pad, ..self }
+    }
+}
+
 /// A column's header: its hover, its name (with the order's arrow) and its subtitle, each
 /// cut with `…` to the column. The room on its left a caller drew in (a key's icon) is left
 /// out with `start`.
@@ -100,24 +146,17 @@ pub fn header_cell(
 ) {
     let p = ctx.palette;
     let r = cell.rect;
+    // To a screen reader: a column's header named by its name (its texts drawn in it).
+    let _told = column_header(cell.name, r, None);
     if cell.hovered {
-        let lit = Rect::new(
-            r.min_x() + ctx.px(2.0),
-            r.min_y() + ctx.px(3.0),
-            (r.size.width - ctx.px(4.0)).max(0.0),
-            (r.size.height - ctx.px(6.0)).max(0.0),
-        );
-        ds::RowHighlight::new(false, true)
-            .radius(radius::SM)
-            .hover(ds::HoverFill::Faint(HEADER_HOVER))
-            .paint(layer, ctx, lit);
+        header_hover(layer, ctx, r);
     }
     let pad = cell.pad;
     let left = r.min_x() + pad + start;
     let room = (r.max_x() - pad - left).max(0.0);
     let name_font = name_font(ctx);
-    let base = (r.min_y() + ctx.px(NAME_BASELINE)).round();
-    let color = if cell.strong { p.text } else { p.text_muted };
+    let base = name_baseline(ctx, r.min_y());
+    let color = ctx.fade(if cell.strong { p.text } else { p.text_muted });
     let arrow = cell.sorted.map(|descending| if descending { "↓" } else { "↑" });
     let arrow_w = arrow.map_or(0.0, |a| text.shape_line(a, &name_font).width + ctx.px(3.0));
     let name_room = (room - arrow_w).max(0.0);
@@ -127,15 +166,58 @@ pub fn header_cell(
         ds::draw_ellipsized(layer, text, cell.name, &name_font, (name_x, base), name_room, color);
     if let Some(arrow) = arrow {
         let shaped = text.shape_line(arrow, &name_font);
-        ui_kit::draw_text(layer, &shaped, name_x + drawn + ctx.px(3.0), base, p.accent);
+        ui_kit::draw_text(layer, &shaped, name_x + drawn + ctx.px(3.0), base, ctx.fade(p.accent));
     }
     if !cell.subtitle.is_empty() {
         let font = subtitle_font(ctx);
-        let base = (r.min_y() + ctx.px(SUBTITLE_BASELINE)).round();
+        let base = subtitle_baseline(ctx, r.min_y());
         let w = text.shape_line(cell.subtitle, &font).width.min(room);
         let x = if cell.right { left + room - w } else { left };
-        ds::draw_ellipsized(layer, text, cell.subtitle, &font, (x, base), room, p.text_muted);
+        let muted = ctx.fade(p.text_muted);
+        ds::draw_ellipsized(layer, text, cell.subtitle, &font, (x, base), room, muted);
     }
+}
+
+/// A column's header to a screen reader, named `name` (the texts drawn while it's held are
+/// that name), its place among the columns (`column`: its cells say the same place, so a
+/// cell is read with its header): for a table drawing its own headers too.
+pub fn column_header(
+    name: &str,
+    rect: Rect,
+    column: Option<usize>,
+) -> Option<ui_kit::access::Opened> {
+    ui_kit::access::open(|| {
+        let header = ui_kit::access::Described::new(ui_kit::access::Role::ColumnHeader, name, rect);
+        match column {
+            Some(column) => header.index(column),
+            None => header,
+        }
+    })
+}
+
+/// A column's header under the mouse (a click sorts by it, a tooltip tells what it is): a
+/// faint rounded highlight inside its area, the same in every table.
+pub fn header_hover(layer: &mut Layer, ctx: &Ctx<'_>, r: Rect) {
+    let lit = Rect::new(
+        r.min_x() + ctx.px(2.0),
+        r.min_y() + ctx.px(3.0),
+        (r.size.width - ctx.px(4.0)).max(0.0),
+        (r.size.height - ctx.px(6.0)).max(0.0),
+    );
+    ds::RowHighlight::new(false, true)
+        .radius(radius::SM)
+        .hover(ds::HoverFill::Faint(HEADER_HOVER))
+        .paint(layer, ctx, lit);
+}
+
+/// A header's name's baseline in a header band at `top` (physical pixels).
+pub fn name_baseline(ctx: &Ctx<'_>, top: f32) -> f32 {
+    (top + ctx.px(NAME_BASELINE)).round()
+}
+
+/// A header's subtitle's baseline in a header band at `top`.
+pub fn subtitle_baseline(ctx: &Ctx<'_>, top: f32) -> f32 {
+    (top + ctx.px(SUBTITLE_BASELINE)).round()
 }
 
 /// The line between two headers at `x`: short and faint; taller in the accent where the
@@ -150,7 +232,7 @@ pub fn header_edge(layer: &mut Layer, ctx: &Ctx<'_>, x: f32, header: Rect, lit: 
         ctx.line().max(1.0),
         (header.size.height - 2.0 * inset).max(0.0),
     );
-    layer.quad(Quad::filled(line, color));
+    layer.quad(Quad::filled(line, ctx.fade(color)));
 }
 
 /// The lines between the columns down the rows, at `edges` (physical x), from `top` for
@@ -163,7 +245,7 @@ pub fn column_lines(
     height: f32,
     clip: Rect,
 ) {
-    let color = ctx.palette.border.with_alpha(0.55);
+    let color = ctx.fade(ctx.palette.border.with_alpha(0.55));
     for x in edges {
         let x = x.round();
         if x >= clip.min_x() && x <= clip.max_x() && height > 0.0 {
@@ -175,7 +257,7 @@ pub fn column_lines(
 /// The tint of the row at place `index` (every second one), behind its cells.
 pub fn stripe(layer: &mut Layer, ctx: &Ctx<'_>, row: Rect, index: usize) {
     if index % 2 == 1 {
-        layer.quad(Quad::filled(row, stripe_color(ctx)));
+        layer.quad(Quad::filled(row, ctx.fade(stripe_color(ctx))));
     }
 }
 

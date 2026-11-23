@@ -75,3 +75,19 @@ fn as_a_control_it_takes_the_keys_over_its_part() {
     assert_eq!(action, Some(PickerAction::Cancel));
     assert_eq!(field.text(), "", "nothing reached the part under it");
 }
+
+/// Drawn: a part under the mouse (a format, a button) is lit (a frame asked), once; the
+/// mouse gone from them, none is.
+#[test]
+fn its_parts_light_under_the_mouse() {
+    let mut picker = ColorPicker::default();
+    picker.set_viewport(Rect::new(0.0, 0.0, 1200.0, 800.0), 1.0);
+    picker.open(Rect::new(40.0, 40.0, 10.0, 10.0), Rgba::rgb(0xe5484d), ColorFormat::Hex, &Hex);
+    let palette = crate::palette::Palette::dark();
+    let mut text = text_layout::TextSystem::new();
+    picker.paint(&mut text, &mut render_api::Scene::default(), &icons::Icons::builtin(), &palette);
+    let part = picker.parts.first().map(|(r, _)| r.center()).expect("its parts drawn");
+    assert!(picker.hover(part));
+    assert!(!picker.hover(part), "still on it: nothing new");
+    assert!(picker.hover(Point::new(1190.0, 790.0)), "left");
+}

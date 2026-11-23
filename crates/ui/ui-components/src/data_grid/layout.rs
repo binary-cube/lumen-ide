@@ -70,7 +70,27 @@ impl ColumnLayout {
 
     /// The source's columns shown, in their order.
     pub fn visible(&self) -> Vec<usize> {
-        self.order.iter().copied().filter(|&c| !self.hidden[c]).collect()
+        let mut out = Vec::new();
+        self.visible_into(&mut out);
+        out
+    }
+
+    /// [`Self::visible`] written into `out` (a buffer kept by its owner: nothing allocated
+    /// once it has grown).
+    pub fn visible_into(&self, out: &mut Vec<usize>) {
+        out.clear();
+        out.extend(self.order.iter().copied().filter(|&c| !self.hidden[c]));
+    }
+
+    /// [`Self::edges`] times `scale` (physical pixels), written into `out` (a kept buffer).
+    pub fn edges_into(&self, out: &mut Vec<f32>, scale: f32) {
+        out.clear();
+        let mut x = 0.0;
+        for &col in self.order.iter().filter(|&&c| !self.hidden[c]) {
+            out.push(x * scale);
+            x += self.width(col);
+        }
+        out.push(x * scale);
     }
 
     pub fn is_hidden(&self, col: usize) -> bool {

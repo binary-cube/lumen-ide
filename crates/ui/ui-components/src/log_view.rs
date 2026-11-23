@@ -295,6 +295,8 @@ struct Layout {
     rows: VecDeque<Row>,
     /// The widest row (columns, with its indent): how far it scrolls sideways.
     widest: usize,
+    /// A piece's rows when it wraps (scratch, reused).
+    parts: Vec<std::ops::Range<usize>>,
 }
 
 impl Layout {
@@ -326,7 +328,10 @@ impl Layout {
         for piece in entry.body.split('\n') {
             let end = start + piece.len();
             if self.wrap {
-                for (a, b) in wrap(piece, room) {
+                // The rows every view wraps text into (`text_options`), the same breaks.
+                crate::text_options::wrap_rows(piece, room, 4, &mut self.parts);
+                for part in &self.parts {
+                    let (a, b) = (part.start, part.end);
                     self.rows.push_back(Row { line, start: start + a, end: start + b, first });
                     first = false;
                 }
@@ -338,32 +343,6 @@ impl Layout {
             start = end + 1;
         }
     }
-}
-
-/// `text`'s rows at `room` characters: broken after a space in a row's second half when
-/// there's one, else at the room's end. Byte ranges.
-fn wrap(text: &str, room: usize) -> Vec<(usize, usize)> {
-    let mut out = Vec::new();
-    let mut start = 0;
-    let mut count = 0;
-    let mut space = None;
-    let mut chars = text.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        count += 1;
-        if c == ' ' && count > room / 2 {
-            space = Some(i + 1);
-        }
-        if count == room && chars.peek().is_some() {
-            let next = chars.peek().map_or(text.len(), |(j, _)| *j);
-            let cut = space.filter(|&s| s < next).unwrap_or(next);
-            out.push((start, cut));
-            count = text[cut..next].chars().count();
-            start = cut;
-            space = None;
-        }
-    }
-    out.push((start, text.len()));
-    out
 }
 
 /// A side button.
@@ -688,7 +667,7 @@ impl LogView {
             let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
                 .icon(button.icon())
                 .rest_tone(ds::Tone::Neutral)
-                .on(on)
+                .toggle(on)
                 .hovered(hovered);
             ds::button(layer, text, icons, ds, r, spec);
             self.buttons.push((r, button));
@@ -822,6 +801,11 @@ fn kind_color(kind: LogKind, p: &Palette) -> Rgba {
 }
 
 impl Viewer for LogView {
+    /// Word wrap as every view shows text (its own button still turns it for this log).
+    fn set_text_options(&mut self, options: &crate::TextOptions) {
+        self.set_wrap(options.word_wrap);
+    }
+
     fn memory(&self) -> ViewMemory {
         let rows = self.layout.rows.len() * std::mem::size_of::<Row>();
         ViewMemory { ram: rows as u64, gpu: 0 }

@@ -38,6 +38,7 @@ use crate::worker::{Client, Request, Response, SessionWorker, Ticket};
 use workbench_model::Notification;
 
 mod export;
+mod panes;
 mod schema;
 mod viewer;
 
@@ -64,6 +65,8 @@ enum Hit {
     Row(structure::Part, usize),
     /// "Jump to Query Console…" (a configured source writing SQL).
     Console,
+    /// A pane offered over the table's rows (by its place among the offered).
+    Pane(usize),
 }
 
 /// The file's size and time when last seen: a change reported by the disk that leaves
@@ -187,6 +190,10 @@ pub struct DataView {
     page_generation: u64,
     /// The grid's layout version last kept.
     kept_version: u64,
+    /// The panes offered over the shown table's rows.
+    panes: Option<panes::TablePanes>,
+    /// A pane's "Save As" is open (its path goes to the pane, not to an export).
+    pane_saving: bool,
     /// The file as our last commit left it.
     own: Stamp,
     /// Its file's size as last seen (when its tables came, after our own writes): what a
@@ -269,6 +276,8 @@ impl DataView {
             asked: None,
             schema_answer: None,
             reselect: None,
+            panes: None,
+            pane_saving: false,
             pending_where: None,
             told: Vec::new(),
             export: None,
@@ -551,6 +560,7 @@ impl DataView {
         }
         self.kept_version = grid.layout_version();
         self.grid = Some(grid);
+        self.make_panes();
     }
 
     /// The shown table's layout kept (it comes back when the table is shown again, also

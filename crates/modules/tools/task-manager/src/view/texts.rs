@@ -5,7 +5,7 @@
 
 use i18n::{t, tr};
 use text_layout::TextSystem;
-use ui_components::chart::scale_for;
+use ui_components::charts::spark::scale_for;
 use ui_components::ds::{self, Ctx};
 
 use super::{Card, TaskManager};
@@ -59,6 +59,8 @@ pub(crate) struct Labels {
     pub programs: String,
     pub operations: String,
     pub no_threads: String,
+    /// A thread the system gave no name (written in its place, muted).
+    pub thread_unnamed: String,
     /// The actions' labels, by [`super::actions::kind_index`].
     pub actions: [String; 7],
 }
@@ -127,6 +129,7 @@ impl Labels {
             programs: t("tasks.programs_title"),
             operations: t("tasks.operations"),
             no_threads: t("tasks.no_threads"),
+            thread_unnamed: t("tasks.thread_unnamed"),
             actions: [
                 t("tasks.action_stop"),
                 t("tasks.action_close"),
@@ -175,9 +178,8 @@ pub(crate) struct Stat {
 pub(crate) struct DetailTexts {
     /// The metrics it reports.
     pub stats: Vec<Stat>,
-    /// Each chart's scale top and its label, by [`Metric::ALL`].
+    /// Each chart's scale top, by [`Metric::ALL`].
     pub scales: [f32; 5],
-    pub scale_labels: [String; 5],
     /// Owner · project · group.
     pub owner: String,
     pub group: String,
@@ -429,9 +431,9 @@ impl TaskManager {
         };
         let mut threads: Vec<(String, String)> =
             line.thread_cpu.iter().map(|(n, c)| (n.clone(), percent(*c))).collect();
-        threads.sort_by(|a, b| a.0.cmp(&b.0));
+        // By name, the unnamed ones last.
+        threads.sort_by(|a, b| (a.0.trim().is_empty(), &a.0).cmp(&(b.0.trim().is_empty(), &b.0)));
         self.texts.detail = DetailTexts {
-            scale_labels: Metric::ALL.map(|m| value(m, scales[m as usize])),
             stats,
             scales,
             owner,

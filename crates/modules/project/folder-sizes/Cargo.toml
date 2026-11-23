@@ -17,6 +17,7 @@ workbench-model.workspace = true
 languages.workspace = true
 i18n.workspace = true
 ui-components.workspace = true
+charts-model.workspace = true
 ui-kit.workspace = true
 text-layout.workspace = true
 render-api.workspace = true

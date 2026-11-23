@@ -63,7 +63,7 @@ pub fn edit_text(value: &CellRef<'_>) -> String {
 impl<S: GridSource> DataGrid<S> {
     /// Rows can be edited now.
     pub fn can_edit(&self) -> bool {
-        self.source.editing().allowed()
+        self.source.can_edit()
     }
 
     /// Why column `col` (the source's) can't be edited now, if it can't.

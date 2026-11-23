@@ -123,7 +123,7 @@ impl DiagramView {
         // Around everything chosen: shapes' boxes, edges' ways (one pass over the drawing).
         let is_chosen = self.is_chosen();
         let mut chosen: Option<Rect> = None;
-        let mut add = |r: Rect| chosen = Some(chosen.map_or(r, |c| crate::edit::union(c, r)));
+        let mut add = |r: Rect| chosen = Some(chosen.map_or(r, |c| c.union(&r)));
         for (_, r) in drawing.boxes.iter().filter(|(id, _)| is_chosen(id)) {
             let (a, b) = (to_screen(r.origin), to_screen(Point::new(r.max_x(), r.max_y())));
             add(Rect::new(a.x, a.y, b.x - a.x, b.y - a.y));

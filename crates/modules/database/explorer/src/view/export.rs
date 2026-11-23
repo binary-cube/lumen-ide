@@ -10,6 +10,9 @@ impl DataView {
         let name = format!("{}.{}", info.table.name, format.extension());
         let start = self.path.parent().map(Path::to_path_buf);
         self.export_format = Some(format);
+        // The path picked now is the export's (a pane's "Save As" cancelled before it isn't
+        // waiting any more: a cancel sends nothing back).
+        self.pane_saving = false;
         self.action = Some(ViewerAction::Request(AppRequest::PickSavePath { start, name }));
     }
 

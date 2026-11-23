@@ -5,7 +5,7 @@ use super::*;
 
 /// A toggle (on / off), vertically centered on `mid`. Returns its area.
 pub fn switch(layer: &mut Layer, ctx: &Ctx<'_>, x: f32, mid: f32, on: bool, hovered: bool) -> Rect {
-    switch_sized(layer, ctx, (x, mid), (ctx.px(36.0), ctx.px(20.0)), on, hovered, true)
+    switch_sized(layer, ctx, (x, mid), (ctx.px(SWITCH.0), ctx.px(SWITCH.1)), on, hovered, true)
 }
 
 /// A toggle that may be off limits: `enabled` false, it's dimmed and ignores the mouse.
@@ -17,20 +17,35 @@ pub fn switch_enabled(
     hovered: bool,
     enabled: bool,
 ) -> Rect {
-    let sized = (ctx.px(36.0), ctx.px(20.0));
+    let sized = (ctx.px(SWITCH.0), ctx.px(SWITCH.1));
     switch_sized(layer, ctx, (x, mid), sized, on, hovered && enabled, enabled)
 }
 
-/// The width of a [`small_switch`].
+/// A switch's width and height (logical pixels).
+pub const SWITCH: (f32, f32) = (36.0, 20.0);
+
+/// The width of a [`small_switch`], and its height.
 pub const SMALL_SWITCH_W: f32 = 26.0;
+const SMALL_SWITCH_H: f32 = 15.0;
 
 /// What a switch off limits keeps of its colors.
 pub const DISABLED_ALPHA: f32 = 0.45;
 
 /// The switch made small, for a menu's row: only says how a setting stands.
 pub fn small_switch(layer: &mut Layer, ctx: &Ctx<'_>, x: f32, mid: f32, on: bool) -> Rect {
-    switch_sized(layer, ctx, (x, mid), (ctx.px(SMALL_SWITCH_W), ctx.px(15.0)), on, false, true)
+    switch_sized(
+        layer,
+        ctx,
+        (x, mid),
+        (ctx.px(SMALL_SWITCH_W), ctx.px(SMALL_SWITCH_H)),
+        on,
+        false,
+        true,
+    )
 }
+
+/// The room between a switch's knob and its edge (logical pixels).
+const SWITCH_KNOB_INSET: f32 = 2.0;
 
 fn switch_sized(
     layer: &mut Layer,
@@ -54,9 +69,11 @@ fn switch_sized(
         ctx.palette.text.with_alpha(if hovered { 0.22 } else { 0.16 })
     };
     layer.quad(Quad::filled(rect, dim(track)).rounded(h / 2.0));
-    let knob = h - ctx.px(4.0);
-    let kx = if on { rect.max_x() - ctx.px(2.0) - knob } else { rect.min_x() + ctx.px(2.0) };
-    let kr = Rect::new(kx, rect.min_y() + ctx.px(2.0), knob, knob);
+    let inset = ctx.px(SWITCH_KNOB_INSET);
+    // Both insets rounded as one (as wide at every scale).
+    let knob = h - ctx.px(2.0 * SWITCH_KNOB_INSET);
+    let kx = if on { rect.max_x() - inset - knob } else { rect.min_x() + inset };
+    let kr = Rect::new(kx, rect.min_y() + inset, knob, knob);
     layer.quad(Quad::filled(kr, dim(Rgba::WHITE)).rounded(knob / 2.0));
     rect
 }
@@ -96,6 +113,8 @@ pub fn checkbox(
 /// A checkbox's side by default (logical pixels) and its ✓'s font at that side (relative to
 /// the UI's).
 pub const CHECKBOX: f32 = 16.0;
+/// Its corners' radius (logical pixels).
+const CHECKBOX_RADIUS: f32 = 4.0;
 const CHECKBOX_TICK_FONT: f32 = -2.0;
 /// An empty box's outline at rest and under the mouse (alpha of the muted text).
 const CHECKBOX_BORDER: f32 = 0.6;
@@ -159,14 +178,14 @@ impl Checkbox {
         if self.state == Check::Off {
             let border =
                 if self.hovered && self.enabled { CHECKBOX_BORDER_HOVER } else { CHECKBOX_BORDER };
-            layer.quad(Quad::filled(r, Rgba::TRANSPARENT).rounded(px(4.0)).bordered(
+            layer.quad(Quad::filled(r, Rgba::TRANSPARENT).rounded(px(CHECKBOX_RADIUS)).bordered(
                 ctx.line().max(1.0),
                 ctx.fade(ctx.palette.text_muted.with_alpha(border)),
             ));
             return r;
         }
         let fill = if self.enabled { ctx.palette.accent } else { ctx.palette.text_muted };
-        layer.quad(Quad::filled(r, ctx.fade(fill)).rounded(px(4.0)));
+        layer.quad(Quad::filled(r, ctx.fade(fill)).rounded(px(CHECKBOX_RADIUS)));
         if self.state == Check::Mixed {
             let bar =
                 Rect::new(r.min_x() + px(4.0), (mid - px(1.0)).round(), size - px(8.0), px(2.0));
@@ -321,7 +340,11 @@ pub fn busy_primary_button(
 ) {
     let busy = busy.clamp(0.0, 1.0);
     let base = ctx.palette.accent;
-    let fill = if hovered { base.mix(Rgba::WHITE, 0.12 * (1.0 - busy)) } else { base };
+    let fill = if hovered {
+        base.mix(Rgba::WHITE, super::button::FILLED_HOVER_MIX * (1.0 - busy))
+    } else {
+        base
+    };
     layer.quad(Quad::filled(rect, ctx.fade(fill)).rounded(ctx.px(radius::MD)));
     busy_label(layer, text, ctx, rect, (label, Rgba::WHITE), busy);
 }
@@ -343,7 +366,7 @@ pub(super) fn busy_label(
     let room = ctx.px(BUSY_EXTRA) * busy;
     let x = (rect.min_x() + (rect.size.width - room - shaped.width) / 2.0).round();
     // Below that it would be a speck: the label alone.
-    if busy > 0.05 {
+    if busy > super::button::SPINNER_FROM {
         let spinner = Loader {
             size: BUSY_SPINNER * busy,
             color: Some(color.with_alpha(color.a * busy)),
@@ -384,6 +407,28 @@ pub fn danger_button(
     filled_button(layer, text, ctx, rect, (label, ctx.palette.danger), enabled, hovered);
 }
 
+/// A button to a screen reader while the guard lives (its paint): named by its label, greyed
+/// out while it's off, its key said with it (its texts drawn in it are its own).
+fn told_button(
+    label: &str,
+    rect: Rect,
+    enabled: bool,
+    key: Option<&str>,
+) -> Option<ui_kit::access::Opened> {
+    // Drawn inside a button told already (the shared `ds::button` paints through these).
+    if ui_kit::access::inside(ui_kit::access::Role::Button) {
+        return None;
+    }
+    ui_kit::access::open(|| {
+        use ui_kit::access::{Described, Role};
+        let node = Described::new(Role::Button, label, rect).disabled(!enabled);
+        match key {
+            Some(key) => node.shortcut(key),
+            None => node,
+        }
+    })
+}
+
 /// A button filled with `base`, its label centered.
 fn filled_button(
     layer: &mut Layer,
@@ -394,11 +439,12 @@ fn filled_button(
     enabled: bool,
     hovered: bool,
 ) {
+    let _told = told_button(label, rect, enabled, None);
     let p = ctx.palette;
     let fill = if !enabled {
         p.text.with_alpha(0.08)
     } else if hovered {
-        base.mix(Rgba::WHITE, 0.12)
+        base.mix(Rgba::WHITE, super::button::FILLED_HOVER_MIX)
     } else {
         base
     };
@@ -409,6 +455,11 @@ fn filled_button(
 /// The height of a view header's buttons (the Git window's Commit / Refresh / Fetch / Pull /
 /// Push): smaller than a dialog's [`BUTTON_H`].
 pub const TOOLBAR_BUTTON_H: f32 = 30.0;
+/// Its icon's side, where the icon starts, and the room between it and the label (logical
+/// pixels).
+const TOOLBAR_ICON: f32 = 14.0;
+const TOOLBAR_ICON_X: f32 = 11.0;
+const TOOLBAR_ICON_GAP: f32 = 8.0;
 
 /// The font of a view header's buttons.
 pub fn toolbar_button_font(ctx: &Ctx<'_>) -> Font {
@@ -429,7 +480,7 @@ pub struct ToolbarButton<'a> {
 /// How wide [`toolbar_button`] is for `label` (its icon, the label, room around them).
 pub fn toolbar_button_width(text: &mut TextSystem, ctx: &Ctx<'_>, label: &str) -> f32 {
     let font = toolbar_button_font(ctx);
-    (text.shape_line(label, &font).width + ctx.px(14.0) + ctx.px(30.0)).round()
+    (text.shape_line(label, &font).width + ctx.px(TOOLBAR_ICON) + ctx.px(30.0)).round()
 }
 
 /// A button in a view's header row (beside its title, as the Git window's): bordered,
@@ -470,6 +521,7 @@ fn paint_toolbar_button(
     button: ToolbarButton<'_>,
     busy: bool,
 ) {
+    let _told = told_button(button.label, rect, true, None);
     let p = ctx.palette;
     let (fill, border, color) = match (button.accent, button.hovered) {
         (true, false) => (p.accent.with_alpha(0.16), p.accent.with_alpha(0.5), p.accent),
@@ -482,13 +534,13 @@ fn paint_toolbar_button(
             .rounded(ctx.px(radius::MD))
             .bordered(ctx.line(), ctx.fade(border)),
     );
-    let icon_size = ctx.px(14.0);
+    let icon_size = ctx.px(TOOLBAR_ICON);
     if busy {
-        let spinner = Loader { size: 14.0, color: Some(color), ..Loader::default() };
-        loader(layer, text, ctx, rect.min_x() + ctx.px(11.0), rect.center().y, &spinner);
+        let spinner = Loader { size: TOOLBAR_ICON, color: Some(color), ..Loader::default() };
+        loader(layer, text, ctx, rect.min_x() + ctx.px(TOOLBAR_ICON_X), rect.center().y, &spinner);
     } else if let Some(id) = icons.id(button.icon) {
         let ir = Rect::new(
-            rect.min_x() + ctx.px(11.0),
+            rect.min_x() + ctx.px(TOOLBAR_ICON_X),
             (rect.min_y() + (rect.size.height - icon_size) / 2.0).round(),
             icon_size,
             icon_size,
@@ -500,7 +552,7 @@ fn paint_toolbar_button(
     draw_text(
         layer,
         &shaped,
-        (rect.min_x() + ctx.px(19.0) + icon_size).round(),
+        (rect.min_x() + ctx.px(TOOLBAR_ICON_X + TOOLBAR_ICON_GAP) + icon_size).round(),
         optical_baseline(rect.min_y(), rect.size.height, &font),
         ctx.fade(color),
     );
@@ -518,6 +570,7 @@ pub fn secondary_button(
     enabled: bool,
     hovered: bool,
 ) {
+    let _told = told_button(label, rect, enabled, None);
     let p = ctx.palette;
     let fill = if enabled && hovered { p.text.with_alpha(0.08) } else { Rgba::TRANSPARENT };
     layer.quad(
@@ -558,9 +611,25 @@ pub struct ChoiceSpec<'a> {
     pub hovered: bool,
 }
 
+impl<'a> ChoiceSpec<'a> {
+    /// `label` at `x`, centered on `mid`: not chosen, not under the mouse.
+    pub fn new(x: f32, mid: f32, label: &'a str) -> Self {
+        Self { x, mid, label, selected: false, hovered: false }
+    }
+
+    /// The one in force.
+    pub fn selected(self, selected: bool) -> Self {
+        Self { selected, ..self }
+    }
+
+    pub fn hovered(self, hovered: bool) -> Self {
+        Self { hovered, ..self }
+    }
+}
+
 /// A [`choice`] pill's width for `label` (to lay pills out before drawing them).
 pub fn choice_width(text: &mut TextSystem, ctx: &Ctx<'_>, label: &str) -> f32 {
-    (text.shape_line(label, &ctx.ui_font(0.0)).width + ctx.px(28.0)).round()
+    (text.shape_line(label, &ctx.ui_font(0.0)).width + ctx.px(2.0 * CHOICE_PAD)).round()
 }
 
 /// An option in a choice group (pill), vertically centered on `mid`; the selected one
@@ -575,6 +644,10 @@ pub fn choice(
 }
 
 /// A choice pill's leading dot, and the room after it (logical pixels).
+/// A choice pill's height, and the room on each side of its content (logical pixels).
+const CHOICE_H: f32 = 32.0;
+const CHOICE_PAD: f32 = 14.0;
+/// Its dot's side.
 const CHOICE_DOT: f32 = 7.0;
 const CHOICE_DOT_GAP: f32 = 6.0;
 
@@ -604,10 +677,19 @@ fn paint_choice(
     let ChoiceSpec { x, mid, label, selected, hovered } = spec;
     let font = ctx.ui_font(0.0);
     let shaped = text.shape_line(label, &font);
-    let h = ctx.px(32.0);
+    let h = ctx.px(CHOICE_H);
     let lead = dot.map_or(0.0, |_| ctx.px(CHOICE_DOT + CHOICE_DOT_GAP));
-    let rect =
-        Rect::new(x, (mid - h / 2.0).round(), (shaped.width + lead + ctx.px(28.0)).round(), h);
+    let rect = Rect::new(
+        x,
+        (mid - h / 2.0).round(),
+        (shaped.width + lead + ctx.px(2.0 * CHOICE_PAD)).round(),
+        h,
+    );
+    // To a screen reader: one of a group's choices (a radio), chosen or not.
+    let _told = ui_kit::access::open(|| {
+        use ui_kit::access::{Described, Role};
+        Described::new(Role::Radio, label, rect).checked(selected)
+    });
     let p = ctx.palette;
     let (fill, border, color) = if selected {
         (p.accent.with_alpha(0.10), p.accent.with_alpha(0.7), p.accent)
@@ -623,17 +705,70 @@ fn paint_choice(
     );
     if let Some(dot) = dot {
         let d = ctx.px(CHOICE_DOT);
-        let at = Rect::new(rect.min_x() + ctx.px(14.0), (mid - d / 2.0).round(), d, d);
+        let at = Rect::new(rect.min_x() + ctx.px(CHOICE_PAD), (mid - d / 2.0).round(), d, d);
         layer.quad(Quad::filled(at, ctx.fade(dot)).rounded(d / 2.0));
     }
     draw_text(
         layer,
         &shaped,
-        rect.min_x() + ctx.px(14.0) + lead,
+        rect.min_x() + ctx.px(CHOICE_PAD) + lead,
         optical_baseline(rect.min_y(), h, &font),
         ctx.fade(color),
     );
     rect
+}
+
+/// A choice laid in a grid of equal cells (versions, levels), as [`choice_cell`] draws it.
+#[derive(Debug, Clone, Copy)]
+pub struct ChoiceCell<'a> {
+    pub label: &'a str,
+    /// The one in force: filled in the accent, its label bold and white.
+    pub selected: bool,
+    pub hovered: bool,
+    /// Under the keys: lit as under the mouse.
+    pub active: bool,
+}
+
+/// The room kept on each side of a [`choice_cell`]'s label (logical pixels).
+const CHOICE_CELL_PAD: f32 = 7.0;
+
+/// A choice filling `rect` (a cell of a grid of them), its label centered and cut with "…":
+/// the one in force filled in the accent, one under the mouse or the keys tinted.
+pub fn choice_cell(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    rect: Rect,
+    cell: ChoiceCell<'_>,
+) {
+    let ChoiceCell { label, selected, hovered, active } = cell;
+    let _told = ui_kit::access::open(|| {
+        use ui_kit::access::{Described, Role};
+        Described::new(Role::Radio, label, rect).checked(selected)
+    });
+    let p = ctx.palette;
+    let (fill, border) = if selected {
+        (p.accent, p.accent)
+    } else if active || hovered {
+        (p.accent.with_alpha(0.10), p.accent.with_alpha(0.6))
+    } else {
+        (p.text.with_alpha(0.035), p.border)
+    };
+    layer.quad(
+        Quad::filled(rect, ctx.fade(fill))
+            .rounded(ctx.px(radius::MD))
+            .bordered(ctx.line(), ctx.fade(border)),
+    );
+    let font = ctx.ui_font(-0.5);
+    let font = if selected { font.with_weight(Font::SEMIBOLD) } else { font };
+    let room = (rect.size.width - 2.0 * ctx.px(CHOICE_CELL_PAD)).max(0.0);
+    let w = ellipsized_width(text, label, &font, room);
+    let at = (
+        (rect.min_x() + (rect.size.width - w) / 2.0).round(),
+        optical_baseline(rect.min_y(), rect.size.height, &font),
+    );
+    let color = ctx.fade(if selected { Rgba::WHITE } else { p.text });
+    draw_ellipsized(layer, text, label, &font, at, room, color);
 }
 
 /// What [`check_row`] draws: its label and state, and, for a list that differs, its
@@ -800,6 +935,23 @@ pub struct SegmentedSpec<'a> {
     pub labels: &'a [&'a str],
     pub selected: usize,
     pub hovered: Option<usize>,
+}
+
+impl<'a> SegmentedSpec<'a> {
+    /// `labels` ending at `right`, centered on `mid`, the first chosen.
+    pub fn new(right: f32, mid: f32, labels: &'a [&'a str]) -> Self {
+        Self { right, mid, labels, selected: 0, hovered: None }
+    }
+
+    /// The one chosen (its place).
+    pub fn selected(self, selected: usize) -> Self {
+        Self { selected, ..self }
+    }
+
+    /// The one under the mouse.
+    pub fn hovered(self, hovered: Option<usize>) -> Self {
+        Self { hovered, ..self }
+    }
 }
 
 /// A segmented control (one of a few, side by side in a track: "All · Dark · Light"),
@@ -1006,6 +1158,25 @@ pub struct StepperSpec<'a> {
     pub current: usize,
 }
 
+impl<'a> StepperSpec<'a> {
+    /// `labels` across `width` from `x`, centered on `mid`, the first the current one.
+    pub fn new((x, width): (f32, f32), mid: f32, labels: &'a [&'a str]) -> Self {
+        Self { x, width, mid, labels, current: 0 }
+    }
+
+    /// The step under way (its place).
+    pub fn current(self, current: usize) -> Self {
+        Self { current, ..self }
+    }
+}
+
+/// A step's number as written, the usual wizard's at most.
+const STEP_NUMBERS: [&str; 9] = ["1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
+/// A stepper's numbered circle, and the room between it and the lines (logical pixels).
+const STEP: f32 = 22.0;
+const STEP_GAP: f32 = 10.0;
+
 /// A wizard's steps across `width` from `x`, centered on `mid`: each a numbered circle and
 /// its name, joined by lines — the done ones filled with a check, the current one ringed in
 /// the accent (its name bold), the next ones muted.
@@ -1015,8 +1186,8 @@ pub fn stepper(layer: &mut Layer, text: &mut TextSystem, ctx: &Ctx<'_>, spec: St
     let font = ctx.ui_font(-0.5);
     let bold = font.clone().with_weight(Font::SEMIBOLD);
     let number = ctx.ui_font(-2.0).with_weight(Font::SEMIBOLD);
-    let d = ctx.px(22.0);
-    let gap = ctx.px(10.0);
+    let d = ctx.px(STEP);
+    let gap = ctx.px(STEP_GAP);
     let shaped: Vec<_> = labels
         .iter()
         .enumerate()
@@ -1027,8 +1198,22 @@ pub fn stepper(layer: &mut Layer, text: &mut TextSystem, ctx: &Ctx<'_>, spec: St
     let joins = labels.len().saturating_sub(1).max(1) as f32;
     let line_w = ((width - items - 2.0 * gap * joins) / joins).max(ctx.px(16.0));
     let mut cx = x;
+    // To a screen reader: a list of the steps, the one under way chosen, those done checked.
+    let all = Rect::new(x, (mid - d / 2.0).round(), width, d);
+    let _steps = ui_kit::access::open(|| {
+        ui_kit::access::Described::new(ui_kit::access::Role::List, "", all).count(labels.len())
+    });
     for (i, label) in shaped.iter().enumerate() {
         let circle = Rect::new(cx.round(), (mid - d / 2.0).round(), d, d);
+        let step = Rect::new(circle.min_x(), circle.min_y(), d + ctx.px(8.0) + label.width, d);
+        let _step = ui_kit::access::open(|| {
+            use ui_kit::access::{Described, Role};
+            let name = labels.get(i).copied().unwrap_or_default();
+            Described::new(Role::ListItem, name, step)
+                .index(i)
+                .selected(i == current)
+                .checked(i < current)
+        });
         let (fill, ring, color) = if i < current {
             (p.accent, p.accent, Rgba::WHITE)
         } else if i == current {
@@ -1056,8 +1241,17 @@ pub fn stepper(layer: &mut Layer, text: &mut TextSystem, ctx: &Ctx<'_>, spec: St
                 .rounded(d / 2.0)
                 .bordered(ctx.px(1.5), ctx.fade(ring)),
         );
-        let mark = if i < current { "✓".to_owned() } else { (i + 1).to_string() };
-        let m = text.shape_line(&mark, &number);
+        // Its number from a table (no text made per frame); past it, written.
+        let written;
+        let mark = match STEP_NUMBERS.get(i) {
+            _ if i < current => "✓",
+            Some(n) => n,
+            None => {
+                written = (i + 1).to_string();
+                written.as_str()
+            }
+        };
+        let m = text.shape_line(mark, &number);
         draw_text(
             layer,
             &m,
@@ -1089,6 +1283,25 @@ pub struct RadioCardSpec<'a> {
     pub hovered: bool,
 }
 
+impl<'a> RadioCardSpec<'a> {
+    /// A card in `rect`: its title and the line under it, not chosen, not under the mouse.
+    pub fn new(rect: Rect, title: &'a str, detail: &'a str) -> Self {
+        Self { rect, title, detail, selected: false, hovered: false }
+    }
+
+    /// The one in force.
+    pub fn selected(self, selected: bool) -> Self {
+        Self { selected, ..self }
+    }
+
+    pub fn hovered(self, hovered: bool) -> Self {
+        Self { hovered, ..self }
+    }
+}
+
+/// A radio card's padding (logical pixels).
+const RADIO_CARD_PAD: f32 = 16.0;
+
 /// A choice as a card: a radio, a title and a line under it (`rect`); the chosen one
 /// ringed in the accent on a light tint.
 pub fn radio_card(
@@ -1111,18 +1324,17 @@ pub fn radio_card(
             .rounded(ctx.px(radius::LG))
             .bordered(if selected { ctx.px(1.5) } else { ctx.line() }, ctx.fade(border)),
     );
-    let pad = ctx.px(16.0);
+    let pad = ctx.px(RADIO_CARD_PAD);
     let font = ctx.ui_font(0.0).with_weight(Font::SEMIBOLD);
     let small = ctx.ui_font(-1.0);
-    let d = ctx.px(18.0);
+    let d = ctx.px(RADIO);
     let top = rect.min_y() + pad;
     let radio =
         Radio::new(selected).paint(layer, ctx, Point::new(rect.min_x() + pad, top + ctx.px(1.0)));
     let tx = radio.max_x() + ctx.px(12.0);
     let room = (rect.max_x() - pad - tx).max(0.0);
-    let title = ellipsize(text, title, &font, room);
-    let shaped = text.shape_line(&title, &font);
-    draw_text(layer, &shaped, tx, optical_baseline(top, d + ctx.px(2.0), &font), ctx.fade(p.text));
+    let baseline = optical_baseline(top, d + ctx.px(2.0), &font);
+    draw_ellipsized(layer, text, title, &font, (tx, baseline), room, ctx.fade(p.text));
     // The line under it, wrapped on two lines at most.
     let mut y = top + d + ctx.px(8.0);
     for l in wrap(text, detail, &small, room, 2) {
@@ -1162,13 +1374,14 @@ pub fn primary_button_with_key(
     let shaped = text.shape_line(label, &font);
     let key_shaped = text.shape_line(key, &key_font);
     let key_w = (key_shaped.width + ctx.px(8.0)).max(ctx.px(18.0));
-    let h = ctx.px(34.0);
+    let h = ctx.px(BUTTON_H);
     let w = (shaped.width + key_w + ctx.px(38.0)).round();
     let rect = Rect::new((right - w).round(), (mid - h / 2.0).round(), w, h);
+    let _told = told_button(label, rect, enabled, Some(key));
     let fill = if !enabled {
         p.text.with_alpha(0.08)
     } else if hovered {
-        base.mix(Rgba::WHITE, 0.12)
+        base.mix(Rgba::WHITE, super::button::FILLED_HOVER_MIX)
     } else {
         base
     };
@@ -1206,13 +1419,9 @@ pub fn search_field(
             .rounded(rect.size.height / 2.0)
             .bordered(ctx.line(), ctx.fade(border)),
     );
-    let size = ctx.px(15.0);
-    let x = rect.min_x() + ctx.px(13.0);
-    if let Some(id) = icons.id("search") {
-        let r = Rect::new(x, (rect.min_y() + (rect.size.height - size) / 2.0).round(), size, size);
-        ui_kit::draw_icon(layer, icons, id, r, ctx.fade(p.text_muted));
-    }
-    let left = x + size + ctx.px(9.0);
+    let x = rect.min_x() + ctx.px(MAGNIFIER_LEFT);
+    magnifier(layer, icons, ctx, x, rect);
+    let left = x + ctx.px(MAGNIFIER) + ctx.px(9.0);
     Rect::new(left, rect.min_y(), rect.max_x() - left - ctx.px(14.0), rect.size.height)
 }
 
@@ -1271,17 +1480,24 @@ pub fn search_input(
     let (layer, text, icons, ctx) = (&mut *pen.layer, &mut *pen.text, pen.icons, &pen.ds);
     let style = search_input_style(ctx, rect.size.height);
     input.paint(layer, text, rect, focused, placeholder, &style);
-    if let Some(id) = icons.id("search") {
-        let s = ctx.px(15.0);
-        let r = Rect::new(
-            (rect.min_x() + ctx.px(13.0)).round(),
-            (rect.min_y() + (rect.size.height - s) / 2.0).round(),
-            s,
-            s,
-        );
-        ui_kit::draw_icon(layer, icons, id, r, ctx.fade(ctx.palette.text_muted));
-    }
+    magnifier(layer, icons, ctx, (rect.min_x() + ctx.px(MAGNIFIER_LEFT)).round(), rect);
 }
+
+/// A search pill's magnifier: its side, and its place from the pill's left (logical pixels).
+const MAGNIFIER: f32 = 15.0;
+const MAGNIFIER_LEFT: f32 = 13.0;
+
+/// The magnifier of a search pill in `rect`, from `x`, centered on its height.
+fn magnifier(layer: &mut Layer, icons: &icons::Icons, ctx: &Ctx<'_>, x: f32, rect: Rect) {
+    let Some(id) = icons.id("search") else { return };
+    let s = ctx.px(MAGNIFIER);
+    let r = Rect::new(x, (rect.min_y() + (rect.size.height - s) / 2.0).round(), s, s);
+    ui_kit::draw_icon(layer, icons, id, r, ctx.fade(ctx.palette.text_muted));
+}
+
+/// A field's clear button's side, and its ×'s (logical pixels).
+const CLEAR: f32 = 18.0;
+const CLEAR_ICON: f32 = 9.0;
 
 /// The round clear button of a field (×), centered on `(cx, mid)`. Returns its area.
 pub fn clear_button(
@@ -1292,13 +1508,13 @@ pub fn clear_button(
     mid: f32,
     hovered: bool,
 ) -> Rect {
-    let size = ctx.px(18.0);
+    let size = ctx.px(CLEAR);
     let r = Rect::new((cx - size / 2.0).round(), (mid - size / 2.0).round(), size, size);
     let p = ctx.palette;
     let fill = p.text.with_alpha(if hovered { 0.12 } else { 0.06 });
     layer.quad(Quad::filled(r, ctx.fade(fill)).rounded(size / 2.0));
     if let Some(id) = icons.id("x") {
-        let icon = ctx.px(9.0);
+        let icon = ctx.px(CLEAR_ICON);
         let ir = Rect::new(
             (r.min_x() + (size - icon) / 2.0).round(),
             (r.min_y() + (size - icon) / 2.0).round(),

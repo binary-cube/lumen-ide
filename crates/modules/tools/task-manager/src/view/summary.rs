@@ -8,7 +8,7 @@ use std::sync::PoisonError;
 
 use render_api::Scene;
 use text_layout::TextSystem;
-use ui_components::chart::{Reduce, Samples, series_color};
+use ui_components::charts::spark::{Reduce, Samples, series_color};
 use ui_components::ds::{self, Ctx};
 use ui_components::metric_card::{CardForm, CardSeries, MetricCard, metric_card};
 
@@ -37,7 +37,7 @@ pub(super) fn metrics(card: Card) -> &'static [Metric] {
 
 /// A metric's series color.
 pub(crate) fn color(palette: &ui_components::Palette, metric: Metric) -> kernel::Rgba {
-    use ui_components::chart::Series;
+    use ui_components::charts::spark::Series;
     let series = match metric {
         Metric::Cpu => Series::Cpu,
         Metric::Memory => Series::Memory,

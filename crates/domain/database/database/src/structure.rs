@@ -280,6 +280,12 @@ impl Structure {
 
     /// How its rows are found (a primary key first, then the row id, when a name of it
     /// isn't hidden by a column, then the line in its file).
+    /// Its rows can be found to be edited ([`Self::key_kind`] isn't `None`), nothing made
+    /// to say how.
+    pub fn has_key(&self) -> bool {
+        self.columns.iter().any(|c| c.in_key) || self.row_id_name().is_some() || self.lines
+    }
+
     pub fn key_kind(&self) -> KeyKind {
         let key = self.primary_key();
         if !key.is_empty() {

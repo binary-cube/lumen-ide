@@ -120,6 +120,7 @@ fn a_modal_s_field_takes_copy_cut_and_undo() {
         popover: false,
         dragging: false,
         extension: "view-test-field".into(),
+        text_told: 0,
     });
     assert!(wb.select_all(&mut text), "⌘A in the field");
     assert_eq!(
@@ -190,6 +191,7 @@ fn a_modal_view_that_zooms_gets_the_zoom_and_its_presses() {
         popover: false,
         dragging: false,
         extension: "view-test-zoom".into(),
+        text_told: 0,
     });
     if let Some((frame, _)) = wb.modal_view.as_mut().and_then(|m| m.frame.as_mut()) {
         frame.open();
@@ -233,6 +235,7 @@ fn a_modal_view_without_a_field_gets_its_keys() {
         popover: false,
         dragging: false,
         extension: "view-test-keys".into(),
+        text_told: 0,
     });
     let mut text = TextSystem::new();
     assert_eq!(wb.modal_view_text(&mut text, "0"), Some(true));
@@ -272,6 +275,7 @@ fn a_popover_done_without_an_action_is_closed() {
         popover: true,
         dragging: false,
         extension: "view-test-popover".into(),
+        text_told: 0,
     };
     wb.modal_view = Some(popover());
     wb.edit_key(&mut text, EditKey::Escape);
@@ -316,6 +320,7 @@ fn a_window_s_view_asked_menu_opens_and_comes_back_to_it() {
         popover: true,
         dragging: false,
         extension: "view-test-asking".into(),
+        text_told: 0,
     });
     wb.click_modal_view(&mut text, Point::new(50.0, 50.0), 1);
     assert!(wb.context_menu.is_open(), "the app's menu, over the window");

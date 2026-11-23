@@ -104,8 +104,9 @@ impl EditorView {
         let buffer = doc.buffer();
         let head = doc.selections().primary().head;
         let line = buffer.line_of(head);
-
-        let top = folds.row_of(line as u32) as f32 * layout.line_height;
+        self.refresh_rows(doc, folds);
+        let (row, _) = self.row_of_offset(doc, folds, head);
+        let top = row as f32 * layout.line_height;
         let height = self.bounds.size.height;
         let margin = layout.line_height;
         if top - margin < self.scroll_y {
@@ -114,8 +115,12 @@ impl EditorView {
             self.scroll_y = top + layout.line_height + margin - height;
         }
         self.clamp_scroll_y(doc, folds);
-
-        buffer.write_line(line, &mut self.line);
+        // Wrapped: every row fits, nothing scrolls sideways.
+        if self.wraps() {
+            self.scroll_x = 0.0;
+            return;
+        }
+        self.load_line(doc, line);
         let col = head - buffer.line_start(line);
         let x = self.x_in_line(text, doc, col);
         let width = self.bounds.size.width - layout.text_left;
@@ -141,8 +146,9 @@ impl EditorView {
         /// The lines kept from an edge for the line to count as seen.
         const COMFORT: f32 = 3.0;
         let line_height = self.layout(text, doc, palette).line_height;
-        let line = doc.buffer().line_of(doc.selections().primary().head);
-        let top = folds.row_of(line as u32) as f32 * line_height;
+        self.refresh_rows(doc, folds);
+        let (row, _) = self.row_of_offset(doc, folds, doc.selections().primary().head);
+        let top = row as f32 * line_height;
         let height = self.bounds.size.height;
         let margin = (COMFORT * line_height).min(height / 4.0);
         let seen =
@@ -166,7 +172,7 @@ impl EditorView {
         folds: &Folds,
     ) -> (ScrollMetrics, ScrollMetrics) {
         let lh = self.line_height();
-        let rows = folds.visible_rows(doc.buffer().line_count() as u32);
+        let rows = self.total_rows(doc, folds);
         let height = self.bounds.size.height;
         // Can scroll until the last row reaches the top ("scroll past end").
         let vertical = ScrollMetrics {
@@ -277,7 +283,10 @@ impl EditorView {
     /// top of the view (a preview beside it follows it).
     pub fn top_line(&self, folds: &Folds) -> f32 {
         let row = (self.scroll_y / self.line_height()).max(0.0);
-        folds.line_of(row.floor() as u32) as f32 + row.fract()
+        let (line, k) = self.row_at(folds, row.floor() as u32);
+        // A wrapped line: how far down its rows.
+        let rows = self.rows_of_line(folds, line).max(1) as f32;
+        line as f32 + (k as f32 + row.fract()) / rows
     }
 
     /// Scrolled so document line `line` (fractional) is at the top (a preview beside it
@@ -285,7 +294,9 @@ impl EditorView {
     pub fn scroll_to_line(&mut self, line: f32, doc: &Document, folds: &Folds) -> bool {
         let before = self.scroll_y;
         let line = line.max(0.0);
-        let row = folds.row_of(line.floor() as u32) as f32 + line.fract();
+        let first = line.floor() as u32;
+        let rows = self.rows_of_line(folds, first).max(1) as f32;
+        let row = self.row_of_line(folds, first) as f32 + line.fract() * rows;
         self.scroll_y = row * self.line_height();
         self.clamp_scroll_y(doc, folds);
         self.scroll_y != before
@@ -293,7 +304,7 @@ impl EditorView {
 
     pub(super) fn clamp_scroll_y(&mut self, doc: &Document, folds: &Folds) {
         // Can scroll until the last row reaches the top ("scroll past end").
-        let rows = folds.visible_rows(doc.buffer().line_count() as u32);
+        let rows = self.total_rows(doc, folds);
         let max = rows.saturating_sub(1) as f32 * self.line_height();
         self.scroll_y = self.scroll_y.clamp(0.0, max.max(0.0)).round();
     }

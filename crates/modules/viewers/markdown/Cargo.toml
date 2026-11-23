@@ -10,6 +10,8 @@ publish.workspace = true
 doctest = false
 
 [dependencies]
+# A chart's ticks, the same as every chart's (plan 94).
+charts-model.workspace = true
 workbench-model.workspace = true
 kernel.workspace = true
 extensions.workspace = true

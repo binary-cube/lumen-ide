@@ -482,8 +482,14 @@ impl OverlaySlot for DropdownListSlot {
         wb.dropdown_list.paint(scene, text, &wb.icons, &ctx, (anchor, bounds), "");
     }
 
-    fn animating(&self, wb: &Workbench) -> bool {
-        wb.dropdown_list.next_frame().is_some()
+    /// Nothing of its own moves every frame: its scrollbar fades at its own pace.
+    fn animating(&self, _wb: &Workbench) -> bool {
+        false
+    }
+
+    /// Its scrollbar's next change, while it's open (closed, it isn't drawn).
+    fn frame_deadline(&self, wb: &Workbench) -> Option<std::time::Instant> {
+        wb.dropdown_list.is_open().then(|| wb.dropdown_list.next_frame()).flatten()
     }
 
     fn has_input(&self, wb: &Workbench) -> bool {

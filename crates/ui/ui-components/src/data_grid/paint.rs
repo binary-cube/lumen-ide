@@ -20,6 +20,7 @@ use crate::ds::{self, Ctx, radius};
 use crate::scrollbar::ScrollMetrics;
 
 mod bars;
+pub(super) use bars::{BarKey, BarTexts, Hints};
 mod popups;
 mod table;
 
@@ -30,16 +31,47 @@ const FILTER_OVERLAP: f32 = 8.0;
 
 /// `n` with its thousands grouped as the language writes them.
 pub fn grouped(n: u64) -> String {
-    let sep = if i18n::locale().starts_with("ro") { '.' } else { ',' };
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+    let mut out = String::new();
+    write_grouped(&mut out, n);
+    out
+}
+
+/// [`grouped`] written at the end of `out` (a text kept by its owner: nothing allocated
+/// once it has grown).
+pub fn write_grouped(out: &mut String, n: u64) {
+    let sep = group_separator();
+    // Its digits, from the right, on the stack (a u64 has at most 20).
+    let mut digits = [0u8; 20];
+    let mut len = 0;
+    let mut rest = n;
+    loop {
+        digits[len] = b'0' + (rest % 10) as u8;
+        len += 1;
+        rest /= 10;
+        if rest == 0 {
+            break;
+        }
+    }
+    for i in (0..len).rev() {
+        out.push(char::from(digits[i]));
+        if i > 0 && i % 3 == 0 {
             out.push(sep);
         }
-        out.push(c);
     }
-    out
+}
+
+/// The thousands' separator of the language: read again only when the messages change.
+fn group_separator() -> char {
+    use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+    static SEEN: AtomicU64 = AtomicU64::new(u64::MAX);
+    static SEPARATOR: AtomicU32 = AtomicU32::new(',' as u32);
+    let now = i18n::generation();
+    if SEEN.load(Ordering::Acquire) != now {
+        let sep = if i18n::locale().starts_with("ro") { '.' } else { ',' };
+        SEPARATOR.store(sep as u32, Ordering::Release);
+        SEEN.store(now, Ordering::Release);
+    }
+    char::from_u32(SEPARATOR.load(Ordering::Acquire)).unwrap_or(',')
 }
 
 /// A cell's text as drawn: its first line, cut to [`CELL_CHARS`] characters.
@@ -94,6 +126,8 @@ fn draw_fitted(
     }
     let dots = text.shape_line("…", font);
     let limit = room - dots.width;
+    // To a screen reader: the whole value, where its cut shows.
+    ui_kit::access::text_shown(&shaped, (x.round(), room), baseline);
     let mut end = 0.0;
     for g in shaped.glyphs.iter().take_while(|g| g.x + g.advance <= limit) {
         layer.glyphs.push(GlyphInstance {

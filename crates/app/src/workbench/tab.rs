@@ -105,6 +105,7 @@ impl Tab {
         Self {
             pinned: false,
             disk_read_only: false,
+            text_told: 0,
             disk_changed: false,
             // Seen by the caller once it's made (`seen_on_disk`).
             disk_stamp: None,
@@ -363,6 +364,16 @@ pub(super) fn all_tabs<'a>(
     tabs.iter().chain(groups.iter().flat_map(|g| g.tabs.iter()))
 }
 
+/// The tabs on screen: the main group's active one and each split group's — what can show
+/// a change (asked whether it moves or wants a frame; the others are asked when shown).
+pub(super) fn shown_tabs<'a>(
+    tabs: &'a [Tab],
+    active: usize,
+    groups: &'a [GroupState],
+) -> impl Iterator<Item = &'a Tab> {
+    tabs.get(active).into_iter().chain(groups.iter().filter_map(|g| g.tabs.get(g.active)))
+}
+
 pub(super) fn all_tabs_mut<'a>(
     tabs: &'a mut [Tab],
     groups: &'a mut [GroupState],
@@ -435,3 +446,10 @@ pub(super) fn text_fingerprint<'a>(chunks: impl Iterator<Item = &'a str>) -> u64
 #[cfg(test)]
 #[path = "../../tests/unit/workbench/tab.rs"]
 mod tests;
+
+impl Workbench {
+    /// The tabs on screen ([`shown_tabs`]).
+    pub(super) fn shown_tabs(&self) -> impl Iterator<Item = &Tab> {
+        shown_tabs(&self.tabs, self.active, &self.editors.groups)
+    }
+}

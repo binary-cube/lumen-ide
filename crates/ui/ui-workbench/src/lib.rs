@@ -7,19 +7,21 @@
 pub use ui_components::Painter;
 pub use ui_components::backdrop::{self, BackdropStyle};
 pub use ui_components::card_preview::{self, CardPreview};
-pub use ui_components::chart;
+pub use ui_components::charts;
 pub use ui_components::control;
 pub use ui_components::data_grid;
 pub use ui_components::decorations;
 pub use ui_components::ds;
 pub use ui_components::editor_toolbar;
 pub use ui_components::picker;
+pub use ui_components::result_pane;
 pub use ui_components::screen_widgets;
 pub use ui_components::services;
 pub use ui_components::severity;
 pub use ui_components::shortcuts;
 pub use ui_components::snippets;
 pub use ui_components::tab_strip;
+pub use ui_components::text_options::{self, TextOptions};
 pub use ui_components::toast;
 pub(crate) use ui_components::{
     anim, code_tokens, color_picker, palette, splitter, tool_panel, tooltip, viewer,

@@ -97,6 +97,7 @@ fn a_tables_rows_are_edited_and_submitted_at_once_in_auto() {
     let (_spec, runner) = console(&mut s, "SELECT * FROM users;", TxMode::Auto);
     let mut source = shown(&s, &runner);
     assert_eq!(source.editing(), Editing::Allowed);
+    assert_eq!(source.can_edit(), source.editing().allowed(), "can_edit agrees");
     assert!(source.columns()[0].key && !source.columns()[1].key);
     assert!(!source.columns()[1].nullable, "NOT NULL, as the table says");
     // A cell changed, a row added, a row deleted.
@@ -155,6 +156,7 @@ fn what_can_t_be_edited_says_why() {
         assert!(!runner.result_tabs().is_empty(), "{text}: {:?}", runner.snapshot().last);
         let mut source = shown(&s, &runner);
         assert_eq!(source.editing(), Editing::ReadOnly(why), "{text}");
+        assert_eq!(source.can_edit(), source.editing().allowed(), "can_edit agrees");
         assert!(source.set(0, 0, CellValue::Int(9)).is_err());
         assert_eq!(source.insert(None), None);
     }
@@ -166,10 +168,12 @@ fn what_can_t_be_edited_says_why() {
     );
     let source = shown(&s, &runner);
     assert_eq!(source.editing(), Editing::ReadOnly(i18n::t("console.edit_no_table_key")));
+    assert_eq!(source.can_edit(), source.editing().allowed(), "can_edit agrees");
     // An expression's column isn't written; the others are.
     let (_spec, runner) = console(&mut s, "SELECT id, upper(name) FROM users;", TxMode::Auto);
     let mut source = shown(&s, &runner);
     assert_eq!(source.editing(), Editing::Allowed);
+    assert_eq!(source.can_edit(), source.editing().allowed(), "can_edit agrees");
     assert!(!source.columns()[1].editable);
     assert!(source.set(0, 1, CellValue::Text("x".into())).is_err());
 }
@@ -189,6 +193,7 @@ fn a_read_only_source_s_result_is_never_edited() {
     s.manual.run_all();
     source.poll();
     assert_eq!(source.editing(), Editing::ReadOnly(i18n::t("console.edit_ro_source")));
+    assert_eq!(source.can_edit(), source.editing().allowed(), "can_edit agrees");
     assert!(
         runner.result(runner.result_tabs()[0].id).unwrap().editing
             == crate::results::Editability::Unknown,
@@ -273,6 +278,7 @@ fn a_row_found_by_its_row_id_is_edited() {
     );
     let mut source = shown(&s, &runner);
     assert_eq!(source.editing(), Editing::Allowed);
+    assert_eq!(source.can_edit(), source.editing().allowed(), "can_edit agrees");
     assert!(source.columns()[0].key && !source.columns()[0].editable);
     source.set(1, 1, CellValue::Text("B".into())).unwrap();
     assert!(ask(&mut s, &runner, &source));

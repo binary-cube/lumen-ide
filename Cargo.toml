@@ -86,6 +86,7 @@ members = [
     "crates/modules/editing/quality",
     "crates/modules/appearance/themes",
     "crates/modules/viewers/image",
+    "crates/modules/viewers/charts",
     "crates/modules/insight/structure",
     "crates/modules/editing/colors",
     "crates/modules/editing/language-levels",
@@ -102,6 +103,8 @@ members = [
     "crates/modules/appearance/decorations",
     "crates/modules/viewers/markdown",
     "crates/domain/viewers/diagram-text",
+    "crates/domain/viewers/charts-model",
+    "crates/domain/viewers/data-tables",
     "crates/domain/viewers/tex",
     "crates/infra/media/web-fetch",
     "crates/infra/http/http-transport",
@@ -219,6 +222,8 @@ profiling = { path = "crates/domain/tools/profiling" }
 diagram-model = { path = "crates/domain/tools/diagram-model" }
 power-system = { path = "crates/infra/system/power" }
 diagram-text = { path = "crates/domain/viewers/diagram-text" }
+charts-model = { path = "crates/domain/viewers/charts-model" }
+data-tables = { path = "crates/domain/viewers/data-tables" }
 tex = { path = "crates/domain/viewers/tex" }
 http-requests = { path = "crates/domain/http/http-requests" }
 web-fetch = { path = "crates/infra/media/web-fetch" }
@@ -259,6 +264,7 @@ indexer = { path = "crates/infra/code/indexer" }
 embed = { path = "crates/infra/code/embed" }
 image-decode = { path = "crates/infra/media/image" }
 viewer-image = { path = "crates/modules/viewers/image" }
+viewer-charts = { path = "crates/modules/viewers/charts" }
 structure = { path = "crates/modules/insight/structure" }
 colors = { path = "crates/modules/editing/colors" }
 language-levels = { path = "crates/modules/editing/language-levels" }

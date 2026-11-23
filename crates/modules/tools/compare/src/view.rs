@@ -5,6 +5,11 @@ use super::*;
 use crate::parts::{BUTTONS, DIVIDERS, FIELD};
 
 impl Viewer for Compare {
+    /// Word wrap: its columns' lines go on in rows under them (no scroll across then).
+    fn set_text_options(&mut self, options: &ui_components::TextOptions) {
+        self.wrap = options.word_wrap;
+    }
+
     fn set_data(&mut self, data: &dyn std::any::Any) {
         if let Some(sizes) = data.downcast_ref::<workbench_model::LayoutSizes>() {
             self.take_sizes(sizes);
@@ -112,13 +117,7 @@ impl Viewer for Compare {
             .shape_line(&format!("{}", self.left.len().max(self.right.len()) + 1), &number_font)
             .width
             + px(16.0);
-        let grid = Grid {
-            font,
-            number_font,
-            number_w,
-            first: (self.scroll / self.row_h).floor() as usize,
-            visible: (self.list.size.height / self.row_h).ceil() as usize + 1,
-        };
+        let mut grid = Grid { font, number_font, number_w, first: 0, visible: 0 };
         let rows = std::mem::take(&mut self.rows);
         // Columns, each in its own layer (clipped to its edges: long text does not spill into the
         // gutter), then the choices, then the separators over them.
@@ -139,8 +138,29 @@ impl Viewer for Compare {
             across.room = (col.size.width - number_w(which) - px(6.0)).max(0.0);
             let content = self.widest[which] as f32 * advance + px(24.0);
             across.max = (content - across.room).max(0.0);
+            // Wrapping: every line fits its column (a column kept for the wrap's mark).
+            if self.wrap {
+                across.max = 0.0;
+            }
             across.clamp();
         }
+        // The columns' widths in characters, while wrapping; the rows' heights for them.
+        self.wrap_columns = [0; 3];
+        if self.wrap {
+            for (which, col) in each {
+                if col.is_some() {
+                    let room = self.across[which].room;
+                    self.wrap_columns[which] =
+                        ((room / advance.max(1.0)).floor() as usize).saturating_sub(1);
+                }
+            }
+            self.heights.refresh(
+                (&rows, &self.left, &self.right),
+                self.rows_generation,
+                self.wrap_columns,
+            );
+        }
+        (grid.first, grid.visible) = self.rows_in_view_of(rows.len());
         for (which, col) in each {
             let Some(col) = col else { continue };
             // The tints and the numbers (fixed), then the code clipped after the numbers.
@@ -163,8 +183,8 @@ impl Viewer for Compare {
         // A click on a difference's rows (any column) makes it the current one.
         for (ri, row) in rows.iter().enumerate().skip(grid.first).take(grid.visible) {
             if let Some(change) = row.change {
-                let y = (self.list.min_y() + ri as f32 * self.row_h - self.scroll).round();
-                let r = Rect::new(self.list.min_x(), y, self.list.size.width, self.row_h);
+                let y = (self.list.min_y() + self.row_top(ri) - self.scroll).round();
+                let r = Rect::new(self.list.min_x(), y, self.list.size.width, self.row_height(ri));
                 // Only the visible part: a row under the toolbar must not take its clicks.
                 if let Some(r) = r.intersect(&self.list) {
                     self.hits.push((r, Hit::Select(change)));

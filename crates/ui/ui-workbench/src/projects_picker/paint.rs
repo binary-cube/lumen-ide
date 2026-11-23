@@ -37,6 +37,7 @@ impl ProjectsPicker {
             closable: true,
             zoom: None,
         };
+        let _dialog = self.modal.told(&spec);
         let Some((content, ctx)) = self.modal.paint(&spec, icons, text, scene, palette) else {
             return;
         };

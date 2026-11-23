@@ -26,6 +26,7 @@ mod paths;
 mod php_stubs;
 mod release;
 mod sql_data;
+mod ui_conventions;
 mod web_data;
 use std::path::Path;
 use std::process::{Command, ExitCode};
@@ -289,6 +290,7 @@ fn check_deps() -> Result<usize, String> {
     let locales = Path::new(root).join("crates/domain/core/i18n/locales/en.toml");
     let keys = conventions::locale_keys(&std::fs::read_to_string(&locales).unwrap_or_default());
     violations.extend(conventions::violations(Path::new(root), kernel::brand::ID, &keys));
+    violations.extend(ui_conventions::violations(Path::new(root)));
     for v in &violations {
         eprintln!("  ✗ {v}");
     }

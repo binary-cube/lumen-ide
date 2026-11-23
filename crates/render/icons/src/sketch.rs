@@ -14,12 +14,8 @@ struct Wobble(u64);
 
 impl Wobble {
     fn of(text: &str) -> Self {
-        // FNV-1a: stable across runs and builds.
-        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        for b in text.bytes() {
-            h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
-        }
-        Self(h | 1)
+        // Stable across runs and builds.
+        Self(kernel::hash::fnv64(text) | 1)
     }
 
     /// A number in `-1.0..1.0`.

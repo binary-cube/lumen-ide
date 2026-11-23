@@ -277,6 +277,10 @@ impl Splitter {
         if b.size.width <= 0.0 || b.size.height <= 0.0 {
             return;
         }
+        // To a screen reader: a separator between panels, dragged to resize them.
+        ui_kit::access::node(|| {
+            ui_kit::access::Described::new(ui_kit::access::Role::Splitter, "", b)
+        });
         let px = |v: f32| (v * self.scale).round();
         let st = &self.style;
         let progress = self.activity(Instant::now());

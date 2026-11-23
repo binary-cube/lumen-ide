@@ -227,4 +227,109 @@ fn its_rows_tell_their_names_and_the_chosen_one() {
             .collect::<Vec<_>>()
     };
     assert_eq!(under(items[2]), ["uid 2"]);
+    // Under a list that knows how many rows it has; each row its place in it.
+    let list = frame.nodes().iter().find(|n| n.role == Role::List).expect("the list");
+    assert_eq!(list.place.count, Some(8));
+    assert!(items.iter().all(|i| i.parent == list.id));
+    assert_eq!(items[2].place.index, Some(2));
+}
+
+/// The same frame drawn again (warmed up, its scene kept): nothing allocated, at both
+/// scales.
+#[test]
+fn an_identical_repaint_allocates_nothing() {
+    let palette = crate::palette::Palette::dark();
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut scene = Scene::default();
+    for scale in [1.0, 2.0] {
+        let ctx = Ctx::new(&palette, scale);
+        let mut p = picker(Some(2));
+        let bounds = Rect::new(0.0, 0.0, 800.0 * scale, 900.0 * scale);
+        let anchor = Rect::new(10.0, 10.0, 300.0 * scale, 30.0 * scale);
+        let mut frame = |p: &mut Picker| {
+            scene.reset(palette.editor_background);
+            p.paint(&mut scene, &mut text, &icons, &ctx, (anchor, bounds), "Search");
+        };
+        for _ in 0..3 {
+            frame(&mut p);
+        }
+        let n = crate::allocations::during(|| frame(&mut p));
+        assert_eq!(n, 0, "at {scale}: {n} allocations");
+    }
+}
+
+/// Paths: the name first, the characters typed lit in the accent, the folder after it
+/// (cut in the middle when narrow, its end kept); the whole path in the tooltip; a repaint
+/// allocates nothing.
+#[test]
+fn path_rows_show_the_name_first_and_the_path_in_the_tooltip() {
+    let palette = crate::palette::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut scene = Scene::default();
+    let path = "qq/vendor/twig/twig/src/Sandbox";
+    let item = PickerItem {
+        label: path.into(),
+        icon: Some("folder"),
+        marks: vec![24, 25],
+        ..PickerItem::default()
+    };
+    let mut p = Picker::default();
+    p.open_suggestions_with(vec![item], (None, true), Box::new(PathRows));
+    let (anchor, bounds) = (Rect::new(10.0, 10.0, 260.0, 30.0), Rect::new(0.0, 0.0, 800.0, 600.0));
+    p.paint(&mut scene, &mut text, &icons, &ctx, (anchor, bounds), "");
+    let glyphs: Vec<_> = scene.layers().iter().flat_map(|l| l.glyphs.iter()).collect();
+    let lit = glyphs.iter().filter(|g| g.color == palette.accent).count();
+    assert_eq!(lit, 2, "\"Sa\" of Sandbox lit");
+    let (row, _) = p.rows[0];
+    let on_row = |c: kernel::Rgba| {
+        glyphs.iter().filter(move |g| g.color == c && row.contains(g.origin)).map(|g| g.origin.x)
+    };
+    let lit_x = on_row(palette.accent).fold(f32::MIN, f32::max);
+    // The muted ones after the name are its folder (the icon, muted too, is before it).
+    let folder_after = on_row(palette.text_muted).filter(|x| *x > lit_x).count();
+    assert!(folder_after > 3, "the folder after the name");
+    let tip = p.tooltip_at(row.center()).expect("its tooltip");
+    assert_eq!(tip.label, path);
+    let n = crate::allocations::during(|| {
+        scene.reset(palette.editor_background);
+        p.paint(&mut scene, &mut text, &icons, &ctx, (anchor, bounds), "");
+    });
+    assert_eq!(n, 0, "{n} allocations");
+    // As wide as its field, however long its rows (they shorten): it never grows as you type.
+    assert_eq!(p.area.size.width, anchor.size.width);
+    let long = PickerItem {
+        label: format!("{}/AVeryLongFolderNameThatWouldWidenTheList", path.repeat(3)),
+        icon: Some("folder"),
+        ..PickerItem::default()
+    };
+    p.open_suggestions_with(vec![long], (None, true), Box::new(PathRows));
+    p.paint(&mut scene, &mut text, &icons, &ctx, (anchor, bounds), "");
+    assert_eq!(p.area.size.width, anchor.size.width);
+}
+
+/// A path cut in the middle: its start and its end kept, "…" between, inside the room.
+#[test]
+fn a_path_is_cut_in_the_middle() {
+    let palette = crate::palette::Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let font = ctx.ui_font(-1.5);
+    let value = "qq/vendor/symfony/form/Extension/Validator/Constraints";
+    let whole = text.shape_line(value, &font).width;
+    let mut layer = Layer::default();
+    let w = ds::draw_ellipsized_middle(
+        &mut layer,
+        &mut text,
+        value,
+        &font,
+        (0.0, 20.0),
+        whole / 2.0,
+        palette.text,
+    );
+    assert!(w <= whole / 2.0 + 0.5 && w > whole / 3.0, "{w} in {}", whole / 2.0);
+    let last = layer.glyphs.last().unwrap().origin.x;
+    assert!(last > w * 0.8, "its end kept at the end");
 }

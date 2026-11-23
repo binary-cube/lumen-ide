@@ -48,9 +48,7 @@ pub struct Block {
 
 /// 64-bit FNV-1a: enough to know whether a file has changed.
 pub fn hash(bytes: &[u8]) -> u64 {
-    bytes
-        .iter()
-        .fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3))
+    kernel::hash::fnv64(bytes)
 }
 
 struct Writer(Vec<u8>);

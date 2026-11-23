@@ -779,6 +779,20 @@ impl FilesTree {
             let x = layout.x(left, row.depth);
             let baseline = ds::optical_baseline(top, layout.row_height, &font);
             let right = pill.max_x() - px(8.0);
+            let (name, expanded) = match &row.kind {
+                RowKind::Folder { label, expanded, .. } => (label.as_str(), Some(*expanded)),
+                RowKind::File { index, .. } => {
+                    let path = self.files[*index].path.as_str();
+                    (if self.flat { path } else { path.rsplit('/').next().unwrap_or(path) }, None)
+                }
+            };
+            let _row = tree::item(tree::Item {
+                name,
+                bounds: pill,
+                level: row.depth,
+                expanded,
+                selected: chosen == Some(i),
+            });
             match &row.kind {
                 RowKind::Folder { key, label, count, expanded } => {
                     let name = key.rsplit('/').next().unwrap_or(key);

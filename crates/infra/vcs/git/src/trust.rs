@@ -98,10 +98,7 @@ fn trusted_file() -> Option<PathBuf> {
 
 /// `root` trusted with `lines`: its line in the list.
 fn entry(root: &Path, lines: &[String]) -> String {
-    let hash = lines
-        .join("\n")
-        .bytes()
-        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    let hash = kernel::hash::fnv64(lines.join("\n"));
     format!("{}\t{hash:016x}", root.display().to_string().escape_default())
 }
 

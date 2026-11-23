@@ -626,6 +626,12 @@ impl<'a> TabLook<'a> {
     ) {
         let (palette, b, rect) = (self.palette, self.bounds, slot.rect);
         let (is_active, hovered) = (slot.active, slot.hovered);
+        // To a screen reader: a tab named by its file, chosen while it's shown; its title's
+        // text is its name, its close button under it.
+        let _told = ui_kit::access::open(|| {
+            ui_kit::access::Described::new(ui_kit::access::Role::Tab, tab.title, rect)
+                .selected(is_active)
+        });
         let (tab_top, tab_h, icon) = (b.min_y(), b.size.height, self.icon);
         // The underline: accent on the active tab, subtle under the cursor.
         let underline = self.px(2.0);

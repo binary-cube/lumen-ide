@@ -342,6 +342,16 @@ struct Dropdown {
 const QUERY: usize = 3;
 const FILTER: usize = 4;
 
+/// What wakes the app (the window's waker).
+#[derive(Clone)]
+struct Wake(std::sync::Arc<dyn Fn() + Send + Sync>);
+
+impl std::fmt::Debug for Wake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Wake")
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct SettingsView {
     modal: Modal,
@@ -437,6 +447,8 @@ pub struct SettingsView {
     /// The vectors being made in the background (for that fingerprint): the search finds
     /// by words meanwhile, and again by meaning once they're here.
     making: Option<(u64, std::sync::mpsc::Receiver<Vec<Vec<f32>>>)>,
+    /// Wakes the app when the vectors are made (no frames asked while they're on their way).
+    waker: Option<Wake>,
     /// What `results` were found for: the folded query and the entries' fingerprint (the
     /// search runs again only when either changes, not on every frame).
     searched: Option<(String, u64)>,
@@ -562,11 +574,15 @@ impl SettingsView {
         self.modal.set_viewport(viewport, scale);
     }
 
+    /// Something moves: its window appearing, a setting found flashing. The vectors being
+    /// made aren't: they wake the app when they're here ([`Self::set_waker`]).
     pub fn is_animating(&self) -> bool {
-        self.modal.is_animating()
-            || self.flash.as_ref().is_some_and(|(_, _, t)| t.animating())
-            // The vectors are being made: frames until they're here (a moment).
-            || self.making.is_some()
+        self.modal.is_animating() || self.flash.as_ref().is_some_and(|(_, _, t)| t.animating())
+    }
+
+    /// What wakes the app when work done in the background (the search's vectors) is ready.
+    pub fn set_waker(&mut self, waker: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
+        self.waker = waker.map(Wake);
     }
 
     /// The page `id` shown (as a click on it; nothing if there's none).
@@ -1041,6 +1057,7 @@ impl SettingsView {
             closable: true,
             zoom: None,
         };
+        let _dialog = self.modal.told(&spec);
         let Some((content, ctx)) = self.modal.paint(&spec, icons, text, scene, palette) else {
             return;
         };

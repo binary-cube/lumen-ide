@@ -389,6 +389,15 @@ impl Scrollbar {
         if opacity <= 0.0 {
             return;
         }
+        // To a screen reader: a scrollbar, its value the share scrolled.
+        if m.content > m.viewport {
+            ui_kit::access::node(|| {
+                use ui_kit::access::{Described, Role};
+                let share = m.offset / (m.content - m.viewport) * 100.0;
+                Described::new(Role::ScrollBar, "", t)
+                    .value(format!("{:.0}%", share.clamp(0.0, 100.0)))
+            });
+        }
         let faded;
         let st = if opacity < 1.0 {
             let fade = |c: Rgba| c.with_alpha(c.a * opacity);
@@ -631,7 +640,22 @@ impl EdgeScrollbar {
     ) {
         let thickness = Scrollbar::track_thickness(scale);
         let track = Rect::new(area.max_x() - thickness, area.min_y(), thickness, area.size.height);
-        self.paint_track(scene, palette, scale, track, content, offset);
+        self.paint_track(scene, (palette, scale, 1.0), track, content, offset);
+    }
+
+    /// [`Self::paint`] in a window that may fade (a modal, a menu appearing): with the
+    /// window's palette, scale and opacity.
+    pub fn paint_in(
+        &mut self,
+        scene: &mut Scene,
+        ctx: &crate::ds::Ctx<'_>,
+        area: Rect,
+        content: f32,
+        offset: f32,
+    ) {
+        let thickness = Scrollbar::track_thickness(ctx.scale);
+        let track = Rect::new(area.max_x() - thickness, area.min_y(), thickness, area.size.height);
+        self.paint_track(scene, (ctx.palette, ctx.scale, ctx.opacity), track, content, offset);
     }
 
     /// Painted on a dividing line: its thread at rest on the line at `x` (from `top`,
@@ -646,20 +670,38 @@ impl EdgeScrollbar {
         content: f32,
         offset: f32,
     ) {
+        let track = Self::on_line(palette, scale, (x, top, height));
+        self.paint_track(scene, (palette, scale, 1.0), track, content, offset);
+    }
+
+    /// [`Self::paint_on_line`] in a window that may fade (with its opacity).
+    pub fn paint_on_line_in(
+        &mut self,
+        scene: &mut Scene,
+        ctx: &crate::ds::Ctx<'_>,
+        line: (f32, f32, f32),
+        content: f32,
+        offset: f32,
+    ) {
+        let track = Self::on_line(ctx.palette, ctx.scale, line);
+        self.paint_track(scene, (ctx.palette, ctx.scale, ctx.opacity), track, content, offset);
+    }
+
+    /// The track of a bar whose thread rests on the line at `x`.
+    fn on_line(palette: &Palette, scale: f32, (x, top, height): (f32, f32, f32)) -> Rect {
         let thickness = Scrollbar::track_thickness(scale);
         let px = |v: f32| (v * scale).round();
         let active = ScrollbarStyle::from_palette(palette).thickness_active;
         // At rest the thread sits this far from the track's left (see `Scrollbar::paint`).
         let resting = thickness - px(2.0) - px(active) / 2.0;
-        let track = Rect::new((x - resting).round(), top, thickness, height);
-        self.paint_track(scene, palette, scale, track, content, offset);
+        Rect::new((x - resting).round(), top, thickness, height)
     }
 
+    /// Draws it in `track`; `fade`: its window's opacity (1 for a view's).
     fn paint_track(
         &mut self,
         scene: &mut Scene,
-        palette: &Palette,
-        scale: f32,
+        (palette, scale, fade): (&Palette, f32, f32),
         track: Rect,
         content: f32,
         offset: f32,
@@ -669,7 +711,7 @@ impl EdgeScrollbar {
         let area = track;
         self.metrics = ScrollMetrics { content, viewport: area.size.height, offset };
         let style = ScrollbarStyle::from_palette(palette);
-        let opacity = self.opacity_at(now);
+        let opacity = self.opacity_at(now) * fade;
         let bar =
             self.bar.get_or_insert_with(|| Scrollbar::new(style.clone(), Orientation::Vertical));
         bar.set_style(style);

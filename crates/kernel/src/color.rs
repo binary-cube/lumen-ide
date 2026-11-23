@@ -34,7 +34,12 @@ impl Rgba {
         Self { a, ..self }
     }
 
-    /// Parses `#rgb`, `#rrggbb` or `#rrggbbaa`.
+    /// Its relative brightness (0 black … 1 white, the eye's weights on its channels): a
+    /// dark theme told from a light one, a text's color chosen to read on it.
+    pub fn luminance(self) -> f32 {
+        0.2126 * self.r + 0.7152 * self.g + 0.0722 * self.b
+    }
+
     /// `self` moved toward `other` by `t` (0: self, 1: other); alpha as well.
     pub fn mix(self, other: Self, t: f32) -> Self {
         let m = |a: f32, b: f32| a + (b - a) * t;

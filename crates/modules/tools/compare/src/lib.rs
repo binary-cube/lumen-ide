@@ -44,6 +44,7 @@ mod paint;
 mod parts;
 mod select;
 mod view;
+mod wrap;
 
 static MANIFEST: ModuleManifest = ModuleManifest {
     id: ModuleId::new_static("view.compare"),
@@ -351,6 +352,14 @@ struct Compare {
     merge: bool,
     target: Option<Side>,
     rows: Vec<Row>,
+    /// Bumped each time the rows are made again (their heights follow).
+    rows_generation: u64,
+    /// Lines wrap at their column's width ([`ui_components::TextOptions::word_wrap`]).
+    wrap: bool,
+    /// Each column's width in characters while wrapping (0: not shown, or not wrapping).
+    wrap_columns: [usize; 3],
+    /// The rows' heights while wrapping.
+    heights: wrap::Heights,
     /// Start row of each difference.
     change_rows: Vec<usize>,
     current: usize,
@@ -613,6 +622,7 @@ impl Compare {
         let longest = |lines: &[String]| lines.iter().map(|l| shown_len(l)).max().unwrap_or(0);
         let (left, right) = (longest(&self.left), longest(&self.right));
         self.widest = [left, left.max(right), right];
+        self.rows_generation += 1;
         self.rows.clear();
         self.change_rows.clear();
         let mut change = 0;
@@ -661,13 +671,12 @@ impl Compare {
         let Some(&row) = self.change_rows.get(i) else { return };
         self.current = i;
         let view = self.list.size.height;
-        self.scroll = (row as f32 * self.row_h - view / 3.0).max(0.0);
+        self.scroll = (self.row_top(row) - view / 3.0).max(0.0);
         self.clamp_scroll();
     }
 
     fn clamp_scroll(&mut self) {
-        let max =
-            (self.rows.len() as f32 * self.row_h - self.list.size.height + self.row_h).max(0.0);
+        let max = (self.rows_height() - self.list.size.height + self.row_h).max(0.0);
         self.scroll = self.scroll.clamp(0.0, max);
         for across in &mut self.across {
             across.clamp();
@@ -676,7 +685,7 @@ impl Compare {
 
     /// The overview's thumb: where the rows in view are along it.
     fn overview_thumb(&self) -> Rect {
-        let content = (self.rows.len().max(1) as f32 * self.row_h).max(1.0);
+        let content = self.rows_height().max(self.row_h).max(1.0);
         let o = self.overview;
         let top = self.scroll / content * o.size.height;
         let h = (self.list.size.height / content * o.size.height).min(o.size.height);
@@ -686,7 +695,7 @@ impl Compare {
     /// The thumb's top at `y` (it held `grab` pixels below its top): the rows scrolled
     /// there.
     fn drag_overview(&mut self, y: f32, grab: f32) {
-        let content = self.rows.len().max(1) as f32 * self.row_h;
+        let content = self.rows_height().max(self.row_h);
         let top = y - grab - self.overview.min_y();
         self.scroll = top / self.overview.size.height.max(1.0) * content;
         self.clamp_scroll();
@@ -843,7 +852,11 @@ struct CellSpec<'a> {
     extension: &'a str,
     col: Rect,
     y: f32,
+    /// One row's height, and the cell's (its rows, wrapped).
     row_h: f32,
+    height: f32,
+    /// The columns its line wraps at (0: it doesn't).
+    wrap: usize,
     number: Option<usize>,
     source: Option<&'a str>,
     tint: Option<Rgba>,

@@ -36,6 +36,9 @@ pub const AXIS_H: f32 = 20.0;
 /// pixels).
 const BAND_BUTTON_H: f32 = 22.0;
 const BACK_W: f32 = crate::ds::button_size::COMPACT;
+/// A bar's words on its heat's fill, whatever the theme (the fills are the heat's own): a
+/// warm near-black and a warm near-white, the one that reads better taken.
+const INKS: (Rgba, Rgba) = (Rgba::rgb(0x1c1b1a), Rgba::rgb(0xf4f2ee));
 
 /// A node: its parent, its value in all and its own, what it says (its label, a detail
 /// after it), its fill, an outline and a sign (a problem), its tooltip.
@@ -214,6 +217,8 @@ pub struct Icicle {
     row_h: f32,
     scroll: f32,
     crumbs: Vec<(Rect, Hit)>,
+    /// The crumbs' nodes (`None`: all), a buffer kept from frame to frame.
+    crumb_path: Vec<Option<usize>>,
     /// What it did last as a control (a press), taken by its view.
     event: Option<IcicleEvent>,
 }
@@ -575,21 +580,29 @@ impl Icicle {
                 ));
             }
         }
-        let mut path: Vec<Option<usize>> = vec![None];
-        path.extend(self.path().into_iter().map(Some));
+        // All, then the zoom's ancestors from the top, in a buffer filled anew.
+        let mut path = std::mem::take(&mut self.crumb_path);
+        path.clear();
+        path.push(None);
+        let mut at = self.focus;
+        while let Some(i) = at {
+            path.push(Some(i));
+            at = self.nodes.get(i).and_then(|n| n.parent);
+        }
+        path[1..].reverse();
         let sep = text.shape_line("›", &font);
         for (k, node) in path.iter().enumerate() {
             let last = k + 1 == path.len();
-            let label = match node {
-                None => self.labels.all.clone(),
-                Some(n) => self.nodes[*n].label.clone(),
+            let label: &str = match node {
+                None => &self.labels.all,
+                Some(n) => &self.nodes[*n].label,
             };
             let f = if last { &strong } else { &font };
             let room = crumbs_end - x;
             if room < px(30.0) {
                 break;
             }
-            let shown = ds::ellipsize(text, &label, f, room.min(px(220.0)));
+            let shown = ds::ellipsize(text, label, f, room.min(px(220.0)));
             let shaped = text.shape_line(&shown, f);
             let r = Rect::new(
                 x,
@@ -624,8 +637,11 @@ impl Icicle {
                 x = r.max_x() + sep.width + px(4.0);
             }
         }
+        self.crumb_path = path;
         let width = self.chart.size.width;
-        let cells = self.cells(width).to_vec();
+        // Laid out again only for another width, zoom or data; read borrowed, never copied.
+        self.cells(width);
+        let cells = self.cells_cached();
         if cells.is_empty() {
             ds::empty_state(base, text, &ds, self.chart, &self.labels.empty, None);
             return;
@@ -716,7 +732,7 @@ impl Icicle {
             };
             let node = &self.nodes[n];
             // Its words, readable on its fill.
-            let (dark, light) = (Rgba::rgb(0x1c1b1a), Rgba::rgb(0xf4f2ee));
+            let (dark, light) = INKS;
             let ink = if contrast(dark, fill) >= contrast(light, fill) { dark } else { light };
             let mut lx = r.min_x() + px(6.0);
             let room_end = r.max_x() - px(6.0);
@@ -742,17 +758,17 @@ impl Icicle {
             if room < px(14.0) {
                 continue;
             }
-            let label = ds::ellipsize(text, &node.label, &label_font, room);
-            let shaped = text.shape_line(&label, &label_font);
             let base_y = ds::optical_baseline(r.min_y(), r.size.height, &label_font);
-            draw_text(layer, &shaped, lx.round(), base_y, ink);
-            if label == node.label && !node.detail.is_empty() {
+            let at = (lx.round(), base_y);
+            let (label_w, cut) =
+                ds::draw_ellipsized(layer, text, &node.label, &label_font, at, room, ink);
+            if !cut && !node.detail.is_empty() {
                 let detail = text.shape_line(&node.detail, &detail_font);
-                if shaped.width + px(8.0) + detail.width <= room {
+                if label_w + px(8.0) + detail.width <= room {
                     draw_text(
                         layer,
                         &detail,
-                        (lx + shaped.width + px(8.0)).round(),
+                        (lx + label_w + px(8.0)).round(),
                         base_y,
                         ink.with_alpha(0.75),
                     );

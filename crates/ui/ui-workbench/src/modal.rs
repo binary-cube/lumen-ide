@@ -209,8 +209,9 @@ impl Modal {
         self.scale = scale;
     }
 
+    /// Appearing (only while open: closed, it's gone at once and moves for nobody).
     pub fn is_animating(&self) -> bool {
-        self.appear.animating()
+        self.is_open() && self.appear.animating()
     }
 
     /// The side navigation (from the last paint; empty without sections).
@@ -330,6 +331,17 @@ impl Modal {
         let i = sections.iter().position(|s| s.id == active)? as isize;
         let next = ui_kit::step_index(i as usize, delta, sections.len());
         Some(sections[next].id)
+    }
+
+    /// The modal to a screen reader, while the guard lives (held over its frame and its
+    /// content): a dialog named by its title, what's behind it not read meanwhile.
+    pub fn told(&self, spec: &ModalSpec<'_>) -> Option<ui_kit::access::Opened> {
+        if !self.open {
+            return None;
+        }
+        ui_kit::access::open(|| {
+            ui_kit::access::Described::new(ui_kit::access::Role::Dialog, spec.title, self.viewport)
+        })
     }
 
     /// Draws the frame and returns the content area and the context (with the appearance
@@ -712,7 +724,7 @@ impl Modal {
             let (content, offset) = (self.nav_scroll.content(), self.nav_scroll.offset());
             // On the line between the navigation and the page: one thin line, no gap.
             let line = (nav.max_x() + ctx.line() / 2.0, nav.min_y(), nav.size.height);
-            self.nav_bar.paint_on_line(scene, ctx.palette, self.scale, line, content, offset);
+            self.nav_bar.paint_on_line_in(scene, ctx, line, content, offset);
         }
         Rect::new(
             nav.max_x() + ctx.line(),
@@ -870,7 +882,7 @@ pub(crate) fn paint_key_footer(
     let shape =
         Rect::new(p.min_x() + inset, p.min_y(), p.size.width - 2.0 * inset, p.size.height - inset);
     fl.quad(
-        Quad::filled(shape, ctx.fade(ctx.palette.text.with_alpha(0.022)))
+        Quad::filled(shape, ctx.fade(ctx.palette.text.with_alpha(ds::BAND_TINT)))
             .rounded((ctx.px(footer.radius) - inset).max(0.0)),
     );
     let fl = scene.push_layer(Some(p));

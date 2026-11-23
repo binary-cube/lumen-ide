@@ -140,7 +140,7 @@ impl Layout {
         cards.extend(focus);
         cards.extend(code);
         cards.extend(right);
-        let bounds = cards.iter().map(|c| c.rect).reduce(union).unwrap_or_default();
+        let bounds = cards.iter().map(|c| c.rect).reduce(|a, b| a.union(&b)).unwrap_or_default();
         Self { cards, edges, bounds }
     }
 }
@@ -383,12 +383,6 @@ impl Columns {
             });
         }
     }
-}
-
-fn union(a: Rect, b: Rect) -> Rect {
-    let (x0, y0) = (a.min_x().min(b.min_x()), a.min_y().min(b.min_y()));
-    let (x1, y1) = (a.max_x().max(b.max_x()), a.max_y().max(b.max_y()));
-    Rect::new(x0, y0, x1 - x0, y1 - y0)
 }
 
 impl Layout {

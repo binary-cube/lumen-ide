@@ -235,6 +235,7 @@ fn clearing_the_caches_reaches_the_windows_views_and_the_side_panels() {
         pinned: false,
         provider: "test",
         viewer: Box::new(Purged(Arc::clone(&purged))),
+        text_told: 0,
     };
     let mut window = ToolWindow::new("test");
     window.groups[0].views = vec![view("a"), view("b")];
@@ -251,6 +252,7 @@ fn clearing_the_caches_reaches_the_windows_views_and_the_side_panels() {
         key: None,
         project: None,
         parked_since: None,
+        text_told: 0,
     };
     wb.tools.sides.push(side(ui_workbench::Dock::Right));
     wb.tools.parked.push(side(ui_workbench::Dock::Left));
@@ -278,6 +280,7 @@ fn a_side_panel_hidden_for_a_while_lets_its_data_go() {
         key: None,
         project: None,
         parked_since,
+        text_told: 0,
     };
     wb.tools.sides.push(side("shown", ui_workbench::Dock::Right, None));
     wb.tools.parked.push(side("old", ui_workbench::Dock::Left, long_ago));

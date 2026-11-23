@@ -111,7 +111,43 @@ impl DataView {
         match self.tab {
             Tab::Data => match &mut self.grid {
                 Some(grid) => {
-                    grid.paint(GridPaint { bounds: area, scale, text, scene, palette: p, icons })
+                    let (grid_area, pane_area) = match &mut self.panes {
+                        Some(panes) => {
+                            panes.whole = area;
+                            panes.host.split(area, scale)
+                        }
+                        None => (area, None),
+                    };
+                    grid.paint(GridPaint {
+                        bounds: grid_area,
+                        scale,
+                        text,
+                        scene,
+                        palette: p,
+                        icons,
+                    });
+                    if let (Some(rect), Some(pane)) =
+                        (pane_area, self.panes.as_mut().and_then(|panes| panes.host.pane()))
+                    {
+                        let layer = scene.push_layer(Some(rect));
+                        layer.quad(Quad::filled(rect, p.editor_background));
+                        ds::divider(layer, &ds, rect.min_x(), rect.max_x(), rect.min_y());
+                        let waker = self
+                            .waker
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner)
+                            .clone();
+                        pane.paint(ViewerPaint {
+                            bounds: rect,
+                            scale,
+                            text,
+                            scene,
+                            palette: p,
+                            icons,
+                            focused: false,
+                            waker,
+                        });
+                    }
                 }
                 None => {
                     let layer = scene.push_layer(Some(area));
@@ -385,6 +421,24 @@ impl DataView {
         let mut left_of_tabs = segments.first().map_or(header.max_x(), |r| r.min_x());
         for (i, r) in segments.into_iter().enumerate() {
             self.hits.push((r, Hit::Tab(if i == 0 { Tab::Data } else { Tab::Structure })));
+        }
+        // The panes offered over its rows, before Data / Structure (its data shown).
+        if self.tab == Tab::Data
+            && let Some(panes) = &self.panes
+        {
+            let hovered = match self.hover {
+                Some(Hit::Pane(i)) => Some(i),
+                _ => None,
+            };
+            let mut hits = Vec::new();
+            let side = px(ds::button_size::LARGE);
+            left_of_tabs = panes.host.paint_buttons(
+                (layer, text, icons, ds),
+                (left_of_tabs - px(8.0), mid, side),
+                hovered,
+                &mut hits,
+            ) + px(2.0);
+            self.hits.extend(hits.into_iter().map(|(r, i)| (r, Hit::Pane(i))));
         }
         // "Jump to Query Console…", before Data / Structure (a source writing SQL).
         if self.has_console() {

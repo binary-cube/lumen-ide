@@ -54,6 +54,7 @@ mod snippets;
 mod split_tree;
 mod startup;
 mod symbols;
+mod text_options;
 mod theme_options;
 mod themes;
 mod toasts;

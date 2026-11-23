@@ -80,3 +80,18 @@ fn a_field_tells_its_text_but_never_a_secret() {
     assert_eq!(nodes[1].value, None);
     assert!(!format!("{nodes:?}").contains("hunter2"), "the secret never in the tree");
 }
+
+/// A text cut to its room (scrolled in a field, cut with "…") is read whole, where it shows.
+#[test]
+fn a_text_cut_short_is_read_whole() {
+    let mut text = text_layout::TextSystem::new();
+    let font = text_layout::Font::new(text_layout::FontFamily::SansSerif, 13.0);
+    let line = text.shape_line("a rather long name", &font);
+    let mut layer = render_api::Layer::default();
+    let tree = begin();
+    crate::draw_text_within(&mut layer, &line, 10.0, 20.0, kernel::Rgba::WHITE, (10.0, 40.0));
+    let frame = tree.take();
+    let label = &frame.nodes()[0];
+    assert_eq!(&*label.name, "a rather long name");
+    assert!((label.bounds.size.width - 30.0).abs() < 0.5, "where it shows");
+}

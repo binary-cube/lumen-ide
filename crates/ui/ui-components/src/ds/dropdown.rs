@@ -7,7 +7,7 @@ use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
 use ui_kit::draw_text;
 
-use super::{Ctx, ellipsize, optical_baseline, radius};
+use super::{Ctx, optical_baseline, radius};
 
 /// What [`dropdown`] shows.
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +22,37 @@ pub struct DropdownSpec<'a> {
     pub note: Option<&'a str>,
     /// Muted, while nothing is chosen (`value` empty).
     pub placeholder: Option<&'a str>,
+}
+
+impl<'a> DropdownSpec<'a> {
+    /// A field showing `value`: closed, enabled, nothing else.
+    pub fn new(value: &'a str) -> Self {
+        Self { value, open: false, hovered: false, enabled: true, note: None, placeholder: None }
+    }
+
+    /// Its list open under it.
+    pub fn open(self, open: bool) -> Self {
+        Self { open, ..self }
+    }
+
+    pub fn hovered(self, hovered: bool) -> Self {
+        Self { hovered, ..self }
+    }
+
+    /// Off limits: dimmed, no chevron.
+    pub fn enabled(self, enabled: bool) -> Self {
+        Self { enabled, ..self }
+    }
+
+    /// Muted, on the right (a count, a kind).
+    pub fn note(self, note: &'a str) -> Self {
+        Self { note: Some(note), ..self }
+    }
+
+    /// Shown muted while the value is empty.
+    pub fn placeholder(self, placeholder: &'a str) -> Self {
+        Self { placeholder: Some(placeholder), ..self }
+    }
 }
 
 /// What a [`dropdown_styled`] field adds to its [`DropdownSpec`]; the default is
@@ -39,6 +70,28 @@ pub struct DropdownLook<'a> {
     pub value_color: Option<Rgba>,
 }
 
+impl<'a> DropdownLook<'a> {
+    /// Muted, before the value ("Tx:" in "Tx: Auto").
+    pub fn prefix(self, prefix: &'a str) -> Self {
+        Self { prefix: Some(prefix), ..self }
+    }
+
+    /// A status dot before it all.
+    pub fn dot(self, dot: Rgba) -> Self {
+        Self { dot: Some(dot), ..self }
+    }
+
+    /// A toolbar's pill.
+    pub fn compact(self, compact: bool) -> Self {
+        Self { compact, ..self }
+    }
+
+    /// The value and its chevron in this color.
+    pub fn value_color(self, color: Rgba) -> Self {
+        Self { value_color: Some(color), ..self }
+    }
+}
+
 /// The room around a field's content, its chevron, its dot (logical pixels): a regular
 /// field's, a compact one's.
 const PAD: (f32, f32) = (10.0, 8.0);
@@ -48,6 +101,10 @@ const DOT: f32 = 7.0;
 const ICON: (f32, f32) = (14.0, 12.0);
 /// The room between a field's parts (dot, prefix, value, chevron), logical pixels.
 const PART_GAP: f32 = 6.0;
+/// A note's room from the field's right edge, and between it and the value (logical
+/// pixels).
+const NOTE_RIGHT: f32 = 12.0;
+const NOTE_GAP: f32 = 22.0;
 
 /// The field of a list to choose from, in `r`.
 pub fn dropdown(
@@ -190,17 +247,20 @@ fn paint_field(
     // The note on the right, the value in what's left.
     let mut room = r.size.width - 2.0 * pad - chevron - px(PART_GAP);
     if let Some(note) = spec.note {
-        let note = ellipsize(text, note, &small, (room * 0.5).max(0.0));
-        let shaped = text.shape_line(&note, &small);
-        let x = r.max_x() - px(12.0) - shaped.width;
-        draw_text(
+        // Cut with "…" to half the room, placed by its right edge (nothing allocated).
+        let half = (room * 0.5).max(0.0);
+        let x = r.max_x() - px(NOTE_RIGHT) - super::ellipsized_width(text, note, &small, half);
+        let baseline = optical_baseline(r.min_y(), r.size.height, &small);
+        super::draw_ellipsized(
             layer,
-            &shaped,
-            x,
-            optical_baseline(r.min_y(), r.size.height, &small),
-            p.text_muted,
+            text,
+            note,
+            &small,
+            (x, baseline),
+            half,
+            ctx.fade(p.text_muted),
         );
-        room = x - r.min_x() - px(22.0);
+        room = x - r.min_x() - px(NOTE_GAP);
     }
     let mid = r.min_y() + r.size.height / 2.0;
     let mut x = r.min_x() + pad;
@@ -232,15 +292,21 @@ fn paint_field(
         Some(placeholder) if spec.value.is_empty() => (placeholder, true),
         _ => (spec.value, false),
     };
-    let shown = ellipsize(text, value, &font, room.max(0.0));
-    let shaped = text.shape_line(&shown, &font);
     let color = match look.value_color {
         Some(color) if spec.enabled && !empty => color,
         _ if spec.enabled && !empty => p.text,
         _ => p.text_muted,
     };
     let baseline = optical_baseline(r.min_y(), r.size.height, &font);
-    draw_text(layer, &shaped, x, baseline, color);
+    super::draw_ellipsized(
+        layer,
+        text,
+        value,
+        &font,
+        (x, baseline),
+        room.max(0.0),
+        ctx.fade(color),
+    );
     if spec.enabled
         && let Some(id) = icons.id("chevron-down")
     {

@@ -77,12 +77,55 @@ impl Workbench {
         true
     }
 
+    /// How text is shown, told to every view and panel holding one (a tab's, the bottom
+    /// windows', a side's, a modal's) at its first frame and each time it changes: one
+    /// number compared per view, nothing else per frame.
+    pub(super) fn sync_text_options(&mut self) {
+        let generation = crate::text_options::generation();
+        let mut options = None;
+        let mut tell = |told: &mut u64| {
+            (*told != generation).then(|| {
+                *told = generation;
+                *options.get_or_insert_with(crate::text_options::current)
+            })
+        };
+        for tab in all_tabs_mut(&mut self.tabs, &mut self.editors.groups) {
+            // Its code editor, then the view it shows (a preview, a module's).
+            if let Some(o) = tell(&mut tab.text_told) {
+                tab.view.set_text_options(&o);
+            }
+            if let Some(v) = &mut tab.viewer
+                && let Some(o) = tell(&mut v.text_told)
+            {
+                v.viewer.set_text_options(&o);
+            }
+        }
+        for window in &mut self.tools.windows {
+            for view in window.groups.iter_mut().flat_map(|g| g.views.iter_mut()) {
+                if let Some(o) = tell(&mut view.text_told) {
+                    view.viewer.set_text_options(&o);
+                }
+            }
+        }
+        for side in &mut self.tools.sides {
+            if let Some(o) = tell(&mut side.text_told) {
+                side.panel.set_text_options(&o);
+            }
+        }
+        if let Some(modal) = &mut self.modal_view
+            && let Some(o) = tell(&mut modal.text_told)
+        {
+            modal.viewer.set_text_options(&o);
+        }
+    }
+
     /// Each tab's view told whether it's visible, only when that changed: the active tab of
     /// each group, its view shown (not its editor alone), the window not hidden. Worked out
     /// here, from the groups as they are, before each frame and when the window is hidden
     /// or shown again — whatever moved the tabs (activated, dragged, split, merged, closed).
+    /// The window's focus told the same way, to every tab's view, when it changes.
     pub(super) fn sync_shown(&mut self) {
-        fn tell(tabs: &mut [Tab], active: usize, visible: bool) {
+        fn tell(tabs: &mut [Tab], active: usize, (visible, focused): (bool, bool)) {
             for (i, tab) in tabs.iter_mut().enumerate() {
                 if let Some(v) = &mut tab.viewer {
                     let shown = visible && i == active && v.viewer_visible();
@@ -90,17 +133,21 @@ impl Workbench {
                         v.shown = shown;
                         v.viewer.set_shown(shown);
                     }
+                    if v.window_focused != Some(focused) {
+                        v.window_focused = Some(focused);
+                        v.viewer.set_window_focused(focused);
+                    }
                 }
             }
         }
         // Under a view drawing the whole window, none is seen.
-        let visible = !self.occluded && !self.modal_view_covers();
-        tell(&mut self.tabs, self.active, visible);
+        let window = (!self.occluded && !self.modal_view_covers(), self.window_focused());
+        tell(&mut self.tabs, self.active, window);
         let current = self.editors.current;
         for (g, group) in self.editors.groups.iter_mut().enumerate() {
             // The current group's slot holds nothing: its tabs are the fields'.
             if g != current {
-                tell(&mut group.tabs, group.active, visible);
+                tell(&mut group.tabs, group.active, window);
             }
         }
     }

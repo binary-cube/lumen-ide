@@ -108,6 +108,19 @@ impl LogView {
                 }
             };
             let mid = top + row_h / 2.0;
+            // To a screen reader: the row a tree's item (its name, depth, a group open or not,
+            // chosen).
+            let expanded = match item {
+                BranchItem::Group { expanded, .. } => Some(*expanded),
+                _ => None,
+            };
+            let _item = tree::item(tree::Item {
+                name: &label,
+                bounds: row,
+                level: *depth,
+                expanded,
+                selected: chosen || self.branch_selected == Some(i),
+            });
             let r = Rect::new(x, (mid - icon / 2.0).round(), icon, icon);
             if let BranchItem::Group { expanded, .. } = item {
                 tree::chevron(layer, icons, r, *expanded, color);

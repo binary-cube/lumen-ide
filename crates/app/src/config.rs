@@ -64,10 +64,7 @@ pub fn data_dir() -> Option<PathBuf> {
 /// A project's data folder (outside the project): `<data>/projects/<name>-<hash of its path>`.
 pub fn project_data_dir(root: &std::path::Path) -> Option<PathBuf> {
     let name = kernel::paths::file_name(root);
-    let hash = root
-        .to_string_lossy()
-        .bytes()
-        .fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3));
+    let hash = kernel::hash::fnv64(root.to_string_lossy().as_bytes());
     Some(data_dir()?.join("projects").join(format!("{name}-{hash:016x}")))
 }
 

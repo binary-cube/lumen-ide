@@ -139,14 +139,24 @@ impl SettingsView {
         };
         // Made once per entries (another language, a theme added: made again), in the
         // background: by words until they're here, then searched again.
-        if let Some((made_for, rx)) = &self.making
-            && let Ok(vectors) = rx.try_recv()
-        {
-            self.vectors = vectors;
-            self.vectors_for = Some(*made_for);
-            self.making = None;
-            // Searched again, by meaning too.
-            self.searched = None;
+        if let Some((made_for, rx)) = &self.making {
+            match rx.try_recv() {
+                Ok(vectors) => {
+                    self.vectors = vectors;
+                    self.vectors_for = Some(*made_for);
+                    self.making = None;
+                    // Searched again, by meaning too.
+                    self.searched = None;
+                }
+                // The worker gone without them: by words only for these entries (never
+                // started again and again).
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.vectors = Vec::new();
+                    self.vectors_for = Some(*made_for);
+                    self.making = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
         }
         if let Some(embedder) = &self.embedder
             && self.vectors_for != Some(fingerprint)
@@ -158,8 +168,12 @@ impl SettingsView {
                 .collect();
             let (embedder, (tx, rx)) =
                 (std::sync::Arc::clone(&embedder.0), std::sync::mpsc::channel());
+            let waker = self.waker.clone();
             kernel::work::run("settings-search", move || {
                 let _ = tx.send(texts.iter().map(|t| embedder.embed(t)).collect());
+                if let Some(Wake(wake)) = waker {
+                    wake();
+                }
             });
             self.making = Some((fingerprint, rx));
         }
@@ -273,9 +287,22 @@ impl SettingsView {
         let font = ctx.ui_font(0.0);
         let small = ctx.ui_font(-1.0);
         let row_h = px(54.0);
+        // To a screen reader: a list of the settings found, each a row naming the setting
+        // (its page and its detail read under it), the one under the keys chosen.
+        let found = self.results.len();
+        let list = Rect::new(x0, y, width, found as f32 * (row_h + px(4.0)));
+        let _list = ui_kit::access::open(|| {
+            ui_kit::access::Described::new(ui_kit::access::Role::List, "", list).count(found)
+        });
         for (slot, &index) in self.results.iter().enumerate() {
             let entry = &entries[index];
             let r = Rect::new(x0 - px(10.0), y, width + px(20.0), row_h);
+            let _row = ui_kit::access::open(|| {
+                use ui_kit::access::{Described, Role};
+                Described::new(Role::ListItem, entry.title.as_str(), r)
+                    .index(slot)
+                    .selected(slot == self.selected)
+            });
             ds::RowHighlight::new(slot == self.selected, false)
                 .radius(RESULT_RADIUS)
                 .paint(layer, ctx, r);

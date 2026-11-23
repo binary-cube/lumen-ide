@@ -124,6 +124,11 @@ impl CommitView {
 }
 
 impl Viewer for CommitView {
+    /// Word wrap: the changes' lines go on in rows under them (no scroll sideways then).
+    fn set_text_options(&mut self, options: &ui_components::TextOptions) {
+        self.wrap = options.word_wrap;
+    }
+
     fn set_data(&mut self, data: &dyn std::any::Any) {
         if let Some(sizes) = data.downcast_ref::<LayoutSizes>() {
             for divider in &mut self.dividers.0 {

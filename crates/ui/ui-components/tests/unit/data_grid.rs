@@ -82,6 +82,9 @@ impl GridSource for Fake {
     fn editing(&self) -> Editing {
         if self.editable { Editing::Allowed } else { Editing::ReadOnly("no".into()) }
     }
+    fn can_edit(&self) -> bool {
+        self.editable
+    }
     fn insert(&mut self, _like: Option<u64>) -> Option<u64> {
         self.inserted += 1;
         self.editable.then_some(NEW_ROWS + self.inserted as u64)
@@ -1061,4 +1064,153 @@ fn the_find_field_is_the_shared_search_field_with_its_clear_button() {
     g.field = None;
     paint_at(&mut g, &mut text, 1200.0);
     assert!(!g.find.search.shows_caret(), "not the field with the keys: no caret");
+}
+
+/// The same frame drawn again (warmed up, its scene kept as the app keeps it): nothing
+/// allocated, at both scales.
+#[test]
+fn an_identical_repaint_allocates_nothing() {
+    let mut text = text_layout::TextSystem::new();
+    let palette = crate::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = render_api::Scene::default();
+    for scale in [1.0, 2.0] {
+        let mut g = grid(40, None);
+        let mut frame = |g: &mut DataGrid<Fake>| {
+            scene.reset(palette.editor_background);
+            g.paint(GridPaint {
+                bounds: Rect::new(0.0, 0.0, 900.0 * scale, 600.0 * scale),
+                scale,
+                text: &mut text,
+                scene: &mut scene,
+                palette: &palette,
+                icons: &icons,
+            });
+        };
+        for _ in 0..3 {
+            frame(&mut g);
+        }
+        let n = crate::allocations::during(|| frame(&mut g));
+        assert_eq!(n, 0, "at {scale}: {n} allocations");
+    }
+}
+
+/// To a screen reader: each column's header and each cell carry their column's place, so a
+/// cell is read with its header's name.
+#[test]
+fn cells_and_headers_share_their_column_s_place() {
+    use ui_kit::access::Role;
+    let mut text = text_layout::TextSystem::new();
+    let mut g = grid(3, None);
+    let recording = ui_kit::access::begin();
+    paint_at(&mut g, &mut text, 900.0);
+    let frame = recording.take();
+    let nodes = frame.nodes();
+    let headers: Vec<_> = nodes.iter().filter(|n| n.role == Role::ColumnHeader).collect();
+    let cells: Vec<_> = nodes.iter().filter(|n| n.role == Role::Cell).collect();
+    assert!(!headers.is_empty() && !cells.is_empty());
+    for cell in &cells {
+        let column = cell.place.index.expect("its column");
+        assert!(
+            headers.iter().any(|h| h.place.index == Some(column)),
+            "a header for column {column}"
+        );
+    }
+}
+
+/// Measured (not a check): a grid's frame drawn with a screen reader's tree made, and without.
+#[test]
+#[ignore = "a measurement: cargo test -p ui-components --release measure_tree_cost -- --ignored --nocapture"]
+fn measure_tree_cost() {
+    let mut text = text_layout::TextSystem::new();
+    let palette = crate::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = render_api::Scene::default();
+    let mut g = grid(2000, None);
+    let mut frame = |g: &mut DataGrid<Fake>| {
+        scene.reset(palette.editor_background);
+        g.paint(GridPaint {
+            bounds: Rect::new(0.0, 0.0, 1800.0, 2000.0),
+            scale: 2.0,
+            text: &mut text,
+            scene: &mut scene,
+            palette: &palette,
+            icons: &icons,
+        });
+    };
+    for _ in 0..5 {
+        frame(&mut g);
+    }
+    let runs = 50u32;
+    let started = std::time::Instant::now();
+    for _ in 0..runs {
+        frame(&mut g);
+    }
+    let plain = started.elapsed() / runs;
+    let started = std::time::Instant::now();
+    let mut nodes = 0;
+    for _ in 0..runs {
+        let recording = ui_kit::access::begin();
+        frame(&mut g);
+        nodes = recording.take().nodes().len();
+    }
+    let told = started.elapsed() / runs;
+    println!("grid frame: {plain:?} plain, {told:?} with its tree ({nodes} nodes)");
+}
+
+/// The selection as a table, for whoever draws from it: the columns selected over the rows
+/// touched (in order, each once), every column shown when whole rows are; values as
+/// numbers or text; less than two cells: nothing.
+#[test]
+fn the_selection_is_lent_as_a_table() {
+    use charts_model::Tabular;
+    let mut g = grid(10, Some(100));
+    g.press(at(1, 1), 1, NONE);
+    g.release();
+    assert!(g.picked().is_none(), "one cell");
+    g.press(at(3, 2), 1, SHIFT);
+    g.release();
+    let picked = g.picked().expect("cells");
+    let names: Vec<&str> = picked.columns().iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["name", "score"]);
+    assert_eq!(picked.rows(), 3);
+    assert_eq!(picked.text(0, 0).as_deref(), Some("n1"));
+    assert_eq!(picked.number(0, 1), Some(0.5));
+    assert_eq!(picked.number(2, 1), None, "an empty cell");
+    // Whole rows: every column shown.
+    g.press(Point::new(10.0, at(5, 0).y), 1, NONE);
+    g.release();
+    g.press(Point::new(10.0, at(6, 0).y), 1, SHIFT);
+    g.release();
+    let picked = g.picked().expect("rows");
+    assert_eq!(picked.columns().len(), 3);
+    assert_eq!(picked.number(1, 0), Some(7.0));
+    assert_eq!(picked.left_out, 0);
+}
+
+/// Measured (not a check): the most rows a selection lends, copied on the click.
+#[test]
+#[ignore = "a measurement: cargo test -p ui-components --release measure_picked -- --ignored --nocapture"]
+fn measure_picked() {
+    let mut g = grid(MOST_PICKED_ROWS, None);
+    assert!(g.select_all());
+    let started = std::time::Instant::now();
+    let picked = g.picked().expect("rows");
+    println!(
+        "{} rows × 3 columns taken in {:?}",
+        charts_model::Tabular::rows(&picked),
+        started.elapsed()
+    );
+}
+
+/// A selection past the most rows taken: the rest counted at once, not walked.
+#[test]
+fn a_huge_selection_is_counted_not_walked() {
+    let mut g = grid(10, Some(100));
+    g.selection.rows(0, 50_000_000, 3, false);
+    let started = std::time::Instant::now();
+    let picked = g.picked().expect("rows");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+    assert_eq!(charts_model::Tabular::rows(&picked), 10);
+    assert_eq!(picked.left_out, 50_000_001 - 10);
 }

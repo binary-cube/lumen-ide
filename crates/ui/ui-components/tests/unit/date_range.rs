@@ -184,3 +184,46 @@ fn a_range_s_ends_are_squared_toward_the_days_between() {
     p.set_range(d(2026, 11, 3), d(2026, 11, 3));
     assert!(squares(&mut p).1.is_empty(), "a single day stays round");
 }
+
+/// The same frame drawn again (warmed up, its scene kept): nothing allocated.
+#[test]
+fn an_identical_repaint_allocates_nothing() {
+    let palette = crate::palette::Palette::dark();
+    let ctx = crate::ds::Ctx::new(&palette, 1.0);
+    let mut text = text_layout::TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut scene = render_api::Scene::default();
+    let mut p = picker();
+    let (anchor, view) = (Rect::new(20.0, 20.0, 200.0, 28.0), Rect::new(0.0, 0.0, 1200.0, 800.0));
+    let mut frame = |p: &mut DateRangePicker| {
+        scene.reset(palette.editor_background);
+        p.paint(&mut scene, &mut text, &icons, &ctx, anchor, view);
+    };
+    for _ in 0..3 {
+        frame(&mut p);
+    }
+    let n = crate::allocations::during(|| frame(&mut p));
+    assert_eq!(n, 0, "{n} allocations");
+}
+
+/// Drawn: a day pressed is picked, hovered it's lit (a frame asked) once, the mouse moved to
+/// another day lights that one.
+#[test]
+fn a_day_is_hovered_and_pressed() {
+    let palette = crate::palette::Palette::dark();
+    let ctx = crate::ds::Ctx::new(&palette, 1.0);
+    let mut text = text_layout::TextSystem::new();
+    let icons = icons::Icons::builtin();
+    let mut p = picker();
+    let (anchor, view) = (Rect::new(20.0, 20.0, 200.0, 28.0), Rect::new(0.0, 0.0, 1200.0, 800.0));
+    p.paint(&mut render_api::Scene::default(), &mut text, &icons, &ctx, anchor, view);
+    let days: Vec<Rect> =
+        p.hits.iter().filter(|(_, part)| matches!(part, Part::Day(_))).map(|(r, _)| *r).collect();
+    assert!(days.len() > 20, "a month's days");
+    let (a, b) = (days[3].center(), days[4].center());
+    assert!(p.hover(a));
+    assert!(!p.hover(a), "still on it: nothing new");
+    assert!(p.hover(b), "another day");
+    p.press(b);
+    assert!(p.start.is_some(), "picked");
+}

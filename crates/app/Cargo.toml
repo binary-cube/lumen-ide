@@ -75,6 +75,7 @@ text-search.workspace = true
 embed.workspace = true
 i18n.workspace = true
 viewer-image.workspace = true
+viewer-charts.workspace = true
 structure.workspace = true
 colors.workspace = true
 language-levels.workspace = true

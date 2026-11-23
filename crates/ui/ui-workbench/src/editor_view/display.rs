@@ -179,27 +179,8 @@ pub(super) fn indent_width(line: &str, tab: u32) -> Option<usize> {
     None
 }
 
-/// The columns a character takes on screen in a monospace font: two for East Asian wide and
-/// fullwidth characters (CJK, Hangul, fullwidth forms, most emoji), one for the others; tabs are
-/// handled by the caller (they go to the next stop).
-pub(super) fn char_columns(c: char) -> usize {
-    let wide = matches!(c as u32,
-        0x1100..=0x115F
-            | 0x2E80..=0x303E
-            | 0x3041..=0x33FF
-            | 0x3400..=0x4DBF
-            | 0x4E00..=0x9FFF
-            | 0xA000..=0xA4CF
-            | 0xAC00..=0xD7A3
-            | 0xF900..=0xFAFF
-            | 0xFE30..=0xFE4F
-            | 0xFF00..=0xFF60
-            | 0xFFE0..=0xFFE6
-            | 0x1F300..=0x1F64F
-            | 0x1F900..=0x1F9FF
-            | 0x20000..=0x3FFFD);
-    if wide { 2 } else { 1 }
-}
+/// The columns a character takes (the components' rule, the same everywhere).
+pub(super) use ui_components::text_options::char_columns;
 
 /// The widest line's display columns (tabs expanded to their stops, wide characters as two),
 /// over the text's `chunks`, the lines in `hidden` (sorted `[first, last]` ranges: collapsed

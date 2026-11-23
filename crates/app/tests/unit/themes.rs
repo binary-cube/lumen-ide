@@ -59,7 +59,7 @@ fn saved_theme_is_used_at_startup() {
 /// 3:1 on the card's background, the text and the muted text at least 4.5:1.
 #[test]
 fn the_task_manager_reads_on_the_default_themes() {
-    use ui_workbench::chart::{Series, series_color};
+    use ui_workbench::charts::spark::{Series, series_color};
     use ui_workbench::severity::contrast;
     let themes = Themes::load(&bundled());
     for id in ["default-dark", "default-light"] {

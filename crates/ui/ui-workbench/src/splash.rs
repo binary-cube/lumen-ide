@@ -13,7 +13,8 @@ use ui_kit::draw_text;
 
 use crate::Painter;
 
-/// The card background (the illustration is dark, regardless of the theme).
+/// The cyan the loading bar's glow leans to from the accent.
+const GLOW: Rgba = Rgba::rgb(0x22d3ee);
 
 #[derive(Debug, Default)]
 pub struct Splash;
@@ -91,7 +92,7 @@ impl Splash {
         );
         // The piece glides across once every 1/0.7 s, a share of the track wide.
         let ds = crate::ds::Ctx::new(palette, scale).with_opacity(opacity);
-        let glow = palette.accent.mix(Rgba::rgb(0x22d3ee), 0.35);
+        let glow = palette.accent.mix(GLOW, 0.35);
         crate::ds::ProgressBar::unknown()
             .on_dark()
             .color(glow)

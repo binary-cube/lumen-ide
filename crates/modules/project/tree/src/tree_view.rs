@@ -506,7 +506,17 @@ impl ProjectTreeView {
                 renamed_row = Some((top_of(i), row.depth));
                 continue;
             }
+            let item = tree_row::Item {
+                name: tree.name(row.id),
+                bounds: Rect::new(b.min_x(), top_of(i), b.size.width, row_height),
+                level: usize::from(row.depth),
+                expanded: (tree.kind(row.id) == NodeKind::Directory)
+                    .then(|| tree.is_expanded(row.id)),
+                selected: self.is_selected(row.id),
+            };
+            let told = tree_row::item(item);
             let right = self.paint_row(layer, text, tree, &frame, row, top_of(i));
+            drop(told);
             content_width = content_width.max(right);
         }
         self.content_width.set(content_width);

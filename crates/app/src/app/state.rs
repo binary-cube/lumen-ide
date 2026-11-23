@@ -99,6 +99,11 @@ pub(super) struct Frames {
     pub scene: Scene,
     /// The moment of the first input not yet painted (for input → frame latency).
     pub pending_input: Option<Instant>,
+    /// The last frame showed nothing new (the renderer skipped it): an animation's next
+    /// frame waits a display's frame then, never asked at once (it would spin unpaced).
+    pub last_skipped: bool,
+    /// Frames moving while nothing changes on screen, followed to be told in the log.
+    pub unseen_motion: super::unseen_motion::UnseenMotion,
     /// The redraw asked for when the kept frame can go.
     pub kept_frame_check: Option<Instant>,
     /// `EDITOR_DEBUG_RESIZE` diagnostic: how many resizes are left and the frame durations.
@@ -131,6 +136,8 @@ impl Frames {
             overlay: DebugOverlay::new(String::new()),
             scene: Scene::default(),
             pending_input: None,
+            last_skipped: false,
+            unseen_motion: Default::default(),
             kept_frame_check: None,
             resize_test: std::env::var("EDITOR_DEBUG_RESIZE")
                 .ok()

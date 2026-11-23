@@ -233,21 +233,133 @@ pub fn draw_ellipsized(
     text: &mut TextSystem,
     value: &str,
     font: &Font,
-    (x, baseline): (f32, f32),
+    at: (f32, f32),
     max: f32,
     color: Rgba,
 ) -> (f32, bool) {
+    draw_ellipsized_marked(layer, text, value, font, at, max, (color, Marks::NONE))
+}
+
+/// Characters of a text drawn in a color of their own (what a search matched): their byte
+/// positions in it, in order.
+#[derive(Debug, Clone, Copy)]
+pub struct Marks<'a> {
+    pub at: &'a [usize],
+    pub color: Rgba,
+    /// Where the text drawn starts in the one `at` counts in (a path's name: after its
+    /// folder).
+    pub from: usize,
+}
+
+impl Marks<'_> {
+    pub const NONE: Marks<'static> = Marks { at: &[], color: Rgba::TRANSPARENT, from: 0 };
+
+    /// The color of the glyph starting at `byte`.
+    fn color_at(&self, byte: usize, color: Rgba) -> Rgba {
+        if self.at.binary_search(&(self.from + byte)).is_ok() { self.color } else { color }
+    }
+}
+
+/// [`draw_ellipsized`] with `marks`' characters in their own color (those cut off left out).
+pub fn draw_ellipsized_marked(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    value: &str,
+    font: &Font,
+    (x, baseline): (f32, f32),
+    max: f32,
+    (color, marks): (Rgba, Marks<'_>),
+) -> (f32, bool) {
     let line = text.shape_line(value, font);
-    if line.width <= max + 0.5 {
+    let fits = line.width <= max + 0.5;
+    if fits && marks.at.is_empty() {
         draw_text(layer, &line, x, baseline, color);
         return (line.width, false);
     }
     let dots = text.shape_line("…", font);
+    let (count, end) = if fits {
+        (line.glyphs.len(), line.width)
+    } else {
+        let Some(cut) = cut(&line, value, max - dots.width) else { return (0.0, true) };
+        cut
+    };
+    let shown = if fits { end } else { end + dots.width };
+    // To a screen reader: the whole value, where it shows.
+    ui_kit::access::text_shown(&line, (x, shown), baseline);
+    layer.glyphs.extend(line.glyphs[..count].iter().map(|g| render_api::GlyphInstance {
+        key: g.key,
+        origin: kernel::Point::new(x + g.x, baseline + g.y),
+        color: marks.color_at(g.start, color),
+    }));
+    if !fits {
+        draw_text(layer, &dots, x + end, baseline, color);
+    }
+    (shown, !fits)
+}
+
+/// `value` drawn from `x` on `baseline`, cut in the middle with "…" where it passes `max`
+/// (its start and its end kept: a path's root and its last folders), nothing allocated:
+/// the shaped line's first glyphs, the "…", its last glyphs. Returns the width drawn.
+pub fn draw_ellipsized_middle(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    value: &str,
+    font: &Font,
+    (x, baseline): (f32, f32),
+    max: f32,
+    color: Rgba,
+) -> f32 {
+    let line = text.shape_line(value, font);
+    if line.width <= max + 0.5 {
+        draw_text(layer, &line, x, baseline, color);
+        return line.width;
+    }
+    let dots = text.shape_line("…", font);
     let room = max - dots.width;
     if room <= 0.0 {
-        return (0.0, true);
+        return 0.0;
     }
-    // The glyphs that end before the room does (a trailing space left out).
+    // Half the room for the start, the rest for the end.
+    let (head, head_w) = cut(&line, value, room / 2.0).unwrap_or((0, 0.0));
+    let tail_from = line
+        .glyphs
+        .iter()
+        .skip(head)
+        .find(|g| line.width - g.x <= room - head_w + 0.01)
+        .map_or(line.width, |g| g.x);
+    let shown = head_w + dots.width + (line.width - tail_from);
+    ui_kit::access::text_shown(&line, (x, shown), baseline);
+    let glyph = |g: &text_layout::ShapedGlyph, at: f32| render_api::GlyphInstance {
+        key: g.key,
+        origin: kernel::Point::new(at, baseline + g.y),
+        color,
+    };
+    layer.glyphs.extend(line.glyphs[..head].iter().map(|g| glyph(g, x + g.x)));
+    draw_text(layer, &dots, x + head_w, baseline, color);
+    let shift = x + head_w + dots.width - tail_from;
+    layer.glyphs.extend(
+        line.glyphs.iter().skip(head).filter(|g| g.x >= tail_from).map(|g| glyph(g, shift + g.x)),
+    );
+    shown
+}
+
+/// The width [`draw_ellipsized`] would draw `value` in (its whole width, or cut with "…"
+/// to `max`), nothing drawn and nothing allocated: a text placed by its right edge.
+pub fn ellipsized_width(text: &mut TextSystem, value: &str, font: &Font, max: f32) -> f32 {
+    let line = text.shape_line(value, font);
+    if line.width <= max + 0.5 {
+        return line.width;
+    }
+    let dots = text.shape_line("…", font).width;
+    cut(&line, value, max - dots).map_or(0.0, |(_, end)| end + dots)
+}
+
+/// Where a line is cut to leave `room`: how many of its glyphs, and where the last ends (a
+/// trailing space left out). `None`: no room at all.
+fn cut(line: &text_layout::ShapedLine, value: &str, room: f32) -> Option<(usize, f32)> {
+    if room <= 0.0 {
+        return None;
+    }
     let mut end = 0.0_f32;
     let mut count = 0;
     for (i, g) in line.glyphs.iter().enumerate() {
@@ -260,14 +372,11 @@ pub fn draw_ellipsized(
             count = i + 1;
         }
     }
-    layer.glyphs.extend(line.glyphs[..count].iter().map(|g| render_api::GlyphInstance {
-        key: g.key,
-        origin: kernel::Point::new(x + g.x, baseline + g.y),
-        color,
-    }));
-    draw_text(layer, &dots, x + end, baseline, color);
-    (end + dots.width, true)
+    Some((count, end))
 }
+
+/// How tall a section title's heading is told to a screen reader (logical pixels).
+const SECTION_TITLE_REACH: f32 = 24.0;
 
 /// A content section title (and an optional description); returns the y below it.
 pub fn section_title(
@@ -297,6 +406,11 @@ pub fn section_title_in(
     title: &str,
     detail: Option<&str>,
 ) -> f32 {
+    // To a screen reader: a heading named by its title (its detail read under it).
+    let heading = Rect::new(x, y, width, ctx.px(SECTION_TITLE_REACH));
+    let _told = ui_kit::access::open(|| {
+        ui_kit::access::Described::new(ui_kit::access::Role::Heading, title, heading)
+    });
     let font = section_title_font(ctx);
     let m = text.metrics(&font);
     let baseline = (y + m.ascent).round();
@@ -364,12 +478,46 @@ pub fn section_header(
 /// A name's initials for an avatar: the first letters of its first two words
 /// (`docker.acme.test` → "DA", `www-data` → "WD"), otherwise its first two letters.
 pub fn initials(name: &str) -> String {
-    let words: Vec<&str> =
-        name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
-    let initials: String = match words.as_slice() {
-        [first, second, ..] => first.chars().take(1).chain(second.chars().take(1)).collect(),
-        [only] => only.chars().take(2).collect(),
-        [] => "?".into(),
-    };
-    initials.to_uppercase()
+    Initials::of(name).as_str().to_owned()
+}
+
+/// A name's [`initials`] held on the stack (an avatar drawn every frame writes no text).
+#[derive(Debug, Clone, Copy)]
+pub struct Initials {
+    bytes: [u8; Self::ROOM],
+    len: usize,
+}
+
+impl Initials {
+    /// Room for two letters in upper case (one may become a few: `ß` → `SS`).
+    const ROOM: usize = 16;
+
+    pub fn of(name: &str) -> Self {
+        let mut words = name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty());
+        let mut out = Self { bytes: [0; Self::ROOM], len: 0 };
+        match (words.next(), words.next()) {
+            (Some(first), Some(second)) => {
+                first.chars().take(1).chain(second.chars().take(1)).for_each(|c| out.push_upper(c));
+            }
+            (Some(only), None) => only.chars().take(2).for_each(|c| out.push_upper(c)),
+            _ => out.push_upper('?'),
+        }
+        out
+    }
+
+    fn push_upper(&mut self, c: char) {
+        for upper in c.to_uppercase() {
+            let mut buf = [0; 4];
+            let encoded = upper.encode_utf8(&mut buf).as_bytes();
+            let Some(room) = self.bytes.get_mut(self.len..self.len + encoded.len()) else {
+                return;
+            };
+            room.copy_from_slice(encoded);
+            self.len += encoded.len();
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        std::str::from_utf8(&self.bytes[..self.len]).unwrap_or("?")
+    }
 }

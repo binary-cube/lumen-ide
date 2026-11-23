@@ -61,6 +61,7 @@ impl Workbench {
                     pinned: view.pinned,
                     provider,
                     viewer,
+                    text_told: 0,
                 });
             }
             if made.is_empty() {

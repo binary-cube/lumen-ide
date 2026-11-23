@@ -23,6 +23,8 @@ pub(super) struct CodeArea {
 #[derive(Debug, Default)]
 pub(super) struct CodeSelection {
     at: CodeArea,
+    /// The rows' heights while lines wrap (the paint and the pointer read the same).
+    pub(super) wrap: super::wrap::DiffWrap,
     /// Where it started and where it reaches.
     range: Option<(Place, Place)>,
     dragging: bool,
@@ -65,28 +67,43 @@ impl CodeSelection {
         if a.row_h <= 0.0 || a.column <= 0.0 {
             return None;
         }
-        let row = ((p.y - a.area.min_y() + a.scroll) / a.row_h).max(0.0) as usize;
+        let screen = ((p.y - a.area.min_y() + a.scroll) / a.row_h).max(0.0) as u32;
+        let (row, part) = self.wrap.at(screen);
         let column = ((p.x - a.left + a.sideways) / a.column).round().max(0.0) as usize;
-        Some((row, column))
+        // A wrapped line's later row: its columns go on from where the row starts.
+        let from = self.wrap.parts(row, usize::MAX).get(part).map_or(0, |(from, _)| *from);
+        Some((row, from + column))
     }
 
     /// The highlight of row `row`, its code `width` columns wide, between `edges`.
-    pub(super) fn band(&self, row: usize, width: usize, edges: (f32, f32)) -> Option<Rect> {
-        let (from, to) = self.ordered()?;
+    /// Row `row`'s selected part (its line `width` columns), a rectangle for each of its
+    /// screen rows it touches (a wrapped line's several), into `out`.
+    pub(super) fn bands(&self, row: usize, width: usize, edges: (f32, f32), out: &mut Vec<Rect>) {
+        out.clear();
+        let Some((from, to)) = self.ordered() else { return };
         if row < from.0 || row > to.0 {
-            return None;
+            return;
         }
         let first = if row == from.0 { from.1.min(width) } else { 0 };
         // A row followed by more of it shows its line break too.
         let last = if row == to.0 { to.1.min(width) } else { width + 1 };
         if first >= last {
-            return None;
+            return;
         }
         let a = self.at;
-        let x = |column: usize| a.left - a.sideways + column as f32 * a.column;
-        let (start, end) = (x(first).max(edges.0), x(last).min(edges.1));
-        let top = a.area.min_y() + row as f32 * a.row_h - a.scroll;
-        (start < end).then(|| Rect::new(start, top, end - start, a.row_h))
+        let top = a.area.min_y() + self.wrap.first(row) as f32 * a.row_h - a.scroll;
+        let parts = self.wrap.parts(row, width + 1);
+        for (k, &(start_col, end_col)) in parts.iter().enumerate() {
+            let (f, l) = (first.max(start_col), last.min(end_col));
+            if f >= l {
+                continue;
+            }
+            let x = |column: usize| a.left - a.sideways + (column - start_col) as f32 * a.column;
+            let (start, end) = (x(f).max(edges.0), x(l).min(edges.1));
+            if start < end {
+                out.push(Rect::new(start, top + k as f32 * a.row_h, end - start, a.row_h));
+            }
+        }
     }
 
     fn ordered(&self) -> Option<(Place, Place)> {

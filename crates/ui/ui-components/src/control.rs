@@ -548,13 +548,7 @@ impl Control for ui_kit::TextInput {
     }
 
     fn text(&mut self, typed: &str) -> bool {
-        // One line: its breaks become spaces, other control characters go.
-        let line: String = typed
-            .chars()
-            .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
-            .filter(|c| !c.is_control())
-            .collect();
-        self.insert(&line);
+        self.insert(&kernel::text::pasted_line(typed));
         true
     }
 
@@ -574,6 +568,25 @@ impl Control for ui_kit::TextInput {
     }
 }
 
+/// A press on an edge scrollbar: its thumb held, the offset it gives handed to `set` (the
+/// parts below differ only in where the offset goes).
+fn bar_press(bar: &mut crate::scrollbar::EdgeScrollbar, p: Point, set: impl FnOnce(f32)) -> Press {
+    match bar.press(p) {
+        Some(offset) => {
+            set(offset);
+            Press::Held
+        }
+        None => Press::Ignored,
+    }
+}
+
+/// `offset` moved to `to`: whether it changed.
+fn move_to(offset: &mut f32, to: f32) -> bool {
+    let changed = to != *offset;
+    *offset = to;
+    changed
+}
+
 /// A scrollbar and the offset it moves, as one control: pressed on its lane, its thumb is
 /// held (or the offset jumps there) and follows the pointer.
 #[derive(Debug)]
@@ -588,20 +601,11 @@ impl Control for Thumb<'_> {
     }
 
     fn press(&mut self, p: Point, _clicks: u32) -> Press {
-        match self.bar.press(p) {
-            Some(offset) => {
-                *self.offset = offset;
-                Press::Held
-            }
-            None => Press::Ignored,
-        }
+        bar_press(self.bar, p, |offset| *self.offset = offset)
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let changed = offset != *self.offset;
-        *self.offset = offset;
-        changed
+        self.bar.drag(p).is_some_and(|offset| move_to(self.offset, offset))
     }
 
     fn release(&mut self) -> bool {
@@ -631,13 +635,9 @@ impl Control for ScrollThumb<'_> {
     }
 
     fn press(&mut self, p: Point, _clicks: u32) -> Press {
-        match self.bar.press(p) {
-            Some(offset) => {
-                self.scroll.scroll_to(offset);
-                Press::Held
-            }
-            None => Press::Ignored,
-        }
+        bar_press(self.bar, p, |offset| {
+            self.scroll.scroll_to(offset);
+        })
     }
 
     fn drag(&mut self, p: Point) -> bool {
@@ -843,21 +843,13 @@ impl Control for Scrolled<'_> {
     }
 
     fn press(&mut self, p: Point, _clicks: u32) -> Press {
-        match self.bar.press(p) {
-            Some(offset) => {
-                *self.offset = offset.clamp(0.0, self.max.max(0.0));
-                Press::Held
-            }
-            None => Press::Ignored,
-        }
+        let max = self.max.max(0.0);
+        bar_press(self.bar, p, |offset| *self.offset = offset.clamp(0.0, max))
     }
 
     fn drag(&mut self, p: Point) -> bool {
-        let Some(offset) = self.bar.drag(p) else { return false };
-        let offset = offset.clamp(0.0, self.max.max(0.0));
-        let changed = offset != *self.offset;
-        *self.offset = offset;
-        changed
+        let max = self.max.max(0.0);
+        self.bar.drag(p).is_some_and(|offset| move_to(self.offset, offset.clamp(0.0, max)))
     }
 
     fn release(&mut self) -> bool {
@@ -869,9 +861,8 @@ impl Control for Scrolled<'_> {
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
-        let before = *self.offset;
-        *self.offset = (*self.offset + dy).clamp(0.0, self.max.max(0.0));
-        *self.offset != before
+        let to = (*self.offset + dy).clamp(0.0, self.max.max(0.0));
+        move_to(self.offset, to)
     }
 
     fn frame_deadline(&self) -> Option<Instant> {
@@ -1101,9 +1092,7 @@ impl Control for BarThumb<'_> {
     fn drag(&mut self, p: Point) -> bool {
         let Some(offset) = self.bar.drag_to(p, self.metrics) else { return false };
         let offset = self.within(offset);
-        let changed = offset != *self.offset;
-        *self.offset = offset;
-        changed
+        move_to(self.offset, offset)
     }
 
     fn release(&mut self) -> bool {

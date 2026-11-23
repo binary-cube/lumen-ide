@@ -57,9 +57,9 @@ fn long_texts_are_cut_to_the_card_at_every_width() {
         // Cut with "…".
         let ctx = Ctx::new(&palette, SCALE);
         let (title_font, detail_font, ..) = fonts(&ctx);
-        let lines = wrap_lines(&mut text, long, &title_font, card.text_width, 2);
+        let lines = ds::wrap(&mut text, long, &title_font, card.text_width, 2);
         assert!(ends_cut(&card.title[1], &mut text, &title_font, &lines[1]), "{width}: {lines:?}");
-        let details = wrap_lines(&mut text, detail, &detail_font, card.text_width, 2);
+        let details = ds::wrap(&mut text, detail, &detail_font, card.text_width, 2);
         assert!(ends_cut(&card.detail[1], &mut text, &detail_font, &details[1]), "{details:?}");
     }
 }

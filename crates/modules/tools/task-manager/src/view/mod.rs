@@ -7,7 +7,7 @@
 //! each goes is [`crate::layout`]'s (pure, kept while nothing changes); what's listed is
 //! the view model's ([`crate::model`], built once per look or change); the texts are
 //! written once per look ([`texts`]); the graphs aggregated once per new value or width
-//! (`chart::PlotCache`). A frame that draws the same allocates nothing.
+//! (`spark::PlotCache`). A frame that draws the same allocates nothing.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -16,7 +16,7 @@ use std::time::Instant;
 use kernel::{Point, Rect};
 use render_api::Scene;
 use text_layout::TextSystem;
-use ui_components::chart::PlotCache;
+use ui_components::charts::spark::PlotCache;
 use ui_components::columns::Choice;
 use ui_components::control::Controls;
 use ui_components::ds::{self, Ctx};
@@ -187,8 +187,12 @@ pub(crate) enum Hit {
 #[derive(Debug, Default)]
 pub(crate) struct Plots {
     pub cards: [PlotCache; 5],
-    pub detail: [PlotCache; 5],
     pub trend: Vec<PlotCache>,
+    /// The detail's charts (the app's one chart: its axis, its tooltip of every series), by
+    /// the first metric each shows; their data made again for each new history.
+    pub detail_charts: [ui_components::charts::Chart; 5],
+    /// The history their data was made from (its generation, the part's).
+    pub detail_seen: Option<u64>,
 }
 
 impl kernel::Purge for Plots {

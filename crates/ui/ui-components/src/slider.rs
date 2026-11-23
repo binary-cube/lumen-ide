@@ -97,6 +97,27 @@ pub struct SliderSpec<'a> {
     pub style: &'a SliderStyle,
 }
 
+impl<'a> SliderSpec<'a> {
+    /// `labels` as stops across `width` from `(x, top)` in `style`, the first chosen.
+    pub fn new(
+        (x, top): (f32, f32),
+        width: f32,
+        labels: &'a [&'a str],
+        style: &'a SliderStyle,
+    ) -> Self {
+        Self { x, top, width, labels, current: 0, hovered: false, style }
+    }
+
+    /// The stop in force (its place).
+    pub fn current(self, current: usize) -> Self {
+        Self { current, ..self }
+    }
+
+    pub fn hovered(self, hovered: bool) -> Self {
+        Self { hovered, ..self }
+    }
+}
+
 /// Draws a slider at `x`, `top`, at most `width` wide, its stops named `labels`, at stop
 /// `current`; `hovered`: the mouse is over it (the thumb gets its ring).
 pub fn slider(
@@ -109,6 +130,18 @@ pub fn slider(
     let px = |v: f32| ctx.px(v);
     let width = width.min(px(style.max_width));
     let thumb = px(style.thumb_size);
+    // To a screen reader: a slider (named by the text on its line), its stop as its value
+    // ("3 of 5" by its place).
+    ui_kit::access::node(|| {
+        use ui_kit::access::{Described, Role};
+        let node = Described::new(Role::Slider, "", Rect::new(x, top, width, thumb + px(4.0)))
+            .index(current)
+            .count(labels.len());
+        match labels.get(current) {
+            Some(label) => node.value(*label),
+            None => node,
+        }
+    });
     let mid = (top + thumb / 2.0 + px(2.0)).round();
     let (start, end) = (x + thumb / 2.0, x + width - thumb / 2.0);
     let count = labels.len().max(1);

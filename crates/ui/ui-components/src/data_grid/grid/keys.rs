@@ -14,11 +14,14 @@ impl<S: GridSource> DataGrid<S> {
             return true;
         }
         if let Some(editor) = &mut self.editor {
+            // A cell takes the first line only: lines joined would be a value nobody wrote
+            // (the multi-line editor takes them all).
             editor.input.insert(typed.lines().next().unwrap_or_default());
             editor.error = None;
             return true;
         }
-        let typed = typed.lines().next().unwrap_or_default();
+        let typed = kernel::text::pasted_line(typed);
+        let typed = typed.as_ref();
         match self.field {
             Some(Field::Where) => self.where_input.insert(typed),
             Some(Field::Order) => self.order_input.insert(typed),

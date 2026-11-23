@@ -27,6 +27,7 @@ pub mod export;
 pub mod grid_source;
 pub mod identity;
 pub mod layout;
+pub mod pane_rows;
 pub mod preview;
 pub mod provider;
 pub mod repository;

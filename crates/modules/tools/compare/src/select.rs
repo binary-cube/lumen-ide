@@ -96,14 +96,19 @@ impl Compare {
     }
 
     /// The place under `p` in column `which`.
-    fn text_pos(&self, which: usize, p: Point) -> TextPos {
+    pub(crate) fn text_pos(&self, which: usize, p: Point) -> TextPos {
         let last = self.rows.len().saturating_sub(1);
-        let row = ((p.y - self.list.min_y() + self.scroll) / self.row_h.max(1.0)).floor();
-        let row = (row.max(0.0) as usize).min(last);
+        let (row, part) = self.row_at(p.y - self.list.min_y() + self.scroll);
+        let row = row.min(last);
         let x = p.x - self.code_x[which] + self.across[which].offset;
         let col = (x / self.advance.max(1.0)).round().max(0.0) as usize;
-        let len = self.line_in(row, which).map_or(0, drawn_len);
-        TextPos { row, col: col.min(len) }
+        let line = self.line_in(row, which).unwrap_or_default();
+        let len = drawn_len(line);
+        // A wrapped line's row: its columns go on from where the row starts, up to its end.
+        let parts = self.part_columns(line, which);
+        let (from, to) = parts.get(part as usize).or(parts.last()).copied().unwrap_or((0, len));
+        let end = if part as usize + 1 >= parts.len() { len } else { to.saturating_sub(1) };
+        TextPos { row, col: (from + col).min(end).min(len) }
     }
 
     /// Whether `p` is on a column's code (past its line numbers): which one.
@@ -193,14 +198,23 @@ impl Compare {
             if b <= a {
                 continue;
             }
-            let y = (self.list.min_y() + row as f32 * self.row_h - self.scroll).round();
-            let r = Rect::new(
-                (x0 + a as f32 * self.advance).round(),
-                y,
-                ((b - a) as f32 * self.advance).round(),
-                self.row_h,
-            );
-            layer.quad(Quad::filled(r, color));
+            let top = (self.list.min_y() + self.row_top(row) - self.scroll).round();
+            // Each of its rows its share (a wrapped line's), the last one past its end.
+            let parts = self.part_columns(line, which);
+            for (k, &(from, to)) in parts.iter().enumerate() {
+                let to = if k + 1 == parts.len() { to + 1 } else { to };
+                let (a, b) = (a.max(from), b.min(to));
+                if b <= a {
+                    continue;
+                }
+                let r = Rect::new(
+                    (x0 + (a - from) as f32 * self.advance).round(),
+                    top + k as f32 * self.row_h,
+                    ((b - a) as f32 * self.advance).round(),
+                    self.row_h,
+                );
+                layer.quad(Quad::filled(r, color));
+            }
         }
     }
 }

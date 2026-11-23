@@ -1,5 +1,7 @@
 //! Copying through the data extractors, and the list choosing one.
 
+use std::sync::Arc;
+
 use super::*;
 
 impl<S: GridSource> DataGrid<S> {
@@ -9,12 +11,12 @@ impl<S: GridSource> DataGrid<S> {
     }
 
     /// The chosen extractor's name (read again only when the catalog changed).
-    pub(in crate::data_grid) fn extractor_label(&mut self) -> String {
+    pub(in crate::data_grid) fn extractor_label(&mut self) -> Arc<str> {
         let generation = extractors::catalog().generation();
         match &self.extract_label {
             Some((g, label)) if *g == generation => label.clone(),
             _ => {
-                let label = self.extractor().name();
+                let label: Arc<str> = self.extractor().name().into();
                 self.extract_label = Some((generation, label.clone()));
                 label
             }

@@ -10,6 +10,7 @@ pub mod cpu;
 pub mod event;
 pub mod fuzzy;
 pub mod geometry;
+pub mod hash;
 pub mod id;
 pub mod memory;
 pub mod paths;

@@ -15,6 +15,7 @@ fn view() -> CommitView {
             rows: vec![DiffRow::Hunk(0), DiffRow::Line(0, 0), DiffRow::Line(0, 1)],
             colors: Vec::new(),
             partial: true,
+            id: super::diff::reading_id(),
         }),
         ..CommitView::default()
     };
@@ -78,9 +79,53 @@ fn the_highlight_covers_what_is_selected_and_stays_between_the_edges() {
     let mut view = view();
     press_code(&mut view, at(1.0, 4.0));
     view.drag(at(2.0, 2.0));
-    let row = view.code.band(1, 7, (100.0, 400.0)).unwrap();
-    assert_eq!((row.min_x(), row.size.width), (140.0, 40.0));
-    let last = view.code.band(2, 3, (100.0, 400.0)).unwrap();
-    assert_eq!(last.size.width, 20.0);
-    assert!(view.code.band(0, 3, (100.0, 400.0)).is_none());
+    let mut bands = Vec::new();
+    view.code.bands(1, 7, (100.0, 400.0), &mut bands);
+    assert_eq!(bands.len(), 1);
+    assert_eq!((bands[0].min_x(), bands[0].size.width), (140.0, 40.0));
+    view.code.bands(2, 3, (100.0, 400.0), &mut bands);
+    assert_eq!(bands[0].size.width, 20.0);
+    view.code.bands(0, 3, (100.0, 400.0), &mut bands);
+    assert!(bands.is_empty());
+}
+
+/// Wrapped: a long line takes several screen rows; a press on its second row selects from
+/// past where that row starts, and the highlight is drawn on each row it touches.
+#[test]
+fn a_wrapped_line_is_selected_on_its_rows() {
+    let mut view = view();
+    let long = "a fairly long line that will not fit in ten columns here\n";
+    if let Some(diff) = &mut view.diff {
+        diff.hunks[0].lines[1].text = long.into();
+        view.code.wrap.refresh(diff, 10);
+    }
+    assert!(view.code.wrap.on());
+    assert!(view.code.wrap.rows(2) > 1);
+    // Its second screen row: the line's row 2 starts at screen row 2.
+    let second = Point::new(100.0 + 2.0 * 10.0, 3.0 * 20.0 + 5.0);
+    assert!(press_code(&mut view, at(2.0, 0.0)));
+    assert!(view.drag(second));
+    let (_, to) = view.code.ordered().expect("a selection");
+    assert_eq!(to.0, 2, "the same line");
+    assert!(to.1 > 10, "past its first row: {}", to.1);
+    let mut bands = Vec::new();
+    let width = super::text_selection::columns(long.trim_end());
+    view.code.bands(2, width, (100.0, 400.0), &mut bands);
+    assert_eq!(bands.len(), 2, "on both rows it touches");
+}
+
+/// Another file's changes, as many rows: their own heights, never the last file's (each
+/// reading is its own, whatever memory it lands in).
+#[test]
+fn another_file_s_rows_are_wrapped_anew() {
+    let mut view = view();
+    let mut diff = view.diff.take().expect("a diff");
+    diff.hunks[0].lines[1].text =
+        "a fairly long line that will not fit in ten columns here\n".into();
+    view.code.wrap.refresh(&diff, 10);
+    assert!(view.code.wrap.rows(2) > 1);
+    let mut other = FileDiff { id: super::diff::reading_id(), ..diff };
+    other.hunks[0].lines[1].text = "short\n".into();
+    view.code.wrap.refresh(&other, 10);
+    assert_eq!(view.code.wrap.rows(2), 1, "the other file's own heights");
 }

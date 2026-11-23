@@ -323,6 +323,15 @@ pub fn decode_svg(bytes: &[u8]) -> io::Result<Decoded> {
     decode_svg_fitting(bytes, MAX_SIDE)
 }
 
+/// `pixels` (`width * height * 4` bytes, non-premultiplied RGBA) as a PNG file's bytes.
+pub fn encode_png(width: u32, height: u32, pixels: Vec<u8>) -> io::Result<Vec<u8>> {
+    let image = image::RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| io::Error::other("pixels don't fill the size"))?;
+    let mut out = io::Cursor::new(Vec::new());
+    image.write_to(&mut out, image::ImageFormat::Png).map_err(io::Error::other)?;
+    Ok(out.into_inner())
+}
+
 /// Renders an SVG (as [`decode_svg`]) with no side over `max_side`.
 pub fn decode_svg_fitting(bytes: &[u8], max_side: u32) -> io::Result<Decoded> {
     let tree = resvg::usvg::Tree::from_data(bytes, &svg_options(bytes, false))

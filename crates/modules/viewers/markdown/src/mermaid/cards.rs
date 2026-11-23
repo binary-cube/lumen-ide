@@ -64,20 +64,30 @@ fn card_of(n: &BoxNode, kind: Kind) -> Card {
     }
 }
 
+/// C4's colors, as its notation has them: an external box's grey, then a person's, a
+/// system's, a container's, a component's blue (each lighter than the one before).
+const C4_EXTERNAL: Rgba = Rgba::rgb(0x999999);
+const C4_PERSON: Rgba = Rgba::rgb(0x08427b);
+const C4_SYSTEM: Rgba = Rgba::rgb(0x1168bd);
+const C4_CONTAINER: Rgba = Rgba::rgb(0x438dd5);
+const C4_COMPONENT: Rgba = Rgba::rgb(0x85bbf0);
+/// A label's dark ink on a light fill.
+const DARK_INK: Rgba = Rgba::rgb(0x101014);
+
 /// C4's colors by what a box is (its notation's, toned to the theme's background).
 fn c4_fill(kind: &str, look: &Look) -> Rgba {
     let ext = kind.ends_with("_Ext");
     let base = kind.trim_end_matches("_Ext");
     let c = if ext {
-        Rgba::rgb(0x999999)
+        C4_EXTERNAL
     } else if base.starts_with("Person") {
-        Rgba::rgb(0x08427b)
+        C4_PERSON
     } else if base.starts_with("System") {
-        Rgba::rgb(0x1168bd)
+        C4_SYSTEM
     } else if base.starts_with("Container") {
-        Rgba::rgb(0x438dd5)
+        C4_CONTAINER
     } else if base.starts_with("Component") {
-        Rgba::rgb(0x85bbf0)
+        C4_COMPONENT
     } else {
         look.fill
     };
@@ -87,7 +97,7 @@ fn c4_fill(kind: &str, look: &Look) -> Rgba {
 /// Black or white, whichever reads on `fill`.
 fn ink_on(fill: Rgba) -> Rgba {
     let l = 0.299 * fill.r + 0.587 * fill.g + 0.114 * fill.b;
-    if l > 0.6 { Rgba::rgb(0x101014) } else { Rgba::rgb(0xffffff) }
+    if l > 0.6 { DARK_INK } else { Rgba::WHITE }
 }
 
 const ICON: f32 = 34.0;

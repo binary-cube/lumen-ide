@@ -575,3 +575,37 @@ fn a_tab_command_s_asked_menu_is_offered_at_once() {
     assert!(matches!(panel.take_action(), Some(ToolPanelAction::MenuUnder { .. })));
     assert!(panel.active_view().and_then(|v| v.take_menu()).is_none(), "nothing left asked");
 }
+
+/// To a screen reader: each row of its tree is a tree's item, with its name and its depth.
+#[test]
+fn its_rows_are_a_tree_s_items() {
+    use ui_kit::access::Role;
+    let mut panel = panel();
+    // Its rows made (as the panel asks for them), then told as they're drawn.
+    assert!(!labels(&mut panel).is_empty());
+    let recording = ui_kit::access::begin();
+    let _ = painted(&mut panel);
+    let frame = recording.take();
+    let items: Vec<_> = frame.nodes().iter().filter(|n| n.role == Role::TreeItem).collect();
+    assert!(!items.is_empty(), "its rows told");
+    assert!(items.iter().all(|n| !n.name.is_empty() && n.place.level.is_some()));
+}
+
+/// How text is shown reaches its views: one made later (the Output's log) wraps as told.
+#[test]
+fn its_views_are_told_how_text_is_shown() {
+    let mut panel = panel();
+    panel.set_text_options(&ui_components::TextOptions { word_wrap: true });
+    panel.select(console(), None);
+    let view = panel.active_view().expect("the Output's view");
+    let menu = view.context_menu(kernel::Point::new(10.0, 10.0)).unwrap_or_default();
+    let unwrap = i18n::t("log.unwrap");
+    let labels: Vec<String> = menu
+        .iter()
+        .filter_map(|e| match e {
+            ui_components::ViewMenuEntry::Item { label, .. } => Some(label.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(labels.contains(&unwrap), "wrapped: {labels:?}");
+}

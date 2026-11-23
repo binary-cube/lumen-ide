@@ -483,6 +483,60 @@ impl Workbench {
             return true;
         }
         let page = self.tabs.get(self.active).map_or(10, |t| t.view.page_lines());
+        // Lines wrapping: Home / End go to the row's start and end first (a second press,
+        // the line's).
+        if let EditKey::Move { motion: motion @ (Motion::LineStart | Motion::LineEnd), extend } =
+            key
+            && let Some(tab) = self.tabs.get_mut(self.active)
+            && tab.view.wraps()
+        {
+            let end = motion == Motion::LineEnd;
+            let (view, doc, folds) = (&mut tab.view, &tab.doc, &tab.folds);
+            let targets: Vec<Option<usize>> = doc
+                .selections()
+                .iter()
+                .map(|s| view.row_home_end(doc, folds, s.head, end))
+                .collect();
+            if targets.iter().any(Option::is_some) {
+                let mut targets = targets.into_iter();
+                let moved = doc.selections().transform(|s| {
+                    let Some(Some(head)) = targets.next() else { return *s };
+                    let anchor = if extend { s.anchor } else { head };
+                    document::Selection { anchor, head, goal: None }
+                });
+                tab.doc.set_selections(moved);
+                tab.view.reveal_cursor(&tab.doc, &tab.folds, text, &self.palette);
+                return true;
+            }
+        }
+        // Lines wrapping: ↑ / ↓ / PageUp / PageDown move over the rows shown, not the lines.
+        if let EditKey::Move { motion, extend } = key
+            && let Some(tab) = self.tabs.get_mut(self.active)
+            && tab.view.wraps()
+        {
+            let rows = match motion {
+                Motion::Up => -1,
+                Motion::Down => 1,
+                Motion::PageUp(_) => -i64::from(page),
+                Motion::PageDown(_) => i64::from(page),
+                _ => 0,
+            };
+            if rows != 0 {
+                let (view, doc, folds) = (&mut tab.view, &tab.doc, &tab.folds);
+                let palette = &self.palette;
+                let moved = doc.selections().transform(|s| {
+                    let goal = s.goal.map(|g| g as usize);
+                    let (head, goal) =
+                        view.moved_by_rows(doc, folds, text, palette, s.head, goal, rows);
+                    let anchor = if extend { s.anchor } else { head };
+                    let goal = u32::try_from(goal).unwrap_or(u32::MAX);
+                    document::Selection { anchor, head, goal: Some(goal) }
+                });
+                tab.doc.set_selections(moved);
+                tab.view.reveal_cursor(&tab.doc, &tab.folds, text, &self.palette);
+                return true;
+            }
+        }
         if let EditKey::Move { motion, extend } = key
             && let Some(tab) = self.tabs.get_mut(self.active)
             && tab.folds.has_any()
@@ -751,6 +805,44 @@ impl Workbench {
     pub(super) fn move_in_field(&mut self, key: &EditKey) -> bool {
         let EditKey::Move { motion, extend } = *key else { return false };
         self.active_input_mut().is_some_and(|input| move_cursor(input, motion, extend))
+    }
+
+    /// The text field with the keyboard's selection set to `range` (bytes: a screen reader
+    /// moved its caret) — only if it's the field the reader meant, its text `meant` (the
+    /// node's value); `false`: no field has the keyboard, or another one has it (a find
+    /// bar's while the reader was in a setting's), or the node wasn't a field's whole text
+    /// (a code editor tells only its lines shown).
+    pub fn select_in_field(&mut self, range: std::ops::Range<usize>, meant: &str) -> bool {
+        let Some(input) = self.active_input_mut() else { return false };
+        let text = input.text();
+        if text != meant {
+            return false;
+        }
+        let fit = |b: usize| text.floor_char_boundary(b.min(text.len()));
+        let range = fit(range.start)..fit(range.end);
+        input.select(range);
+        true
+    }
+
+    /// The code editor with the keyboard: the selection set from a screen reader's places,
+    /// each (the line among those it told, a character in it); `false`: the editor hasn't
+    /// the keyboard (a field has it), or the line isn't one it told.
+    pub fn select_in_editor(&mut self, anchor: (usize, usize), head: (usize, usize)) -> bool {
+        if self.focus != Focus::Editor || self.active_input_mut().is_some() {
+            return false;
+        }
+        let Some(tab) = self.tabs.get_mut(self.active) else { return false };
+        let buffer = tab.doc.buffer();
+        let offset = |(told, character): (usize, usize)| {
+            let line = tab.view.told_line(told)? as usize;
+            let text = buffer.line_text(line);
+            let inside = text.char_indices().nth(character).map_or(text.len(), |(at, _)| at);
+            Some(buffer.line_start(line) + inside)
+        };
+        let (Some(anchor), Some(head)) = (offset(anchor), offset(head)) else { return false };
+        let selection = document::Selection { anchor, head, goal: None };
+        tab.doc.set_selections(document::Selections::single(selection));
+        true
     }
 
     /// A text field of the window's has the keyboard (a screen reader's value goes in it).

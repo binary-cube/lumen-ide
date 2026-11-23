@@ -61,7 +61,9 @@ pub(super) struct PanelView {
     pub(super) pinned: bool,
     /// Its viewer's id (where its actions' keys work).
     pub(super) provider: &'static str,
-    viewer: Box<dyn ui_workbench::Viewer>,
+    pub(super) viewer: Box<dyn ui_workbench::Viewer>,
+    /// The text options' generation its viewer was last told (0: never).
+    pub(super) text_told: u64,
 }
 
 impl PanelView {
@@ -535,6 +537,7 @@ impl Workbench {
             pinned: false,
             provider,
             viewer,
+            text_told: 0,
         });
         Some((w, g, window.groups[g].views.len() - 1))
     }
@@ -839,11 +842,10 @@ impl Workbench {
                 w.groups.iter().filter_map(|g| g.active_view()?.viewer.frame_deadline())
             });
         let sides = self.tools.sides.iter().filter_map(|s| s.panel.frame_deadline());
-        let tabs = super::tab::all_tabs(&self.tabs, &self.editors.groups)
-            .filter_map(|t| t.viewer.as_ref()?.viewer.frame_deadline());
+        // The tabs on screen only: one behind another has nothing to show at its time.
+        let tabs = self.shown_tabs().filter_map(|t| t.viewer.as_ref()?.viewer.frame_deadline());
         // The code editors' scrollbars fading.
-        let editors = super::tab::all_tabs(&self.tabs, &self.editors.groups)
-            .filter_map(|t| t.view.scrollbar_deadline());
+        let editors = self.shown_tabs().filter_map(|t| t.view.scrollbar_deadline());
         bottom.chain(sides).chain(tabs).chain(editors).min()
     }
 
@@ -856,38 +858,15 @@ impl Workbench {
         if !kernel::probe::recording() {
             return;
         }
-        let mut ask = |owner: &'static str, moving: bool, due: Option<std::time::Instant>| {
-            if moving {
-                trigger(owner, Cause::Animation);
+        let _ = self.each_frame_asker(|a| {
+            if a.moving {
+                trigger(a.name, Cause::Animation);
             }
-            if let Some(at) = due {
-                asked.push((owner, at));
+            if let Some(at) = a.due {
+                asked.push((a.name, at));
             }
-        };
-        if let Some(w) = self.tools.window() {
-            for v in w.groups.iter().filter_map(|g| g.active_view()) {
-                ask(v.provider, v.viewer.is_animating(), v.viewer.frame_deadline());
-            }
-        }
-        for s in &self.tools.sides {
-            ask(s.id, s.panel.is_animating(), s.panel.frame_deadline());
-        }
-        for t in super::tab::all_tabs(&self.tabs, &self.editors.groups) {
-            if let Some(v) = &t.viewer {
-                ask(v.provider, v.viewer.is_animating(), v.viewer.frame_deadline());
-            }
-            ask("editor", t.view.is_animating(), t.view.scrollbar_deadline());
-        }
-        ask("tooltips", self.tooltips.is_animating(), None);
-        ask("code-hover", self.code_hover.is_animating(), None);
-        ask("toolbars", self.toolbars_animating(), None);
-    }
-
-    pub(super) fn tool_window_animating(&self) -> bool {
-        self.tools.window().is_some_and(|w| {
-            w.split.animating()
-                || w.groups.iter().any(|g| g.active_view().is_some_and(|v| v.viewer.is_animating()))
-        })
+            std::ops::ControlFlow::Continue(())
+        });
     }
 
     /// The bottom area's view shows a loader (work going on).

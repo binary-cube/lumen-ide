@@ -46,6 +46,8 @@ pub struct ResultsTab {
     services: Option<ConsoleServices>,
     /// The tab shown and its view.
     shown: Option<(ServiceId, Box<dyn Viewer>)>,
+    /// How text is shown, as the app told it: given to the view shown (a later one too).
+    text_options: ui_components::TextOptions,
 }
 
 impl std::fmt::Debug for ResultsTab {
@@ -61,7 +63,8 @@ impl ResultsTab {
         let mut changed = services.poll();
         if let Some((node, tab)) = services.take_reveal() {
             let tab = tab.or_else(|| services.tabs(node).first().map(|t| t.id));
-            if let Some((tab, view)) = tab.and_then(|t| Some((t, services.open_tab(t)?))) {
+            if let Some((tab, mut view)) = tab.and_then(|t| Some((t, services.open_tab(t)?))) {
+                view.set_text_options(&self.text_options);
                 self.shown = Some((tab, view));
                 changed = true;
             }
@@ -75,6 +78,14 @@ impl ResultsTab {
 }
 
 impl Viewer for ResultsTab {
+    /// How text is shown: handed to the view shown (the next one gets it when made).
+    fn set_text_options(&mut self, options: &ui_components::TextOptions) {
+        self.text_options = *options;
+        if let Some(view) = self.view() {
+            view.set_text_options(options);
+        }
+    }
+
     fn set_data(&mut self, data: &dyn std::any::Any) {
         let Some(data) = data.downcast_ref::<ResultsData>() else { return };
         let Some(consoles) = crate::consoles::consoles(data.project) else { return };

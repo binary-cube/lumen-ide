@@ -46,3 +46,26 @@ fn a_wide_item_s_tooltip_shows_by_the_mouse() {
     tips.paint(&mut text, &mut scene, &palette, 1.0, window);
     assert!((tips.areas()[1].0.center().x - button.center().x).abs() <= 0.5);
 }
+
+/// Hovered: it waits its delay (one frame asked, for then) and shows nothing before; once
+/// shown, the next item's shows at once; the same item again changes nothing; leaving hides.
+#[test]
+fn a_tooltip_waits_then_moves_at_once() {
+    let (mut text, mut scene, palette) = (TextSystem::new(), Scene::default(), Palette::dark());
+    let window = Rect::new(0.0, 0.0, 800.0, 600.0);
+    let (a, b) = (Rect::new(100.0, 100.0, 30.0, 30.0), Rect::new(140.0, 100.0, 30.0, 30.0));
+    let mut tips = Tooltips::default();
+    assert!(!tips.set(Some(Tip::new(a, "Run"))), "waiting: nothing to draw yet");
+    assert!(tips.deadline().is_some(), "one frame asked, for when it shows");
+    tips.paint(&mut text, &mut scene, &palette, 1.0, window);
+    assert!(tips.areas().is_empty(), "not before its delay");
+    assert!(!tips.set(Some(Tip::new(a, "Run"))), "the same item: nothing new");
+    tips.set(None);
+    tips.set(Some(Tip::new(a, "Run").with_delay(Duration::ZERO)));
+    tips.paint(&mut text, &mut scene, &palette, 1.0, window);
+    assert!(!tips.areas().is_empty(), "shown");
+    assert!(tips.set(Some(Tip::new(b, "Stop"))), "another item: at once");
+    assert!(tips.deadline().is_none(), "no wait");
+    assert!(tips.set(None), "left: hidden");
+    assert!(tips.areas().is_empty());
+}

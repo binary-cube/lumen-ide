@@ -12,7 +12,7 @@ use kernel::{Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 use text_layout::{Font, TextSystem};
 use ui_components::LayerPainter;
-use ui_components::chart::{Samples, Style, sparkline};
+use ui_components::charts::spark::{Samples, Style, sparkline};
 use ui_components::ds::{self, ButtonKind, ButtonSpec, Ctx, Tone, radius};
 use ui_components::tree;
 use ui_kit::draw_text;
@@ -582,7 +582,7 @@ impl TaskManager {
                                     w as usize,
                                     summary::reduce(Metric::Cpu),
                                 );
-                                let max = ui_components::chart::scale_for(plot.peak, 5.0);
+                                let max = ui_components::charts::spark::scale_for(plot.peak, 5.0);
                                 sparkline(
                                     pen.layer,
                                     ds,

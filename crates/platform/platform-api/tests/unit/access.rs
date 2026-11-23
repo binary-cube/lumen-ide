@@ -145,3 +145,97 @@ fn an_unnamed_control_keeps_its_identity_when_another_appears() {
     assert_eq!(switch_id(false), switch_id(true));
     assert!(switch_id(false).is_some());
 }
+
+/// The group open is known by its role (a fold inside a row told whole adds nothing); its
+/// place and lines are kept on the node.
+#[test]
+fn the_open_group_s_role_and_a_node_s_place_are_kept() {
+    let mut frame = Frame::new();
+    assert_eq!(frame.open_role(), None);
+    frame.open(Described::new(Role::List, "", Rect::default()).count(40));
+    assert_eq!(frame.open_role(), Some(Role::List));
+    let item = frame.add(Described::new(Role::ListItem, "a", Rect::default()).index(7));
+    frame.close();
+    assert_eq!(frame.open_role(), None);
+    let node = frame.nodes().iter().find(|n| n.id == item).expect("the item");
+    assert_eq!(node.place.index, Some(7));
+    assert_eq!(frame.nodes()[0].place.count, Some(40));
+}
+
+/// A text cut short to fit is still the control's own: not read a second time.
+#[test]
+fn a_name_cut_short_is_still_the_control_s() {
+    let mut frame = Frame::new();
+    frame.open(Described::new(Role::TreeItem, "controllers", Rect::new(0.0, 0.0, 100.0, 20.0)));
+    frame.add(Described::new(Role::Label, "contr…", Rect::new(10.0, 2.0, 40.0, 16.0)));
+    frame.add(Described::new(Role::Label, "…llers", Rect::new(10.0, 2.0, 40.0, 16.0)));
+    frame.close();
+    assert_eq!(frame.nodes().len(), 1);
+}
+
+/// A paragraph drawn a word at a time reads as one text a line: a space where the words
+/// stand apart, none between the pieces of one word, nothing joined across lines or parents.
+#[test]
+fn pieces_of_a_line_read_as_one_text() {
+    let mut frame = Frame::new();
+    let piece = |name: &str, x: f32, y: f32, w: f32| {
+        Described::new(Role::Label, name, Rect::new(x, y, w, 16.0))
+    };
+    frame.add(piece("Save ", 0.0, 0.0, 40.0));
+    frame.add(piece("your", 40.0, 0.0, 30.0));
+    frame.add(piece("work", 74.0, 0.0, 30.0));
+    frame.add(piece("ind", 0.0, 20.0, 20.0));
+    frame.add(piece("ex.php", 20.0, 20.0, 40.0));
+    frame.add(piece("far away", 400.0, 20.0, 60.0));
+    frame.join_pieces();
+    let names: Vec<_> = frame.nodes().iter().map(|n| n.name.to_string()).collect();
+    assert_eq!(names, ["Save your work", "index.php", "far away"]);
+}
+
+/// A dialog's title drawn in it isn't read again; its other texts are, even one its title
+/// holds.
+#[test]
+fn a_dialog_s_title_is_its_own_and_nothing_else() {
+    let mut frame = Frame::new();
+    frame.open(Described::new(Role::Dialog, "Settings", Rect::new(0.0, 0.0, 400.0, 300.0)));
+    frame.add(Described::new(Role::Label, "Settings", Rect::new(10.0, 10.0, 60.0, 16.0)));
+    frame.add(Described::new(Role::Label, "Set", Rect::new(10.0, 60.0, 30.0, 16.0)));
+    frame.close();
+    let names: Vec<_> = frame.nodes().iter().map(|n| n.name.to_string()).collect();
+    assert_eq!(names, ["Settings", "Set"]);
+}
+
+/// A button showing only an icon is named by its tooltip and says its keys; a title beside
+/// it never names it; a control with a name keeps it.
+#[test]
+fn an_icon_button_is_named_by_its_tooltip_never_by_a_title_beside_it() {
+    let mut frame = Frame::new();
+    frame.add(Described::new(Role::Label, "Project", Rect::new(0.0, 0.0, 60.0, 16.0)));
+    let icon = frame.add(Described::new(Role::Button, "", Rect::new(70.0, 0.0, 16.0, 16.0)));
+    frame.add(Described::new(Role::Button, "Save", Rect::new(100.0, 0.0, 40.0, 16.0)));
+    frame.name_from_labels();
+    assert!(frame.nodes()[1].name.is_empty(), "not the title beside it");
+    frame.name_from_tips(|r| {
+        (r.min_x() >= 70.0).then(|| ("Collapse All".into(), Some("⌘-".into())))
+    });
+    let named = &frame.nodes()[1];
+    assert_eq!((&*named.name, named.shortcut.as_deref()), ("Collapse All", Some("⌘-")));
+    assert_ne!(named.id, icon, "its identity follows its name");
+    assert_eq!(&*frame.nodes()[2].name, "Save");
+}
+
+/// A place a screen reader tells in a field (a line, a character in it) is a byte of its
+/// text: characters of any width, the line's break counted, the end of the text too.
+#[test]
+fn a_place_in_a_text_is_its_byte() {
+    let text = "ăb\ncd";
+    assert_eq!(byte_of(text, 0, 0), Some(0));
+    assert_eq!(byte_of(text, 0, 1), Some(2), "after ă (two bytes)");
+    assert_eq!(byte_of(text, 1, 1), Some(5));
+    assert_eq!(byte_of(text, 1, 9), Some(text.len()), "past a line's end: its end");
+    assert_eq!(byte_of("", 0, 0), Some(0));
+    assert_eq!(byte_of("a\n", 1, 0), Some(2), "the empty line after a last break");
+    assert_eq!(byte_of(text, 5, 0), None);
+    assert_ne!(run_id(NodeId(1), 0), run_id(NodeId(1), 1));
+    assert!(run_id(NodeId(1), 0) >> 63 == 1, "never one of the app's nodes");
+}

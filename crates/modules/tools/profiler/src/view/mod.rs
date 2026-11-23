@@ -28,7 +28,8 @@ use i18n::t;
 use kernel::{Point, Rect};
 use profiling::Recording;
 use render_api::Quad;
-use ui_components::chart::Plot;
+use ui_components::charts::spark::Plot;
+use ui_components::charts::{ChartLook, ChartParts};
 use ui_components::control::{Control, Controls, Shown, Thumb};
 use ui_components::ds::{self, Ctx};
 use ui_components::{
@@ -50,13 +51,11 @@ enum Read {
     Failed(String),
 }
 
-/// The plots for a width: the cards' (by series) and the timeline's (by series), made again
-/// only when the columns change.
+/// The cards' plots for a width (by series), made again only when the columns change.
 #[derive(Default)]
 struct Plots {
-    columns: (usize, usize),
+    columns: usize,
     cards: Vec<Plot>,
-    lines: Vec<Plot>,
 }
 
 /// A recording's view.
@@ -73,6 +72,9 @@ pub struct ProfileView {
     hover: Option<Hit>,
     mouse: Option<Point>,
     timeline: Option<Rect>,
+    /// The timeline's chart (the app's one: lanes along time, its tooltip), its data made
+    /// once a recording is read.
+    chart: ui_components::charts::Chart,
     /// The flame graph (its zoom and hover kept), and where it was drawn.
     flame: ui_components::Icicle,
     flame_area: Option<Rect>,
@@ -119,6 +121,7 @@ impl ProfileView {
             hover: None,
             mouse: None,
             timeline: None,
+            chart: ui_components::charts::Chart::new(),
             flame: flame::icicle(),
             flame_area: None,
             controls: Controls::default(),
@@ -173,6 +176,7 @@ impl ProfileView {
         self.read = Some(match read {
             Read::Done(mut prepared) => {
                 self.flame.set_nodes(std::mem::take(&mut prepared.flame_nodes));
+                timeline_data(&mut self.chart, &prepared);
                 Ok(prepared)
             }
             Read::Failed(why) => Err(why),
@@ -192,16 +196,48 @@ impl ProfileView {
 }
 
 impl Plots {
-    /// The plots for `cards` columns (each card's chart) and `lines` columns (the
-    /// timeline's), made again only when they change.
-    fn for_width(&mut self, prepared: &Prepared, cards: usize, lines: usize) -> &Self {
-        if self.columns != (cards, lines) || self.cards.is_empty() {
-            self.columns = (cards, lines);
+    /// The plots for `cards` columns (each card's chart), made again only when they change.
+    fn for_width(&mut self, prepared: &Prepared, cards: usize) -> &Self {
+        if self.columns != cards || self.cards.is_empty() {
+            self.columns = cards;
             self.cards = prepared.series.iter().map(|s| page::plot(&s.values, cards)).collect();
-            self.lines = prepared.series.iter().map(|s| page::plot(&s.values, lines)).collect();
         }
         self
     }
+}
+
+/// The timeline's series, in their lanes' order.
+const TIMELINE: [usize; 4] = [prepared::CPU, prepared::FPS, prepared::NETWORK, prepared::DISK];
+
+/// The timeline's data, made once from a recording: each series' values over its length,
+/// their moments as durations (`1:20`), each value in its unit.
+fn timeline_data(chart: &mut ui_components::charts::Chart, prepared: &Prepared) {
+    use ui_components::charts::ValueFormat;
+    let series: Vec<&prepared::Series> =
+        TIMELINE.iter().filter_map(|&i| prepared.series.get(i)).collect();
+    let n = series.iter().map(|s| s.values.len()).max().unwrap_or(0);
+    let step = if n > 1 { prepared.seconds / (n - 1) as f64 } else { 0.0 };
+    let times: Vec<f64> = (0..n).map(|i| i as f64 * step).collect();
+    let labels = times.iter().map(|&t| words::length(t)).collect();
+    let units: Vec<&'static str> = series.iter().map(|s| s.unit).collect();
+    let data = charts_model::Prepared::over_time(
+        charts_model::ChartKind::Area,
+        labels,
+        times,
+        series
+            .iter()
+            .map(|s| (s.label.clone(), s.values.iter().map(|&v| f64::from(v)).collect()))
+            .collect(),
+    );
+    chart.set_lanes(true);
+    chart.set_options(charts_model::Options { stepped: true, ..charts_model::Options::default() });
+    chart.set_format(Some(ValueFormat(std::sync::Arc::new(move |s, v| {
+        format!("{v:.1}{}", units.get(s).copied().unwrap_or(""))
+    }))));
+    chart.set_x_format(Some(ValueFormat(std::sync::Arc::new(|_, t| words::length(t)))));
+    chart.set_title(&t("profiler.over_time"));
+    // A recording read again (its file changed) is new data.
+    chart.set_data(Some(std::sync::Arc::new(data)), kernel::id::new_uuid() as u64);
 }
 
 /// A table drawn under its title.
@@ -220,15 +256,14 @@ fn paint_page(
     page: &mut Page<'_, '_>,
     prepared: &Prepared,
     plots: &mut Plots,
-    icicle: &mut ui_components::Icicle,
+    (icicle, chart): (&mut ui_components::Icicle, &mut ui_components::charts::Chart),
 ) {
     let p = page.ds.palette;
     page.header(&prepared.title, &prepared.meta);
     page.title(&t("profiler.findings"), "");
     page.findings(&prepared.findings);
     let cards_w = (page.width / 4.0 / page.ds.px(3.0)).max(1.0) as usize;
-    let line_w = ((page.width - page.ds.px(160.0)) / page.ds.px(2.0)).max(1.0) as usize;
-    let plots = plots.for_width(prepared, cards_w, line_w);
+    let plots = plots.for_width(prepared, cards_w);
     let cards: Vec<page::Card<'_>> = prepared
         .cards
         .iter()
@@ -246,22 +281,18 @@ fn paint_page(
         .collect();
     page.cards(&cards);
     page.title(&t("profiler.over_time"), &t("profiler.over_time_hint"));
-    let timeline: Vec<page::Series<'_>> =
-        [prepared::CPU, prepared::FPS, prepared::NETWORK, prepared::DISK]
-            .iter()
-            .filter_map(|&i| {
-                let s = prepared.series.get(i)?;
-                Some((
-                    s.label.as_str(),
-                    plots.lines.get(i)?,
-                    s.tone.color(p),
-                    s.top,
-                    s.values.as_slice(),
-                    s.unit,
-                ))
-            })
-            .collect();
-    page.timeline(&timeline, prepared.seconds);
+    let colors = TIMELINE.map(|i| prepared.series.get(i).map_or(p.accent, |s| s.tone.color(p)));
+    let lanes = TIMELINE.iter().filter(|&&i| prepared.series.get(i).is_some()).count();
+    let look = ChartLook::new(page.ds, p.editor_background).colors(&colors).parts(ChartParts {
+        x_axis: true,
+        y_axis: false,
+        grid: false,
+        legend: false,
+        hover: true,
+        // The wheel scrolls the page, as everywhere on it.
+        zoom: false,
+    });
+    page.timeline(chart, &look, lanes);
     for table in &prepared.before_flame {
         paint_table(page, table);
     }
@@ -275,6 +306,7 @@ fn paint_page(
 impl Viewer for ProfileView {
     fn paint(&mut self, ctx: ViewerPaint<'_>) {
         self.ask(ctx.waker.clone());
+        self.chart.set_waker(&ctx.waker);
         self.take_read();
         let ViewerPaint { bounds: b, scale, text, scene, palette, icons, .. } = ctx;
         let ds = Ctx::new(palette, scale);
@@ -292,7 +324,14 @@ impl Viewer for ProfileView {
                 let layer = page.scene.push_layer(Some(b));
                 ds::empty_state(layer, page.text, &ds, b, &t("profiler.unreadable"), Some(why));
             }
-            Some(Ok(prepared)) => paint_page(&mut page, prepared, &mut self.plots, &mut self.flame),
+            Some(Ok(prepared)) => {
+                paint_page(
+                    &mut page,
+                    prepared,
+                    &mut self.plots,
+                    (&mut self.flame, &mut self.chart),
+                );
+            }
         }
         self.content_h = page.y - top + ds.px(page::PAD);
         self.hits = std::mem::take(&mut page.hits);
@@ -302,11 +341,17 @@ impl Viewer for ProfileView {
     }
 
     fn poll(&mut self) -> bool {
-        self.take_read()
+        // The timeline's lines rasterized meanwhile.
+        self.chart.poll() | self.take_read()
     }
 
     fn is_loading(&self) -> bool {
         self.asked.is_some()
+    }
+
+    /// The timeline appearing or lit under the mouse.
+    fn is_animating(&self) -> bool {
+        self.chart.animating() || self.controls.is_animating()
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
@@ -332,7 +377,8 @@ impl Viewer for ProfileView {
         let hover = self.hit(p);
         let on_timeline = self.timeline.is_some_and(|r| r.contains(p));
         let was_on = self.mouse.is_some_and(|m| self.timeline.is_some_and(|r| r.contains(m)));
-        let changed = hover != self.hover || on_timeline || was_on;
+        let lit = self.chart.hover(on_timeline.then_some(p));
+        let changed = hover != self.hover || lit || (was_on && !on_timeline);
         self.hover = hover;
         self.mouse = Some(p);
         // The keys go to the part under the mouse that takes them (the flame graph's walk).
@@ -352,6 +398,10 @@ impl Viewer for ProfileView {
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {
+        // The timeline's reading: every series at the moment under the mouse.
+        if self.timeline.is_some_and(|r| r.contains(p)) {
+            return self.chart.tooltip(p);
+        }
         self.controls.tooltip_at(p)
     }
 

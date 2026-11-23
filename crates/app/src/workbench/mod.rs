@@ -90,6 +90,7 @@ mod file_drop;
 mod file_format;
 mod files;
 mod find_search;
+mod frame_askers;
 pub(crate) mod frameworks;
 mod groups;
 mod home;
@@ -340,6 +341,8 @@ struct SidePanel {
     /// Hidden since (parked, its data not let go yet): after a while its data goes
     /// (`ToolPanel::purge`), like a hidden bottom window's views'.
     parked_since: Option<std::time::Instant>,
+    /// The text options' generation it was last told (0: never).
+    text_told: u64,
 }
 
 /// Which project, and which state of its files, a panel was given.
@@ -437,6 +440,11 @@ struct TabViewer {
     /// What its viewer was last told of its visibility ([`ui_workbench::Viewer::set_shown`]):
     /// hidden until the first frame shows it.
     shown: bool,
+    /// What its viewer was last told of the window's focus
+    /// ([`ui_workbench::Viewer::set_window_focused`]): `None` until first told.
+    window_focused: Option<bool>,
+    /// The text options' generation its viewer was last told (0: never).
+    text_told: u64,
     /// Split: the halves' ratio and the separator between them.
     split: preview_split::PreviewSplit,
 }
@@ -465,6 +473,8 @@ impl TabViewer {
             below: false,
             keys: false,
             shown: false,
+            window_focused: None,
+            text_told: 0,
             split: preview_split::PreviewSplit::default(),
         }
     }
@@ -514,6 +524,8 @@ struct Mark {
 struct Tab {
     /// Pinned: stays first and isn't closed as part of the group.
     pinned: bool,
+    /// The text options' generation its editor was last told (0: never).
+    text_told: u64,
     /// Its file can't be written (read-only on disk): opened locked, and it stays so until
     /// the file is writable again (`locking`). The lock itself is its document's.
     disk_read_only: bool,

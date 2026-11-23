@@ -71,7 +71,9 @@ fn the_text_filters_once_typing_pauses() {
     assert!(view.wants_text());
     view.text_input("ch");
     assert_eq!(ids(&view).len(), 3, "not yet");
-    assert!(view.is_animating(), "frames until it applies");
+    let typed = view.bar.typed_at.expect("typed");
+    assert_eq!(view.frame_deadline(), Some(typed + filters::TYPING_PAUSE), "one frame, then");
+    assert!(!view.is_animating(), "no frames meanwhile");
     view.bar.typed_at = Some(std::time::Instant::now() - filters::TYPING_PAUSE);
     settle(&mut view);
     assert_eq!(ids(&view), ["chat"]);

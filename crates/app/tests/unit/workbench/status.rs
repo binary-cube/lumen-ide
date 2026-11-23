@@ -235,3 +235,21 @@ fn the_ram_pill_says_the_app_and_the_total() {
     assert_eq!((ram.value.as_str(), ram.more.as_deref()), ("198 MB", Some("367 MB")));
     assert!(pills.iter().filter(|p| p.label != tr!("status.ram")).all(|p| p.more.is_none()));
 }
+
+/// Word wrap's item: shown beside the file's details, a click runs its command; it says
+/// whether it's on (its tooltip, its label lit only while on).
+#[test]
+fn word_wrap_s_item_says_whether_it_is_on_and_turns_it() {
+    let (mut wb, _dir) = opened(1600);
+    let command = crate::commands::WORD_WRAP.0;
+    for on in [true, false] {
+        let item = wb.word_wrap_item(on);
+        let want = if on { tr!("status.wrap_on_detail") } else { tr!("status.wrap_off_detail") };
+        assert_eq!(item.tooltip, Some(want));
+        assert_eq!(item.text.is_empty(), !on, "its label only while on");
+        assert_eq!(item.action, Some(command));
+    }
+    let item = wb.status.action_rect(command).expect("the item shown");
+    let clicked = wb.mouse_down(&mut TextSystem::new(), item.center(), false, false, false, 1);
+    assert!(matches!(clicked, MouseResult::Command(c) if c == command), "{clicked:?}");
+}

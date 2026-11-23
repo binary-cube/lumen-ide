@@ -960,7 +960,7 @@ impl Studio {
     /// Whether the preview's effects move now: asked to, something in them moves, and the
     /// user did something lately (they stop when idle, as the window's).
     pub(crate) fn animating(&self) -> bool {
-        if self.preview_still {
+        if self.preview_still || self.window_away {
             return false;
         }
         let idle = ui_components::decorations::provider()

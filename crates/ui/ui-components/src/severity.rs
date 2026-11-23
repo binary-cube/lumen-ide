@@ -18,6 +18,11 @@ pub enum Level {
     Critical,
 }
 
+/// The levels' colors (info, warning, critical), Okabe–Ito's (told apart by every eye) on a
+/// dark background and, deeper, on a light one.
+const SEVERITY_ON_DARK: [Rgba; 3] = [Rgba::rgb(0x56b4e9), Rgba::rgb(0xe69f00), Rgba::rgb(0xf0703a)];
+const SEVERITY_ON_LIGHT: [Rgba; 3] =
+    [Rgba::rgb(0x0072b2), Rgba::rgb(0xa86b00), Rgba::rgb(0xc44e00)];
 impl Level {
     pub const ALL: [Level; 3] = [Level::Info, Level::Warning, Level::Critical];
 
@@ -70,12 +75,12 @@ impl Palette {
     pub fn severity(&self, level: Level) -> Rgba {
         let dark = self.is_dark();
         match (level, dark) {
-            (Level::Info, true) => Rgba::rgb(0x56b4e9),
-            (Level::Info, false) => Rgba::rgb(0x0072b2),
-            (Level::Warning, true) => Rgba::rgb(0xe69f00),
-            (Level::Warning, false) => Rgba::rgb(0xa86b00),
-            (Level::Critical, true) => Rgba::rgb(0xf0703a),
-            (Level::Critical, false) => Rgba::rgb(0xc44e00),
+            (Level::Info, true) => SEVERITY_ON_DARK[0],
+            (Level::Info, false) => SEVERITY_ON_LIGHT[0],
+            (Level::Warning, true) => SEVERITY_ON_DARK[1],
+            (Level::Warning, false) => SEVERITY_ON_LIGHT[1],
+            (Level::Critical, true) => SEVERITY_ON_DARK[2],
+            (Level::Critical, false) => SEVERITY_ON_LIGHT[2],
         }
     }
 
