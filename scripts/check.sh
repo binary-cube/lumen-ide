@@ -18,6 +18,11 @@
 # Windows clippy needs the target x86_64-pc-windows-gnu and MinGW-w64 (see build.sh).
 
 set -uo pipefail
+# The tools where they're installed, when the shell didn't put them on the path: cargo,
+# and MinGW-w64 for Windows' clippy (Homebrew's folder on macOS).
+for tools in "$HOME/.cargo/bin" /opt/homebrew/bin /usr/local/bin; do
+    [ -d "$tools" ] && case ":$PATH:" in *":$tools:"*) ;; *) PATH="$PATH:$tools" ;; esac
+done
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 LOGS="$ROOT/target/checks"
@@ -42,7 +47,8 @@ cargo fmt --all || { echo "fmt failed"; exit 1; }
 # The crates with platform-specific code or dependencies.
 WINDOWS=()
 # Their tests too: a test using a function of one system only fails to build on the other.
-for dir in $( (grep -rlE 'cfg!?\((windows|unix|not\((windows|unix)\)|target_os)' crates --include='*.rs' \
+# Any `cfg` naming a system, however nested (`cfg(not(target_os = "macos"))`, `cfg(any(…))`).
+for dir in $( (grep -rlE 'cfg!?\(([a-z_]+\()*(windows|unix|target_os|target_family)' crates --include='*.rs' \
         | sed -E 's#(crates/([^/]+/)*[^/]+)/(src|tests)/.*#\1#';
     grep -l '^\[target\.' crates/*/Cargo.toml crates/*/*/Cargo.toml crates/*/*/*/Cargo.toml \
         | xargs -n1 dirname) | sort -u); do
@@ -63,12 +69,15 @@ run() {
 
 clippy_clean() {
     # Clippy's warnings count as failures; a dependency's build script output (a C
-    # compiler's notes: `warning: crate@1.2.3: …`) doesn't.
+    # compiler's notes: `warning: crate@1.2.3: …`) doesn't. Cargo failing (an error, a
+    # build script that couldn't run) fails it too: its status is kept, never lost in a pipe.
     local out="$1"
     shift
-    "$@" 2>&1 | tee "$out.raw" | grep -E "^(warning|error)" \
+    "$@" >"$out.raw" 2>&1
+    local status=$?
+    grep -E "^(warning|error)" "$out.raw" \
         | grep -vE "^warning: [A-Za-z0-9_-]+@[0-9][^ ]*: " && return 1
-    return 0
+    return "$status"
 }
 
 # Cargo's messages, rendered as usual for the log; its JSON lines (the units built or

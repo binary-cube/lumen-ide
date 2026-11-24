@@ -171,7 +171,7 @@ impl Renderer for WgpuRenderer {
         }
         #[cfg(not(target_os = "macos"))]
         {
-            self.resized_until = Some(std::time::Instant::now() + RESIZE_SETTLE);
+            self.resized_until = Some(std::time::Instant::now() + crate::instances::RESIZE_SETTLE);
         }
     }
 
