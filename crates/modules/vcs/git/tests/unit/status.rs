@@ -124,3 +124,68 @@ fn a_merged_file_saved_without_markers_is_marked_resolved() {
     assert_eq!(resolved().len(), 1);
     let _ = std::fs::remove_dir_all(root);
 }
+
+/// Others making, removing or writing files only the repository ignores (a framework's
+/// sessions) ask for no `git status`; a file it doesn't ignore does.
+#[test]
+fn others_changes_to_ignored_files_read_nothing() {
+    let root =
+        std::env::temp_dir().join(format!("git-status-ignored-{:x}", kernel::id::new_uuid()));
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(root.join(".gitignore"), "/storage/sessions/\n").unwrap();
+    let changes = Arc::new(Changes::default());
+    let fake = Arc::new(crate::fake::FakeRepository::default());
+    let repo: Arc<dyn Repository> = Arc::clone(&fake) as Arc<dyn Repository>;
+    let settled = |changes: &Arc<Changes>| {
+        let started = std::time::Instant::now();
+        while started.elapsed() < Duration::from_secs(5) {
+            let read = changes.lock();
+            if !read.reading && read.candidates.is_empty() {
+                return;
+            }
+            drop(read);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    };
+    std::fs::create_dir_all(root.join("storage/sessions")).unwrap();
+    for name in ["a1b2", "c3d4", "e5"] {
+        std::fs::write(root.join("storage/sessions").join(name), "").unwrap();
+    }
+    let read_once_more = |changes: &Arc<Changes>, before: u64| {
+        let started = std::time::Instant::now();
+        while changes.files().0 == before && started.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        changes.files().0
+    };
+    changes.changed(&[root.join("storage/sessions/a1b2"), root.join("storage/sessions/c3d4")]);
+    changes.start(Arc::clone(&repo));
+    settled(&changes);
+    assert_eq!(changes.files().0, 0, "all ignored: not read");
+    changes.changed(&[root.join("storage/sessions/e5"), root.join("src/Cart.php")]);
+    changes.start(Arc::clone(&repo));
+    assert_eq!(read_once_more(&changes, 0), 1, "a file not ignored: read");
+    // Gone: it may have been a folder holding tracked files (a `.gitkeep`): read.
+    changes.changed(&[root.join("storage/sessions/gone")]);
+    changes.start(repo);
+    assert_eq!(read_once_more(&changes, 1), 2, "gone: read");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A batch of changes whose end never came holds the reads only so long.
+#[test]
+fn a_batch_never_ended_lets_the_reads_go() {
+    let changes = Arc::new(Changes::default());
+    let repo: Arc<dyn Repository> = Arc::new(crate::fake::FakeRepository::default());
+    let long_ago = std::time::Instant::now().checked_sub(HOLD_LIMIT + Duration::from_secs(1));
+    let Some(long_ago) = long_ago else { return };
+    changes.lock().held.push((7, long_ago));
+    changes.stale();
+    changes.start(repo);
+    assert!(changes.lock().held.is_empty());
+    let started = std::time::Instant::now();
+    while changes.files().0 == 0 && started.elapsed() < Duration::from_secs(5) {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(changes.files().0, 1);
+}

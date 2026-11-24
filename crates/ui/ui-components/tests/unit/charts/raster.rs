@@ -24,3 +24,17 @@ fn a_ring_s_piece_goes_round_and_back() {
     let Some(Seg::Cubic(_, _, end)) = segs.iter().rev().nth(1) else { panic!() };
     assert!((end.x - 50.0).abs() < 1e-3 && (end.y - 30.0).abs() < 1e-3, "back at the top");
 }
+
+/// A set of masks frees its textures as soon as nothing holds it: not while a fade still
+/// draws it, at once when the last holder lets it go.
+#[test]
+fn masks_free_their_textures_once_nobody_holds_them() {
+    let image = ImageData::mask(4, 4, vec![255; 16], Rgba::WHITE);
+    let piece = Piece { slice: None, image: image.clone(), at: Rect::new(0.0, 0.0, 4.0, 4.0) };
+    let masks = Arc::new(Masks(vec![piece]));
+    let fading = Arc::clone(&masks);
+    drop(masks);
+    assert!(!image.released(), "still drawn by the fade");
+    drop(fading);
+    assert!(image.released());
+}

@@ -94,10 +94,29 @@ pub enum TreeAction {
     Open(NodeId),
 }
 
+/// The rows' marks kept at most: more (a huge tree scrolled through) starts again.
+const MARKED_MOST: usize = 4096;
+
+/// A row's mark, its own, found by the modules ([`ProjectTreeView::path_mark`]).
+type RowMark = Option<(PathMark, bool, bool)>;
+
+/// The rows' marks worked out, and what they were worked out from: the tree's root and the
+/// dependencies' generation (the user's marks changing empties it).
+#[derive(Debug, Default)]
+struct MarkedRows {
+    root: Option<std::path::PathBuf>,
+    generation: u64,
+    rows: std::collections::HashMap<NodeId, RowMark>,
+}
+
 #[derive(Debug)]
 pub struct ProjectTreeView {
     /// What the user marked in the project.
     path_marks: std::cell::RefCell<Option<std::sync::Arc<PathMarks>>>,
+    /// Each row's mark as worked out ([`Self::path_mark`]): a node's path never changes (an
+    /// id is never reused for another entry), so it's kept while the tree, the user's marks
+    /// and the dependencies stay.
+    marked: std::cell::RefCell<MarkedRows>,
     style: ProjectTreeStyle,
     bounds: Rect,
     scale: f32,
@@ -148,6 +167,7 @@ impl ProjectTreeView {
     pub fn new(style: ProjectTreeStyle) -> Self {
         Self {
             path_marks: std::cell::RefCell::default(),
+            marked: std::cell::RefCell::default(),
             style,
             bounds: Rect::default(),
             scale: 1.0,
@@ -538,13 +558,38 @@ impl ProjectTreeView {
     /// end (for the horizontal scroll).
     /// What the user marked the project as (`None`: nothing).
     pub fn set_path_marks(&self, marks: Option<std::sync::Arc<PathMarks>>) {
-        *self.path_marks.borrow_mut() = marks;
+        let mut current = self.path_marks.borrow_mut();
+        let same = match (current.as_ref(), marks.as_ref()) {
+            (Some(was), Some(now)) => std::sync::Arc::ptr_eq(was, now),
+            (was, now) => was.is_none() && now.is_none(),
+        };
+        if !same {
+            *current = marks;
+            self.marked.borrow_mut().rows.clear();
+        }
     }
 
     /// `id`'s mark, and whether it's its own (not a parent's): the user's, else a dependency
     /// folder's (`vendor`, `node_modules`, Composer's `vendor-dir`: a library, found by the
     /// modules, plan 74g) — the third says it's that one.
     fn path_mark(&self, tree: &FileTree, id: NodeId) -> Option<(PathMark, bool, bool)> {
+        // The user's marks changing empties it (`set_path_marks`).
+        let generation = kernel::paths::generation();
+        let mut marked = self.marked.borrow_mut();
+        let same =
+            marked.root.as_deref() == Some(tree.root_path()) && marked.generation == generation;
+        if !same || marked.rows.len() >= MARKED_MOST {
+            marked.rows.clear();
+            if marked.root.as_deref() != Some(tree.root_path()) {
+                marked.root = Some(tree.root_path().to_path_buf());
+            }
+            marked.generation = generation;
+        }
+        *marked.rows.entry(id).or_insert_with(|| self.work_out_mark(tree, id))
+    }
+
+    /// [`Self::path_mark`] worked out (the path built, the marks and dependencies asked).
+    fn work_out_mark(&self, tree: &FileTree, id: NodeId) -> Option<(PathMark, bool, bool)> {
         let path = tree.path(id);
         let relative =
             path.strip_prefix(tree.root_path()).ok()?.to_string_lossy().replace('\\', "/");

@@ -81,17 +81,20 @@ impl Workbench {
 
     // ─── Language level ───
 
+    /// How long a tab may stay off screen before what's made only to show it goes (its
+    /// syntax tree, its text's copy, its decorations' reads), made again when it's shown.
+    pub(super) const UNSEEN: std::time::Duration = std::time::Duration::from_secs(300);
+
     /// Frees the syntax trees and text copies of tabs not on screen for a few minutes (they come back,
     /// parsed again, when the tab is shown). Checked at most every 30 s.
     pub(super) fn release_unseen_syntax(&mut self) {
-        const UNSEEN: std::time::Duration = std::time::Duration::from_secs(300);
         if self.syntax_swept.elapsed() < std::time::Duration::from_secs(30) {
             return;
         }
         self.syntax_swept = std::time::Instant::now();
         let worker = self.worker.as_ref();
         for tab in all_tabs_mut(&mut self.tabs, &mut self.editors.groups) {
-            if tab.seen.elapsed() <= UNSEEN {
+            if tab.seen.elapsed() <= Self::UNSEEN {
                 continue;
             }
             // Its text's copy (made for hover, occurrences, the modules) goes too, and what

@@ -63,6 +63,10 @@ impl EditorApp {
         let scale = window.scale_factor() as f32;
         self.sync_decorations_window(&window, frame_start);
         if self.release_without_frame(frame_start) {
+            // A renderer not due yet (the floating layer's, the window's): looked at again then.
+            if let Some(at) = self.frames.kept_frame_check {
+                window.request_redraw_at(at);
+            }
             return;
         }
         // Nothing happened since the last whole frame and nothing else is due: only the
@@ -270,7 +274,14 @@ impl EditorApp {
             tracing::info!(?painted, total = ?frame_start.elapsed(), phases, "a slow frame");
         }
         // A window left standing gives its kept frame back: one redraw at that moment.
-        if let Some(at) = renderer.kept_frame_release_at()
+        // The floating layer keeps one too: the sooner of the two.
+        let floating_at =
+            self.frames.floating.as_ref().and_then(|f| f.renderer.kept_frame_release_at());
+        let release_at = match (renderer.kept_frame_release_at(), floating_at) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        if let Some(at) = release_at
             && self.frames.kept_frame_check.is_none_or(|check| check <= frame_start)
         {
             self.frames.kept_frame_check = Some(at);
@@ -455,8 +466,24 @@ impl EditorApp {
         if renderer.capture_waits_for_frame() {
             return false;
         }
-        renderer.release_idle();
-        self.frames.kept_frame_check = None;
+        // Each renderer at its own time (the floating layer's may come first): one not due
+        // yet is looked at again then.
+        let due = |r: &dyn Renderer| r.kept_frame_release_at().is_none_or(|at| at <= now);
+        if due(renderer.as_ref()) {
+            renderer.release_idle();
+        }
+        let mut later = renderer.kept_frame_release_at().filter(|at| *at > now);
+        if let Some(floating) = &mut self.frames.floating {
+            if due(floating.renderer.as_ref()) {
+                floating.renderer.release_idle();
+            }
+            let its = floating.renderer.kept_frame_release_at().filter(|at| *at > now);
+            later = match (later, its) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            };
+        }
+        self.frames.kept_frame_check = later;
         true
     }
 

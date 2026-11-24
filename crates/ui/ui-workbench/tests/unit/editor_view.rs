@@ -654,3 +654,31 @@ fn wrapped_rows_hang_at_the_line_s_indentation() {
     let caret = view.caret_rect(&doc, &folds, &mut text, &palette);
     assert!((caret.min_x() - (left + 8.0 * layout.advance)).abs() < 1.0, "{caret:?}");
 }
+
+/// The selections touching some bytes, found by a binary search: exactly those a walk over
+/// all of them keeps, each with its place among all (a caret's identity).
+#[test]
+fn the_selections_near_some_bytes_are_those_a_walk_finds() {
+    use document::{Selection, Selections};
+    // Cursors and selections mixed, some touching at their ends, some reversed.
+    let items: Vec<Selection> = (0..300usize)
+        .map(|i| match i % 4 {
+            0 => Selection::cursor(i * 10),
+            1 => Selection::new(i * 10, i * 10 + 6),
+            2 => Selection::new(i * 10 + 9, i * 10 + 2),
+            _ => Selection::new(i * 10, i * 10 + 10),
+        })
+        .collect();
+    let all = Selections::new(items, 0);
+    let all = all.as_slice();
+    for (from, to) in [(0, 0), (5, 5), (100, 180), (1234, 1300), (2990, 5000), (40, 39)] {
+        let walked: Vec<usize> = all
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| s.range().end >= from && s.range().start <= to)
+            .map(|(n, _)| n)
+            .collect();
+        let found: Vec<usize> = highlights::near(all, from..=to).map(|(n, _)| n).collect();
+        assert_eq!(found, walked, "{from}..={to}");
+    }
+}

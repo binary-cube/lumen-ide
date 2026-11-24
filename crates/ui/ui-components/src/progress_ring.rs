@@ -134,6 +134,13 @@ impl ProgressRing {
             start: quantize(start.rem_euclid(1.0)) % STEPS,
             sweep: quantize(sweep),
         };
+        // The arc moved: the last image's texture freed now (a countdown makes one per step,
+        // each otherwise kept until the renderer finds it unused long enough).
+        if self.image.key().is_some_and(|kept| *kept != key)
+            && let Some(old) = self.image.value()
+        {
+            old.release();
+        }
         self.image.get_or_update(key, || {
             let turns = |steps: u16| f32::from(steps) / f32::from(STEPS);
             let pixels = rasterize(spec, turns(key.start), turns(key.sweep));

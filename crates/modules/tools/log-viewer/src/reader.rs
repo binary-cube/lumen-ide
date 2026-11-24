@@ -34,6 +34,18 @@ pub const LOOK_EVERY: Duration = Duration::from_millis(500);
 /// A line longer than this is read only this far (the log's own are at most 64 KB).
 const MAX_LINE: u64 = 256 * 1024;
 
+/// The bytes read at a time while filtering (whole lines).
+const FILTER_PIECE: u64 = 1024 * 1024;
+
+/// A line's bytes without its end (`\n`, `\r\n`) and cut at [`MAX_LINE`].
+fn trimmed(bytes: &[u8]) -> &[u8] {
+    let mut bytes = &bytes[..bytes.len().min(MAX_LINE as usize)];
+    while let [rest @ .., b'\n' | b'\r'] = bytes {
+        bytes = rest;
+    }
+    bytes
+}
+
 /// What the view asks.
 #[derive(Debug)]
 pub enum Ask {
@@ -256,23 +268,67 @@ impl Reader {
         Some(String::from_utf8_lossy(&bytes).into_owned())
     }
 
-    /// Filters at most `most` more lines: `true` once every line known is.
+    /// Filters at most `most` more lines: `true` once every line known is. The lines are
+    /// read a piece of the file at a time ([`FILTER_PIECE`]), not each with its own seek and
+    /// read (a log of a few hundred thousand lines filtered again at each keystroke).
     pub(crate) fn filter_some(&mut self, most: usize) -> bool {
         if self.passing.is_none() {
             self.filtered_upto = self.starts.len();
             return true;
         }
         let end = self.starts.len().min(self.filtered_upto.saturating_add(most));
-        for n in self.filtered_upto..end {
-            let passes = self
-                .line(n)
-                .is_some_and(|l| entry::passes(&entry::parse(&l), self.filter.as_ref()));
-            if passes && let Some(p) = &mut self.passing {
-                p.push(n as u64);
+        let mut passed = Vec::new();
+        let mut n = self.filtered_upto;
+        while n < end {
+            let start = self.starts[n];
+            let mut last = n;
+            while last < end && self.line_end(last).saturating_sub(start) <= FILTER_PIECE {
+                last += 1;
             }
+            if last == n {
+                // One line longer than a piece: read alone, cut at `MAX_LINE`.
+                let line = self.line(n);
+                if line.is_some_and(|l| entry::passes(&entry::parse(&l), self.filter.as_ref())) {
+                    passed.push(n as u64);
+                }
+                n += 1;
+                continue;
+            }
+            // Not read (the file cut meanwhile): its lines pass nothing, as each read alone.
+            let Some(piece) = self.bytes(start, self.line_end(last - 1)) else {
+                n = last;
+                continue;
+            };
+            for k in n..last {
+                let from = usize::try_from(self.starts[k] - start).unwrap_or(usize::MAX);
+                let to = usize::try_from(self.line_end(k) - start).unwrap_or(usize::MAX);
+                let Some(bytes) = piece.get(from..to.min(piece.len())) else { continue };
+                let line = String::from_utf8_lossy(trimmed(bytes));
+                if entry::passes(&entry::parse(&line), self.filter.as_ref()) {
+                    passed.push(k as u64);
+                }
+            }
+            n = last;
+        }
+        if let Some(p) = &mut self.passing {
+            p.extend(passed);
         }
         self.filtered_upto = end;
         end == self.starts.len()
+    }
+
+    /// Where line `n` ends (the next one's start, or where the walk got to).
+    fn line_end(&self, n: usize) -> u64 {
+        self.starts.get(n + 1).copied().unwrap_or(self.walked)
+    }
+
+    /// The file's bytes from `start` to `end`.
+    fn bytes(&mut self, start: u64, end: u64) -> Option<Vec<u8>> {
+        let file = self.file.as_mut()?;
+        file.seek(SeekFrom::Start(start)).ok()?;
+        let mut bytes = vec![0u8; usize::try_from(end.saturating_sub(start)).ok()?];
+        file.read_exact(&mut bytes).ok()?;
+        Some(bytes)
     }
 
     /// Block `block` of the first `count` lines that pass, the newest first: rows

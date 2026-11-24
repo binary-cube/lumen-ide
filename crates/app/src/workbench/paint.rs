@@ -697,17 +697,17 @@ impl Workbench {
             })
             .unwrap_or_default();
         // Where the servers' own diagnostics are (the built-in engine's there aren't shown).
-        let by_server: Vec<std::ops::Range<usize>> = match relative.filter(|_| served) {
-            Some(file) => self
-                .data
-                .diagnostics
-                .of_sources(file, code_intelligence::servers::is_server_source)
-                .filter_map(|p| diagnostics::mark_of(p, tab.doc.buffer(), word_chars))
-                .map(|m| m.range)
-                .collect(),
-            None => Vec::new(),
+        let by_server = match relative.filter(|_| served) {
+            Some(file) => diagnostics::Covered::new(
+                self.data
+                    .diagnostics
+                    .of_sources(file, code_intelligence::servers::is_server_source)
+                    .filter_map(|p| diagnostics::mark_of(p, tab.doc.buffer(), word_chars))
+                    .map(|m| m.range),
+            ),
+            None => diagnostics::Covered::default(),
         };
-        let own = |range: &std::ops::Range<usize>| !by_server.iter().any(|s| overlaps(s, range));
+        let own = |range: &std::ops::Range<usize>| !by_server.meets(range);
         let tab = &mut self.tabs[self.active];
         let Some(snapshot) = tab.syntax.snapshot() else { return };
         tab.diagnostics.errors = if alone { Vec::new() } else { snapshot.errors() };
@@ -1071,11 +1071,6 @@ fn tab_icon(file: (IconId, Rgba), tab: &Tab, icons: &Icons, palette: &Palette) -
         .and_then(|t| t.bar.icon())
         .and_then(|name| icons.id(name))
         .map_or(file, |id| (id, palette.text_muted))
-}
-
-/// Whether two marked ranges cover the same place (an empty one: where the other starts).
-fn overlaps(a: &std::ops::Range<usize>, b: &std::ops::Range<usize>) -> bool {
-    (a.start < b.end && b.start < a.end) || a.start == b.start
 }
 
 /// A file that isn't the open project's (dropped in, opened from elsewhere); with no project

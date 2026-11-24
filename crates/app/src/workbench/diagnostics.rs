@@ -56,6 +56,44 @@ pub(super) fn mark_of(
     })
 }
 
+/// The ranges the language servers' own diagnostics cover, asked whether another range meets
+/// one (the editor's own error there isn't shown twice): sorted by start, with the farthest
+/// end so far, so each question is a binary search, not a walk over all of them (a file
+/// with hundreds of the servers' diagnostics, each of the editor's marks asked).
+#[derive(Debug, Default)]
+pub(super) struct Covered {
+    /// (start, end), sorted by start.
+    ranges: Vec<(usize, usize)>,
+    /// The farthest end among `ranges[..=i]`.
+    reach: Vec<usize>,
+}
+
+impl Covered {
+    pub(super) fn new(ranges: impl IntoIterator<Item = std::ops::Range<usize>>) -> Self {
+        let mut ranges: Vec<(usize, usize)> =
+            ranges.into_iter().map(|r| (r.start, r.end)).collect();
+        ranges.sort_unstable();
+        let mut farthest = 0;
+        let reach = ranges
+            .iter()
+            .map(|&(_, end)| {
+                farthest = farthest.max(end);
+                farthest
+            })
+            .collect();
+        Self { ranges, reach }
+    }
+
+    /// `range` meets one of them: they overlap, or start at the same place (an empty one
+    /// meets what starts where it is).
+    pub(super) fn meets(&self, range: &std::ops::Range<usize>) -> bool {
+        // Those starting before `range` ends: one of them reaching past its start overlaps.
+        let before = self.ranges.partition_point(|&(start, _)| start < range.end);
+        let overlap = before > 0 && self.reach[before - 1] > range.start;
+        overlap || self.ranges.binary_search_by_key(&range.start, |&(start, _)| start).is_ok()
+    }
+}
+
 #[cfg(test)]
 #[path = "../../tests/unit/workbench/diagnostics.rs"]
 mod tests;

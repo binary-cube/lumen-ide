@@ -412,6 +412,11 @@ pub struct LensItem {
     doc: DocumentId,
 }
 
+/// The files whose diagnostics are kept as the server sent them at most (for the code
+/// actions): past it, only the open documents' stay (a server checking the whole workspace
+/// publishes for thousands).
+const PUBLISHED_MOST: usize = 2_000;
+
 /// A document as the server has it.
 struct Doc {
     path: PathBuf,
@@ -481,7 +486,9 @@ pub(crate) struct Driver {
     /// The last code actions offered (raw), for running one.
     actions: (u64, Vec<Value>),
     action_seq: u64,
-    /// The diagnostics last published, by URI (sent back with a code action request).
+    /// The diagnostics last published, by URI (sent back with a code action request). A server
+    /// checking the whole workspace publishes for every file: past [`PUBLISHED_MOST`] files,
+    /// those of documents not open go first.
     published: HashMap<String, Vec<Value>>,
     /// The documents whose diagnostics are asked for (a server that doesn't push them).
     pulls: HashMap<DocumentId, pull::Pull>,

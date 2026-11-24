@@ -70,12 +70,15 @@ impl Workbench {
         if paths.is_empty() {
             return false;
         }
+        // Looked up by path (a poll may carry thousands: a checkout, a build's output).
+        let written: std::collections::HashSet<&Path> =
+            paths.iter().map(PathBuf::as_path).collect();
         // A view in its file's place (an image, a diagram) reads it again itself.
         let mut views = false;
         for tab in all_tabs_mut(&mut self.tabs, &mut self.editors.groups) {
             if !tab.holds_text()
                 && let Some(viewer) = tab.viewer.as_mut()
-                && tab.doc.path().is_some_and(|p| paths.iter().any(|w| w == p))
+                && tab.doc.path().is_some_and(|p| written.contains(p))
             {
                 viewer.viewer.file_changed();
                 views = true;
@@ -84,7 +87,7 @@ impl Workbench {
         // Only the open tabs whose file's stamp moved (our own save, reported now: not read).
         let mut asked: Vec<(PathBuf, Option<DiskStamp>)> = Vec::new();
         for tab in all_tabs_mut(&mut self.tabs, &mut self.editors.groups) {
-            let Some(path) = tab.doc.path().filter(|p| paths.iter().any(|w| w == p)) else {
+            let Some(path) = tab.doc.path().filter(|p| written.contains(p)) else {
                 continue;
             };
             if !tab.holds_text() || tab.untitled.is_some() {

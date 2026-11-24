@@ -69,9 +69,23 @@ impl Folders {
     }
 }
 
+/// Bumped each time what makes a dependency changes (a module's folders, a project's found
+/// or marked ones): what's worked out from them is good while it stays.
+static CHANGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// What [`dependency_at`] answers is the same while this stays.
+pub fn generation() -> u64 {
+    CHANGES.load(std::sync::atomic::Ordering::Acquire)
+}
+
+fn changed() {
+    CHANGES.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+}
+
 /// Adds a module's folders (again: no change).
 pub fn register(dirs: ProjectDirs) {
     let Ok(mut folders) = REGISTERED.write() else { return };
+    changed();
     let add = |list: &mut Vec<&'static str>, names: &[&'static str]| {
         for name in names {
             if !list.contains(name) {
@@ -103,6 +117,7 @@ static FOUND: std::sync::RwLock<Vec<(std::path::PathBuf, Vec<String>)>> =
 /// with `/`): what [`in_dependencies`] knows besides the modules' fixed names.
 pub fn set_found(root: &Path, folders: Vec<String>) {
     let Ok(mut all) = FOUND.write() else { return };
+    changed();
     all.retain(|(r, _)| r != root);
     if !folders.is_empty() {
         all.push((root.to_path_buf(), folders));
@@ -200,6 +215,7 @@ static LIBRARIES: std::sync::RwLock<Vec<(std::path::PathBuf, Vec<std::path::Path
 /// The folders marked as libraries in the project at `root` (none: it's forgotten).
 pub fn set_libraries(root: &Path, libraries: Vec<std::path::PathBuf>) {
     let Ok(mut all) = LIBRARIES.write() else { return };
+    changed();
     all.retain(|(r, _)| r != root);
     if !libraries.is_empty() {
         all.push((root.to_path_buf(), libraries));

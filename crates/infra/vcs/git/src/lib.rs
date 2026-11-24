@@ -458,9 +458,13 @@ impl Repository for GitRepository {
 
     fn discard(&self, paths: &[String]) -> Result<(), VcsError> {
         let status = self.staged_files()?;
-        let untracked = |path: &String| {
-            status.iter().any(|f| f.path == *path && f.unstaged == Some(FileState::Untracked))
-        };
+        // Looked up by path (thousands of new files discarded at once).
+        let untracked: std::collections::HashSet<&str> = status
+            .iter()
+            .filter(|f| f.unstaged == Some(FileState::Untracked))
+            .map(|f| f.path.as_str())
+            .collect();
+        let untracked = |path: &String| untracked.contains(path.as_str());
         let (new, known): (Vec<String>, Vec<String>) = paths.iter().cloned().partition(untracked);
         if !new.is_empty() {
             self.on_paths(&["clean", "-f", "-q", "--"], &new)?;

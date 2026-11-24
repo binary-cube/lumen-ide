@@ -2,9 +2,12 @@
 //! and the "Changes" tab. Read in the background (one read at a time on a pool's thread,
 //! gone when idle), again when the project's files change (a save, the disk, a batch of
 //! changes) or `HEAD` moves (a commit, a checkout); the requests close together are taken as
-//! one, a read asked during another made after it. The operation in progress (a rebase, a
-//! merge) is read with them; conflicts appearing are told once (a notification leading to
-//! the Conflicts tab), the button turns to a warning while they last.
+//! one, a read asked during another made after it. Changes others make on disk (written,
+//! made, removed, renamed) are only candidates: on the read's thread, those all ignored by
+//! the repository (a log, a cache, a framework's sessions) ask for no `git status`. The
+//! operation in progress (a rebase, a merge) is read with them; conflicts appearing are told
+//! once (a notification leading to the Conflicts tab), the button turns to a warning while
+//! they last.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
@@ -17,6 +20,10 @@ use workbench_model::{ProjectContext, ProjectService, ToolBadge, WorkbenchHost};
 /// How long a read waits for the requests to calm down (a save, a formatter after it).
 const QUIET: Duration = Duration::from_millis(300);
 
+/// How long a batch of changes may hold the reads: one whose end never came (a paste that
+/// failed midway) lets them go after this.
+const HOLD_LIMIT: Duration = Duration::from_secs(600);
+
 /// Each open project's changes (held by its subscriptions: gone with the project).
 static PROJECTS: workbench_model::PerProject<Changes> = workbench_model::PerProject::new();
 
@@ -27,6 +34,8 @@ pub struct Changes {
     wake: Option<Arc<dyn Fn() + Send + Sync>>,
     /// Its reads, one at a time (this project's: another's never waits for them).
     reads: std::sync::OnceLock<Pool>,
+    /// The repository's ignore rules, to let others' changes to ignored files go.
+    ignored: crate::ignored::Ignored,
 }
 
 impl std::fmt::Debug for Changes {
@@ -47,14 +56,18 @@ struct Read {
     reading: bool,
     /// Asked to read again (the files changed since the last read started).
     stale: bool,
+    /// Paths others changed since: a read only if one of them isn't ignored (looked at on
+    /// the read's thread).
+    candidates: Vec<std::path::PathBuf>,
     /// The count the button shows now.
     shown: Option<(usize, bool)>,
     /// git refused to run: the repository's own settings run programs (those lines), not
     /// trusted yet. Asked once per opening.
     untrusted: Option<Vec<String>>,
     asked: bool,
-    /// The batches of changes running (their identities): no read until they end.
-    held: Vec<u128>,
+    /// The batches of changes running (their identities, when they began): no read until
+    /// they end, or until [`HOLD_LIMIT`].
+    held: Vec<(u128, std::time::Instant)>,
     /// The conflicted files open in a three-part merge (on disk): marked resolved once its
     /// result is saved, with the repository to do it in.
     resolving: Vec<(std::path::PathBuf, Arc<dyn Repository>)>,
@@ -133,21 +146,71 @@ impl Changes {
         }
     }
 
-    /// Starts a read if one is asked and none is going on.
-    pub(crate) fn start(self: &Arc<Self>, repo: Arc<dyn Repository>) {
+    /// Paths others changed on disk: a read unless all of them are ignored (too many: a
+    /// read).
+    fn changed(&self, paths: &[std::path::PathBuf]) {
+        if paths.len() > crate::ignored::MOST {
+            return self.stale();
+        }
         {
             let mut read = self.lock();
-            if !read.stale || read.reading || !read.held.is_empty() {
-                return;
+            read.candidates.extend_from_slice(paths);
+            if read.candidates.len() > crate::ignored::MOST {
+                read.candidates.clear();
+                read.stale = true;
             }
-            read.reading = true;
         }
+        if let Some(wake) = &self.wake {
+            wake();
+        }
+    }
+
+    /// Starts a read if one is asked and none is going on.
+    pub(crate) fn start(self: &Arc<Self>, repo: Arc<dyn Repository>) {
+        let (candidates, expired) = {
+            let mut read = self.lock();
+            // A batch whose end never came lets the reads go.
+            let before = read.held.len();
+            read.held.retain(|(_, began)| began.elapsed() < HOLD_LIMIT);
+            let expired = read.held.len() < before;
+            let asked = read.stale || !read.candidates.is_empty();
+            if !asked || read.reading || !read.held.is_empty() {
+                (None, expired)
+            } else {
+                read.reading = true;
+                (Some(std::mem::take(&mut read.candidates)), expired)
+            }
+        };
+        if expired {
+            tracing::warn!("a batch of changes never ended: the status is read again");
+        }
+        let Some(candidates) = candidates else { return };
         let weak = Arc::downgrade(self);
         let reads = self.reads.get_or_init(|| Pool::new("git-status", 1, work::IDLE));
         reads.spawn(Priority::Background, None, move || {
             std::thread::sleep(QUIET);
             let Some(changes) = weak.upgrade() else { return };
-            changes.lock().stale = false;
+            // Only others' changes to ignored files that are still there: nothing to read
+            // (unless asked meanwhile). One gone may have been a folder holding tracked
+            // files (a force-added `.gitkeep` in an ignored folder): read.
+            let ignored = !candidates.is_empty()
+                && candidates.iter().all(|p| p.exists())
+                && changes.ignored.all(&candidates);
+            {
+                let mut read = changes.lock();
+                if ignored && !read.stale {
+                    read.reading = false;
+                    let more = !read.candidates.is_empty();
+                    drop(read);
+                    if more && let Some(wake) = &changes.wake {
+                        wake();
+                    }
+                    return;
+                }
+                // The read covers what came meanwhile too.
+                read.stale = false;
+                read.candidates.clear();
+            }
             let files = repo.status();
             let operation = repo.operation();
             {
@@ -210,31 +273,44 @@ impl ProjectService for ChangesService {
             },
             // Found after the service started: its files are read then.
             on::<version_control::RepositoryOpened>(&changes, events),
-            // Written by others: read again unless all of it is ignored (a log, a cache).
+            // Changed by others: read again unless all of it is ignored (a log, a cache, a
+            // framework's sessions), looked at on the read's thread.
             {
                 let changes = Arc::clone(&changes);
-                let ignored = crate::ignored::Ignored::default();
                 events.subscribe(move |e: &workspace::events::FilesWritten| {
-                    if !ignored.all(&e.paths) {
-                        changes.stale();
-                    }
+                    changes.changed(&e.paths);
                 })
             },
-            on::<workspace::events::EntriesChanged>(&changes, events),
-            on::<workspace::events::EntriesDeleted>(&changes, events),
-            on::<workspace::events::FileRenamed>(&changes, events),
+            {
+                let changes = Arc::clone(&changes);
+                events.subscribe(move |e: &workspace::events::EntriesChanged| {
+                    changes.changed(&e.paths);
+                })
+            },
+            {
+                let changes = Arc::clone(&changes);
+                events.subscribe(move |e: &workspace::events::EntriesDeleted| {
+                    changes.changed(&e.paths);
+                })
+            },
+            {
+                let changes = Arc::clone(&changes);
+                events.subscribe(move |e: &workspace::events::FileRenamed| {
+                    changes.changed(&[e.from.clone(), e.to.clone()]);
+                })
+            },
             on::<workspace::events::EntriesRescan>(&changes, events),
             // A batch of changes (a refactoring, a paste) is read once, when it ends.
             {
                 let changes = Arc::clone(&changes);
                 events.subscribe(move |e: &workspace::events::BulkChangeStarted| {
-                    changes.lock().held.push(e.id);
+                    changes.lock().held.push((e.id, std::time::Instant::now()));
                 })
             },
             {
                 let changes = Arc::clone(&changes);
                 events.subscribe(move |e: &workspace::events::BulkChangeEnded| {
-                    changes.lock().held.retain(|h| *h != e.id);
+                    changes.lock().held.retain(|(h, _)| *h != e.id);
                     changes.stale();
                 })
             },
@@ -245,7 +321,7 @@ impl ProjectService for ChangesService {
     fn busy(&self, id: ProjectId) -> bool {
         changes(id).is_some_and(|changes| {
             let read = changes.lock();
-            read.stale || read.reading
+            read.stale || read.reading || !read.candidates.is_empty()
         })
     }
 

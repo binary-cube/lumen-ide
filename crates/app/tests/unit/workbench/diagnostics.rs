@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use document::TextBuffer;
 use workbench_model::{Diagnostic, Severity};
 
-use super::mark_of;
+use super::{Covered, mark_of};
 
 fn problem(path: &str, line: u32, column: Option<u32>, severity: Severity) -> Diagnostic {
     Diagnostic {
@@ -51,4 +51,24 @@ fn warnings_and_notes_mark_as_such() {
     let info = mark(Severity::Info);
     assert!(info.warning && info.weak);
     assert_eq!(mark(Severity::Error).code.as_deref(), Some("PHPStan"));
+}
+
+/// Whether a range meets the servers' ones, found by a binary search: what comparing it with
+/// each of them gives (overlapping, or starting at the same place), empty ranges too.
+#[test]
+fn a_range_meets_the_servers_ones_as_a_walk_finds() {
+    let walk = |all: &[std::ops::Range<usize>], b: &std::ops::Range<usize>| {
+        all.iter().any(|a| (a.start < b.end && b.start < a.end) || a.start == b.start)
+    };
+    // Unsorted, nested, touching, empty.
+    let servers: Vec<std::ops::Range<usize>> =
+        vec![40..60, 5..9, 100..300, 120..130, 60..61, 200..200, 9..12, 500..520];
+    let covered = Covered::new(servers.clone());
+    for start in 0..560 {
+        for len in [0, 1, 3, 25] {
+            let range = start..start + len;
+            assert_eq!(covered.meets(&range), walk(&servers, &range), "{range:?}");
+        }
+    }
+    assert!(!Covered::default().meets(&(3..9)), "none: meets nothing");
 }

@@ -140,7 +140,15 @@ fn a_dependency_folder_is_shown_as_a_library_found() {
     marks.set("node_modules", Some(PathMark::Normal));
     view.set_path_marks(Some(std::sync::Arc::new(marks)));
     assert_eq!(view.path_mark(&tree, modules), Some((PathMark::Normal, true, false)), "the user's");
+    // Kept between frames, yet what changes is seen: the same marks again change nothing,
+    // a folder found later is a library at once.
+    let same = view.path_marks.borrow().clone();
+    view.set_path_marks(same);
+    assert_eq!(view.path_mark(&tree, modules), Some((PathMark::Normal, true, false)));
+    kernel::paths::set_found(tree.root_path(), vec!["libs".into(), "src".into()]);
+    assert_eq!(view.path_mark(&tree, src), Some((PathMark::Library, true, true)), "found later");
     kernel::paths::set_found(tree.root_path(), Vec::new());
+    assert_eq!(view.path_mark(&tree, src), None, "forgotten");
 }
 
 #[test]

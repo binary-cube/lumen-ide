@@ -28,6 +28,28 @@ pub(crate) struct Piece {
     pub at: Rect,
 }
 
+/// A chart's masks, made together: their textures freed as soon as nothing holds them any
+/// more (a new layout's came, the old ones' fade ended, the chart hidden), not when the
+/// renderer finds them unused long enough — a splitter dragged makes a set per size.
+#[derive(Debug, Default)]
+pub(crate) struct Masks(pub Vec<Piece>);
+
+impl std::ops::Deref for Masks {
+    type Target = Vec<Piece>;
+
+    fn deref(&self) -> &Vec<Piece> {
+        &self.0
+    }
+}
+
+impl Drop for Masks {
+    fn drop(&mut self) {
+        for piece in &self.0 {
+            piece.image.release();
+        }
+    }
+}
+
 /// A shape to rasterize, owned (sent to the worker).
 struct Owned {
     segs: Vec<Seg>,
@@ -39,7 +61,7 @@ struct Owned {
 /// A chart's masks: the ones drawn, the ones being made.
 #[derive(Default)]
 pub(crate) struct Raster {
-    made: Option<(u64, Arc<Vec<Piece>>)>,
+    made: Option<(u64, Arc<Masks>)>,
     waiting: Option<(u64, Receiver<Vec<Piece>>)>,
     waker: Option<Wake>,
 }
@@ -58,7 +80,7 @@ impl Raster {
     }
 
     /// The masks to draw (the last made).
-    pub fn pieces(&self) -> Option<Arc<Vec<Piece>>> {
+    pub fn pieces(&self) -> Option<Arc<Masks>> {
         self.made.as_ref().map(|(_, p)| Arc::clone(p))
     }
 
@@ -73,7 +95,7 @@ impl Raster {
         }
         let shapes = shapes(g, look, stacked);
         if shapes.is_empty() {
-            self.made = Some((key, Arc::new(Vec::new())));
+            self.made = Some((key, Arc::new(Masks::default())));
             self.waiting = None;
             return;
         }
@@ -94,7 +116,7 @@ impl Raster {
         let Some((key, rx)) = &self.waiting else { return false };
         match rx.try_recv() {
             Ok(pieces) => {
-                self.made = Some((*key, Arc::new(pieces)));
+                self.made = Some((*key, Arc::new(Masks(pieces))));
                 self.waiting = None;
                 true
             }

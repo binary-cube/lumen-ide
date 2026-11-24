@@ -21,6 +21,9 @@ pub struct Folds {
     hidden: Vec<(u32, u32)>,
     /// How many lines the ranges in `hidden` hide in total.
     hidden_total: u32,
+    /// How many lines the ranges before each of `hidden` hide (one more: all of them): a
+    /// row's line and a line's row found by a binary search, asked for every row shown.
+    hidden_before: Vec<u32>,
     /// (start line, index in `available`), sorted by line: `fold_at` is called
     /// for every visible row, on every frame and mouse move.
     by_line: Vec<(u32, usize)>,
@@ -230,6 +233,7 @@ impl Folds {
             self.generation += 1;
         }
         self.hidden_total = 0;
+        self.hidden_before.clear();
     }
 
     pub fn is_hidden(&self, line: u32) -> bool {
@@ -254,31 +258,34 @@ impl Folds {
 
     /// The displayed row of a visible line (for a hidden line: the region's row).
     pub fn row_of(&self, line: u32) -> u32 {
-        let mut row = line;
-        for (a, b) in &self.hidden {
-            if *b < line {
-                row -= b - a + 1;
-            } else if *a <= line {
-                row -= line - a + 1;
-                break;
-            } else {
-                break;
-            }
+        // The ranges wholly above it, then the one it's in (if hidden).
+        let i = self.hidden.partition_point(|(_, b)| *b < line);
+        let row = line.saturating_sub(self.before(i));
+        match self.hidden.get(i) {
+            Some(&(a, _)) if a <= line => row.saturating_sub(line - a + 1),
+            _ => row,
         }
-        row
     }
 
     /// The document line displayed on row `row`.
     pub fn line_of(&self, row: u32) -> u32 {
-        let mut line = row;
-        for (a, b) in &self.hidden {
-            if *a <= line {
-                line += b - a + 1;
+        // The ranges starting at or before the row's line: each one's start, less what those
+        // above it hide, is the row it would be shown on (growing from one range to the next).
+        let (mut low, mut high) = (0, self.hidden.len());
+        while low < high {
+            let mid = low + (high - low) / 2;
+            if self.hidden[mid].0.saturating_sub(self.before(mid)) <= row {
+                low = mid + 1;
             } else {
-                break;
+                high = mid;
             }
         }
-        line
+        row + self.before(low)
+    }
+
+    /// The lines hidden by the ranges before range `i` (all of them past the end).
+    fn before(&self, i: usize) -> u32 {
+        self.hidden_before.get(i).or(self.hidden_before.last()).copied().unwrap_or(0)
     }
 
     /// The next visible line up / down from `line`.
@@ -312,6 +319,13 @@ impl Folds {
             self.generation += 1;
         }
         self.hidden_total = self.hidden.iter().map(|(a, b)| b - a + 1).sum();
+        self.hidden_before.clear();
+        self.hidden_before.push(0);
+        let mut total = 0;
+        for (a, b) in &self.hidden {
+            total += b - a + 1;
+            self.hidden_before.push(total);
+        }
     }
 }
 

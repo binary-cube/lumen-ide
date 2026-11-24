@@ -187,3 +187,57 @@ fn a_selection_reaching_a_collapsed_region_takes_it_whole() {
     let after = Selection::new(row_end + 1, buffer.len());
     assert_eq!(one(&f, after), after);
 }
+
+/// A row's line and a line's row, found by a binary search, are what walking every hidden
+/// range gives: for many ranges, every line and every row, and back again.
+#[test]
+fn rows_and_lines_match_a_walk_over_the_hidden_ranges() {
+    let walk_row = |hidden: &[(u32, u32)], line: u32| {
+        let mut row = line;
+        for (a, b) in hidden {
+            if *b < line {
+                row -= b - a + 1;
+            } else if *a <= line {
+                row -= line - a + 1;
+                break;
+            } else {
+                break;
+            }
+        }
+        row
+    };
+    let walk_line = |hidden: &[(u32, u32)], row: u32| {
+        let mut line = row;
+        for (a, b) in hidden {
+            if *a <= line {
+                line += b - a + 1;
+            } else {
+                break;
+            }
+        }
+        line
+    };
+    // Regions of 1 to 5 hidden lines, every 7 lines, some next to each other.
+    let folds: Vec<FoldRange> = (0..40u32)
+        .map(|i| {
+            let start = i * 7 + (i % 3);
+            fold(start, start + 1 + i % 5)
+        })
+        .collect();
+    let mut folds_state = Folds::default();
+    folds_state.set_available(&folds);
+    assert_eq!(folds_state.row_of(5), 5, "nothing collapsed");
+    folds_state.collapse_all();
+    let hidden = folds_state.hidden_ranges().to_vec();
+    assert!(!hidden.is_empty());
+    for line in 0..320 {
+        assert_eq!(folds_state.row_of(line), walk_row(&hidden, line), "line {line}");
+    }
+    for row in 0..folds_state.visible_rows(320) {
+        let line = folds_state.line_of(row);
+        assert_eq!(line, walk_line(&hidden, row), "row {row}");
+        assert_eq!(folds_state.row_of(line), row, "back to row {row}");
+    }
+    folds_state.expand_all();
+    assert_eq!((folds_state.row_of(9), folds_state.line_of(9)), (9, 9));
+}

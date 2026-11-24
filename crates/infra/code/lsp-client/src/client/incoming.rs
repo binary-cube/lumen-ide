@@ -169,16 +169,27 @@ impl Driver {
         let Some(path) = uri::to_path(uri_text) else { return };
         let Ok(relative) = path.strip_prefix(&self.config.project_root) else { return };
         let items = params.get("diagnostics").cloned().unwrap_or(json!([]));
-        let diagnostics = {
+        // None: nothing to place in its text (a file not open isn't read for it).
+        let diagnostics = if items.as_array().is_none_or(Vec::is_empty) {
+            Vec::new()
+        } else {
             let mut texts = DriverTexts::new(&self.docs);
             let Some(lines) = texts.lines(&path) else { return };
             convert::diagnostics(&items, relative, &lines, self.encoding, &self.config.name)
         };
-        let raw = items.as_array().cloned().unwrap_or_default();
-        if raw.is_empty() {
-            self.published.remove(uri_text);
-        } else {
-            self.published.insert(uri_text.to_owned(), raw);
+        // As sent: a code action there sends them back.
+        match items {
+            Value::Array(raw) if !raw.is_empty() => {
+                self.published.insert(uri_text.to_owned(), raw);
+                if self.published.len() > super::PUBLISHED_MOST {
+                    let open: std::collections::HashSet<&str> =
+                        self.docs.values().map(|d| d.uri.as_str()).collect();
+                    self.published.retain(|uri, _| uri == uri_text || open.contains(uri.as_str()));
+                }
+            }
+            _ => {
+                self.published.remove(uri_text);
+            }
         }
         self.event(Event::Diagnostics { path: relative.to_path_buf(), diagnostics });
     }

@@ -384,6 +384,18 @@ fn formatting_and_code_actions_change_the_files() {
     assert_eq!(label.as_deref(), Some("Run a command"));
     assert_eq!(change.files[0].edits[0].text, "// done\n");
     wait("answered", || h.seen(|s| s.applied == Some(true)));
+    // An open document's diagnostics there go with the question (its quick fixes' context).
+    let (fix, _) = h.open(
+        "b.ts", "// TODO
+",
+    );
+    wait("published", || {
+        h.events()
+            .iter()
+            .any(|e| matches!(e, Event::Diagnostics { diagnostics, .. } if !diagnostics.is_empty()))
+    });
+    let _ = answer(h.client.code_actions(fix, 3..5));
+    assert!(h.seen(|s| s.action_diagnostics.last().is_some_and(|n| *n > 0)), "sent back");
 }
 
 #[test]

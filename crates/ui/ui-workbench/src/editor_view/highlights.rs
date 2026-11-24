@@ -30,10 +30,15 @@ impl EditorView {
                 }
             }
         }
-        // Every row of the line (a wrapped one's too).
-        for sel in f.doc.selections().iter().filter(|s| s.is_empty()) {
+        // Every row of the line (a wrapped one's too): only the cursors on the rows shown,
+        // each line's rows found in the sorted lines.
+        let (Some(&top), Some(&bottom)) = (self.lines.first(), self.lines.last()) else { return };
+        let shown = buffer.line_start(top as usize)..=buffer.line_end(bottom as usize);
+        for (_, sel) in near(f.doc.selections().as_slice(), shown).filter(|(_, s)| s.is_empty()) {
             let line = buffer.line_of(sel.head) as u32;
-            for (i, _) in self.lines.iter().enumerate().filter(|(_, l)| **l == line) {
+            let first = self.lines.partition_point(|l| *l < line);
+            let last = self.lines.partition_point(|l| *l <= line);
+            for i in first..last {
                 background.quad(Quad::filled(
                     Rect::new(b.min_x(), f.row_top(i), b.size.width, f.layout.line_height),
                     palette.current_line,
@@ -193,7 +198,7 @@ fn push_selections(
     current_match: Option<&Range<usize>>,
 ) {
     let (start, end, layout, x_of) = (row.start, row.end, row.layout, row.x_of);
-    for sel in doc.selections().iter().filter(|s| !s.is_empty()) {
+    for (_, sel) in near(doc.selections().as_slice(), start..=end).filter(|(_, s)| !s.is_empty()) {
         let r = sel.range();
         let after = if row.continues { r.start >= end } else { r.start > end };
         if r.end < start || after || current_match == Some(&r) {
@@ -315,4 +320,17 @@ fn push_current_match(rects: &mut Vec<(Rect, Rgba)>, rect: Rect, color: Rgba, sc
     rects.push((Rect::new(x, y + h - line, w, line), edge));
     rects.push((Rect::new(x, y, line, h), edge));
     rects.push((Rect::new(x + w - line, y, line, h), edge));
+}
+
+/// The selections touching `bytes` (ending at or after its start, starting at or before its
+/// end), with their places among all: selections are sorted and don't overlap, so both their
+/// starts and their ends only grow — found by a binary search, never all of them walked (a
+/// row is drawn with ten thousand cursors after "Select All Occurrences").
+pub(super) fn near(
+    all: &[document::Selection],
+    bytes: std::ops::RangeInclusive<usize>,
+) -> impl Iterator<Item = (usize, &document::Selection)> {
+    let (from, to) = (*bytes.start(), *bytes.end());
+    let first = all.partition_point(|s| s.range().end < from);
+    all.iter().enumerate().skip(first).take_while(move |(_, s)| s.range().start <= to)
 }

@@ -128,6 +128,13 @@ pub(super) struct Frames {
 }
 
 impl Frames {
+    /// Every renderer of the window: its own, and the floating layer's while a page is on
+    /// screen — what's given back when the window is hidden, left or minimized goes from
+    /// both (each holds window-sized images of its own).
+    pub fn renderers(&mut self) -> impl Iterator<Item = &mut Box<dyn Renderer>> {
+        self.renderer.iter_mut().chain(self.floating.iter_mut().map(|f| &mut f.renderer))
+    }
+
     pub fn new() -> Self {
         Self {
             renderer: None,

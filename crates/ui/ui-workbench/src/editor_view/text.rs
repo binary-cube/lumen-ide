@@ -437,10 +437,8 @@ impl EditorView {
         let end = closing.as_ref().map_or(pill.max_x(), |(shaped, x)| x + shaped.width);
         // A selection reaching the region takes it whole (`Folds::widen`): shown on it too.
         let tail = f.doc.buffer().line_end(row.line as usize);
-        let selected = f.doc.selections().iter().any(|s| {
-            let r = s.range();
-            !r.is_empty() && r.start <= tail && tail <= r.end
-        });
+        let selected = super::highlights::near(f.doc.selections().as_slice(), tail..=tail)
+            .any(|(_, s)| !s.is_empty());
         if selected {
             let color = if f.focused { palette.selection } else { palette.selection_inactive };
             let x = self.row_x0(f) + width;
@@ -469,7 +467,10 @@ impl EditorView {
         let carets = scene.push_layer(Some(f.text_area));
         // This view's carets (each glides and leaves its trail on its own).
         let id = std::ptr::from_ref(self) as u64;
-        for (n, sel) in f.doc.selections().iter().enumerate() {
+        // Only the cursors on the rows shown (each keeps its place among all: its caret's id).
+        let (Some(&top), Some(&bottom)) = (self.lines.first(), self.lines.last()) else { return };
+        let shown = buffer.line_start(top as usize)..=buffer.line_end(bottom as usize);
+        for (n, sel) in super::highlights::near(f.doc.selections().as_slice(), shown) {
             let line = buffer.line_of(sel.head);
             let column = sel.head - buffer.line_start(line);
             let Some(i) = self.visible_row_of(line, column) else { continue };

@@ -86,13 +86,18 @@ impl Workbench {
     }
 
     /// For the current group's documents shown: the decorators ask for what's missing (in
-    /// the background); their annotations' width follows.
+    /// the background); their annotations' width follows. A tab off screen for a while
+    /// (`UNSEEN`) isn't asked: what they read for it goes, read again once it's shown.
     pub(super) fn sync_decorations(&mut self) {
         if self.data.decorations.is_empty() {
             return;
         }
-        for tab in &mut self.tabs {
+        let active = self.active;
+        for (i, tab) in self.tabs.iter_mut().enumerate() {
             if tab.viewer.as_ref().is_some_and(|v| !v.editor_visible()) {
+                continue;
+            }
+            if i != active && tab.seen.elapsed() > Self::UNSEEN {
                 continue;
             }
             let Some(path) = tab.doc.path() else { continue };

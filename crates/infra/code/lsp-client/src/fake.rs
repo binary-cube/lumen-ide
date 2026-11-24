@@ -80,6 +80,8 @@ pub struct Seen {
     pub applied: Option<bool>,
     /// The client's answers to its `vscode/content` requests, by URL (`Err`: refused).
     pub contents: BTreeMap<String, Result<String, String>>,
+    /// How many diagnostics each `textDocument/codeAction` was sent in its context.
+    pub action_diagnostics: Vec<usize>,
 }
 
 impl Seen {
@@ -155,6 +157,12 @@ pub fn serve(input: impl Read, mut output: impl Write, behaviour: &Behaviour, se
         };
         if let Ok(mut s) = seen.lock() {
             s.methods.push(method.clone());
+            if method == "textDocument/codeAction"
+                && let Message::Request { params, .. } = &message
+            {
+                let sent = params["context"]["diagnostics"].as_array().map_or(0, Vec::len);
+                s.action_diagnostics.push(sent);
+            }
         }
         if behaviour.crash_on.as_deref() == Some(method.as_str()) {
             return;

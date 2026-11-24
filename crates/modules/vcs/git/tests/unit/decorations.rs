@@ -152,7 +152,39 @@ fn the_blame_annotations_are_shown_and_hidden() {
     // Its day in the user's time zone.
     let (y, m, d) = crate::local_time::date(1_700_000_000);
     assert!(tip.starts_with(&format!("1111111 · Ana · {y}-{m:02}-{d:02}\nfirst")), "{tip}");
+    // Not asked for a while (its tab off screen): what was read goes, the switch and the
+    // bars stay; asked again, read again.
+    let long_ago =
+        std::time::Instant::now().checked_sub(UNASKED + std::time::Duration::from_secs(1));
+    if let Some(long_ago) = long_ago {
+        let shared = PROJECTS.get(decorated.project).unwrap();
+        // Time with nothing drawn doesn't count: still kept.
+        shared.lock().docs.get_mut(&doc).unwrap().asked = Some(long_ago);
+        shared.lock().last_asked = Some(long_ago);
+        decorated.decorations.keep(&[doc]);
+        assert!(shared.lock().docs[&doc].base.is_some(), "a window left standing keeps it");
+        // The editor drew since (other tabs asked), this one wasn't asked: let go.
+        shared.lock().last_asked = Some(std::time::Instant::now());
+        decorated.decorations.keep(&[doc]);
+        {
+            let state = shared.lock();
+            let d = &state.docs[&doc];
+            assert!(d.base.is_none() && d.blame.is_none(), "let go");
+            assert!(d.annotate, "the switch stays");
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            decorated.settle();
+            let back = decorated.decorations.decorations(doc).unwrap().annotations.unwrap();
+            if !back.is_empty() {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "read again");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
     // Hidden again.
+    let host = Host { decorated: &decorated, line: 2 };
     assert!(toggle_annotations(&host));
     assert!(decorated.decorations.decorations(doc).unwrap().annotations.is_none());
     assert_eq!(decorated.decorations.annotation_chars(doc), 0);

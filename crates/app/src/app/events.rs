@@ -46,7 +46,7 @@ impl EditorApp {
                 // waited for input — the focus coming back counts as such).
                 self.workbench
                     .window_returned(Instant::now(), matches!(event, PlatformEvent::Focused(true)));
-                if let Some(renderer) = &mut self.frames.renderer {
+                for renderer in self.frames.renderers() {
                     renderer.set_visible(true);
                 }
                 if let Some(resources) = &mut self.resources {
@@ -117,7 +117,7 @@ impl EditorApp {
                 self.wait_while_hidden();
                 self.workbench.set_occluded(true);
                 // The frame kept for partial redraws (a surface-sized texture) goes meanwhile.
-                if let Some(renderer) = &mut self.frames.renderer {
+                for renderer in self.frames.renderers() {
                     renderer.set_visible(false);
                 }
                 // The status bar's figures aren't seen: not measured meanwhile.
@@ -132,7 +132,7 @@ impl EditorApp {
             PlatformEvent::Focused(false) => {
                 self.workbench.project_left();
                 self.capture_window(false);
-                if let Some(renderer) = &mut self.frames.renderer {
+                for renderer in self.frames.renderers() {
                     renderer.release_idle();
                 }
                 self.workbench.icons().release_drawings();
@@ -336,10 +336,10 @@ impl EditorApp {
             return;
         }
         self.window_state.hidden = None;
-        if let Some(renderer) = &mut self.frames.renderer {
+        for renderer in self.frames.renderers() {
             renderer.release_hidden();
-            tracing::debug!("hidden a while: the window's image on screen given back");
         }
+        tracing::debug!("hidden a while: the window's images on screen given back");
     }
 
     /// Background work woke the loop: collects what it finished.
@@ -371,7 +371,15 @@ impl EditorApp {
             self.mouse_result(request);
         }
         if let Some(sample) = self.resources.as_ref().and_then(ResourceMonitor::latest) {
-            let gpu = self.frames.renderer.as_ref().and_then(|r| r.gpu_memory());
+            // The window's own memory counts its floating layer's too.
+            let floating = self.frames.floating.as_ref().and_then(|f| f.renderer.gpu_memory());
+            let gpu = match (self.frames.renderer.as_ref().and_then(|r| r.gpu_memory()), floating) {
+                (Some(mut gpu), floating) => {
+                    gpu.window += floating.map_or(0, |f| f.window);
+                    Some(gpu)
+                }
+                (None, floating) => floating,
+            };
             changed |= self.workbench.set_resources(sample, gpu);
         }
         if changed && let Some(window) = &self.window {

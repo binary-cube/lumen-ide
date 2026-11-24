@@ -10,7 +10,7 @@ use charts_model::geometry::{Mark, MarkShape};
 use kernel::{Point, Rect};
 
 use super::look::{ChartMotion, Enter, Update};
-use super::raster::Piece;
+use super::raster::Masks;
 
 /// How long the lit element takes to light up.
 const HOVER: Duration = Duration::from_millis(120);
@@ -33,7 +33,7 @@ pub(crate) struct Motion {
     /// `before`'s places sorted by (series, index): a mark's earlier self found by a
     /// binary search (a scatter's thousands of points each frame of a transition).
     pub before_order: Vec<u32>,
-    pub old_pieces: Option<Arc<Vec<Piece>>>,
+    pub old_pieces: Option<Arc<Masks>>,
     pub pieces_since: Option<Instant>,
     /// When the element under the mouse was lit.
     pub lit_since: Option<Instant>,
@@ -54,7 +54,7 @@ impl Motion {
 
     /// New data came: `first` (nothing shown before) or after other data (its marks and
     /// masks kept to move from).
-    pub fn data(&mut self, first: bool, marks: &[Mark], pieces: Option<Arc<Vec<Piece>>>) {
+    pub fn data(&mut self, first: bool, marks: &[Mark], pieces: Option<Arc<Masks>>) {
         let now = Instant::now();
         if first {
             if self.asked.enter != Enter::None {

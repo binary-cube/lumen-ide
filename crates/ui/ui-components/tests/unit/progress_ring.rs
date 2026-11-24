@@ -110,8 +110,11 @@ fn the_image_is_kept_until_what_it_shows_changes() {
     let first = ring.image(&s, 0.0, 0.5).id;
     assert_eq!(ring.image(&s, 0.0, 0.5).id, first, "the same: not rasterized again");
     assert_eq!(ring.image(&s, 0.0, 0.5 + 0.3 / f32::from(STEPS)).id, first, "less than a step");
+    let kept = ring.image(&s, 0.0, 0.5).clone();
     let next = ring.image(&s, 0.0, 0.5 + 1.0 / f32::from(STEPS)).id;
     assert_ne!(next, first, "a step: another image");
+    assert!(kept.released(), "the last one's texture freed at once");
+    assert!(!ring.kept().unwrap().released());
     assert_ne!(
         ring.image(&RingSpec { color: TRACK, ..s }, 0.0, 0.5 + 1.0 / f32::from(STEPS)).id,
         next

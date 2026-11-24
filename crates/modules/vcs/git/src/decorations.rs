@@ -118,6 +118,10 @@ struct State {
     /// A new `HEAD` found in the background, announced from the UI thread at the next poll.
     announce: Option<HeadChanged>,
     docs: HashMap<DocumentId, Doc>,
+    /// When a document was last asked for (any: the editor drew). A document not asked for
+    /// [`UNASKED`] before it is off screen; time with nothing drawn (a window left standing)
+    /// doesn't count.
+    last_asked: Option<std::time::Instant>,
 }
 
 /// A document's git state.
@@ -141,9 +145,31 @@ struct Doc {
     /// Per line, its annotation; and the document version they match.
     annotations: Arc<Vec<Option<LineAnnotation>>>,
     annotations_version: Option<u64>,
+    /// When it was last asked for (`sync`: its tab shown, or kept current).
+    asked: Option<std::time::Instant>,
 }
 
+/// How long a document may go unasked (its tab off screen) before what was read for it goes.
+const UNASKED: std::time::Duration = std::time::Duration::from_secs(300);
+
 impl Doc {
+    /// What was read for it let go (the committed text, the blame, its annotations), its
+    /// bars and its annotate switch kept: asked again, it's read again in the background.
+    fn let_go(&mut self) {
+        if self.base.is_none() && self.blame.is_none() && self.pending.is_none() {
+            return;
+        }
+        self.base = None;
+        self.pending = None;
+        self.blame = None;
+        self.blame_pending = false;
+        self.annotations = Arc::new(Vec::new());
+        self.annotations_version = None;
+        // Found again from the text read next (the bars shown meanwhile are these).
+        self.version = None;
+        self.requested = None;
+    }
+
     /// The memory it holds (bytes): the committed text, the changed lines, the blame and
     /// its annotations.
     fn memory(&self) -> u64 {
@@ -278,9 +304,12 @@ impl ProjectDecorations for GitDecorations {
     fn sync(&mut self, shown: &ShownDocument<'_>) {
         let shared = Arc::clone(&self.shared);
         let mut state = shared.lock();
-        let State { head, docs, .. } = &mut *state;
+        let State { head, docs, last_asked, .. } = &mut *state;
         let Some(head) = head.as_deref() else { return };
+        let now = std::time::Instant::now();
+        *last_asked = Some(now);
         let doc = docs.entry(shown.id).or_default();
+        doc.asked = Some(now);
         let fresh = doc.base.as_ref().is_some_and(|(h, _)| h == head);
         let reading = doc.pending.as_deref() == Some(head);
         if !fresh && !reading {
@@ -359,7 +388,17 @@ impl ProjectDecorations for GitDecorations {
     }
 
     fn keep(&mut self, open: &[DocumentId]) {
-        self.shared.lock().docs.retain(|id, _| open.contains(id));
+        let mut state = self.shared.lock();
+        state.docs.retain(|id, _| open.contains(id));
+        // Not asked for a while the others were (its tab off screen): the committed text and
+        // the blame go, read again when it's next asked for; the bars and the annotate
+        // switch stay.
+        let Some(last) = state.last_asked else { return };
+        for doc in state.docs.values_mut() {
+            if doc.asked.is_some_and(|at| last.saturating_duration_since(at) > UNASKED) {
+                doc.let_go();
+            }
+        }
     }
 
     fn decorations(&self, doc: DocumentId) -> Option<DocumentDecorations> {

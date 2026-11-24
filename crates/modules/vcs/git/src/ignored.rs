@@ -2,7 +2,8 @@
 //! repository's `.gitignore` files on their way (and `.git/info/exclude`) ignore — an app's
 //! logs, a framework's cache, a watch build's output, written all the time. Their writes ask
 //! for no read (each read is a `git status` process). The rules files are read once each and
-//! again when their date changes; read on the thread the event comes on, never the UI's.
+//! again when their date changes; looked at on the status's own thread (`status.rs`), never
+//! the UI's.
 //!
 //! A file both tracked and ignored (rare) edited by another program shows at the next read
 //! asked for anything else; the editor's own saves always ask for one.
@@ -15,7 +16,7 @@ use std::time::SystemTime;
 use workspace::ignore::IgnoreRules;
 
 /// More paths than this in one event: read anyway (an install, a checkout: not a log).
-const MOST: usize = 64;
+pub(crate) const MOST: usize = 64;
 
 /// A rules file as read: its date then (`None`: not there) and its text.
 type Read = (Option<SystemTime>, Arc<str>);

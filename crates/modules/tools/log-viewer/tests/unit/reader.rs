@@ -113,3 +113,44 @@ fn the_files_before_and_after_are_found() {
     assert_eq!((older, newer), (Some(dir.join("app-2026-11-20.1.jsonl")), None));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Filtered a piece of the file at a time, a line longer than a piece read alone: what
+/// passes is what each line read by itself passes, CRLF ends too.
+#[test]
+fn the_filter_reads_the_file_in_pieces_as_line_by_line() {
+    use ui_components::data_grid::filter::{Compare, GridFilter};
+    use ui_components::data_grid::source::CellValue;
+    let dir = scratch();
+    let path = dir.join("app-2026-11-21.jsonl");
+    let long = "x".repeat(FILTER_PIECE as usize + 10);
+    let mut text = String::new();
+    for n in 0..30_000 {
+        let level = if n % 7 == 0 { "ERROR" } else { "INFO" };
+        text += &line(n, level);
+        text += if n % 2 == 0 { "\n" } else { "\r\n" };
+        if n == 12_000 {
+            text += &format!("{{\"level\":\"ERROR\",\"msg\":\"{long}\"}}\n");
+        }
+    }
+    std::fs::write(&path, text).unwrap();
+    let mut reader = Reader::new(path);
+    reader.grow().unwrap();
+    reader.filter = Some(GridFilter::Compare {
+        column: "level".into(),
+        op: Compare::Eq,
+        value: CellValue::Text("ERROR".into()),
+    });
+    // Each line read by itself, as the filter did before.
+    let lines = reader.starts.len();
+    let one_by_one: Vec<u64> = (0..lines)
+        .filter(|&n| {
+            reader.line(n).is_some_and(|l| entry::passes(&entry::parse(&l), reader.filter.as_ref()))
+        })
+        .map(|n| n as u64)
+        .collect();
+    reader.passing = Some(Vec::new());
+    while !reader.filter_some(5_000) {}
+    assert_eq!(reader.passing.as_deref(), Some(&one_by_one[..]));
+    assert!(one_by_one.len() > 4_000);
+    let _ = std::fs::remove_dir_all(dir);
+}
