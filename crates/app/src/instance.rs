@@ -19,7 +19,42 @@ use interprocess::local_socket::prelude::*;
 use interprocess::local_socket::{ListenerOptions, Name, Stream};
 
 /// The paths handed by later starts, in order (an empty list: just the app to the front).
-static INCOMING: Mutex<VecDeque<Vec<PathBuf>>> = Mutex::new(VecDeque::new());
+static INCOMING: Mutex<VecDeque<Vec<Handed>>> = Mutex::new(VecDeque::new());
+/// The worker the system's own paths are looked at on (one: they keep their order).
+static LOOKING: std::sync::OnceLock<kernel::work::Pool> = std::sync::OnceLock::new();
+/// How long that worker waits for more before it ends.
+const LOOKING_IDLE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// A path a later start handed, as it is on disk (looked at off the UI thread).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Handed {
+    /// As it was given: what's opened (a tab's path).
+    pub path: PathBuf,
+    /// Its real path (links resolved: `/tmp` is `/private/tmp` on macOS), as the projects'
+    /// roots are kept; the given one when it can't be resolved.
+    pub real: PathBuf,
+    /// A folder: a project.
+    pub is_dir: bool,
+}
+
+impl Handed {
+    /// `path` looked at on disk (blocking: a worker's).
+    fn looked_at(path: PathBuf) -> Self {
+        let real = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        let is_dir = real.is_dir();
+        Self { path, real, is_dir }
+    }
+}
+
+/// A window a handed file may open in ([`window_for`]).
+#[derive(Debug, Clone, Copy)]
+pub struct Candidate<'a, W> {
+    pub window: W,
+    /// Its project's root (`None`: no project).
+    pub root: Option<&'a Path>,
+    /// When it last took the focus: the frontmost has the highest.
+    pub focus_turn: u64,
+}
 /// Wakes the event loop when paths arrive (set once a window exists).
 static WAKER: Mutex<Option<Arc<dyn Fn() + Send + Sync>>> = Mutex::new(None);
 
@@ -58,11 +93,18 @@ pub fn set_waker(waker: Arc<dyn Fn() + Send + Sync>) {
     }
 }
 
-/// Paths to open as a later start's (the system's own asking: macOS' "Open With"): queued,
-/// the app woken.
+/// Paths to open as a later start's (the system's own asking: macOS' "Open With", on the
+/// UI thread): looked at on a worker, then queued and the app woken.
 pub fn hand_in(paths: Vec<PathBuf>) {
+    let looking = LOOKING.get_or_init(|| kernel::work::Pool::new("open-with", 1, LOOKING_IDLE));
+    looking.spawn(kernel::work::Priority::Interactive, None, move || queue(paths));
+}
+
+/// `paths` looked at, queued, the app woken (blocking: a worker's, the listener's).
+fn queue(paths: Vec<PathBuf>) {
+    let handed: Vec<Handed> = paths.into_iter().map(Handed::looked_at).collect();
     if let Ok(mut queue) = INCOMING.lock() {
-        queue.push_back(paths);
+        queue.push_back(handed);
     }
     if let Some(wake) = WAKER.lock().ok().and_then(|w| w.clone()) {
         wake();
@@ -70,8 +112,21 @@ pub fn hand_in(paths: Vec<PathBuf>) {
 }
 
 /// The paths handed since the last call.
-pub fn take() -> Vec<Vec<PathBuf>> {
+pub fn take() -> Vec<Vec<Handed>> {
     INCOMING.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default()
+}
+
+/// The window a handed file (its real path) opens in, as a tab: the one whose project holds
+/// it (the deepest project, if one is inside another), else the frontmost; `None` with no
+/// window.
+pub fn window_for<W: Copy>(file: &Path, windows: &[Candidate<'_, W>]) -> Option<W> {
+    let holding = windows
+        .iter()
+        .filter_map(|c| c.root.filter(|r| file.starts_with(r)).map(|r| (c.window, r)))
+        .max_by_key(|(_, root)| root.components().count());
+    holding
+        .map(|(w, _)| w)
+        .or_else(|| windows.iter().max_by_key(|c| c.focus_turn).map(|c| c.window))
 }
 
 /// What tells this executable's instance apart: a hash of its path (and the path, as it was
@@ -183,7 +238,7 @@ fn receive(stream: Stream) -> Option<()> {
         }
         paths.push(PathBuf::from(path));
     }
-    hand_in(paths);
+    queue(paths);
     reader.get_mut().write_all(b"ok\n").ok()
 }
 

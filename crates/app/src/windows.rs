@@ -7,6 +7,7 @@
 //! - **Error isolation:** a panic while handling an event closes only its window;
 //!   the others keep going.
 
+use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -488,11 +489,54 @@ impl AppWindows {
         self.sessions.record(windows, usize::try_from(kept).unwrap_or(1));
     }
 
-    /// What later starts handed over (the jump list, the app started again): opened here.
+    /// What later starts handed over (the jump list, the app started again, macOS' "Open
+    /// With"): files as tabs of a window already open (`instance::window_for`), the last
+    /// one's window brought to the front; a project as before (its window to the front, or
+    /// a new one).
     fn open_handed(&mut self) {
-        let Some((_, first)) = self.windows.first_mut() else { return };
-        for paths in crate::instance::take() {
-            first.open_handed(paths);
+        if self.windows.is_empty() {
+            return;
+        }
+        for handed in crate::instance::take() {
+            let only_files = !handed.is_empty() && handed.iter().all(|h| !h.is_dir);
+            if only_files {
+                self.open_handed_files(&handed);
+            } else if let Some((_, first)) = self.windows.first_mut() {
+                first.open_handed(handed);
+            }
+        }
+    }
+
+    /// Each handed file to its window: the one of its project, else the frontmost.
+    fn open_handed_files(&mut self, files: &[crate::instance::Handed]) {
+        // Each window's project, by its window (cloned: opening a file may note a project).
+        let roots: HashMap<WindowId, std::path::PathBuf> =
+            self.shared.open_projects.borrow().iter().cloned().collect();
+        let candidates: Vec<crate::instance::Candidate<'_, WindowId>> = self
+            .windows
+            .iter()
+            .map(|(id, app)| crate::instance::Candidate {
+                window: *id,
+                root: roots.get(id).map(|r| r.as_path()),
+                focus_turn: app.focus_turn(),
+            })
+            .collect();
+        // Files by their window (each window opens its own at once); the last file's window
+        // is the one brought to the front.
+        let mut routed: HashMap<WindowId, Vec<std::path::PathBuf>> = HashMap::new();
+        let mut last = None;
+        for file in files {
+            let Some(id) = crate::instance::window_for(&file.real, &candidates) else { continue };
+            routed.entry(id).or_default().push(file.path.clone());
+            last = Some(id);
+        }
+        for (id, app) in &mut self.windows {
+            if let Some(its) = routed.get(id) {
+                app.open_handed_files(its);
+            }
+        }
+        if let Some((_, app)) = self.windows.iter().find(|(w, _)| Some(*w) == last) {
+            app.bring_to_front();
         }
     }
 

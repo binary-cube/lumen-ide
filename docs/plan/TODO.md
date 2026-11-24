@@ -60,6 +60,13 @@ făcute se șterg.
     la capăt; testat); același hash numește și canalul dintre instanțe (`peers`). Jurnalul
     spune canalul (`tag`) ascultat („listening for later starts”) și cel căutat („handed to
     the running instance”).
+  - **Făcut (2026-11-24, încercat pe macOS cu un pachet de probă):** pe macOS rămânea un
+    singur proces, dar fiecare fișier primit deschidea o fereastră nouă (și la prima pornire
+    o fereastră goală în plus). Acum un fișier primit devine tab în fereastra proiectului
+    care îl conține (cel mai adânc), altfel în fereastra din față; un fișier deja deschis
+    își alege tabul; fereastra ultimului fișier vine în față. Un folder: ca înainte.
+    Căile primite sunt citite de pe disc pe un worker (`open-with`, `instance::Handed`),
+    nu pe firul interfeței; alegerea ferestrei e `instance::window_for` (testată).
   - **Rămas:** confirmarea pe Windows (dacă tot pornește o instanță nouă: cele două
     `tag`-uri din jurnal spun dacă e alt nume sau altă cauză).
   - **De verificat:** dacă a doua pornire chiar încearcă (jurnalul „handed to the running

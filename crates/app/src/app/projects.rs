@@ -163,13 +163,34 @@ impl EditorApp {
 
     /// Paths handed by a later start: a project already open brings its window to the
     /// front; others open in a new window; nothing: the app to the front.
-    pub fn open_handed(&mut self, paths: Vec<PathBuf>) {
-        let Some(window) = self.window.clone() else { return };
-        match paths.as_slice() {
-            [] => window.focus_window(window.id()),
-            [one] if one.is_dir() => self.open_recent(one),
-            _ => self.open_window_with(paths),
+    pub fn open_handed(&mut self, handed: Vec<crate::instance::Handed>) {
+        match handed.as_slice() {
+            [] => self.bring_to_front(),
+            [one] if one.is_dir => self.open_recent(&one.real),
+            _ => self.open_window_with(handed.into_iter().map(|h| h.path).collect()),
         }
+    }
+
+    /// Files handed by a later start (or the system's "Open With"), opened here as tabs, the
+    /// last one's chosen (one already open: its tab).
+    pub fn open_handed_files(&mut self, files: &[PathBuf]) {
+        for path in files {
+            let opened = self.workbench.open_path(path);
+            self.succeeded(opened, Doing::Opening(path));
+        }
+        self.relayout();
+    }
+
+    /// This window in front, the app's focus in it (out of the Dock if minimized).
+    pub fn bring_to_front(&self) {
+        if let Some(window) = &self.window {
+            window.focus_window(window.id());
+        }
+    }
+
+    /// When this window last took the focus, among the windows (the frontmost: the highest).
+    pub fn focus_turn(&self) -> u64 {
+        self.window_state.focus_turn
     }
 
     /// A recent project chosen from the icon's menu: its window to the front if it's open,
