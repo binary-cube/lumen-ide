@@ -5,6 +5,13 @@ făcute se șterg.
 
 ## Următorul (cerut)
 
+- **Un singur motor web peste tot, desenat de noi** (cerut 2026-11-24: „prefer să avem o
+  soluție generală peste tot […] parte din ce desenăm”). Planul:
+  `docs/plan/99-motor-web-chromium.md` (Chromium prin CEF, desenat în afara ecranului ca
+  textură, într-un proces `web-host` al nostru, descărcat o dată la prima nevoie). Primul pas:
+  99a, încercarea pe macOS, cu măsurători. Planul 98 (WebView2 visual hosting) rămâne scris
+  ca variantă fără descărcare. Până atunci, pe Windows stratul plutitor e o fereastră popup.
+
 - **Windows: decupajele urâte peste pagina motorului web** (raportat 2026-11-23, cu captură).
   Peste editorul de diagrame (o pagină a motorului web al sistemului), pastilele de resurse
   fixate în colț (CPU, RAM, GPU și pinul) apar înconjurate de pete albastre mari, rotunjite
@@ -31,7 +38,32 @@ făcute se șterg.
       aplicației îl are). Deci sub conținutul DirectComposition stătea suprafața opacă a
       sistemului, pe toată regiunea (forma plus marginea umbrei, colțuri mari): petele.
   - **Reparat:** stratul se creează cu `WS_EX_NOREDIRECTIONBITMAP`.
-  - **De confirmat pe Windows** cu build-ul care conține reparația.
+  - **Văzut pe Windows (2026-11-24, beta.22):** petele mai mici, dar tot acolo, de culoarea
+    desktopului: stratul era transparent, dar o fereastră copil își taie locul din compoziția
+    părintelui (fereastra aplicației), deci sub pixelii lui transparenți (umbra, colțurile)
+    se vedea desktopul.
+  - **Reparat (2026-11-24):** stratul e acum o fereastră popup deținută de fereastra aplicației
+    (`WS_POPUP`, unealtă: fără buton în bara de sarcini, fără Alt+Tab, niciodată activată),
+    compusă de sistem peste ea cu transparența ei; stă mereu imediat peste fereastra ei (nu
+    peste alte programe), pleacă odată cu ea la minimizare și o urmează la mutare și la
+    redimensionare (mesajele ei urmărite cu `SetWindowSubclass`: o fereastră trasă nu desenează
+    cadre). Un clic pe ea aduce aplicația în față dacă nu era.
+  - **De confirmat pe Windows:** fără pete; pastilele și meniurile urmează fereastra când e
+    trasă și maximizată; nimic din strat peste alte programe.
+
+- **Windows: actualizarea la beta.22 n-a trecut** (raportat de un utilizator 2026-11-24:
+  „the installer didn't finish; the app is still the version it was”). Instalatorul pornit
+  de aplicație la închidere (silențios) n-a înlocuit programul; fără jurnal, nu se știe de ce.
+  Bănuiala: programul încă folosit (închiderea a durat peste cele 30 s de așteptare, altă
+  copie a aplicației pornită), iar în modul silențios Inno Setup renunță fără mesaj.
+  - **Făcut:** instalatorul scrie un jurnal (`/LOG=` în folderul actualizărilor, cu
+    programele pe care a trebuit să le închidă: `/LOGCLOSEAPPLICATIONS`); la pornirea de după
+    o actualizare care n-a trecut, ultimele lui rânduri ajung în jurnalul aplicației
+    (`the installer didn't finish`), apoi fișierul e șters; așteaptă închiderea aplicației
+    până la 2 minute (nu 30 s).
+  - **De făcut după ce vedem jurnalul:** programul vechi redenumit înainte de copiere (un
+    program pornit se poate redenumi), așteptarea procesului fără PowerShell, aplicația
+    pornită din nou dacă instalarea nu se termină.
 
 - **Windows: „leak detected” la închidere** (văzut în jurnal 2026-11-24, DX12). La
   închiderea ferestrei, alocatorul de memorie GPU al DX12 spune că mai erau blocuri
@@ -380,6 +412,27 @@ Rămâne:
   comenzile lor de legătură au dispărut.
 
 ## Performanță
+
+- **A șaptea iterație (2026-11-24)** — patru analize (cadre, fundal, RAM, GPU), apoi
+  reparate cele cu risc mic, fiecare cu testul ei, și o recenzie separată:
+  - git: fișierele ignorate create, scrise sau redenumite de alții nu mai pornesc `git status`
+    (verificarea `.gitignore` pe firul statusului, nu pe al interfeței); o cale ștearsă tot
+    citește (putea fi un folder cu fișiere urmărite); un lot de schimbări care n-a mai
+    terminat nu mai oprește citirile după 10 minute;
+  - arborele: marcajul fiecărui rând ținut minte (până se schimbă arborele, marcajele sau
+    dependențele), nu calculat la fiecare cadru;
+  - editorul: selecțiile, cursoarele și liniile curente căutate binar (cu mii de cursoare);
+    rândul și linia pliurilor din sume cumulate; erorile noastre față de ale serverului
+    comparate sortat, nu fiecare cu fiecare;
+  - GPU: stratul plutitor își eliberează imaginile ca fereastra (ascunsă, părăsită, oprită),
+    fiecare renderer la timpul lui; măștile graficelor și cercul notificărilor eliberate pe loc;
+  - RAM: git lasă textul din HEAD și blame-ul tabelor necerute 5 minute (timpul fără cadre nu
+    se socotește); diagnosticele brute ale serverelor limitate la 2000 de fișiere;
+  - mici: jurnalul filtrat citind bucăți de 1 MB, nu rând cu rând; discard și reîncărcarea
+    taburilor căutate în seturi.
+  - **Lăsat (risc mediu):** indexul de căi actualizat parțial; textul documentelor ținut o
+    singură dată pentru serverele de limbaj; comparatorul cu un text pe parte; temele încărcate
+    la nevoie; stratul plutitor lăsat cât nu plutește nimic.
 
 - **Profilare și recenzii (2026-11-12)** — un proiect de probă cât unul Laravel real:
   3.200 de fișiere PHP proprii, 20.000 în `vendor/` (20 de pachete, cu `composer.json`),
