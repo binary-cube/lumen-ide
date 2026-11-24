@@ -184,7 +184,7 @@ struct OnRequestFile(bool);
 
 impl CommandHandler for OnRequestFile {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some_and(|f| is_request_file(&f.path))
+        host.active_path().is_some_and(|p| is_request_file(&p))
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
@@ -215,7 +215,7 @@ struct EditAtCursor;
 
 impl CommandHandler for EditAtCursor {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some_and(|f| is_request_file(&f.path))
+        host.active_path().is_some_and(|p| is_request_file(&p))
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
@@ -250,7 +250,7 @@ struct ShowGraph;
 
 impl CommandHandler for ShowGraph {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some_and(|f| is_request_file(&f.path))
+        host.active_path().is_some_and(|p| is_request_file(&p))
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

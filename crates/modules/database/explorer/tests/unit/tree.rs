@@ -4,6 +4,7 @@
 //! sources in their folders.
 
 use database::{ColumnInfo, ForeignKey, IndexInfo, SourceColor};
+use ui_kit::ListFilter;
 
 use super::*;
 

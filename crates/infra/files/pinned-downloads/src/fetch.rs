@@ -235,17 +235,37 @@ impl Pin {
 /// How often a download looks at its stop flag and tells its progress (bytes).
 const CHUNK: usize = 1 << 16;
 
+/// What's downloaded: the file at `url` (on one of `hosts`, else refused), at most `limit`
+/// bytes, checked against `pin` once whole.
+#[derive(Debug, Clone, Copy)]
+pub struct Wanted<'a> {
+    pub url: &'a str,
+    pub hosts: &'a [&'a str],
+    pub pin: &'a Pin,
+    pub limit: u64,
+}
+
+/// How a download goes: through `fetch`, telling `progress(received, total)` as it comes
+/// (the total when the source says it), ended by `stop`.
+#[derive(Clone, Copy)]
+pub struct Going<'a> {
+    pub fetch: &'a dyn Fetch,
+    pub progress: &'a dyn Fn(u64, Option<u64>),
+    pub stop: &'a AtomicBool,
+}
+
+impl std::fmt::Debug for Going<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Going").field("stop", &self.stop).finish_non_exhaustive()
+    }
+}
+
 /// The file at `url` (on one of `hosts`) into memory, at most `limit` bytes, checked against
 /// `pin`; `progress(received, total)` as it comes (the total when the source says it); `stop`
 /// ends it.
 pub fn fetch_bytes(
-    fetch: &dyn Fetch,
-    url: &str,
-    hosts: &[&str],
-    pin: &Pin,
-    limit: u64,
-    progress: &dyn Fn(u64, Option<u64>),
-    stop: &AtomicBool,
+    Going { fetch, progress, stop }: Going<'_>,
+    Wanted { url, hosts, pin, limit }: Wanted<'_>,
 ) -> Result<Vec<u8>, FetchError> {
     if !allowed(url, hosts) {
         return Err(FetchError::Refused(url.to_owned()));
@@ -282,16 +302,10 @@ pub fn fetch_bytes(
 /// The file at `url` (on one of `hosts`) into `part` (resumed from what's there already), at
 /// most `limit` bytes, checked against `pin` once whole: `Ok` with it whole and checked. A
 /// broken-off download leaves `part` to be resumed; one that doesn't match removes it.
-#[allow(clippy::too_many_arguments)]
 pub fn fetch_file(
-    fetch: &dyn Fetch,
-    url: &str,
-    hosts: &[&str],
+    Going { fetch, progress, stop }: Going<'_>,
+    Wanted { url, hosts, pin, limit }: Wanted<'_>,
     part: &Path,
-    pin: &Pin,
-    limit: u64,
-    progress: &dyn Fn(u64, Option<u64>),
-    stop: &AtomicBool,
 ) -> Result<(), FetchError> {
     if !allowed(url, hosts) {
         return Err(FetchError::Refused(url.to_owned()));

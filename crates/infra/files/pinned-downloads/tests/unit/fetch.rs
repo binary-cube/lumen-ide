@@ -63,31 +63,41 @@ fn a_download_is_checked_against_its_pin() {
     let stop = AtomicBool::new(false);
     let got = Mutex::new(Vec::new());
     let bytes = fetch_bytes(
-        &memory,
-        URL,
-        HOSTS,
-        &sha256(b"the archive"),
-        1024,
-        &|r, t| got.lock().unwrap().push((r, t)),
-        &stop,
+        Going { fetch: &memory, progress: &|r, t| got.lock().unwrap().push((r, t)), stop: &stop },
+        Wanted { url: URL, hosts: HOSTS, pin: &sha256(b"the archive"), limit: 1024 },
     )
     .unwrap();
     assert_eq!(bytes, b"the archive");
     assert_eq!(got.lock().unwrap().last(), Some(&(11, Some(11))));
-    let wrong = fetch_bytes(&memory, URL, HOSTS, &sha256(b"another"), 1024, &|_, _| {}, &stop);
+    let wrong = fetch_bytes(
+        Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+        Wanted { url: URL, hosts: HOSTS, pin: &sha256(b"another"), limit: 1024 },
+    );
     assert_eq!(wrong, Err(FetchError::Mismatch(URL.into())));
     let integrity = Pin::Integrity(format!(
         "sha512-{}",
         crate::digest::base64(ring::digest::digest(&ring::digest::SHA512, b"the archive").as_ref())
     ));
-    assert!(fetch_bytes(&memory, URL, HOSTS, &integrity, 1024, &|_, _| {}, &stop).is_ok());
+    assert!(
+        fetch_bytes(
+            Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+            Wanted { url: URL, hosts: HOSTS, pin: &integrity, limit: 1024 }
+        )
+        .is_ok()
+    );
     // Too large, refused, not there.
     assert_eq!(
-        fetch_bytes(&memory, URL, HOSTS, &sha256(b"the archive"), 4, &|_, _| {}, &stop),
+        fetch_bytes(
+            Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+            Wanted { url: URL, hosts: HOSTS, pin: &sha256(b"the archive"), limit: 4 }
+        ),
         Err(FetchError::TooLarge(URL.into()))
     );
     assert!(matches!(
-        fetch_bytes(&memory, "https://example.com/x", HOSTS, &sha256(b""), 4, &|_, _| {}, &stop),
+        fetch_bytes(
+            Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+            Wanted { url: "https://example.com/x", hosts: HOSTS, pin: &sha256(b""), limit: 4 }
+        ),
         Err(FetchError::Refused(_))
     ));
     assert!(
@@ -95,7 +105,10 @@ fn a_download_is_checked_against_its_pin() {
         "a refused URL is never asked"
     );
     assert!(matches!(
-        fetch_bytes(&memory, "https://nodejs.org/none", HOSTS, &sha256(b""), 4, &|_, _| {}, &stop),
+        fetch_bytes(
+            Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+            Wanted { url: "https://nodejs.org/none", hosts: HOSTS, pin: &sha256(b""), limit: 4 }
+        ),
         Err(FetchError::Status(404, _))
     ));
 }
@@ -105,9 +118,11 @@ fn no_network_is_said_as_such() {
     let memory = Memory::default();
     memory.serve(URL, b"x".to_vec());
     memory.set_offline(true);
-    let error =
-        fetch_bytes(&memory, URL, HOSTS, &sha256(b"x"), 10, &|_, _| {}, &AtomicBool::new(false))
-            .unwrap_err();
+    let error = fetch_bytes(
+        Going { fetch: &memory, progress: &|_, _| {}, stop: &AtomicBool::new(false) },
+        Wanted { url: URL, hosts: HOSTS, pin: &sha256(b"x"), limit: 10 },
+    )
+    .unwrap_err();
     assert!(error.offline(), "{error}");
     assert!(!FetchError::Mismatch(URL.into()).offline());
 }
@@ -122,21 +137,20 @@ fn a_broken_off_download_is_resumed_where_it_stopped() {
     memory.cut_next_after(30_000);
     let stop = AtomicBool::new(false);
     let pin = sha256(&body);
-    let first =
-        fetch_file(&memory, URL, HOSTS, &part, &pin, 1 << 20, &|_, _| {}, &stop).unwrap_err();
+    let first = fetch_file(
+        Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+        Wanted { url: URL, hosts: HOSTS, pin: &pin, limit: 1 << 20 },
+        &part,
+    )
+    .unwrap_err();
     assert!(first.offline(), "{first}");
     // What came is kept.
     assert_eq!(std::fs::metadata(&part).unwrap().len(), 30_000);
     let got = Mutex::new(Vec::new());
     fetch_file(
-        &memory,
-        URL,
-        HOSTS,
+        Going { fetch: &memory, progress: &|r, _| got.lock().unwrap().push(r), stop: &stop },
+        Wanted { url: URL, hosts: HOSTS, pin: &pin, limit: 1 << 20 },
         &part,
-        &pin,
-        1 << 20,
-        &|r, _| got.lock().unwrap().push(r),
-        &stop,
     )
     .unwrap();
     assert_eq!(std::fs::read(&part).unwrap(), body);
@@ -152,13 +166,21 @@ fn a_part_that_does_not_match_is_removed() {
     let memory = Memory::default();
     memory.serve(URL, b"what came".to_vec());
     let stop = AtomicBool::new(false);
-    let error =
-        fetch_file(&memory, URL, HOSTS, &part, &sha256(b"what's pinned"), 1024, &|_, _| {}, &stop);
+    let error = fetch_file(
+        Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+        Wanted { url: URL, hosts: HOSTS, pin: &sha256(b"what's pinned"), limit: 1024 },
+        &part,
+    );
     assert_eq!(error, Err(FetchError::Mismatch(URL.into())));
     assert!(!part.exists());
     // A part longer than the file (it changed): from the start again.
     std::fs::write(&part, vec![0u8; 50]).unwrap();
-    fetch_file(&memory, URL, HOSTS, &part, &sha256(b"what came"), 1024, &|_, _| {}, &stop).unwrap();
+    fetch_file(
+        Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+        Wanted { url: URL, hosts: HOSTS, pin: &sha256(b"what came"), limit: 1024 },
+        &part,
+    )
+    .unwrap();
     assert_eq!(std::fs::read(&part).unwrap(), b"what came");
 }
 
@@ -170,7 +192,11 @@ fn a_stopped_download_keeps_what_came() {
     memory.serve(URL, vec![7u8; 10_000]);
     let stop = AtomicBool::new(true);
     assert_eq!(
-        fetch_file(&memory, URL, HOSTS, &part, &sha256(&[7u8; 10_000]), 1 << 20, &|_, _| {}, &stop),
+        fetch_file(
+            Going { fetch: &memory, progress: &|_, _| {}, stop: &stop },
+            Wanted { url: URL, hosts: HOSTS, pin: &sha256(&[7u8; 10_000]), limit: 1 << 20 },
+            &part
+        ),
         Err(FetchError::Stopped)
     );
     assert!(part.exists());

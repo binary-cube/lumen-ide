@@ -1,5 +1,8 @@
 use super::*;
-use database::Collect;
+use database::{
+    Cancel, Collect, Driver, ForeignKey, IndexInfo, Isolation, Page, RoutineKind, RunOptions,
+    Secret, Session, Target, TxOptions,
+};
 
 #[test]
 fn values_are_typed_by_their_column() {

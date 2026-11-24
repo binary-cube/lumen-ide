@@ -660,7 +660,6 @@ impl EdgeScrollbar {
 
     /// Painted on a dividing line: its thread at rest on the line at `x` (from `top`,
     /// `height` high), so the line and the bar are one — no lane of its own beside it.
-    #[allow(clippy::too_many_arguments)]
     pub fn paint_on_line(
         &mut self,
         scene: &mut Scene,

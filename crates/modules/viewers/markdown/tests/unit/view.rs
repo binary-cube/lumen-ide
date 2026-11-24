@@ -61,6 +61,18 @@ fn saving_asks_for_a_path_named_after_the_title() {
     std::fs::create_dir_all(&dir).expect("dir");
     let path = dir.join("d.svg");
     assert!(view.command(&format!("picked-save:{}", path.display())));
+    // Written on the pool, never by the command: told once done.
+    let started = std::time::Instant::now();
+    let notes = loop {
+        let (_, notes) = view.settle();
+        if !notes.is_empty() {
+            break notes;
+        }
+        assert!(started.elapsed().as_secs() < 20, "the file is written");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!(notes.len(), 1);
+    assert!(!view.waiting());
     assert!(std::fs::read_to_string(&path).expect("written").starts_with("<svg"));
     let _ = std::fs::remove_dir_all(&dir);
 }

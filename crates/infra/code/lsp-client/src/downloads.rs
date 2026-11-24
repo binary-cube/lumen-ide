@@ -406,13 +406,9 @@ fn assemble_into(
         let limit =
             if archive.size > 0 { archive.size + archive.size / 2 + (1 << 20) } else { 1 << 30 };
         fetch::fetch_file(
-            fetch,
-            &archive.url,
+            pinned_downloads::fetch::Going { fetch, progress: &|got, _| progress(got), stop },
+            (&archive.url, &Pin::Sha256(archive.sha256.clone()), limit),
             part,
-            &Pin::Sha256(archive.sha256.clone()),
-            limit,
-            &|got, _| progress(got),
-            stop,
         )?;
         before += std::fs::metadata(part).map_or(archive.size, |m| m.len());
         let rules = Rules {
@@ -441,12 +437,8 @@ fn assemble_into(
     for package in c.packages.iter().filter(|p| p.applies(platform)) {
         let at = before;
         let bytes = fetch::fetch_bytes(
-            fetch,
-            &package.url,
-            &Pin::Integrity(package.integrity.clone()),
-            MAX_PACKAGE,
-            &|got, _| progress(at + got),
-            stop,
+            pinned_downloads::fetch::Going { fetch, progress: &|got, _| progress(at + got), stop },
+            (&package.url, &Pin::Integrity(package.integrity.clone()), MAX_PACKAGE),
         )?;
         before += bytes.len() as u64;
         let rules = Rules {
@@ -462,12 +454,8 @@ fn assemble_into(
     for file in &c.files {
         let at = before;
         let bytes = fetch::fetch_bytes(
-            fetch,
-            &file.url,
-            &Pin::Sha256(file.sha256.clone()),
-            MAX_PACKAGE,
-            &|got, _| progress(at + got),
-            stop,
+            pinned_downloads::fetch::Going { fetch, progress: &|got, _| progress(at + got), stop },
+            (&file.url, &Pin::Sha256(file.sha256.clone()), MAX_PACKAGE),
         )?;
         before += bytes.len() as u64;
         if pinned_downloads::paths::pruned_any(&c.prune, &file.path) {

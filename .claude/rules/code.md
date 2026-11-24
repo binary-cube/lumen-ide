@@ -46,6 +46,14 @@ Part of the project's rules: [index](project-conventions.md). Related: [modules]
   it gives or does (`listed()`, `ask_wanted()`).
 - **Constants, never magic numbers**: a size, a delay, a limit is a named `const` with a
   doc comment saying its unit and why that value (`/// The bytes read at a time.`).
+- **Data goes in DTOs, never long lists of arguments** (asked 2026-11-24): what a
+  function, a constructor or a contract takes is a named struct of its own (its fields
+  documented, `Default` where a field has an obvious one, new fields added without
+  touching the callers), or a few small tuples of what belongs together
+  (`(doc, folds)`). Never `#[allow(clippy::too_many_arguments)]` (none is left): clippy refuses
+  the long list, `cargo xtask check-deps` refuses allowing it, for the whole project. The same for what modules
+  pass each other (a request's, an event's payload): a struct that can grow, not a
+  function with one argument more each time.
 - **Small functions, early returns** (`let … else { return }`), `match` over chains of
   `if`; no `unwrap`/`expect` outside tests (clippy forbids them: handle the `None`).
 - **One way of doing a thing**: before writing a helper, look for it (`codegraph explore`,

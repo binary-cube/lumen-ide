@@ -24,9 +24,14 @@ use crate::splitter::Orientation;
 use ui_components::scrollbar::{ScrollMetrics, Scrollbar, ScrollbarStyle};
 
 mod access;
+mod decorations;
 mod errors;
 mod gutter;
+mod highlights;
+mod hits;
 mod text;
+
+pub use decorations::*;
 
 use display::*;
 mod display;
@@ -34,18 +39,9 @@ mod rows;
 mod scroll;
 mod wrap;
 
+pub use rows::RowMove;
 use rows::Seg;
 use wrap::WrapRows;
-
-/// A colored span of text (e.g. from syntax highlighting).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ColorSpan {
-    pub range: Range<usize>,
-    pub color: Rgba,
-    /// The theme's face for it (drawn in the code font's bold / italic, as wide).
-    pub bold: bool,
-    pub italic: bool,
-}
 
 /// The columns a caret's position is shaped in steps of (see `EditorView::x_in_line`).
 const X_STEP: usize = 1024;
@@ -57,97 +53,6 @@ const LONG_LINE: usize = 16 * 1024;
 /// A byte's face: plain, or these bits.
 const BOLD: u8 = 1;
 const ITALIC: u8 = 2;
-
-/// Everything drawn over the text, coming from outside the view.
-#[derive(Debug, Clone, Copy)]
-pub struct Decorations<'a> {
-    /// In order of application: on overlap, the last one wins.
-    pub colors: &'a [ColorSpan],
-    /// Search matches, sorted.
-    pub matches: &'a [Range<usize>],
-    pub current_match: Option<&'a Range<usize>>,
-    pub folds: &'a Folds,
-    /// Error ranges (sorted): squiggly underline and marks on the scroll strip.
-    pub errors: &'a [Range<usize>],
-    /// Deprecated names (sorted): struck through, marks on the scroll strip.
-    pub deprecated: &'a [Range<usize>],
-    /// Other warnings (sorted, e.g. an extension missing from `composer.json`): a yellow
-    /// squiggle, marks on the scroll strip.
-    pub warnings: &'a [Range<usize>],
-    /// Unused code (sorted): dimmed.
-    pub unused: &'a [Range<usize>],
-    /// The symbol under the mouse with ⌘ held: can be clicked to go to the declaration.
-    pub link: Option<&'a Range<usize>>,
-    /// Occurrences of the selected word (sorted): subtle background and marks on the scroll strip.
-    pub occurrences: &'a [Range<usize>],
-    /// Colors written in the code: (line, color), sorted; swatch in the gutter.
-    pub swatches: &'a [(u32, Rgba)],
-    /// The marks of the lines a module decorates (sorted; the lines changed since the last
-    /// commit): bars in the gutter.
-    pub vcs: &'a [workbench_model::LineMark],
-    /// Per line, its annotation (git blame) when shown; empty otherwise.
-    pub annotations: &'a [Option<workbench_model::LineAnnotation>],
-    /// Changes whenever the errors, the warnings or the occurrences are recomputed (also
-    /// at the same document version): the scroll strip's lines are kept for it.
-    pub marks_generation: u64,
-    /// The statements a module marks (a query console's: running, done, failed), sorted:
-    /// a dot in the gutter on each one's first line.
-    pub statements: &'a [StatementLines],
-    /// Lines drawn highlighted (a console's statement Run would run): the first and the one
-    /// after the last.
-    pub highlight: Option<(usize, usize)>,
-    /// The lines of the statement the cursor is in (a console's: what Run runs), the first
-    /// and the one after the last: a bar in the gutter beside them.
-    pub current: Option<(usize, usize)>,
-    /// A place pointed at (bytes) and its color: a profile's finding in a console — the
-    /// text tinted and outlined, its lines lightly tinted.
-    pub focus: Option<(usize, usize, Rgba)>,
-    /// The code actions' bulb, beside the cursor's line.
-    pub bulb: Option<Bulb>,
-    /// The lenses after their lines' text (sorted by line).
-    pub lenses: &'a [LineLens],
-    /// What a module hides (a `.env` file's secrets), sorted: drawn as marks of the same
-    /// length (`workbench_model::concealment::mask`), the text unchanged.
-    pub concealed: &'a [Range<usize>],
-}
-
-/// The bulb beside a line: code actions are there at the cursor (`fix`: a quick fix among
-/// them, drawn brighter).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Bulb {
-    pub line: u32,
-    pub fix: bool,
-}
-
-/// A note written after a line's text (a code lens: `2 usages · 1 implementation`): its
-/// parts, each clicked on its own.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LineLens {
-    pub line: u32,
-    pub parts: Vec<String>,
-}
-
-/// A hint shown inside the text, before byte `offset` (an inlay: a parameter's name): room
-/// is made for it in its row, the text itself is unchanged.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Inlay {
-    pub offset: usize,
-    pub label: String,
-}
-
-impl Inlay {
-    /// The columns it takes in its row (its label and a space after it).
-    fn columns(&self) -> usize {
-        self.label.chars().count() + 1
-    }
-}
-
-/// A statement's lines as a module marks them in the gutter (0-based, end exclusive).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatementLines {
-    pub lines: Range<usize>,
-    pub state: ui_components::editor_toolbar::MarkState,
-}
 
 /// What the strip's mark lines were computed for: the document version, the lists'
 /// generation ([`Decorations::marks_generation`]) and, per list, its length and its first
@@ -163,28 +68,6 @@ fn mark_key(version: u64, generation: u64, lists: [&[Range<usize>]; 4]) -> MarkK
         (l.len(), l.first().map_or(0, |r| r.start), l.last().map_or(0, |r| r.start))
     };
     (version, generation, lists.map(sum))
-}
-
-/// What an error's preview shows: its range, the header (message, code, line), the colors.
-#[derive(Debug, Clone)]
-pub struct ErrorPreviewSpec<'a> {
-    pub error: Range<usize>,
-    pub message: &'a str,
-    pub code: Option<&'a str>,
-    pub line_label: &'a str,
-    pub colors: &'a [ColorSpan],
-}
-
-/// What a problem tooltip shows.
-#[derive(Debug, Clone, Copy)]
-pub struct ErrorTip<'a> {
-    pub message: &'a str,
-    /// The code it is about, in a pill.
-    pub code: Option<&'a str>,
-    /// A warning (e.g. deprecated): the warning color instead of the error one.
-    pub warning: bool,
-    /// Unused code: a neutral tone.
-    pub weak: bool,
 }
 
 /// Dimensions computed for the current scale factor, in physical pixels.
@@ -244,21 +127,6 @@ struct Row {
     line: u32,
     top: f32,
     baseline: f32,
-}
-
-/// A visible row while its highlights are collected: its byte range, its top, where its
-/// text starts and how wide it is, the x (from `x0`) of a byte offset in it.
-struct RowSpan<'a> {
-    start: usize,
-    end: usize,
-    /// Its line goes on in the next row (wrapped): what starts at `end` is that row's.
-    continues: bool,
-    top: f32,
-    x0: f32,
-    width: f32,
-    layout: &'a Layout,
-    scale: f32,
-    x_of: &'a dyn Fn(usize) -> f32,
 }
 
 /// Where the vertical strip's marks go: its track, the span the thumb moves along, the
@@ -383,6 +251,11 @@ pub struct EditorView {
     /// its rows.
     wrap_parts: Vec<Range<usize>>,
     wrap_parts_for: Option<(kernel::DocumentId, u64, usize, usize, u32)>,
+    /// The hints those parts were wrapped with (kept: their list is the key, never an
+    /// address another list could take).
+    wrap_parts_hints: Option<Arc<[Inlay]>>,
+    /// The loaded line's later rows' indentation (columns), wrapped with its parts.
+    wrap_hang: usize,
     /// The line in `line`: its document, version and number (what its parts are for).
     loaded: Option<(kernel::DocumentId, u64, usize)>,
     /// The visible rows' parts of their lines (beside `lines`).
@@ -390,6 +263,9 @@ pub struct EditorView {
     /// Where the row drawn now starts in its line's display (its glyphs' bytes are from
     /// there): 0 but for a wrapped line's later rows.
     row_base: usize,
+    /// How far right the row drawn now starts (pixels): a wrapped line's later rows, under
+    /// its text; 0 otherwise.
+    row_shift: f32,
     /// How many times [`Self::longest_line`] was worked out (the tests check it's not
     /// per frame).
     #[cfg(test)]
@@ -464,9 +340,12 @@ impl EditorView {
             wrap_rows: WrapRows::default(),
             wrap_parts: Vec::new(),
             wrap_parts_for: None,
+            wrap_parts_hints: None,
+            wrap_hang: 0,
             loaded: None,
             segs: Vec::new(),
             row_base: 0,
+            row_shift: 0.0,
             #[cfg(test)]
             width_scans: 0,
         }
@@ -601,44 +480,6 @@ impl EditorView {
         Some(windows)
     }
 
-    /// Updates the arrow under the mouse. Returns `true` if a redraw is needed.
-    pub fn hover(&mut self, p: Point, doc: &Document, folds: &Folds) -> bool {
-        let hovered = self.fold_marker_at(p, doc, folds).or_else(|| self.fold_pill_at(p));
-        let changed = hovered != self.hovered_marker;
-        self.hovered_marker = hovered;
-        let now = std::time::Instant::now();
-        let (v_held, h_held) = self.bars_held();
-        let (v_seen, h_seen) = (self.vauto.showing(now, v_held), self.hauto.showing(now, h_held));
-        let bars = self.hover_bars(p);
-        let v_seen = self.vauto.pointer(self.vbar.is_hovered(), v_seen, true, now);
-        let h_seen = self.hauto.pointer(self.hbar.is_hovered(), h_seen, true, now);
-        let bars = bars && (v_seen || h_seen);
-        let error = self.error_mark_hit(p);
-        let error_changed = error.map(|e| e.0) != self.hovered_error.map(|e| e.0);
-        self.hovered_error = error;
-        if error_changed {
-            self.preview = error.map(|(offset, _)| {
-                let mut appear = Tween::new(0.0, Duration::from_millis(150));
-                appear.retarget(1.0);
-                (offset, appear)
-            });
-        }
-        // The lane's marks grow under the mouse (the lane always shows).
-        let wide = self.vbar.is_hovered() || error.is_some();
-        let widen = self.bar_wide.retarget(if wide { 1.0 } else { 0.0 });
-        changed | error_changed | bars | widen
-    }
-
-    /// The mouse left this editor (another group, a panel over it): nothing stays hovered
-    /// (the widened scroll strip shrinks back).
-    pub fn unhover(&mut self, doc: &Document, folds: &Folds) -> bool {
-        let hovered = self.vbar.is_hovered()
-            || self.hbar.is_hovered()
-            || self.hovered_marker.is_some()
-            || self.hovered_error.is_some();
-        hovered && self.hover(Point::new(f32::MIN, f32::MIN), doc, folds)
-    }
-
     /// Its scrollbars held shown: the mouse on one since it showed, or one dragged.
     fn bars_held(&self) -> (bool, bool) {
         (
@@ -703,108 +544,6 @@ impl EditorView {
         let row = Rect::new(badge.min_x() + px(10.0), badge.min_y(), badge.size.width, h);
         let style = ui_kit::KeyHintsStyle { text: palette.accent, ..style };
         ui_kit::paint_key_hints(layer, text, &[(&[key], label)], row, &style);
-    }
-
-    /// The line and column (in displayed characters) under `p`, also past the end of the line
-    /// (for column selection).
-    pub fn column_at(
-        &mut self,
-        p: Point,
-        doc: &Document,
-        folds: &Folds,
-        text: &mut TextSystem,
-        palette: &Palette,
-    ) -> (usize, usize) {
-        let layout = self.layout(text, doc, palette);
-        self.refresh_rows(doc, folds);
-        let (line, k) = self.row_at_y(p.y, doc, folds, &layout);
-        let line = line as usize;
-        let x = p.x - self.bounds.min_x() - layout.text_left + self.scroll_x;
-        let col = (x / layout.advance.max(1.0)).round().max(0.0) as usize;
-        if k == 0 {
-            return (line, col);
-        }
-        // A wrapped line's later row: its columns go on from where the row starts.
-        self.load_line(doc, line);
-        let seg = self.seg_of(doc, k);
-        let tab = doc.tab_width();
-        (line, col + source_to_display_with(&self.line, seg.from, tab, &self.line_inlays))
-    }
-
-    /// The line of the collapsed region whose label (`⋯`) is under point `p`.
-    pub fn fold_pill_at(&self, p: Point) -> Option<u32> {
-        self.pills.iter().find(|(r, _)| r.contains(p)).map(|(_, line)| *line)
-    }
-
-    /// The document offset under point `p` (physical pixels).
-    pub fn offset_at(
-        &mut self,
-        p: Point,
-        doc: &Document,
-        folds: &Folds,
-        text: &mut TextSystem,
-        palette: &Palette,
-    ) -> usize {
-        let layout = self.layout(text, doc, palette);
-        let buffer = doc.buffer();
-        self.refresh_rows(doc, folds);
-        let (line, k) = self.row_at_y(p.y, doc, folds, &layout);
-        let line = line as usize;
-        self.load_line(doc, line);
-        let seg = self.seg_of(doc, k);
-        let x = p.x - self.bounds.min_x() - layout.text_left + self.scroll_x;
-        buffer.line_start(line) + self.byte_in_row(text, doc, palette, seg, x)
-    }
-
-    /// The byte of the line in `self.line` at `x` from the start of its row `seg` (past a
-    /// row's end that isn't the line's: its last character, the next row starting at it).
-    fn byte_in_row(
-        &mut self,
-        text: &mut TextSystem,
-        doc: &Document,
-        palette: &Palette,
-        seg: Seg,
-        x: f32,
-    ) -> usize {
-        if x <= 0.0 {
-            return seg.from;
-        }
-        let tab = doc.tab_width();
-        expand_tabs_with(&self.line, usize::MAX, tab, &self.line_inlays, &mut self.display);
-        let font = self.font(palette);
-        let shaped = text.shape_line(&self.display, &font);
-        // On a wrapped line's row: from where the row starts.
-        let base = source_to_display_with(&self.line, seg.from, tab, &self.line_inlays);
-        let disp = shaped.byte_at(x + shaped.x_at(base), self.display.len());
-        let mut at = display_to_source_with(&self.line, disp, tab, &self.line_inlays).max(seg.from);
-        if !seg.last && at >= seg.to {
-            at = self.line[..seg.to].char_indices().next_back().map_or(seg.from, |(i, _)| i);
-        }
-        at
-    }
-
-    /// The primary cursor's rectangle, for positioning the IME window.
-    pub fn caret_rect(
-        &mut self,
-        doc: &Document,
-        folds: &Folds,
-        text: &mut TextSystem,
-        palette: &Palette,
-    ) -> Rect {
-        let layout = self.layout(text, doc, palette);
-        let buffer = doc.buffer();
-        let head = doc.selections().primary().head;
-        let line = buffer.line_of(head);
-        self.refresh_rows(doc, folds);
-        let (row, seg) = self.row_of_offset(doc, folds, head);
-        self.load_line(doc, line);
-        let x = self.x_in_row(text, doc, seg, head - buffer.line_start(line));
-        Rect::new(
-            self.bounds.min_x() + layout.text_left + x - self.scroll_x,
-            self.bounds.min_y() + row as f32 * layout.line_height - self.scroll_y,
-            layout.caret_width,
-            layout.line_height,
-        )
     }
 
     pub fn paint(
@@ -966,174 +705,6 @@ impl EditorView {
         Some(columns as f32 * advance)
     }
 
-    /// The current line, for each cursor without a selection; the lines a module highlights.
-    fn paint_current_lines(&self, f: &Frame<'_>, scene: &mut Scene, palette: &Palette) {
-        let (b, buffer) = (f.bounds, f.doc.buffer());
-        let background = scene.push_layer(Some(b));
-        if let Some((first, end)) = f.deco.highlight {
-            for (i, &line) in self.lines.iter().enumerate() {
-                if (first..end).contains(&(line as usize)) {
-                    background.quad(Quad::filled(
-                        Rect::new(b.min_x(), f.row_top(i), b.size.width, f.layout.line_height),
-                        palette.accent.with_alpha(0.08),
-                    ));
-                }
-            }
-        }
-        if let Some((from, to, color)) = f.deco.focus {
-            let (first, last) = (buffer.line_of(from), buffer.line_of(to));
-            for (i, &line) in self.lines.iter().enumerate() {
-                if (first..=last).contains(&(line as usize)) {
-                    background.quad(Quad::filled(
-                        Rect::new(b.min_x(), f.row_top(i), b.size.width, f.layout.line_height),
-                        color.with_alpha(0.07),
-                    ));
-                }
-            }
-        }
-        // Every row of the line (a wrapped one's too).
-        for sel in f.doc.selections().iter().filter(|s| s.is_empty()) {
-            let line = buffer.line_of(sel.head) as u32;
-            for (i, _) in self.lines.iter().enumerate().filter(|(_, l)| **l == line) {
-                background.quad(Quad::filled(
-                    Rect::new(b.min_x(), f.row_top(i), b.size.width, f.layout.line_height),
-                    palette.current_line,
-                ));
-            }
-        }
-    }
-
-    /// Distributes the colors over the visible rows once (keeping the order): `self.buckets`.
-    fn bucket_colors(&mut self, f: &Frame<'_>) {
-        let buffer = f.doc.buffer();
-        self.starts.clear();
-        self.starts.extend(self.lines.iter().map(|&l| buffer.line_start(l as usize)));
-        self.buckets.resize_with(self.lines.len(), Vec::new);
-        self.buckets.iter_mut().for_each(Vec::clear);
-        for (index, span) in f.deco.colors.iter().enumerate() {
-            // The first row of the line the span starts on (a wrapped line's rows share its
-            // start).
-            let last = self.starts.partition_point(|&s| s <= span.range.start).saturating_sub(1);
-            let line_start = self.starts.get(last).copied().unwrap_or(0);
-            let first = self.starts.partition_point(|&s| s < line_start);
-            for (i, start) in self.starts.iter().enumerate().skip(first) {
-                if *start >= span.range.end && i > first {
-                    break;
-                }
-                self.buckets[i].push(index);
-            }
-        }
-    }
-
-    /// What is drawn behind the visible rows' text (selections, squiggles, strike-throughs,
-    /// the link, occurrences, search matches), collected row by row and drawn together;
-    /// notes each row's indentation for the guides. Returns the widest row's width.
-    fn paint_highlights(
-        &mut self,
-        f: &Frame<'_>,
-        text: &mut TextSystem,
-        layer: &mut render_api::Layer,
-        palette: &Palette,
-    ) -> f32 {
-        let (buffer, tab, deco) = (f.doc.buffer(), f.doc.tab_width(), &f.deco);
-        let selection_color =
-            if f.focused { palette.selection } else { palette.selection_inactive };
-        let mut widest: f32 = 0.0;
-        self.link_rect = None;
-        let mut rects = std::mem::take(&mut self.rects);
-        rects.clear();
-        let mut focus: Vec<(Rect, Rgba)> = Vec::new();
-        self.indents.clear();
-        for i in 0..self.lines.len() {
-            let line = self.lines[i] as usize;
-            let base = self.load_row(f.doc, i, f.max_columns);
-            let seg = self.seg(i);
-            // A wrapped line's later rows: no guides (their text starts at the left).
-            self.indents.push(if seg.first { indent_width(&self.line, tab) } else { Some(0) });
-            let shaped = text.shape_line(&self.display, &f.font);
-            widest = widest.max(shaped.width);
-            let line_start = buffer.line_start(line);
-            let (start, end) = if seg.first && seg.last {
-                (line_start, buffer.line_end(line))
-            } else {
-                let to = if seg.last { buffer.line_end(line) } else { line_start + seg.to };
-                (line_start + seg.from, to)
-            };
-            let inlays = &self.line_inlays;
-            let x_of = |offset: usize| {
-                let display = source_to_display_with(&self.line, offset - line_start, tab, inlays);
-                shaped.x_at(display.saturating_sub(base))
-            };
-            let row = RowSpan {
-                start,
-                end,
-                continues: !seg.last,
-                top: f.row_top(i),
-                x0: f.x0,
-                width: shaped.width,
-                layout: &f.layout,
-                scale: f.scale,
-                x_of: &x_of,
-            };
-            push_selections(&mut rects, &row, f.doc, selection_color, deco.current_match);
-            push_squiggles(&mut rects, &row, deco, palette);
-            push_strikes(&mut rects, &row, deco.deprecated, palette);
-            if let Some(rect) = push_link(&mut rects, &row, deco.link, palette) {
-                self.link_rect = Some(rect);
-            }
-            push_matches(&mut rects, &row, deco, palette);
-            if let Some((from, to, color)) = deco.focus
-                && from <= end
-                && to >= start
-            {
-                let (a, z) = (x_of(from.max(start)), x_of(to.min(end)));
-                let r = Rect::new(
-                    f.x0 + a - self.scale,
-                    row.top,
-                    (z - a).max(2.0) + 2.0 * self.scale,
-                    f.layout.line_height,
-                );
-                focus.push((r, color));
-            }
-        }
-        for &(rect, color) in &rects {
-            layer.quad(Quad::filled(rect, color).rounded(2.0 * self.scale));
-        }
-        // A finding's place: tinted in its color and outlined, over the other backgrounds.
-        for &(rect, color) in &focus {
-            layer.quad(
-                Quad::filled(rect, color.with_alpha(0.22))
-                    .rounded(3.0 * self.scale)
-                    .bordered(self.scale.round().max(1.0), color.with_alpha(0.9)),
-            );
-        }
-        self.rects = rects;
-        widest
-    }
-
-    /// The vertical guide at the ruler's column, when it is in view.
-    fn paint_ruler(&self, f: &Frame<'_>, layer: &mut render_api::Layer, palette: &Palette) {
-        let Some(column) = self.ruler else { return };
-        let (b, text_area) = (f.bounds, f.text_area);
-        let x = (f.x0 + column as f32 * f.layout.advance).round();
-        if x > text_area.min_x() && x < text_area.max_x() {
-            let ctx = crate::ds::Ctx::new(palette, self.scale);
-            crate::ds::divider_vertical(layer, &ctx, x, b.min_y(), b.max_y());
-        }
-    }
-
-    fn line_at_y(&self, y: f32, doc: &Document, folds: &Folds, layout: &Layout) -> u32 {
-        self.row_at_y(y, doc, folds, layout).0
-    }
-
-    /// The line and which of its rows is at `y` (the last row's below the text).
-    fn row_at_y(&self, y: f32, doc: &Document, folds: &Folds, layout: &Layout) -> (u32, u32) {
-        let row = ((y - self.bounds.min_y() + self.scroll_y) / layout.line_height).floor().max(0.0)
-            as u32;
-        let rows = self.total_rows(doc, folds);
-        self.row_at(folds, row.min(rows.saturating_sub(1)))
-    }
-
     fn font(&self, palette: &Palette) -> Font {
         Font::new(
             self.font_family.clone(),
@@ -1216,140 +787,6 @@ impl EditorView {
         self.gutter_digits = digits;
         layout
     }
-}
-
-/// The selections crossing the row — but the one that is the current search match (Find
-/// selects it): its outline shows it, and the text in it stays as readable as anywhere.
-fn push_selections(
-    rects: &mut Vec<(Rect, Rgba)>,
-    row: &RowSpan<'_>,
-    doc: &Document,
-    color: Rgba,
-    current_match: Option<&Range<usize>>,
-) {
-    let (start, end, layout, x_of) = (row.start, row.end, row.layout, row.x_of);
-    for sel in doc.selections().iter().filter(|s| !s.is_empty()) {
-        let r = sel.range();
-        let after = if row.continues { r.start >= end } else { r.start > end };
-        if r.end < start || after || current_match == Some(&r) {
-            continue;
-        }
-        let a = x_of(r.start.max(start));
-        // A selection running past the line end also includes `\n`: extend it a bit.
-        let z = if r.end > end { row.width + layout.advance * 0.6 } else { x_of(r.end) };
-        if z > a {
-            rects.push((Rect::new(row.x0 + a, row.top, z - a, layout.line_height), color));
-        }
-    }
-}
-
-/// Errors (red) and warnings (yellow): squiggly underline (small zigzag segments), at least
-/// one character.
-fn push_squiggles(
-    rects: &mut Vec<(Rect, Rgba)>,
-    row: &RowSpan<'_>,
-    deco: &Decorations<'_>,
-    palette: &Palette,
-) {
-    let (start, end, layout, x_of) = (row.start, row.end, row.layout, row.x_of);
-    for (list, color) in [(deco.warnings, palette.warning), (deco.errors, palette.danger)] {
-        let first = list.partition_point(|e| e.end < start);
-        for e in list[first..].iter().take_while(|e| e.start <= end) {
-            let a = x_of(e.start.clamp(start, end));
-            let z = x_of(e.end.clamp(start, end)).max(a + layout.advance);
-            let step = (3.0 * row.scale).round().max(2.0);
-            let thick = (1.5 * row.scale).max(1.0);
-            let base = row.top + layout.line_height - 2.5 * row.scale;
-            let mut x = a;
-            let mut up = false;
-            while x < z {
-                let w = step.min(z - x);
-                let y = if up { base - thick } else { base };
-                rects.push((Rect::new(row.x0 + x, y, w, thick), color));
-                x += step;
-                up = !up;
-            }
-        }
-    }
-}
-
-/// Deprecated: struck through.
-fn push_strikes(
-    rects: &mut Vec<(Rect, Rgba)>,
-    row: &RowSpan<'_>,
-    deprecated: &[Range<usize>],
-    palette: &Palette,
-) {
-    let (start, end, layout, x_of) = (row.start, row.end, row.layout, row.x_of);
-    let first = deprecated.partition_point(|d| d.end < start);
-    for d in deprecated[first..].iter().take_while(|d| d.start <= end) {
-        let a = x_of(d.start.clamp(start, end));
-        let z = x_of(d.end.clamp(start, end)).max(a + layout.advance);
-        let thick = row.scale.round().max(1.0);
-        let y = (row.top + layout.line_height / 2.0).round();
-        rects.push((Rect::new(row.x0 + a, y, z - a, thick), palette.warning));
-    }
-}
-
-/// The link (⌘ + hover), when it is on the row: a background and an underline. Returns
-/// where it is.
-fn push_link(
-    rects: &mut Vec<(Rect, Rgba)>,
-    row: &RowSpan<'_>,
-    link: Option<&Range<usize>>,
-    palette: &Palette,
-) -> Option<Rect> {
-    let link = link.filter(|l| l.start >= row.start && l.end <= row.end)?;
-    let (layout, x_of, top) = (row.layout, row.x_of, row.top);
-    let (a, z) = (x_of(link.start), x_of(link.end));
-    let rect = Rect::new(row.x0 + a, top, (z - a).max(layout.advance), layout.line_height);
-    rects.push((rect, palette.accent.with_alpha(0.12)));
-    let thick = row.scale.round().max(1.0);
-    let base = (top + layout.line_height - 3.0 * row.scale).round();
-    rects.push((Rect::new(rect.min_x(), base, rect.size.width, thick), palette.accent));
-    Some(rect)
-}
-
-/// Occurrences of the selected word: subtle background (below selection and search);
-/// then the search matches, the current one stronger.
-fn push_matches(
-    rects: &mut Vec<(Rect, Rgba)>,
-    row: &RowSpan<'_>,
-    deco: &Decorations<'_>,
-    palette: &Palette,
-) {
-    let (start, end, layout, x_of) = (row.start, row.end, row.layout, row.x_of);
-    let first_occ = deco.occurrences.partition_point(|m| m.end < start);
-    for m in deco.occurrences[first_occ..].iter().take_while(|m| m.start <= end) {
-        let (a, z) = (x_of(m.start.max(start)), x_of(m.end.min(end)));
-        let rect = Rect::new(row.x0 + a, row.top + 1.0, (z - a).max(2.0), layout.line_height - 2.0);
-        rects.push((rect, palette.accent.with_alpha(0.13)));
-    }
-    let first_match = deco.matches.partition_point(|m| m.end < start);
-    for m in deco.matches[first_match..].iter().take_while(|m| m.start <= end) {
-        let (a, z) = (x_of(m.start.max(start)), x_of(m.end.min(end)));
-        let rect = Rect::new(row.x0 + a, row.top, (z - a).max(2.0), layout.line_height);
-        if deco.current_match == Some(m) {
-            push_current_match(rects, rect, palette.search_match_current, row.scale);
-        } else {
-            rects.push((rect, palette.search_match));
-        }
-    }
-}
-
-/// The current search match: a faint fill (the text over it reads as anywhere else, in
-/// every theme, whatever its color — a comment's too) and a solid outline in the match's color (where it is, at a
-/// glance).
-fn push_current_match(rects: &mut Vec<(Rect, Rgba)>, rect: Rect, color: Rgba, scale: f32) {
-    let line = scale.round().max(1.0) * 1.5;
-    let line = line.round();
-    rects.push((rect, color.with_alpha(color.a.min(0.12))));
-    let edge = color.with_alpha(1.0);
-    let (x, y, w, h) = (rect.min_x(), rect.min_y(), rect.size.width, rect.size.height);
-    rects.push((Rect::new(x, y, w, line), edge));
-    rects.push((Rect::new(x, y + h - line, w, line), edge));
-    rects.push((Rect::new(x, y, line, h), edge));
-    rects.push((Rect::new(x + w - line, y, line, h), edge));
 }
 
 fn baseline(layout: &Layout, top: f32) -> f32 {

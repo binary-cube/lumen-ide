@@ -1,4 +1,8 @@
+use super::completion::{NARROWED, keyword_insert};
+use super::hover::strip_modifiers;
 use super::*;
+use crate::symbols::Visibility;
+use crate::{CompletionContext, ContextKind, Receiver, Target};
 
 #[test]
 fn signatures_and_parameters() {
@@ -209,14 +213,14 @@ fn a_word_typed_on_suggests_what_it_would_at_once() {
     }
     // Each run from nothing kept: the matches the keys before it left forgotten.
     fn fresh<T>(run: impl FnOnce() -> T) -> T {
-        super::NARROWED.with_borrow_mut(Vec::clear);
+        NARROWED.with_borrow_mut(Vec::clear);
         run()
     }
     let index = many_libraries();
     for typed in [["x->g", "x->ge", "x->get"], ["G", "Ga", "Gad"], ["l", "li", "lib_g"]] {
         let narrowed = fresh(|| {
             suggested(&index, typed[0]);
-            assert!(super::NARROWED.with_borrow(|kept| !kept.is_empty()), "{typed:?}");
+            assert!(NARROWED.with_borrow(|kept| !kept.is_empty()), "{typed:?}");
             suggested(&index, typed[1]);
             suggested(&index, typed[2])
         });

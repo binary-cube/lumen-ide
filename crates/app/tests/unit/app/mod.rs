@@ -1,3 +1,4 @@
+use super::chords::{altgr_text, chord};
 use super::*;
 
 fn key(c: &str, ctrl: bool, alt: bool, text: Option<&str>) -> KeyEvent {
@@ -128,7 +129,7 @@ fn a_frames_cost_is_recorded_only_while_recording() {
     };
     kernel::probe::start();
     for _ in 0..3 {
-        super::record_frame(&stats, 5);
+        super::frame::record_frame(&stats, 5);
     }
     let gathered = kernel::probe::take();
     kernel::probe::stop();
@@ -139,7 +140,7 @@ fn a_frames_cost_is_recorded_only_while_recording() {
     assert_eq!(counted("glyphs"), Some(900));
     let level = gathered.levels.iter().find(|l| l.0 == "render" && l.1 == "glyphs cached");
     assert_eq!(level.map(|l| l.3), Some(90));
-    super::record_frame(&stats, 5);
+    super::frame::record_frame(&stats, 5);
     kernel::probe::start();
     let after = kernel::probe::take();
     kernel::probe::stop();

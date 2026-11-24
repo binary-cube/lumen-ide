@@ -105,9 +105,7 @@ impl SearchField {
         placeholder: &str,
     ) {
         self.paint_with(
-            layer,
-            text,
-            icons,
+            (layer, text, icons),
             ctx,
             (rect, focused),
             placeholder,
@@ -117,12 +115,9 @@ impl SearchField {
 
     /// [`Self::paint`] with what the view adds (`extras`); returns the room kept on the right
     /// for the view to draw its own in (empty without one).
-    #[allow(clippy::too_many_arguments)]
     pub fn paint_with(
         &mut self,
-        layer: &mut Layer,
-        text: &mut TextSystem,
-        icons: &icons::Icons,
+        (layer, text, icons): (&mut Layer, &mut TextSystem, &icons::Icons),
         ctx: &Ctx<'_>,
         (rect, focused): (Rect, bool),
         placeholder: &str,

@@ -109,3 +109,37 @@ impl Workbench {
         }
     }
 }
+
+/// A highlight scope as the theme draws it: its color, bold, italic.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ScopeStyle {
+    pub color: Rgba,
+    pub bold: bool,
+    pub italic: bool,
+}
+
+impl ScopeStyle {
+    /// A colored span of `range` in this style.
+    pub(super) fn span(self, range: std::ops::Range<usize>) -> ColorSpan {
+        ColorSpan { range, color: self.color, bold: self.bold, italic: self.italic }
+    }
+}
+
+/// The color of a syntax capture in the theme: first the language-specific variant
+/// (`property.json`, `variable.php`), then the general one (`property`, `variable`), each
+/// with hierarchical fallback (`function.method` → `function`).
+pub(super) fn scope_color(
+    support: &LanguageSupport,
+    theme: Option<&ResolvedTheme>,
+    key: ScopeKey,
+) -> Option<ScopeStyle> {
+    let theme = theme?;
+    let (language, capture) = support.syntax.scope(key)?;
+    // Theme lookup is hierarchical: `property.json` falls back to `property` on its own.
+    let style = theme.syntax(&format!("{capture}.{language}"))?;
+    // Only bold / italic (no color of its own): the code's color.
+    let color = style.foreground.or_else(|| {
+        (style.bold || style.italic).then(|| theme.color("editor.foreground")).flatten()
+    })?;
+    Some(ScopeStyle { color, bold: style.bold, italic: style.italic })
+}

@@ -568,12 +568,24 @@ fn clicks_and_moves_follow_the_rows() {
     let left = view.bounds.min_x() + view.layout(&mut text, &doc, &palette).text_left;
     let at = view.offset_at(Point::new(left + 1.0, lh * 1.5), &doc, &folds, &mut text, &palette);
     assert_eq!(at, seg.from, "the second row's start");
-    let (down, goal) = view.moved_by_rows(&doc, &folds, &mut text, &palette, 2, None, 1);
+    let (down, goal) = view.moved_by_rows(
+        (&doc, &folds),
+        (&mut text, &palette),
+        RowMove { head: 2, goal: None, rows: 1 },
+    );
     assert!(view.segs[1].holds(down) && down >= seg.from, "the next row: {down}");
-    let (again, _) = view.moved_by_rows(&doc, &folds, &mut text, &palette, down, Some(goal), 1);
+    let (again, _) = view.moved_by_rows(
+        (&doc, &folds),
+        (&mut text, &palette),
+        RowMove { head: down, goal: Some(goal), rows: 1 },
+    );
     assert!(again > down);
     let rows = i64::from(view.total_rows(&doc, &folds));
-    let (end, _) = view.moved_by_rows(&doc, &folds, &mut text, &palette, 0, None, rows + 5);
+    let (end, _) = view.moved_by_rows(
+        (&doc, &folds),
+        (&mut text, &palette),
+        RowMove { head: 0, goal: None, rows: rows + 5 },
+    );
     assert_eq!(end, doc.buffer().len());
 }
 
@@ -616,4 +628,29 @@ fn a_very_long_wrapped_line_stays_quick() {
         view.caret_rect(&doc, &folds, &mut text, &palette);
     }
     assert!(started.elapsed() < std::time::Duration::from_secs(2), "{:?}", started.elapsed());
+}
+
+/// A wrapped line's later rows start at its indentation (under its text): a click there
+/// lands in the row's part, the caret is drawn where it is.
+#[test]
+fn wrapped_rows_hang_at_the_line_s_indentation() {
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let line = "        the quick brown fox jumps over the lazy dog and runs far away\nnext";
+    let doc = Document::new(line);
+    let folds = Folds::default();
+    let mut view = wrapping(&mut text, &doc, &folds);
+    assert!(view.segs.len() > 2 && !view.segs[1].first);
+    assert_eq!(view.segs[1].hang, 8, "under the text, at its indentation");
+    let layout = view.layout(&mut text, &doc, &palette);
+    let seg = view.segs[1];
+    let left = view.bounds.min_x() + layout.text_left;
+    let lh = view.line_height();
+    // Just past where the row starts (its hang): its part's start.
+    let at = Point::new(left + 8.0 * layout.advance + 1.0, lh * 1.5);
+    assert_eq!(view.offset_at(at, &doc, &folds, &mut text, &palette), seg.from);
+    let mut doc = doc;
+    document::commands::click(&mut doc, seg.from, false, false);
+    let caret = view.caret_rect(&doc, &folds, &mut text, &palette);
+    assert!((caret.min_x() - (left + 8.0 * layout.advance)).abs() < 1.0, "{caret:?}");
 }

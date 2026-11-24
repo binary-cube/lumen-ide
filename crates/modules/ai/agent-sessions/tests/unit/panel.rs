@@ -1,4 +1,6 @@
 use super::*;
+use crate::favorites::Label;
+use ui_components::{KeyReach, ToolPanel, ViewMenuEntry, ViewerCursor, ViewerKey};
 
 /// An agent of the test: its sessions given, its launches plain.
 #[derive(Debug)]

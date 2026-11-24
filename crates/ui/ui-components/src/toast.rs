@@ -332,7 +332,7 @@ impl ToastStack {
                 }
             };
             let placed = ui_kit::access::group(alert, || {
-                paint_card(layer, text, icons, &ctx, (card, toast), rect, self.hover, ring)
+                paint_card((layer, text, icons), &ctx, (card, toast), (rect, self.hover), ring)
             });
             self.placed.push(placed);
         }
@@ -430,15 +430,11 @@ impl<'a> SmallRev<'a> {
 }
 
 /// One card at `rect`.
-#[allow(clippy::too_many_arguments)]
 fn paint_card(
-    layer: &mut Layer,
-    text: &mut TextSystem,
-    icons: &icons::Icons,
+    (layer, text, icons): (&mut Layer, &mut TextSystem, &icons::Icons),
     ctx: &Ctx<'_>,
     (card, toast): (&CardLayout, &Toast),
-    rect: Rect,
-    hover: Option<ToastHit>,
+    (rect, hover): (Rect, Option<ToastHit>),
     ring: Option<(&mut ProgressRing, u16)>,
 ) -> Placed {
     let p = ctx.palette;

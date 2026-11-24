@@ -50,23 +50,29 @@ pub fn ask_name(host: &mut dyn WorkbenchHost, id: ConsoleId) -> bool {
         host.notify(Notification::warning(t("console.gone")));
         return false;
     };
-    let taken = consoles
-        .consoles_of(spec.source)
-        .into_iter()
-        .filter(|s| s.id != id)
-        .map(|s| s.name)
-        .collect();
     let source_name =
         consoles.access().and_then(|a| a.source(spec.source)).map(|b| b.name).unwrap_or_default();
-    let request = RenameRequest {
-        id: NEXT.fetch_add(1, Ordering::Relaxed),
-        project,
-        console: id,
-        name: spec.name,
-        source_name,
-        taken,
-    };
-    host.open_modal(&t("console.rename_title"), EXTENSION, &request)
+    // The names taken as on disk, looked at in the background; the modal opens with them.
+    host.spawn(Box::new(move || {
+        let taken: Vec<String> = consoles
+            .consoles_of(spec.source)
+            .into_iter()
+            .filter(|s| s.id != id)
+            .map(|s| s.name)
+            .collect();
+        Box::new(move |host: &mut dyn WorkbenchHost| {
+            let request = RenameRequest {
+                id: NEXT.fetch_add(1, Ordering::Relaxed),
+                project,
+                console: id,
+                name: spec.name,
+                source_name,
+                taken,
+            };
+            host.open_modal(&t("console.rename_title"), EXTENSION, &request);
+        }) as workbench_model::Completion
+    }));
+    true
 }
 
 /// Console `id` renamed `name` (its file, then everything following it). `true` if it was.

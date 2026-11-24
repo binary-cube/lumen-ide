@@ -1,6 +1,7 @@
 //! The window's keyboard and mouse (including a bottom view taking the whole keyboard,
 //! the terminal).
 
+use super::chords::{altgr_text, chord};
 use super::*;
 
 impl EditorApp {

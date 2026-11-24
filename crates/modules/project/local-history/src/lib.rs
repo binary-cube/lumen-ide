@@ -180,10 +180,10 @@ struct ShowHistory;
 impl CommandHandler for ShowHistory {
     /// Only for the project's files (one opened from elsewhere has no history here).
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        let (Some(file), Some(root)) = (host.active_file(), host.project_root()) else {
+        let (Some(path), Some(root)) = (host.active_path(), host.project_root()) else {
             return false;
         };
-        version_control::relative_path(&root, &file.path).is_some()
+        version_control::relative_path(&root, &path).is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

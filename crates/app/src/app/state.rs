@@ -1,6 +1,7 @@
 //! The window's state, grouped by purpose: the window as shown, the mouse, the frames,
 //! the start (splash), what was applied from the shared state, and what waits on an answer.
 
+use super::frame::ResizeTest;
 use super::*;
 
 /// The window as the system shows it.

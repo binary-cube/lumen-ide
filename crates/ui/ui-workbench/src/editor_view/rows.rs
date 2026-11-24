@@ -7,19 +7,27 @@ use super::*;
 
 /// The part of its line a row shows: bytes `from..to` of the line, whether it's the
 /// line's first row (its number) and its last (what's after the text: a folded label, a
-/// lens; else the wrap's mark at its end).
+/// lens; else the wrap's mark at its end), and how many columns in it starts (a wrapped
+/// line's later rows: under its text, at its indentation).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct Seg {
     pub from: usize,
     pub to: usize,
     pub first: bool,
     pub last: bool,
+    pub hang: usize,
+}
+
+/// The columns a wrapped line's later rows start in: its indentation (the text under its
+/// first row's), never more than half the row.
+pub(super) fn hang_of(line: &str, tab: u32, columns: usize) -> usize {
+    indent_width(line, tab).unwrap_or(0).min(columns / 2)
 }
 
 impl Seg {
     /// The whole line (`len` bytes): its only row.
     pub fn whole(len: usize) -> Self {
-        Self { from: 0, to: len, first: true, last: true }
+        Self { from: 0, to: len, first: true, last: true, hang: 0 }
     }
 
     /// Whether the line's byte `at` shows on this row (a break belongs to the row after
@@ -27,6 +35,15 @@ impl Seg {
     pub fn holds(&self, at: usize) -> bool {
         self.from <= at && (at < self.to || (self.last && at == self.to))
     }
+}
+
+/// A cursor's move over the rows shown: from byte `head`, `rows` rows (down when positive),
+/// at the place along the row it keeps (`goal`, in columns; `None`: where it is now).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RowMove {
+    pub head: usize,
+    pub goal: Option<usize>,
+    pub rows: i64,
 }
 
 impl EditorView {
@@ -48,7 +65,7 @@ impl EditorView {
     /// The wrapped rows brought up to date (nothing when wrap is off or nothing changed).
     pub(super) fn refresh_rows(&mut self, doc: &Document, folds: &Folds) {
         if self.wraps() {
-            self.wrap_rows.refresh(doc, folds, self.wrap_columns);
+            self.wrap_rows.refresh(doc, folds, self.wrap_columns, &self.inlays);
         }
     }
 
@@ -93,11 +110,13 @@ impl EditorView {
         self.wrap_loaded(doc);
         let parts = &self.wrap_parts;
         let k = (k as usize).min(parts.len().saturating_sub(1));
+        let hang = if k == 0 { 0 } else { self.wrap_hang };
         parts.get(k).map_or(Seg::whole(self.line.len()), |r| Seg {
             from: r.start,
             to: r.end,
             first: k == 0,
             last: k + 1 >= parts.len(),
+            hang,
         })
     }
 
@@ -105,17 +124,23 @@ impl EditorView {
     /// each row of a long line drawn, the cursor's row found — read them, never rewrap).
     fn wrap_loaded(&mut self, doc: &Document) {
         let Some((id, version, line)) = self.loaded else { return };
+        // The hints shown in it count too (a new list: its rows again).
         let key = (id, version, line, self.wrap_columns, doc.tab_width());
-        if self.wrap_parts_for == Some(key) {
+        let same_hints =
+            self.wrap_parts_hints.as_ref().is_some_and(|h| Arc::ptr_eq(h, &self.inlays));
+        if self.wrap_parts_for == Some(key) && same_hints {
             return;
         }
-        ui_components::text_options::wrap_rows(
+        let tab = doc.tab_width();
+        self.wrap_hang = hang_of(&self.line, tab, self.wrap_columns);
+        ui_components::text_options::wrap_rows_with(
             &self.line,
-            self.wrap_columns,
-            doc.tab_width(),
+            (self.wrap_columns, tab, self.wrap_hang),
+            &self.line_inlays,
             &mut self.wrap_parts,
         );
         self.wrap_parts_for = Some(key);
+        self.wrap_parts_hints = Some(Arc::clone(&self.inlays));
     }
 
     /// The row (and its part) the byte `offset` of `doc` shows on.
@@ -175,6 +200,7 @@ impl EditorView {
             to: usize::MAX,
             first: true,
             last: true,
+            hang: 0,
         })
     }
 
@@ -219,16 +245,11 @@ impl EditorView {
     /// wrap: the row that far, at the same place along it (`goal`: that place, in columns
     /// from the row's start, kept from the first move); past the first or the last row, the
     /// text's start or end. Returns the byte and the place kept.
-    #[allow(clippy::too_many_arguments)]
     pub fn moved_by_rows(
         &mut self,
-        doc: &Document,
-        folds: &Folds,
-        text: &mut TextSystem,
-        palette: &Palette,
-        head: usize,
-        goal: Option<usize>,
-        rows: i64,
+        (doc, folds): (&Document, &Folds),
+        (text, palette): (&mut TextSystem, &Palette),
+        RowMove { head, goal, rows }: RowMove,
     ) -> (usize, usize) {
         let advance = self.layout(text, doc, palette).advance.max(1.0);
         self.refresh_rows(doc, folds);
@@ -236,9 +257,10 @@ impl EditorView {
         let (row, seg) = self.row_of_offset(doc, folds, head);
         let line = buffer.line_of(head);
         self.load_line(doc, line);
+        // The place on screen (its row's hang counted): a row that hangs in keeps it.
         let goal = goal.unwrap_or_else(|| {
             let x = self.x_in_row(text, doc, seg, head - buffer.line_start(line));
-            (x / advance).round() as usize
+            (x / advance).round() as usize + seg.hang
         });
         let target = i64::from(row) + rows;
         let total = i64::from(self.total_rows(doc, folds));
@@ -251,7 +273,8 @@ impl EditorView {
         let (line, k) = self.row_at(folds, target as u32);
         self.load_line(doc, line as usize);
         let seg = self.seg_of(doc, k);
-        let at = self.byte_in_row(text, doc, palette, seg, goal as f32 * advance);
+        let along = goal.saturating_sub(seg.hang) as f32 * advance;
+        let at = self.byte_in_row(text, doc, palette, seg, along);
         (buffer.line_start(line as usize) + at, goal)
     }
 

@@ -128,9 +128,7 @@ impl LogView {
         let placeholder = t("git.filter_text");
         let extras = SearchExtras { trailing: TOGGLES_W, invalid: self.bar.invalid };
         let room = self.bar.text.paint_with(
-            layer,
-            text,
-            icons,
+            (layer, text, icons),
             ds,
             (field, focused),
             &placeholder,

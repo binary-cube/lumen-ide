@@ -166,7 +166,7 @@ impl CommandHandler for CompareClipboard {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
         // On a tree's file only with something to compare (the editor's tells when empty).
         let tree = host.context().place == MenuPlace::TreeFile;
-        host.active_file().is_some()
+        host.active_path().is_some()
             && (!tree || host.clipboard_text().is_some_and(|t| !t.is_empty()))
     }
 
@@ -187,9 +187,11 @@ impl CommandHandler for CompareClipboard {
 struct CompareWithActive;
 
 impl CompareWithActive {
+    /// The two files, from what's known in memory (the tree's entry, the active tab's
+    /// file): the disk isn't asked.
     fn files(host: &dyn WorkbenchHost) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
-        let target = host.target_path().filter(|p| p.is_file())?;
-        let active = host.active_file().map(|f| f.path).filter(|a| *a != target && a.is_file())?;
+        let target = host.context().file()?.to_path_buf();
+        let active = host.active_path().filter(|a| *a != target)?;
         Some((target, active))
     }
 }
@@ -246,14 +248,23 @@ impl MenuList for OtherTabs {
 }
 
 /// Opens the comparison of two files, each as the editor has it (unsaved changes included),
-/// else as on disk.
+/// else as on disk: a closed one read in the background, the comparison opened once both
+/// are there.
 pub fn compare_files(host: &mut dyn WorkbenchHost, left: &Path, right: &Path) -> bool {
-    let (Some(a), Some(b)) = (host.file_text(left), host.file_text(right)) else {
-        tracing::warn!("can't read the files to compare");
-        return false;
-    };
-    let title = format!("{} ↔ {}", file_name(left), file_name(right));
-    host.compare(CompareInput::files((left.to_path_buf(), a), (right.to_path_buf(), b)), &title)
+    let (a, b) = (host.file_text_later(left), host.file_text_later(right));
+    let (left, right) = (left.to_path_buf(), right.to_path_buf());
+    host.spawn(Box::new(move || {
+        let texts = a.take().zip(b.take());
+        Box::new(move |host: &mut dyn WorkbenchHost| {
+            let Some((a, b)) = texts else {
+                tracing::warn!("can't read the files to compare");
+                return;
+            };
+            let title = format!("{} ↔ {}", file_name(&left), file_name(&right));
+            host.compare(CompareInput::files((left, a), (right, b)), &title);
+        }) as workbench_model::Completion
+    }));
+    true
 }
 
 /// The comparison: the clipboard on the left (read-only), the file on the right — or its

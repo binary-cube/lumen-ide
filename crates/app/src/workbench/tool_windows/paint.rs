@@ -131,7 +131,7 @@ impl Workbench {
                     bounds.min_x() + ctx.px(8.0)
                 };
                 let x = self.paint_tool_tabs(layer, text, &header, g, x, &mut hits);
-                self.paint_tool_buttons(layer, text, &header, g, x, g == hide, &mut hits);
+                self.paint_tool_buttons((layer, text), &header, (g, x, g == hide), &mut hits);
             }
         }
         if let Some(window) = self.tools.window() {
@@ -261,15 +261,11 @@ impl Workbench {
     /// A group's header buttons: "+" after its tabs (from `x`), if the window makes views
     /// (the terminal: a shell); on the right (`hide`: this group's header has them) half the
     /// height, all of it, the window's options ("⋮"), hide; then the line under the header.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn paint_tool_buttons(
         &self,
-        layer: &mut render_api::Layer,
-        text: &mut TextSystem,
+        (layer, text): (&mut render_api::Layer, &mut TextSystem),
         header: &ToolHeader,
-        g: usize,
-        x: f32,
-        hide: bool,
+        (g, x, hide): (usize, f32, bool),
         hits: &mut Vec<(Rect, ToolHit)>,
     ) {
         let (ctx, b, mid) = (header.ctx, header.bounds, header.mid);

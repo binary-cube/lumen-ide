@@ -1,9 +1,9 @@
 use super::*;
-use crate::TableInfo;
 use crate::relations::VirtualKey;
 use crate::schema_index::IndexParts;
 use crate::schema_index::tests::{big_index, shop, shop_loaded};
 use crate::sql::{lex, scope_in};
+use crate::{TableInfo, TableKind};
 
 const LITE: Flavor = Flavor::Sqlite;
 const PG: Flavor = Flavor::Postgres { version: Some(170_000) };

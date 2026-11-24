@@ -16,6 +16,7 @@ use workbench_model::{
     SettingsRow, SettingsScope,
 };
 
+use crate::looked::Looked;
 use crate::runner::ProjectRuns;
 use crate::settings::{self, Saved};
 
@@ -101,6 +102,16 @@ pub(crate) fn language_name(id: &str) -> String {
     KNOWN.iter().find(|(k, _)| *k == id).map_or_else(|| id.to_owned(), |(_, name)| (*name).into())
 }
 
+/// The project's own tools found, by project, language and kind (looked at in the
+/// background).
+static FOUND: std::sync::LazyLock<Arc<Looked<Option<Found>>>> =
+    std::sync::LazyLock::new(|| Arc::new(Looked::new()));
+
+/// What a run would start, by project, language, kind and what's chosen (looked at in the
+/// background: a program's place is asked of the disk and the `PATH`).
+static STATUS: std::sync::LazyLock<Arc<Looked<String>>> =
+    std::sync::LazyLock::new(|| Arc::new(Looked::new()));
+
 /// The runs of the project whose settings these are.
 fn runs_of(project: &SettingsService) -> Option<Arc<ProjectRuns>> {
     crate::PROJECTS.all().into_iter().find(|runs| runs.uses(project))
@@ -120,10 +131,9 @@ impl QualitySettings {
     /// The rows of a `kind` tool for `language`.
     fn kind_rows(
         &self,
-        runs: &ProjectRuns,
-        project: &SettingsService,
-        language: &'static str,
-        kind: Kind,
+        (runs, project): (&Arc<ProjectRuns>, &SettingsService),
+        (language, kind): (&'static str, Kind),
+        wake: Option<&Arc<dyn Fn() + Send + Sync>>,
     ) -> Vec<SettingsRow> {
         let k = keys(kind);
         let saved = settings::saved(project, language, kind);
@@ -155,7 +165,13 @@ impl QualitySettings {
         if current == NONE {
             // A tool the project has (its `node_modules`' ESLint, Prettier…): offered, run
             // only once the user says so.
-            if let Some(found) = tools.iter().find_map(|t| in_project(runs.root(), t.as_ref())) {
+            let key = format!("{}\0{language}\0{kind:?}", runs.root().display());
+            let looking = Arc::clone(runs);
+            let found = FOUND.get(key, wake, move || {
+                tools_for(looking.tools(), kind, language)
+                    .find_map(|t| in_project(looking.root(), t.as_ref()))
+            });
+            if let Some(found) = found.flatten() {
                 let tool = match &found.version {
                     Some(v) => format!("{} {v}", found.name),
                     None => found.name.to_owned(),
@@ -212,7 +228,12 @@ impl QualitySettings {
         // come with the project).
         let chosen = chosen(project, language, kind);
         let row = if runs.allows(&chosen) {
-            SettingsRow::Status { text: status(runs, &saved, kind, language), button: None }
+            let key = format!("{}\0{language}\0{kind:?}\0{saved:?}", runs.root().display());
+            let looking = Arc::clone(runs);
+            let text = STATUS
+                .get(key, wake, move || status(&looking, &saved, kind, language))
+                .unwrap_or_else(|| t("settings.quality_looking"));
+            SettingsRow::Status { text, button: None }
         } else {
             SettingsRow::Status {
                 text: tr!("settings.quality_not_allowed", what = runs.shown(&chosen)),
@@ -349,6 +370,11 @@ impl SettingsContribution for QualitySettings {
         "quality"
     }
 
+    /// A look made in the background since: the block is built again with it.
+    fn poll(&self) -> bool {
+        crate::looked::take_looked()
+    }
+
     fn page(&self) -> &'static str {
         "languages"
     }
@@ -384,7 +410,7 @@ impl SettingsContribution for QualitySettings {
         // A language no tool works on: nothing to say.
         let Some(language) = self.language(runs.tools(), &scope) else { return block };
         for kind in [Kind::Formatter, Kind::Checker] {
-            block.rows.extend(self.kind_rows(&runs, project, language, kind));
+            block.rows.extend(self.kind_rows((&runs, project), (language, kind), scope.wake));
         }
         block
     }

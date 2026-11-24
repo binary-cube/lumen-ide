@@ -73,7 +73,7 @@ pub struct FormatStatement;
 
 impl CommandHandler for FormatStatement {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some_and(|f| host.language_of(&f.path).as_deref() == Some("sql"))
+        host.active_path().is_some_and(|p| host.language_of(&p).as_deref() == Some("sql"))
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

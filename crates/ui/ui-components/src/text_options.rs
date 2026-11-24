@@ -50,23 +50,63 @@ fn breaks_after(c: char) -> bool {
 /// the last space or mark it can break at in its second half, else where it's full; a
 /// character never splits. Nothing allocated past `out`'s room.
 pub fn wrap_rows(line: &str, columns: usize, tab: u32, out: &mut Vec<Range<usize>>) {
+    wrap_rows_hanging(line, columns, tab, 0, out);
+}
+
+/// [`wrap_rows`] with the rows after the first starting `hang` columns in (as the line's
+/// indentation, the wrapped rows under its text): they hold that many fewer, never fewer
+/// than [`LEAST_WRAP_COLUMNS`].
+pub fn wrap_rows_hanging(
+    line: &str,
+    columns: usize,
+    tab: u32,
+    hang: usize,
+    out: &mut Vec<Range<usize>>,
+) {
+    wrap_rows_with(line, (columns, tab, hang), &[], out);
+}
+
+/// [`wrap_rows_hanging`] (`(columns, tab, hang)`) with room shown in the line that isn't its
+/// text (`extra`: before which byte, how many columns, sorted — an editor's inlay hints): it
+/// counts as the character after it does, never split from it.
+pub fn wrap_rows_with(
+    line: &str,
+    (columns, tab, hang): (usize, u32, usize),
+    extra: &[(usize, usize)],
+    out: &mut Vec<Range<usize>>,
+) {
     out.clear();
     let columns = columns.max(LEAST_WRAP_COLUMNS);
+    let later = columns.saturating_sub(hang).max(LEAST_WRAP_COLUMNS);
     let tab = tab.max(1) as usize;
     let (mut start, mut at, mut used) = (0, 0, 0);
+    // The room of the row being filled: the first's, then the later ones'.
+    let mut room = columns;
     // Where the row may end (a byte after a break mark), and its columns there.
     let mut cut: Option<(usize, usize)> = None;
+    let mut next_extra = 0;
     for (i, c) in line.char_indices() {
-        let width = if c == '\t' { tab - at % tab } else { char_columns(c) };
-        if used + width > columns && i > start {
-            let (end, kept) = cut.filter(|(_, kept)| *kept > columns / 2).unwrap_or((i, used));
+        // The room shown before it (a hint), taken with it.
+        let mut room_before = 0;
+        while let Some(&(before, width)) = extra.get(next_extra) {
+            if before > i {
+                break;
+            }
+            room_before += width;
+            next_extra += 1;
+        }
+        at += room_before;
+        let width = room_before + if c == '\t' { tab - at % tab } else { char_columns(c) };
+        if used + width > room && i > start {
+            let (end, kept) = cut.filter(|(_, kept)| *kept > room / 2).unwrap_or((i, used));
             out.push(start..end);
             start = end;
             used -= kept;
             cut = None;
+            room = later;
         }
         used += width;
-        at += width;
+        at += width - room_before;
         if breaks_after(c) {
             cut = Some((i + c.len_utf8(), used));
         }

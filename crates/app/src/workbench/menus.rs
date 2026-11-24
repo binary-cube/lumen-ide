@@ -349,6 +349,7 @@ impl Workbench {
     pub fn set_menu_context(&mut self, context: Option<ActionContext>) {
         self.menu_context = context.map(|c| self.with_facts(c));
         *self.menu_text.get_mut() = None;
+        *self.menu_probe.get_mut() = None;
     }
 
     /// The menu acts on entry `path` (a tab's file, the tree's entry); `None`: the keyboard's
@@ -361,6 +362,7 @@ impl Workbench {
     pub fn clear_menu_target(&mut self) {
         self.menu_context = None;
         *self.menu_text.get_mut() = None;
+        *self.menu_probe.get_mut() = None;
     }
 
     /// A right click at `p` on a side panel's entries (the project tree's rows): what it's
@@ -431,7 +433,7 @@ impl Workbench {
     /// The menu's target as an active file: its text from its tab if open, else from disk
     /// (only a text file).
     pub(super) fn menu_target_file(&self) -> Option<workbench_model::ActiveFile> {
-        let path = self.menu_target()?.to_path_buf();
+        let path = self.menu_target_text_path()?;
         let path = &path;
         let open = all_tabs(&self.tabs, &self.editors.groups)
             .find(|t| t.doc.path() == Some(path.as_path()) && t.editor_visible());
@@ -442,10 +444,6 @@ impl Workbench {
                 match cached {
                     Some((_, text)) => text,
                     None => {
-                        let check = document::probe_text(path, &*self.ports.disk).ok()?;
-                        if check != document::TextCheck::Text {
-                            return None;
-                        }
                         let text: Arc<str> = Arc::from(read_text(&*self.ports.disk, path)?);
                         *self.menu_text.borrow_mut() = Some((path.clone(), Arc::clone(&text)));
                         text
@@ -460,6 +458,29 @@ impl Workbench {
             cursor: 0,
             selection: None,
         })
+    }
+
+    /// The menu's target when it's a text file (open in a tab, or its start looked at once
+    /// per menu: a few kilobytes, never the whole file) — what the menu's `enabled` checks
+    /// ask, its text left to the command that runs.
+    pub(super) fn menu_target_text_path(&self) -> Option<PathBuf> {
+        let path = self.menu_target()?;
+        let open = all_tabs(&self.tabs, &self.editors.groups)
+            .any(|t| t.doc.path() == Some(path) && t.editor_visible());
+        if open {
+            return Some(path.to_path_buf());
+        }
+        let known = self.menu_probe.borrow().clone().filter(|(p, _)| p == path);
+        let text = match known {
+            Some((_, text)) => text,
+            None => {
+                let check = document::probe_text(path, &*self.ports.disk).ok();
+                let text = check == Some(document::TextCheck::Text);
+                *self.menu_probe.borrow_mut() = Some((path.to_path_buf(), text));
+                text
+            }
+        };
+        text.then(|| path.to_path_buf())
     }
 }
 

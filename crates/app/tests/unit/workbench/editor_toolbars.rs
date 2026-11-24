@@ -315,6 +315,11 @@ fn the_history_and_the_consoles_popover_are_the_module_s_views() {
     let consoles = database_console::consoles::consoles(id).unwrap();
     let spec = consoles.spec_of_path(&c.path).unwrap();
     c.wb.run_command(database_console::JUMP);
+    // Its consoles listed in the background (the disk never on the UI thread), then shown.
+    until(&mut c, |wb| {
+        wb.poll_jobs();
+        wb.has_modal_view()
+    });
     assert!(c.wb.has_modal_view(), "the consoles' popover");
     assert!(c.wb.modal_view_has_input());
     c.wb.modal_view = None;

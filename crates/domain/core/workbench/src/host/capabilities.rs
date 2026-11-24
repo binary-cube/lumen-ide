@@ -139,6 +139,38 @@ pub trait ViewHost {
     }
 }
 
+/// A file's text as the editor has it now, or how to read it from the disk off the UI
+/// thread (a job's work: `read` never runs where it's asked).
+pub enum FileText {
+    /// Open in the editor: its text (unsaved changes included).
+    Open(String),
+    /// Closed: read it with this, on a worker.
+    Read(Box<dyn FnOnce() -> Option<String> + Send>),
+    /// Neither open nor readable here.
+    Missing,
+}
+
+impl std::fmt::Debug for FileText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Open(_) => "FileText::Open",
+            Self::Read(_) => "FileText::Read",
+            Self::Missing => "FileText::Missing",
+        })
+    }
+}
+
+impl FileText {
+    /// The text, read now if it's closed: call it on a worker.
+    pub fn take(self) -> Option<String> {
+        match self {
+            Self::Open(text) => Some(text),
+            Self::Read(read) => read(),
+            Self::Missing => None,
+        }
+    }
+}
+
 /// The editor's text: the active file's (editing, saving, its document, the type at its
 /// cursor) and any file's as the editor has it.
 pub trait EditorHost {
@@ -146,6 +178,11 @@ pub trait EditorHost {
     fn file_text(&self, path: &Path) -> Option<String> {
         let _ = path;
         None
+    }
+    /// File `path`'s text from memory when open, else how to read it on a worker
+    /// ([`FileText`]): what a command running on the UI thread asks.
+    fn file_text_later(&self, path: &Path) -> FileText {
+        self.file_text(path).map_or(FileText::Missing, FileText::Open)
     }
     /// The active document is locked (read-only): a change about to be made to it (a
     /// formatter's run on its file) is refused, the user told. `true`: refused, do nothing.

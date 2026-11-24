@@ -37,6 +37,17 @@ impl WorkbenchHost for Workbench {
         Some(ActiveFile { path, text: tab.text(), line, cursor: primary.head, selection })
     }
 
+    fn active_path(&self) -> Option<PathBuf> {
+        if self.menu_context.is_some() {
+            return self.menu_target_text_path();
+        }
+        let tab = self.tabs.get(self.active)?;
+        if tab.viewer.as_ref().is_some_and(|v| !v.editor_visible()) {
+            return None;
+        }
+        tab.doc.path().filter(|p| !is_virtual(p)).map(Path::to_path_buf)
+    }
+
     fn tabs(&self) -> Vec<workbench_model::TabInfo> {
         self.tabs
             .iter()
@@ -354,6 +365,14 @@ impl ViewHost for Workbench {
 impl EditorHost for Workbench {
     fn file_text(&self, path: &Path) -> Option<String> {
         Workbench::file_text(self, path)
+    }
+
+    fn file_text_later(&self, path: &Path) -> workbench_model::FileText {
+        if let Some(text) = self.open_text(path) {
+            return workbench_model::FileText::Open(text);
+        }
+        let (disk, path) = (Arc::clone(&self.ports.disk), path.to_path_buf());
+        workbench_model::FileText::Read(Box::new(move || super::disk::read_text(&*disk, &path)))
     }
 
     fn edit_active(&mut self, range: std::ops::Range<usize>, text: &str) -> bool {

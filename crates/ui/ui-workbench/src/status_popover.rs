@@ -119,6 +119,25 @@ pub struct StatusPopover {
     reading_at: Option<(usize, usize)>,
 }
 
+/// How a status window is drawn: the theme's colors, the icons, the scale.
+#[derive(Debug, Clone, Copy)]
+pub struct PopoverLook<'a> {
+    pub palette: &'a Palette,
+    pub icons: &'a Icons,
+    pub scale: f32,
+}
+
+/// What a status window shows and where: within `viewport`, `bar_top` (physical) the status
+/// bar's top it stays above, its `rows`, its `title` and a pin when `pinnable`.
+#[derive(Debug, Clone, Copy)]
+pub struct PopoverSpec<'a> {
+    pub viewport: Rect,
+    pub bar_top: f32,
+    pub rows: &'a [PopoverRow],
+    pub title: Option<&'a str>,
+    pub pinnable: bool,
+}
+
 impl StatusPopover {
     /// Opened (or moved) over the item of command `owner`, at `anchor`; another item's
     /// window has its own pin (the one before kept none of it).
@@ -248,16 +267,11 @@ impl StatusPopover {
 
     /// Drawn as pills side by side, ending at `corner` (its bottom-right, physical), the pin
     /// last (a click unpins): a pinned window made small, in a corner of the editor.
-    #[allow(clippy::too_many_arguments)]
     pub fn paint_pills(
         &mut self,
-        scene: &mut Scene,
-        text: &mut TextSystem,
-        icons: &Icons,
-        palette: &Palette,
-        scale: f32,
-        corner: Point,
-        pills: &[Pill],
+        (scene, text): (&mut Scene, &mut TextSystem),
+        PopoverLook { palette, icons, scale }: PopoverLook<'_>,
+        (corner, pills): (Point, &[Pill]),
     ) {
         self.rows.clear();
         self.pin = None;
@@ -352,19 +366,11 @@ impl StatusPopover {
 
     /// Draws it with `rows` above its item, its right edge on the item's, `gap` (physical)
     /// over the bar's top `bar_top`, within `viewport`; `title` and a pin when `pinnable`.
-    #[allow(clippy::too_many_arguments)]
     pub fn paint(
         &mut self,
-        scene: &mut Scene,
-        text: &mut TextSystem,
-        icons: &Icons,
-        palette: &Palette,
-        scale: f32,
-        viewport: Rect,
-        bar_top: f32,
-        rows: &[PopoverRow],
-        title: Option<&str>,
-        pinnable: bool,
+        (scene, text): (&mut Scene, &mut TextSystem),
+        PopoverLook { palette, icons, scale }: PopoverLook<'_>,
+        PopoverSpec { viewport, bar_top, rows, title, pinnable }: PopoverSpec<'_>,
     ) {
         self.rows.clear();
         self.graphs.clear();

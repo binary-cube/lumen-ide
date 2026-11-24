@@ -100,13 +100,16 @@ fn keys_of(block: &SettingsBlock) -> Vec<&'static str> {
 fn without_a_project_the_page_says_to_open_one() {
     let page = QualitySettings;
     let settings = SettingsService::new(Arc::new(Memory::default()));
-    let block = page.block(SettingsScope {
-        settings: &settings,
-        project: None,
-        project_data: None,
-        wake: None,
-        language: None,
-    });
+    let block = looked_block(
+        &page,
+        SettingsScope {
+            settings: &settings,
+            project: None,
+            project_data: None,
+            wake: None,
+            language: None,
+        },
+    );
     assert_eq!(block.rows.len(), 1);
     assert!(matches!(block.rows[0], SettingsRow::Status { .. }));
 }
@@ -118,27 +121,27 @@ fn the_choices_are_saved_in_the_project_and_shown() {
     let (root, _runs, settings) = project("choices");
     let page = QualitySettings;
     let scope = scope(&settings);
-    assert_eq!(keys_of(&page.block(scope)), ["formatter", "checker"]);
+    assert_eq!(keys_of(&looked_block(&page, scope)), ["formatter", "checker"]);
     // The page's chooser lists the tools' languages; another language: nothing shown.
     let ids: Vec<String> = page.languages(scope).into_iter().map(|l| l.id).collect();
     assert_eq!(ids, ["php"]);
-    assert!(page.block(SettingsScope { language: Some("sql"), ..scope }).rows.is_empty());
+    assert!(looked_block(&page, SettingsScope { language: Some("sql"), ..scope }).rows.is_empty());
 
     page.choose(scope, "formatter", 1);
     page.choose(scope, "format_on_save", 1);
     assert_eq!(crate::settings::choice(&settings, "php").formatter, Choice::Tool("fmt".into()));
     assert!(crate::settings::choice(&settings, "php").format_on_save);
-    let block = page.block(scope);
+    let block = looked_block(&page, scope);
     assert_eq!(keys_of(&block), ["formatter", "format_on_save", "checker"]);
     assert!(statuses(&block)[0].contains("vendor/bin/fmt --quiet {file}"), "{block:?}");
 
     // The checker isn't installed: said so.
     page.choose(scope, "checker", 1);
-    assert!(statuses(&page.block(scope))[1].contains("lint"));
+    assert!(statuses(&looked_block(&page, scope))[1].contains("lint"));
 
     // A command, its line still to be written: chosen, asked for.
     page.choose(scope, "checker", COMMAND);
-    let block = page.block(scope);
+    let block = looked_block(&page, scope);
     let checker = &keys_of(&block)[2..];
     assert_eq!(checker, ["checker", "checker_value", "checker_reads", "check_on_save"]);
     assert_eq!(crate::settings::choice(&settings, "php").checker, Choice::None);
@@ -153,7 +156,7 @@ fn the_choices_are_saved_in_the_project_and_shown() {
     page.choose(scope, "checker", BINARY);
     assert_eq!(crate::settings::saved(&settings, "php", Kind::Checker).value, "");
     page.set_text(scope, "checker_value", "tools/missing");
-    assert!(statuses(&page.block(scope))[1].contains("tools/missing"));
+    assert!(statuses(&looked_block(&page, scope))[1].contains("tools/missing"));
 
     page.choose(scope, "formatter", NONE);
     assert_eq!(crate::settings::choice(&settings, "php").formatter, Choice::None);
@@ -224,19 +227,21 @@ fn a_tool_the_project_has_is_offered_and_chosen() {
     let page = QualitySettings;
     let scope = || SettingsScope { language: Some("javascript"), ..scope(&settings) };
     // Not there: nothing offered.
-    assert!(statuses(&page.block(scope())).is_empty());
+    assert!(statuses(&looked_block(&page, scope())).is_empty());
     std::fs::write(root.join("node_modules/eslint/bin/eslint.js"), "").unwrap();
     std::fs::write(
         root.join("node_modules/eslint/package.json"),
         "{\"name\": \"eslint\", \"version\": \"9.12.0\"}",
     )
     .unwrap();
+    // Looked at again (the block would after a few seconds).
+    FOUND.forget();
     let found = in_project(&root, &Lint).unwrap();
     assert_eq!(
         (found.place.as_str(), found.version.as_deref()),
         ("node_modules/eslint", Some("9.12.0"))
     );
-    let block = page.block(scope());
+    let block = looked_block(&page, scope());
     let offer = block.rows.iter().find_map(|r| match r {
         SettingsRow::Status { text, button: Some((action, _)) } => Some((text.clone(), *action)),
         _ => None,
@@ -251,4 +256,21 @@ fn a_tool_the_project_has_is_offered_and_chosen() {
     assert_eq!(chosen(&settings, "javascript", Kind::Checker), Choice::Tool("eslint".into()));
     assert!(runs.allows(&Choice::Tool("eslint".into())));
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// The block once what it shows from the disk is looked at (in the background: a block is
+/// built on the UI thread).
+fn looked_block(page: &QualitySettings, scope: SettingsScope<'_>) -> SettingsBlock {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let block = page.block(scope);
+        if !crate::looked::busy() {
+            let again = page.block(scope);
+            if !crate::looked::busy() && format!("{again:?}") == format!("{block:?}") {
+                return again;
+            }
+        }
+        assert!(std::time::Instant::now() < until, "the block's looks are made");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
 }

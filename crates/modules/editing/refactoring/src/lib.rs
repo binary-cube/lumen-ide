@@ -301,7 +301,7 @@ struct FindUsages;
 
 impl CommandHandler for FindUsages {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some()
+        host.active_path().is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
@@ -322,7 +322,7 @@ struct ChangeSignature;
 
 impl CommandHandler for ChangeSignature {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some()
+        host.active_path().is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
@@ -343,7 +343,7 @@ struct Rename;
 
 impl CommandHandler for Rename {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some()
+        host.active_path().is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

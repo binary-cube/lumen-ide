@@ -60,7 +60,9 @@ use crate::runner::{FocusMark, Runner, millis};
 use self::paint::*;
 
 mod actions;
+mod frame;
 mod paint;
+mod parts;
 mod tables;
 mod viewer;
 

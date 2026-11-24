@@ -128,8 +128,6 @@
   - Home și End.
 
 **Lăsat:**
-- Hint-urile inline nu intră în calculul rândurilor editorului.
-- Rândurile care continuă o linie încep de la margine, nu de la indentarea ei.
 - Consola SQL e editorul aplicației, deci încadrează deja. Terminalul își rearanjează
   singur textul și nu e afectat.
 
@@ -163,3 +161,25 @@ care ar fi picat pe codul vechi.
   singură e tot un spațiu.
 - **Comentarii de documentație** puse înapoi deasupra funcțiilor lor (`sync_text_options`,
   `sync_shown`, `access::end`, `queue_write`).
+
+## Pasul 4 — retragerea și hint-urile, testele care picau uneori
+
+**Făcut:**
+- **Rândurile care continuă o linie** încep de la indentarea ei, adică sub textul ei, cel
+  mult jumătate de rând (`wrap_rows_hanging`, `Seg::hang`):
+  - textul, selecțiile, cursorul, hint-urile, semnul de capăt, eticheta plierii și
+    lens-urile sunt mutate cu retragerea;
+  - clicul și selecția pe coloane o scad;
+  - ↑ ↓ păstrează locul de pe ecran, cu tot cu retragere.
+- **Hint-urile inline intră în calculul rândurilor:**
+  - spațiul lor contează ca al caracterului de după ele și nu se desparte de el
+    (`wrap_rows_with`);
+  - harta rândurilor și părțile liniei le primesc;
+  - o listă nouă de hint-uri reface rândurile.
+- **Testele care picau uneori, sub încărcare:**
+  - **Markdown:** așteaptă până nu mai e nicio construire în curs, pentru că una cerută de
+    cache-uri după prima venea și ea;
+  - **editorul de diagrame:** citirea fișierului e așteptată până se termină, cu un mesaj
+    clar dacă nu se termină, în loc să treacă mai departe după 10 s fără nimic citit.
+- **Teste:** rândurile retrase (funcția comună și editorul: clicul, cursorul); hint-urile
+  (funcția comună și harta).

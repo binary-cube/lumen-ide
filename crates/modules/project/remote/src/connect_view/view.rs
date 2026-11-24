@@ -16,7 +16,7 @@ impl Viewer for ConnectView {
             self.action = Some(action);
             return true;
         }
-        let mut changed = false;
+        let mut changed = self.local_folders_read();
         let replies: Vec<Reply> =
             self.browser.as_ref().map(|(_, rx)| rx.try_iter().collect()).unwrap_or_default();
         for reply in replies {
@@ -145,6 +145,7 @@ impl Viewer for ConnectView {
                 }
                 ViewerKey::Escape => {
                     self.suggestions.clear();
+                    self.local_folders = None;
                     return true;
                 }
                 _ => {}
@@ -179,6 +180,7 @@ impl Viewer for ConnectView {
             self.input_mut(Field::Local).set_text(path);
             self.local_typed = true;
             self.suggestions.clear();
+            self.local_folders = None;
             return true;
         }
         // Select All in the focused field, when it's the step's.
@@ -246,6 +248,7 @@ impl Viewer for ConnectView {
             Some((part, _)) if Self::is_field(part) => {
                 if self.focused() != before {
                     self.suggestions.clear();
+                    self.local_folders = None;
                 }
                 self.on_list = false;
                 return None;

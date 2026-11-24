@@ -628,12 +628,17 @@ struct Draft {
     args: String,
     /// How the last addition went.
     outcome: Option<String>,
+    /// Being written now (another press waits for it).
+    adding: bool,
+    /// Its outcome came since the settings last asked (the block shows it then).
+    told: bool,
 }
 
 /// "Add a server".
 #[derive(Debug, Default)]
 pub struct AddServer {
-    draft: Mutex<Draft>,
+    /// What's typed and how adding it went (shared with the worker writing it).
+    draft: Arc<Mutex<Draft>>,
 }
 
 /// A list typed with commas or spaces.
@@ -644,6 +649,11 @@ fn words(text: &str) -> Vec<String> {
 impl SettingsContribution for AddServer {
     fn id(&self) -> &'static str {
         "language-servers-add"
+    }
+
+    /// The server written in the background since: the block shows how it went.
+    fn poll(&self) -> bool {
+        self.draft.lock().is_ok_and(|mut d| std::mem::take(&mut d.told))
     }
 
     fn page(&self) -> &'static str {
@@ -713,31 +723,50 @@ impl SettingsContribution for AddServer {
         }
     }
 
-    fn press(&self, _scope: SettingsScope<'_>, action: &'static str) -> Option<(Question, OnYes)> {
+    /// The server typed added: its description written to the user's file on a worker (the
+    /// settings told when it's done), the open projects' servers looked at again.
+    fn press(&self, scope: SettingsScope<'_>, action: &'static str) -> Option<(Question, OnYes)> {
         if action != "add" {
             return None;
         }
         let Ok(mut draft) = self.draft.lock() else { return None };
+        if draft.adding {
+            return None;
+        }
         let languages = words(&draft.languages);
-        let outcome = if draft.name.is_empty() || draft.command.is_empty() || languages.is_empty() {
-            t("settings.lsp_add_incomplete")
-        } else {
-            match catalog::add_user_server(
-                &draft.name,
-                &draft.command,
-                &draft.args.split_whitespace().map(str::to_owned).collect::<Vec<_>>(),
-                &languages,
-            ) {
+        if draft.name.is_empty() || draft.command.is_empty() || languages.is_empty() {
+            draft.outcome = Some(t("settings.lsp_add_incomplete"));
+            return None;
+        }
+        draft.outcome = Some(t("settings.lsp_adding"));
+        draft.adding = true;
+        let (name, command) = (draft.name.clone(), draft.command.clone());
+        let args: Vec<String> = draft.args.split_whitespace().map(str::to_owned).collect();
+        drop(draft);
+        let (shared, wake) = (Arc::clone(&self.draft), scope.wake.cloned());
+        kernel::work::run("lsp-settings", move || {
+            let outcome = match catalog::add_user_server(&name, &command, &args, &languages) {
                 Ok(_) => {
                     projects::refresh_all();
-                    let added = tr!("settings.lsp_add_done", name = draft.name.as_str());
-                    *draft = Draft::default();
-                    added
+                    Ok(tr!("settings.lsp_add_done", name = name.as_str()))
                 }
-                Err(why) => tr!("settings.lsp_add_failed", reason = why),
+                Err(why) => Err(tr!("settings.lsp_add_failed", reason = why)),
+            };
+            if let Ok(mut draft) = shared.lock() {
+                let added = outcome.is_ok();
+                let said = outcome.unwrap_or_else(|why| why);
+                // Added: the form empties (what was typed meanwhile too: it was this one).
+                if added {
+                    *draft = Draft::default();
+                }
+                draft.outcome = Some(said);
+                draft.adding = false;
+                draft.told = true;
             }
-        };
-        draft.outcome = Some(outcome);
+            if let Some(wake) = wake {
+                wake();
+            }
+        });
         None
     }
 }

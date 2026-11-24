@@ -1253,7 +1253,7 @@ fn only_the_folders_gone_here_are_removed_there() {
         error: None,
     };
     let done = [deleted("app/kept/a.txt"), deleted("app/gone/deep/b.txt"), deleted("x/c.txt")];
-    let folders = super::gone_folders(&root, done.iter());
+    let folders = super::server_changes::gone_folders(&root, done.iter());
     assert_eq!(folders, ["app/gone/deep", "app/gone", "x"]);
     std::fs::remove_dir_all(&root).unwrap();
 }

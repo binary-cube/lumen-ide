@@ -521,16 +521,19 @@ impl Workbench {
         let viewport = Rect::new(0.0, 0.0, width, self.size.height as f32);
         let bar_top = self.status.bounds().min_y();
         self.status_popover.paint(
-            scene,
-            text,
-            &self.icons,
-            &self.palette,
-            self.scale,
-            viewport,
-            bar_top,
-            &rows,
-            (owner == RESOURCES).then(|| tr!("status.resources")).as_deref(),
-            owner == RESOURCES,
+            (scene, text),
+            ui_workbench::PopoverLook {
+                icons: &self.icons,
+                palette: &self.palette,
+                scale: self.scale,
+            },
+            ui_workbench::PopoverSpec {
+                viewport,
+                bar_top,
+                rows: &rows,
+                title: (owner == RESOURCES).then(|| tr!("status.resources")).as_deref(),
+                pinnable: owner == RESOURCES,
+            },
         );
     }
 
@@ -549,13 +552,13 @@ impl Workbench {
             corner.x = corner.x.min(item.max_x());
         }
         self.resource_pills.paint_pills(
-            scene,
-            text,
-            &self.icons,
-            &self.palette,
-            self.scale,
-            corner,
-            &pills,
+            (scene, text),
+            ui_workbench::PopoverLook {
+                icons: &self.icons,
+                palette: &self.palette,
+                scale: self.scale,
+            },
+            (corner, &pills),
         );
     }
 

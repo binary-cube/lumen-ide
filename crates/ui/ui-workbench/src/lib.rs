@@ -49,6 +49,7 @@ mod shortcuts_editor;
 mod splash;
 mod status_bar;
 pub mod status_popover;
+pub use status_popover::{PopoverLook, PopoverSpec};
 mod tab_bar;
 mod tool_strip;
 mod top_bar;
@@ -65,7 +66,7 @@ pub use context_menu::{ContextAction, ContextMenu, MenuEntry, tidy_menu};
 pub use debug_overlay::DebugOverlay;
 pub use dialog::{ButtonKind, Dialog, DialogButton, DialogCheck, DialogSpec, LIST_ROWS};
 pub use editor_view::{
-    Bulb, ColorSpan, Decorations, EditorView, ErrorPreviewSpec, ErrorTip, Inlay, LineLens,
+    Bulb, ColorSpan, Decorations, EditorView, ErrorPreviewSpec, ErrorTip, Inlay, LineLens, RowMove,
     StatementLines,
 };
 pub use find_bar::{FindBar, FindBarSpec, FindField, FindHit};

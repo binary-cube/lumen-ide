@@ -112,6 +112,7 @@ impl EditorView {
             let line = self.lines[i];
             let seg = self.seg(i);
             self.row_base = self.load_row(f.doc, i, f.max_columns);
+            self.row_shift = seg.hang as f32 * f.layout.advance;
             let start = f.doc.buffer().line_start(line as usize);
             // What a module hides is masked in the line, then its row's part taken again.
             if !f.deco.concealed.is_empty() {
@@ -133,6 +134,13 @@ impl EditorView {
             self.paint_lens(f, content, text, row, end, palette);
         }
         self.row_base = 0;
+        self.row_shift = 0.0;
+    }
+
+    /// Where the row drawn now starts (the text's start, a wrapped line's later rows under
+    /// its text).
+    fn row_x0(&self, f: &Frame<'_>) -> f32 {
+        f.x0 + self.row_shift
     }
 
     /// The mark at a wrapped row's end (its line goes on below): muted, after its text.
@@ -146,7 +154,7 @@ impl EditorView {
         palette: &Palette,
     ) {
         let mark = text.shape_line(WRAP_END, &f.font);
-        let x = (f.x0 + width + f.layout.advance * 0.4).round();
+        let x = (self.row_x0(f) + width + f.layout.advance * 0.4).round();
         draw_text(content, &mark, x, row.baseline, palette.text_muted.with_alpha(0.6));
     }
 
@@ -189,12 +197,14 @@ impl EditorView {
                 continue;
             };
             let (x0, x1) = (shaped.x_at(from), shaped.x_at(from + columns));
-            if f.x0 + x1 < f.text_area.min_x() || f.x0 + x0 > f.text_area.max_x() {
+            if self.row_x0(f) + x1 < f.text_area.min_x()
+                || self.row_x0(f) + x0 > f.text_area.max_x()
+            {
                 continue;
             }
             let label = text.shape_line(&inlay.label, &font);
             let chip = Rect::new(
-                (f.x0 + x0).round(),
+                (self.row_x0(f) + x0).round(),
                 row.top + 3.0 * self.scale,
                 (x1 - x0 - gap).max(label.width + 2.0 * pad),
                 f.layout.line_height - 6.0 * self.scale,
@@ -218,7 +228,7 @@ impl EditorView {
         let lenses = f.deco.lenses;
         let Ok(index) = lenses.binary_search_by_key(&row.line, |l| l.line) else { return };
         let lens = &lenses[index];
-        let mut x = (f.x0 + end + f.layout.advance * 3.0).round();
+        let mut x = (self.row_x0(f) + end + f.layout.advance * 3.0).round();
         let color = palette.text_muted.with_alpha(0.85);
         let dot = text.shape_line(" · ", &f.ui_font);
         for (part, label) in lens.parts.iter().enumerate() {
@@ -285,7 +295,7 @@ impl EditorView {
             let tab = f.doc.tab_width();
             build_display_map_with(&self.line, tab, &self.line_inlays, &mut self.disp_to_src);
         }
-        let base = self.row_base;
+        let (base, x0) = (self.row_base, self.row_x0(f));
         content.glyphs.extend(shaped.glyphs.iter().map(|g| {
             let src = if has_tabs {
                 self.disp_to_src.get(g.start + base).map_or(len, |&s| s as usize)
@@ -294,7 +304,7 @@ impl EditorView {
             };
             GlyphInstance {
                 key: g.key,
-                origin: Point::new(f.x0 + g.x, baseline + g.y),
+                origin: Point::new(x0 + g.x, baseline + g.y),
                 color: self.colors.get(src).copied().unwrap_or(palette.code_text),
             }
         }));
@@ -315,7 +325,7 @@ impl EditorView {
             return;
         }
         let has_tabs = self.line.contains('\t') || !self.line_inlays.is_empty();
-        let base = self.row_base;
+        let (base, row_x0) = (self.row_base, self.row_x0(f));
         let src_of = |display: usize| {
             if has_tabs {
                 self.disp_to_src.get(display + base).map_or(usize::MAX, |&s| s as usize)
@@ -360,7 +370,7 @@ impl EditorView {
                 let color = self.colors.get(src).copied().unwrap_or(palette.code_text);
                 styled.push(GlyphInstance {
                     key: g.key,
-                    origin: Point::new(f.x0 + x0 + g.x, baseline + g.y),
+                    origin: Point::new(row_x0 + x0 + g.x, baseline + g.y),
                     color,
                 });
             }
@@ -413,7 +423,7 @@ impl EditorView {
             .radius(FOLD_RADIUS)
             .pad(FOLD_PAD)
             .size(crate::ds::BadgeSize::Custom(layout.line_height / self.scale - 2.0 * FOLD_INSET));
-        let px = (f.x0 + width + layout.advance * 0.6).round();
+        let px = (self.row_x0(f) + width + layout.advance * 0.6).round();
         let mid = row.top + layout.line_height / 2.0;
         let pill = Rect::new(px, mid, badge.width(text, &ctx), 0.0);
         let closing = f.doc.buffer().line_text(fold.end_line as usize);
@@ -433,7 +443,7 @@ impl EditorView {
         });
         if selected {
             let color = if f.focused { palette.selection } else { palette.selection_inactive };
-            let x = f.x0 + width;
+            let x = self.row_x0(f) + width;
             content.quad(Quad::filled(
                 Rect::new(x, row.top, (end - x).max(0.0), layout.line_height),
                 color,
@@ -444,7 +454,7 @@ impl EditorView {
         if let Some((shaped, x)) = &closing {
             draw_text(content, shaped, *x, row.baseline, palette.code_text);
         }
-        end - f.x0
+        end - self.row_x0(f)
     }
 
     /// The cursors, as the caret's look says (blinking, glow, glide, trail: `ui_kit::caret`).
@@ -472,6 +482,7 @@ impl EditorView {
                 self.x_in_row(text, f.doc, seg, after - buffer.line_start(line))
             });
             let width = next.map_or(layout.advance, |n| (n - x).max(1.0));
+            let x = x + seg.hang as f32 * layout.advance;
             let cell = Rect::new((f.x0 + x).round(), f.row_top(i), width, layout.line_height);
             ui_kit::caret::paint(
                 carets,
@@ -504,7 +515,9 @@ impl EditorView {
         if let Some(i) = self.visible_row_of(line, column) {
             self.load_line(doc, line);
             let seg = self.seg(i);
-            let x = (f.x0 + self.x_in_row(text, doc, seg, column)).round();
+            let x =
+                (f.x0 + seg.hang as f32 * layout.advance + self.x_in_row(text, doc, seg, column))
+                    .round();
             let shaped = text.shape_line(&preedit, &f.font);
             let top = f.row_top(i);
             let layer = scene.push_layer(Some(f.text_area));

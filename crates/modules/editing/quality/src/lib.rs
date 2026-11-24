@@ -8,6 +8,7 @@
 //! (`settings`), chosen on the settings' "Code quality" page (`page`).
 
 mod allowed;
+mod looked;
 mod page;
 pub mod runner;
 pub mod settings;
@@ -214,7 +215,7 @@ struct Run(Kind, bool);
 
 impl CommandHandler for Run {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.project_id().is_some() && (self.1 || host.active_file().is_some())
+        host.project_id().is_some() && (self.1 || host.active_path().is_some())
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

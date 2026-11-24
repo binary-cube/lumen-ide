@@ -660,7 +660,8 @@ fn the_project_panel_header_buttons_work() {
     // Nothing read yet: expand all reads and opens the next level (src).
     assert!(find_row(&mut wb, &b).is_none());
     click(&mut wb, &mut text, "expand");
-    assert!(find_row(&mut wb, &b).is_some(), "expand all opens src, even unread");
+    // Read on the tree's listing thread (a click never reads the disk), shown when it's there.
+    assert!(until(&mut wb, |wb| find_row(wb, &b).is_some()), "expand all opens src, even unread");
     click(&mut wb, &mut text, "collapse");
     assert!(find_row(&mut wb, &b).is_none(), "collapse all closes src");
     click(&mut wb, &mut text, "expand");

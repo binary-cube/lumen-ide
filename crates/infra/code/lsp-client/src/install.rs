@@ -160,12 +160,12 @@ pub fn install(
     }
     let total = install.size;
     let bytes = crate::fetch::fetch_bytes(
-        fetch,
-        &url,
-        &Pin::Integrity(install.integrity.clone()),
-        MAX_TARBALL,
-        &|got, said| progress.downloaded(got, total.or(said)),
-        stop,
+        pinned_downloads::fetch::Going {
+            fetch,
+            progress: &|got, said| progress.downloaded(got, total.or(said)),
+            stop,
+        },
+        (&url, &Pin::Integrity(install.integrity.clone()), MAX_TARBALL),
     )
     .map_err(|e| match e {
         FetchError::Mismatch(url) => {

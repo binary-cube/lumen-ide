@@ -19,6 +19,7 @@ use crate::palette::Palette;
 mod badges;
 mod brand;
 mod button;
+mod choices;
 mod controls;
 mod dropdown;
 mod feedback;
@@ -26,10 +27,15 @@ mod number;
 mod place;
 mod progress;
 mod scroll;
+mod search;
+mod segmented;
+mod stepper;
 mod text;
+mod toggles;
 pub use badges::*;
 pub use brand::*;
 pub use button::*;
+pub use choices::*;
 pub use controls::*;
 pub use dropdown::*;
 pub use feedback::*;
@@ -37,7 +43,11 @@ pub use number::*;
 pub use place::*;
 pub use progress::*;
 pub use scroll::*;
+pub use search::*;
+pub use segmented::*;
+pub use stepper::*;
 pub use text::*;
+pub use toggles::*;
 
 /// How faintly a band set apart from what it's under is tinted (the text's alpha): a
 /// footer, a bar, a group's card.

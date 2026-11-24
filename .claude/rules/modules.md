@@ -20,6 +20,13 @@ Per-project state is `PerProject<T>`. A view gets its project through `set_data`
 (`ProjectView`); a panel's work after a picked file comes back through the host.
 Modules build their UI from `ui-components` (never `ui-workbench`).
 
+- **Shared contracts sit in the core, ready for modules that live apart** (asked
+  2026-11-24): what a module offers or asks of others is an interface (a trait, a request
+  and its DTOs) in `contracts`, `workbench-model` or the domain's crate, never a type of a
+  module's own. The project's modules may one day leave the app's process or repository:
+  a contract says only data (owned, `Send`, serializable when it can be), and nothing of
+  the app's internals or another module's.
+
 Made concrete while building the agents (plan 79):
 
 - **Registries the app fills.** A neutral domain crate holds a contract and its registry

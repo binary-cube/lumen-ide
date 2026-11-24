@@ -298,9 +298,7 @@ impl FindBar {
         let extras = SearchExtras { trailing: TOGGLES_W, invalid: spec.error };
         let placeholder = t("find.placeholder");
         let room = self.query.paint_with(
-            layer,
-            text,
-            look.icons,
+            (layer, text, look.icons),
             &look.ctx(),
             (field, query_focused),
             &placeholder,

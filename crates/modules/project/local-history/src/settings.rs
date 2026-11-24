@@ -124,10 +124,15 @@ impl SettingsContribution for HistorySettings {
             return None;
         }
         let dir = scope.project_data?.join(crate::FOLDER);
-        let (_, versions) = usage(&dir);
+        // The figure the block shows (counted in the background): a press reads no disk.
+        let versions = known(&dir).map(|(_, versions)| versions);
         let question = Question {
             title: t("dialog.history_clear_title"),
-            message: tr!("dialog.history_clear", count = versions),
+            message: match versions {
+                Some(count) => tr!("dialog.history_clear", count = count),
+                // Not counted yet (the block's count still runs): said without a figure.
+                None => t("dialog.history_clear_all"),
+            },
             icon: "trash",
             yes: t("dialog.delete"),
             danger: true,
@@ -161,6 +166,11 @@ type Counted = (Option<(u64, usize)>, Instant);
 static COUNTED: AtomicBool = AtomicBool::new(false);
 /// A count older than this is made again (the history grows as files are saved).
 const FRESH: Duration = Duration::from_secs(10);
+
+/// What `dir` holds as last counted, from memory only (`None`: not counted yet).
+fn known(dir: &Path) -> Option<(u64, usize)> {
+    USAGE.lock().ok()?.get(dir).and_then(|(value, _)| *value)
+}
 
 /// What `dir` holds as last counted; counted again in the background when it's old (the app
 /// woken when done). `None`: not counted yet.

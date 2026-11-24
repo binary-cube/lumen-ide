@@ -65,7 +65,7 @@ pub(crate) fn show_log_of(host: &mut dyn WorkbenchHost, reference: Option<String
 
 impl CommandHandler for ShowFileHistory {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.repository().is_some() && host.active_file().is_some()
+        host.repository().is_some() && host.active_path().is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

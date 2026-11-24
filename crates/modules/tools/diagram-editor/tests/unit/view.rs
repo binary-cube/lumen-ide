@@ -45,9 +45,12 @@ fn paint(view: &mut DiagramView, text: &mut TextSystem) -> Scene {
 }
 
 /// Polled until the file is read (it's read on a worker).
+/// Waits for its reading to end (a loaded machine's workers may be slow: long enough, and
+/// said when it never ends, never a test going on with nothing read).
 fn loaded(view: &mut DiagramView) {
     let started = std::time::Instant::now();
-    while view.working() && started.elapsed() < std::time::Duration::from_secs(10) {
+    while view.working() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(60), "never read");
         view.poll();
         std::thread::sleep(std::time::Duration::from_millis(5));
     }

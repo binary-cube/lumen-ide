@@ -683,12 +683,15 @@ impl Workbench {
 
     /// File `path`'s text as the editor has it (unsaved changes included), else as on disk.
     pub(super) fn file_text(&self, path: &Path) -> Option<String> {
-        let open = all_tabs(&self.tabs, &self.editors.groups)
-            .find(|t| t.doc.path() == Some(path) && t.holds_text());
-        match open {
-            Some(tab) => Some(tab.doc.buffer().text()),
-            None => read_text(&*self.ports.disk, path),
-        }
+        self.open_text(path).or_else(|| read_text(&*self.ports.disk, path))
+    }
+
+    /// File `path`'s text when it's open in the editor (unsaved changes included): memory
+    /// only.
+    pub(super) fn open_text(&self, path: &Path) -> Option<String> {
+        all_tabs(&self.tabs, &self.editors.groups)
+            .find(|t| t.doc.path() == Some(path) && t.holds_text())
+            .map(|tab| tab.doc.buffer().text())
     }
 
     #[cfg(feature = "snapshot")]
@@ -936,6 +939,95 @@ fn is_view_of(t: &Tab, extension: &str) -> bool {
         && t.doc
             .path()
             .is_some_and(|p| is_virtual(p) && p.extension().is_some_and(|e| e == extension))
+}
+
+/// The tab's viewer (image, preview) and, for previews, the Editor / Split / Preview
+/// switcher in the top-right corner.
+pub(super) fn paint_viewer(
+    v: &mut TabViewer,
+    doc: &Document,
+    area: Rect,
+    scale: f32,
+    painter: ui_workbench::Painter<'_>,
+    waker: Option<Arc<dyn Fn() + Send + Sync>>,
+) {
+    let ui_workbench::Painter { text, scene, palette, icons } = painter;
+    let px = |x: f32| (x * scale).round();
+    if v.viewer_visible() {
+        // The preview gets the text only when the document changed.
+        // A preview reading its file itself only hears whether the text is saved.
+        if v.kind == ui_workbench::ViewerKind::Preview && v.viewer.reads_file() {
+            v.viewer.set_unsaved(doc.is_dirty());
+        } else if v.kind == ui_workbench::ViewerKind::Preview
+            && v.source_version != Some(doc.version())
+        {
+            v.viewer.set_source(&doc.buffer().text());
+            v.source_version = Some(doc.version());
+        }
+        // Its separator dragged: painted at the width it was last laid out at, clipped to
+        // its half (laid out again every so often, and once released).
+        let live = v.split.live_width().filter(|_| v.splits());
+        let bounds = live.map_or(v.bounds, |w| {
+            Rect::new(v.bounds.min_x(), v.bounds.min_y(), w, v.bounds.size.height)
+        });
+        let first = scene.layers().len();
+        {
+            // Timed for a profile: the view's own paint only.
+            let _busy = kernel::probe::time(v.provider, "paint");
+            v.viewer.paint(ui_workbench::ViewerPaint {
+                bounds,
+                scale,
+                text,
+                scene,
+                palette,
+                icons,
+                focused: true,
+                waker,
+            });
+        }
+        // The view's color (its data source's): a thin strip along its top.
+        if let Some(accent) = v.viewer.accent(palette) {
+            let strip = Rect::new(v.bounds.min_x(), v.bounds.min_y(), v.bounds.size.width, px(2.0));
+            scene.push_layer(None).quad(Quad::filled(strip, accent));
+        }
+        if live.is_some() {
+            preview_split::clip_layers(scene, first, v.bounds);
+        }
+        // The separator over both halves (its handle reaches over them): painted after both.
+        if v.splits() {
+            v.split.splitter.set_style(SplitterStyle::from_palette(palette));
+            v.split.splitter.paint(scene);
+        }
+    }
+    v.toggles.clear();
+    if v.kind != ui_workbench::ViewerKind::Preview {
+        return;
+    }
+    let modes = [
+        (ViewMode::Editor, "view-editor"),
+        (ViewMode::Split, "view-split"),
+        (ViewMode::Preview, "view-preview"),
+    ];
+    let (bw, bh, pad) = (px(ui_workbench::ds::button_size::LARGE), px(24.0), px(3.0));
+    let ctx = ui_workbench::ds::Ctx::new(palette, scale);
+    let width = bw * modes.len() as f32 + 2.0 * pad;
+    let bar =
+        Rect::new(area.max_x() - width - px(22.0), area.min_y() + px(10.0), width, bh + 2.0 * pad);
+    let layer = scene.push_layer(None);
+    layer.quad(
+        Quad::filled(bar, palette.popup_background.with_alpha(0.94))
+            .rounded(px(8.0))
+            .bordered(scale.round().max(1.0), palette.popup_border),
+    );
+    for (i, (mode, icon)) in modes.into_iter().enumerate() {
+        let r = Rect::new(bar.min_x() + pad + i as f32 * bw, bar.min_y() + pad, bw, bh);
+        let spec = ui_workbench::ds::ButtonSpec::new(ui_workbench::ds::ButtonKind::Ghost)
+            .icon(icon)
+            .rest_tone(ui_workbench::ds::Tone::Neutral)
+            .on(v.mode == mode);
+        ui_workbench::ds::button(layer, text, icons, &ctx, r, spec);
+        v.toggles.push((r, mode));
+    }
 }
 
 #[cfg(test)]

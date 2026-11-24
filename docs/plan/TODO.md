@@ -40,7 +40,12 @@ făcute se șterg.
   - **De căutat:** ordinea în care se eliberează rendererul, atlasele (glife, iconițe),
     straturile ferestrei și dispozitivul la închidere; ce ține încă o resursă GPU după ce
     pleacă fereastra (o resursă făcută dinainte, `prepared`).
-  - **De verificat pe Windows:** jurnalul la închidere, fără nicio linie `leak detected`.
+  - **Încercat (2026-11-24):** rendererul ultimei ferestre așteaptă GPU-ul când pleacă
+    (`device.poll(wait)`). Resursele lăsate, dar încă folosite de GPU, sunt eliberate înaintea
+    contextului, nu odată cu el. Nu se poate verifica pe macOS (alocatorul DX12 e al Windows).
+  - **De verificat pe Windows:** jurnalul la închidere, fără nicio linie `leak detected`; dacă
+    tot apar, ce resursă rămâne (texturile atlaselor, straturile ferestrei, contextul făcut
+    dinainte).
 
 - **Windows: „Open with” deschide altă instanță a aplicației** (raportat 2026-11-23). Un
   fișier deschis cu „Open with” → aplicația, apoi alt fișier la fel: se deschide o
@@ -60,13 +65,10 @@ făcute se șterg.
   - **De verificat:** dacă a doua pornire chiar încearcă (jurnalul „handed to the running
     instance”); dacă primul proces ascultă încă după ce și-a deschis fereastra.
 
-- **Fișierele foarte lungi, analizate și sparte** (cerut 2026-11-20, după profilare). De
-  găsit fișierele cele mai lungi din `crates/` (de numărat liniile, cele peste ~800 întâi),
-  apoi pentru fiecare: ce face, dacă face optim (nimic pe firul interfeței, nimic refăcut pe
-  cadru, fără copii inutile), și împărțit în fișiere mici, pe blocuri cu un rost fiecare
-  (`code.md`: un dosar pentru o funcție mare). Ținta: cod de calitate, ușor de urmărit și de
-  extins. Fără să se schimbe ce vede utilizatorul; testele rămân verzi după fiecare fișier.
-
+- **Fișierele foarte lungi, analizate și sparte** — în lucru, planul
+  `docs/plan/97-fisiere-lungi.md` (lista, cum se face, ce e gata). Codul aplicației nu mai
+  are fișiere peste 1200 de rânduri; a rămas `xtask/src/icon_packs.rs` (2280), apoi cele
+  ~90 peste 800.
 - **Profilarea aplicației — prioritate mare** (cerut 2026-11-20; planul:
   `docs/plan/91-profilarea-aplicatiei.md`). Pornită cu acordul utilizatorului, anonimă,
   oprită singură după o durată aleasă, un fișier JSON mic de trimis, un tab cu

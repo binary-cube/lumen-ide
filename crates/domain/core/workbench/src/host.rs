@@ -11,7 +11,7 @@ use kernel::EventBus;
 
 mod capabilities;
 
-pub use capabilities::{EditorHost, RefactoringHost, ServicesHost, SystemHost, ViewHost};
+pub use capabilities::{EditorHost, FileText, RefactoringHost, ServicesHost, SystemHost, ViewHost};
 
 /// The file in the active tab.
 #[derive(Debug, Clone)]
@@ -152,6 +152,11 @@ pub trait WorkbenchHost:
     }
     /// The file in the active tab (not for virtual tabs).
     fn active_file(&self) -> Option<ActiveFile>;
+    /// [`Self::active_file`]'s path alone, its text never read: what `enabled` and menus
+    /// ask (they read nothing but what's in memory); `run` asks for the file itself.
+    fn active_path(&self) -> Option<PathBuf> {
+        self.active_file().map(|f| f.path)
+    }
     /// The tabs of the current editor group, in their order.
     fn tabs(&self) -> Vec<TabInfo> {
         Vec::new()

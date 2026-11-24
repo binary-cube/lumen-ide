@@ -5,10 +5,11 @@
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use ui_components::ServiceNode;
+use ui_components::{PanelMemento, ServiceNode, ViewMenuEntry, ViewerAction, ViewerPaint};
+
+use crate::sample::{self, SampleProvider};
 
 use super::*;
-use crate::sample::{self, SampleProvider};
 
 fn panel() -> ServicesPanel {
     let mut panel = ServicesPanel::with_providers(vec![Arc::new(SampleProvider)]);

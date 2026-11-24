@@ -50,7 +50,7 @@ pub use formatting::{FormatOutcome, format_active};
 pub use host::{
     ActiveFile, BadgeKind, CHOOSE_ENGINE, CLOSE_TAB, COMMENT_LINE, ChoiceItem, ChoiceList,
     CommandContribution, CommandHandler, CommandImplementation, Completion, EditorHost,
-    FIND_USAGES, FileRefactoring, FixedTab, GOTO_DECLARATION, GutterAction, GutterMark,
+    FIND_USAGES, FileRefactoring, FileText, FixedTab, GOTO_DECLARATION, GutterAction, GutterMark,
     IMPLEMENTED, Job, OPEN_REMOTE_PROJECT, OnChoice, OnYes, PROJECT_PANEL, Progress, Question,
     REFORMAT_FILE, RENAME_SYMBOL, RefactoringHost, Requiring, SEARCH_PROJECT, SERVICES_TOOL,
     SHOW_RESOURCES, SHOW_TYPE_DIAGRAM, ServicesHost, SystemHost, THEME_STUDIO,

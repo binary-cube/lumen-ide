@@ -191,8 +191,12 @@ pub fn install(
     }
     let part = part_path(root);
     let pin = Pin::Sha256(SHA256.to_owned());
-    fetch::fetch_file(fetch, URL, &HOSTS, &part, &pin, MAX_DOWNLOAD, progress, stop)
-        .map_err(InstallError::Fetch)?;
+    fetch::fetch_file(
+        fetch::Going { fetch, progress, stop },
+        fetch::Wanted { url: URL, hosts: &HOSTS, pin: &pin, limit: MAX_DOWNLOAD },
+        &part,
+    )
+    .map_err(InstallError::Fetch)?;
     unpacking();
     let dir = install_archive(&part, root, stop)?;
     let _ = std::fs::remove_file(&part);

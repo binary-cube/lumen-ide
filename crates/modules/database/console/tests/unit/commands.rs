@@ -4,12 +4,16 @@
 //! Console…" making the first console (a table's query in it) or listing the source's;
 //! the tab closing with a transaction open asking first; Explain Analyze of a write asked.
 
-use super::*;
-use crate::fake::{FakeAccess, FakeHost, Manual, Project};
-use database::TableRef;
-use database::console::TxMode;
 use std::sync::Mutex;
+
+use database::TableRef;
+use database::console::{JumpRequest, TxMode};
 use workbench_model::EditorHost as _;
+
+use crate::fake::{FakeAccess, FakeHost, Manual, Project};
+
+use super::open_console::quote;
+use super::*;
 
 struct Setup {
     project: Project,

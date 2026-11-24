@@ -580,7 +580,8 @@ fn compare(host: &mut dyn WorkbenchHost, revision: &Revision, label: &str) -> bo
     compare_file(host, &file, revision, label)
 }
 
-/// `file` compared with its version at `revision`.
+/// `file` compared with its version at `revision`: the version read from the repository in
+/// the background (never on the UI thread), the comparison opened once it's there.
 fn compare_file(
     host: &mut dyn WorkbenchHost,
     file: &ActiveFile,
@@ -588,17 +589,25 @@ fn compare_file(
     label: &str,
 ) -> bool {
     let Some(repo) = host.repository() else { return false };
-    let Some(input) = compare_with(repo.as_ref(), &file.path, &file.text, revision, label) else {
-        host.notify(workbench_model::Notification::info(t("git.not_in_repository")));
-        return false;
-    };
-    let name = kernel::paths::file_name(&file.path);
-    host.compare(input, &format!("{name} ↔ {label}"))
+    let (path, text) = (file.path.clone(), Arc::clone(&file.text));
+    let (revision, label) = (revision.clone(), label.to_owned());
+    host.spawn(Box::new(move || {
+        let input = compare_with(repo.as_ref(), &path, &text, &revision, &label);
+        Box::new(move |host: &mut dyn WorkbenchHost| {
+            let Some(input) = input else {
+                host.notify(workbench_model::Notification::info(t("git.not_in_repository")));
+                return;
+            };
+            let name = kernel::paths::file_name(&path);
+            host.compare(input, &format!("{name} ↔ {label}"));
+        }) as Completion
+    }));
+    true
 }
 
 /// The active file's name (the subject of the lists).
 fn file_name(host: &dyn WorkbenchHost) -> String {
-    host.active_file().map(|f| kernel::paths::file_name(&f.path)).unwrap_or_default()
+    host.active_path().map(|p| kernel::paths::file_name(&p)).unwrap_or_default()
 }
 
 /// Brings the active file back to its last commit (one undo step).
@@ -606,10 +615,9 @@ struct Rollback;
 
 impl CommandHandler for Rollback {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        match (host.active_file(), decorations::committed_text(host)) {
-            (Some(file), Some(base)) => *file.text != *base.replace("\r\n", "\n"),
-            _ => false,
-        }
+        // The committed text first (in memory): without it, the file isn't asked for.
+        let Some(base) = decorations::committed_text(host) else { return false };
+        host.active_file().is_some_and(|file| *file.text != *base.replace("\r\n", "\n"))
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
@@ -628,7 +636,7 @@ impl CommandHandler for Rollback {
 
 /// Enabled when the project is in a repository and a file is open.
 fn applies(host: &dyn WorkbenchHost) -> bool {
-    host.repository().is_some() && host.active_file().is_some()
+    host.repository().is_some() && host.active_path().is_some()
 }
 
 /// [`applies`], and someone shows comparisons.

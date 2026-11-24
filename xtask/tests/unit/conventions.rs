@@ -59,3 +59,13 @@ fn locale_keys_named_in_the_code_must_exist() {
     assert_eq!(found.len(), 1, "{found:?}");
     assert!(found[0].contains("tasks.gone"));
 }
+
+/// A function let take a long list of arguments is refused; a mention in a comment isn't
+/// one.
+#[test]
+fn long_argument_lists_are_refused() {
+    let allowed = "#[allow(clippy::too_many_arguments)]\nfn f() {}\n";
+    assert_eq!(long_arguments(&source("modules/x/src/a.rs", allowed)).len(), 1);
+    let said = "// never clippy::too_many_arguments here\nfn f() {}\n";
+    assert!(long_arguments(&source("modules/x/src/a.rs", said)).is_empty());
+}

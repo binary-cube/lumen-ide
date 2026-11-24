@@ -27,16 +27,9 @@ fn it_opens_over_its_item_and_its_rows_run_their_commands() {
     let mut popover = StatusPopover::default();
     popover.open("status.file", item);
     popover.paint(
-        &mut Scene::default(),
-        &mut ts,
-        &Icons::builtin(),
-        &palette,
-        1.0,
-        viewport,
-        768.0,
-        &rows(),
-        None,
-        false,
+        (&mut Scene::default(), &mut ts),
+        PopoverLook { icons: &Icons::builtin(), palette: &palette, scale: 1.0 },
+        PopoverSpec { viewport, bar_top: 768.0, rows: &rows(), title: None, pinnable: false },
     );
     let panel = popover.bounds().expect("drawn");
     assert!(panel.max_y() <= 768.0 - ds::POPOVER_GAP + 0.5, "{panel:?} above the bar");
@@ -56,16 +49,15 @@ fn a_pinned_one_stays() {
     let mut popover = StatusPopover::default();
     popover.open("status.resources", Rect::new(900.0, 772.0, 120.0, 20.0));
     popover.paint(
-        &mut Scene::default(),
-        &mut ts,
-        &Icons::builtin(),
-        &palette,
-        1.0,
-        Rect::new(0.0, 0.0, 1200.0, 800.0),
-        768.0,
-        &rows(),
-        Some("Resources"),
-        true,
+        (&mut Scene::default(), &mut ts),
+        PopoverLook { icons: &Icons::builtin(), palette: &palette, scale: 1.0 },
+        PopoverSpec {
+            viewport: Rect::new(0.0, 0.0, 1200.0, 800.0),
+            bar_top: 768.0,
+            rows: &rows(),
+            title: Some("Resources"),
+            pinnable: true,
+        },
     );
     let pin = popover.pin.expect("a pin");
     assert_eq!(popover.hit(pin.center()), Some(PopoverHit::Pin));
@@ -83,16 +75,15 @@ fn the_way_from_its_item_keeps_it() {
     let mut popover = StatusPopover::default();
     popover.open("status.file", item);
     popover.paint(
-        &mut Scene::default(),
-        &mut ts,
-        &Icons::builtin(),
-        &palette,
-        1.0,
-        Rect::new(0.0, 0.0, 1200.0, 800.0),
-        768.0,
-        &rows(),
-        None,
-        false,
+        (&mut Scene::default(), &mut ts),
+        PopoverLook { icons: &Icons::builtin(), palette: &palette, scale: 1.0 },
+        PopoverSpec {
+            viewport: Rect::new(0.0, 0.0, 1200.0, 800.0),
+            bar_top: 768.0,
+            rows: &rows(),
+            title: None,
+            pinnable: false,
+        },
     );
     let panel = popover.bounds().unwrap();
     let between = Point::new(item.center().x, (panel.max_y() + item.min_y()) / 2.0);
@@ -129,13 +120,9 @@ fn pinned_pills_end_at_their_corner_with_the_pin_last() {
     };
     let corner = Point::new(1000.0, 700.0);
     popover.paint_pills(
-        &mut Scene::default(),
-        &mut ts,
-        &Icons::builtin(),
-        &palette,
-        1.0,
-        corner,
-        &[pill("CPU", "2,2%"), pill("RAM", "500 MB"), pill("GPU", "136 MB")],
+        (&mut Scene::default(), &mut ts),
+        PopoverLook { icons: &Icons::builtin(), palette: &palette, scale: 1.0 },
+        (corner, &[pill("CPU", "2,2%"), pill("RAM", "500 MB"), pill("GPU", "136 MB")]),
     );
     let panel = popover.bounds().expect("drawn");
     assert!((panel.max_x() - corner.x).abs() <= 1.0 && (panel.max_y() - corner.y).abs() <= 1.0);
@@ -166,16 +153,15 @@ fn the_way_to_a_window_left_of_its_item_keeps_it() {
     let mut popover = StatusPopover::default();
     popover.open("status.file", item);
     popover.paint(
-        &mut Scene::default(),
-        &mut ts,
-        &Icons::builtin(),
-        &palette,
-        1.0,
-        Rect::new(0.0, 0.0, 900.0, 800.0),
-        768.0,
-        &rows(),
-        None,
-        false,
+        (&mut Scene::default(), &mut ts),
+        PopoverLook { icons: &Icons::builtin(), palette: &palette, scale: 1.0 },
+        PopoverSpec {
+            viewport: Rect::new(0.0, 0.0, 900.0, 800.0),
+            bar_top: 768.0,
+            rows: &rows(),
+            title: None,
+            pinnable: false,
+        },
     );
     let panel = popover.bounds().unwrap();
     assert!(panel.max_x() < item.min_x(), "left of its item: {panel:?}");
@@ -211,16 +197,9 @@ fn a_graph_tells_its_value_under_the_mouse() {
     popover.open("status.resources", item);
     let paint = |popover: &mut StatusPopover, ts: &mut TextSystem| {
         popover.paint(
-            &mut Scene::default(),
-            ts,
-            &Icons::builtin(),
-            &palette,
-            1.0,
-            viewport,
-            768.0,
-            &[row()],
-            None,
-            false,
+            (&mut Scene::default(), ts),
+            PopoverLook { icons: &Icons::builtin(), palette: &palette, scale: 1.0 },
+            PopoverSpec { viewport, bar_top: 768.0, rows: &[row()], title: None, pinnable: false },
         );
     };
     paint(&mut popover, &mut ts);

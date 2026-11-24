@@ -241,7 +241,12 @@ impl RequestEditor {
                         content.size.width,
                         px(ds::TOOLBAR_BUTTON_H),
                     );
-                    actions_row(layer, text, icons, &ds, row, Table::Params, self.hover, &mut hits);
+                    actions_row(
+                        (layer, text, icons),
+                        &ds,
+                        (row, Table::Params, self.hover),
+                        &mut hits,
+                    );
                 }
                 let bulk_label =
                     t(if self.bulk.is_some() { "http.table_edit" } else { "http.bulk_edit" });
@@ -275,28 +280,19 @@ impl RequestEditor {
                     layer = scene.push_layer(Some(b));
                 } else {
                     paint_rows(
-                        layer,
-                        text,
-                        icons,
+                        (layer, text, icons),
                         &ds,
-                        area,
-                        Table::Params,
-                        &mut form.params,
-                        focus,
-                        self.hover,
+                        (area, Table::Params, &mut form.params),
+                        (focus, self.hover),
                         &mut hits,
                     );
                 }
             }
             Tab::Headers => {
                 let actions = actions_row(
-                    layer,
-                    text,
-                    icons,
+                    (layer, text, icons),
                     &ds,
-                    content,
-                    Table::Headers,
-                    self.hover,
+                    (content, Table::Headers, self.hover),
                     &mut hits,
                 );
                 let mut y = actions.max_y() + px(6.0);
@@ -328,15 +324,10 @@ impl RequestEditor {
                     (content.max_y() - y).max(0.0),
                 );
                 paint_rows(
-                    layer,
-                    text,
-                    icons,
+                    (layer, text, icons),
                     &ds,
-                    area,
-                    Table::Headers,
-                    &mut form.headers,
-                    focus,
-                    self.hover,
+                    (area, Table::Headers, &mut form.headers),
+                    (focus, self.hover),
                     &mut hits,
                 );
             }
@@ -375,27 +366,17 @@ impl RequestEditor {
                         Some(&t("http.no_body_detail")),
                     ),
                     BodyKind::UrlEncoded => paint_rows(
-                        layer,
-                        text,
-                        icons,
+                        (layer, text, icons),
                         &ds,
-                        area,
-                        Table::Form,
-                        &mut form.form,
-                        focus,
-                        self.hover,
+                        (area, Table::Form, &mut form.form),
+                        (focus, self.hover),
                         &mut hits,
                     ),
                     BodyKind::FormData => paint_rows(
-                        layer,
-                        text,
-                        icons,
+                        (layer, text, icons),
                         &ds,
-                        area,
-                        Table::Multipart,
-                        &mut form.parts,
-                        focus,
-                        self.hover,
+                        (area, Table::Multipart, &mut form.parts),
+                        (focus, self.hover),
                         &mut hits,
                     ),
                     BodyKind::File => {
@@ -792,15 +773,10 @@ impl RequestEditor {
 }
 
 /// A table's actions over it (Add, Delete all), where they are.
-#[allow(clippy::too_many_arguments)]
 fn actions_row(
-    layer: &mut Layer,
-    text: &mut TextSystem,
-    icons: &icons::Icons,
+    (layer, text, icons): (&mut Layer, &mut TextSystem, &icons::Icons),
     ds: &Ctx<'_>,
-    content: Rect,
-    table: Table,
-    hover: Option<Hit>,
+    (content, table, hover): (Rect, Table, Option<Hit>),
     hits: &mut Vec<(Rect, Hit)>,
 ) -> Rect {
     let px = |v: f32| ds.px(v);
@@ -828,17 +804,11 @@ fn actions_row(
 const TRASH_CENTER: f32 = 20.0;
 
 /// A table's rows: the name, the value, on / off, remove (a multipart field: file or text).
-#[allow(clippy::too_many_arguments)]
 fn paint_rows(
-    layer: &mut Layer,
-    text: &mut TextSystem,
-    icons: &icons::Icons,
+    (layer, text, icons): (&mut Layer, &mut TextSystem, &icons::Icons),
     ds: &Ctx<'_>,
-    area: Rect,
-    table: Table,
-    rows: &mut [Row],
-    focus: Option<Focus>,
-    hover: Option<Hit>,
+    (area, table, rows): (Rect, Table, &mut [Row]),
+    (focus, hover): (Option<Focus>, Option<Hit>),
     hits: &mut Vec<(Rect, Hit)>,
 ) {
     let p = ds.palette;

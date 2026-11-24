@@ -12,7 +12,7 @@ pub(crate) struct RevertChange;
 
 impl CommandHandler for RevertChange {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some() && crate::decorations::committed_text(host).is_some()
+        host.active_path().is_some() && crate::decorations::committed_text(host).is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
@@ -42,7 +42,7 @@ pub(crate) struct ChangeActions;
 
 impl CommandHandler for ChangeActions {
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.repository().is_some() && host.active_file().is_some()
+        host.repository().is_some() && host.active_path().is_some()
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

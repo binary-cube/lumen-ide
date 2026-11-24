@@ -478,10 +478,12 @@ fn paint_woken(
 }
 
 /// Painted until its layout is of its text's version (built on a worker).
+/// Paints until the text's layout is in place and nothing more is being built (a build the
+/// caches asked for after it, under load, comes too).
 fn settle(viewer: &mut MarkdownViewer, text: &mut TextSystem, bounds: Rect) {
     let version = viewer.version;
     let started = std::time::Instant::now();
-    while viewer.layout.as_ref().is_none_or(|l| l.version != version) {
+    while viewer.layout.as_ref().is_none_or(|l| l.version != version) || viewer.building.is_some() {
         assert!(started.elapsed() < Duration::from_secs(20), "laid out meanwhile");
         std::thread::sleep(Duration::from_millis(2));
         paint_once(viewer, text, bounds);

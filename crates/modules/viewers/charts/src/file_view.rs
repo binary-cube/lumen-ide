@@ -50,9 +50,11 @@ pub struct OpenAsChart;
 impl CommandHandler for OpenAsChart {
     /// On a data file, or on any text with something selected (a JSON pasted in a note).
     fn enabled(&self, host: &dyn WorkbenchHost) -> bool {
-        host.active_file().is_some_and(|f| {
-            f.selection.as_ref().is_some_and(|r| !r.is_empty()) || is_data(&f.path)
-        })
+        // A data file's path first (in memory): only another file's selection is asked.
+        host.active_path().is_some_and(|p| is_data(&p))
+            || host
+                .active_file()
+                .is_some_and(|f| f.selection.as_ref().is_some_and(|r| !r.is_empty()))
     }
 
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {

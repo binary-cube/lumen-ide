@@ -227,17 +227,18 @@ fn start(
                     Some(label) => {
                         RunState::Failed(i18n::tr!("http.not_run", name = label.as_str()))
                     }
-                    None => execute(
-                        &runs,
-                        &environments,
-                        &file,
-                        &request,
-                        &variables,
-                        environment.as_deref(),
-                        &cancel,
-                        round,
-                        &|piece: &[u8]| runs.append_live(id, piece),
-                    ),
+                    None => {
+                        let step = Step {
+                            runs: &runs,
+                            environments: &environments,
+                            file: &file,
+                            request: &request,
+                            variables: &variables,
+                            environment: environment.as_deref(),
+                            cancel: &cancel,
+                        };
+                        execute(step, round, &|piece: &[u8]| runs.append_live(id, piece))
+                    }
                 };
                 let ok = matches!(&outcome, RunState::Done(o) if o.response.status < 400);
                 if !ok && failed.is_none() {
@@ -251,14 +252,8 @@ fn start(
 
 /// The OAuth tokens `request` uses (`{{$auth.token("id")}}`, `{{$auth.idToken("id")}}`),
 /// had and put in `own` (secrets) under the names it writes them by.
-#[allow(clippy::too_many_arguments)]
 fn oauth_tokens(
-    runs: &Runs,
-    request: &Request,
-    variables: &[http_requests::FileVariable],
-    environments: &http_requests::env::Environments,
-    environment: Option<&str>,
-    cancel: &Cancel,
+    Step { runs, request, variables, environments, environment, cancel, .. }: Step<'_>,
     own: &mut std::collections::BTreeMap<String, http_requests::vars::Value>,
 ) -> Result<(), String> {
     let mut texts = vec![request.url.clone()];
@@ -406,18 +401,23 @@ impl http_requests::vars::Lookup for Responses<'_> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn execute(
-    runs: &Runs,
-    environments: &http_requests::env::Environments,
-    file: &Path,
-    request: &Request,
-    variables: &[http_requests::FileVariable],
-    environment: Option<&str>,
-    cancel: &Cancel,
-    round: &Iteration,
-    live: &dyn Fn(&[u8]),
-) -> RunState {
+/// What one request of a chain is run with: the runs it's noted in, the environments read
+/// for the chain, its file and its file's variables, the environment chosen, its cancel.
+#[derive(Clone, Copy)]
+struct Step<'a> {
+    runs: &'a Runs,
+    environments: &'a http_requests::env::Environments,
+    file: &'a Path,
+    request: &'a Request,
+    variables: &'a [http_requests::FileVariable],
+    environment: Option<&'a str>,
+    cancel: &'a Cancel,
+}
+
+/// `step` sent once, for `round` (an element of a collection, or none), its body's pieces
+/// told to `live` as they come.
+fn execute(step: Step<'_>, round: &Iteration, live: &dyn Fn(&[u8])) -> RunState {
+    let Step { runs, environments, file, request, variables, environment, cancel } = step;
     let (file_variables, chosen) =
         (FileVariables(variables), Environment { environments, chosen: environment });
     let responses = Responses { runs, file };
@@ -458,9 +458,7 @@ fn execute(
     };
     let mut own = script.as_ref().map(|s| plain(&s.variables)).unwrap_or_default();
     // `{{$auth.token("id")}}`: the configuration's token had first (on this worker).
-    if let Err(why) =
-        oauth_tokens(runs, request, variables, environments, environment, cancel, &mut own)
-    {
+    if let Err(why) = oauth_tokens(step, &mut own) {
         return RunState::Failed(why);
     }
     // This round's element of a collection, over everything else.

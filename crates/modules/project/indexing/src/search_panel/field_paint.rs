@@ -36,8 +36,13 @@ impl ProjectSearch {
         let focused = !self.in_scope && !self.in_replace && !self.in_mask;
         let placeholder = t("search.placeholder");
         let extras = SearchExtras { trailing: TOOLS_W, invalid: false };
-        let room =
-            self.input.paint_with(layer, text, icons, ctx, (field, focused), &placeholder, extras);
+        let room = self.input.paint_with(
+            (layer, text, icons),
+            ctx,
+            (field, focused),
+            &placeholder,
+            extras,
+        );
         // In its room, from the right: the folder's button (lit while a folder is set), the
         // options (lit while on), the replacement's.
         let side = px(BUTTON);

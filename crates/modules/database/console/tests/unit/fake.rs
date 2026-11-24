@@ -523,7 +523,10 @@ impl WorkbenchHost for FakeHost {
         true
     }
 
-    fn spawn(&mut self, _job: workbench_model::Job) {}
+    /// Done at once: the worker's part, then its completion.
+    fn spawn(&mut self, job: workbench_model::Job) {
+        job()(self);
+    }
 
     fn notify(&mut self, notification: Notification) {
         self.told.push(notification);

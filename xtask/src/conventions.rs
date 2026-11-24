@@ -8,7 +8,9 @@
 //!   comment just above it (`alias`, `before it was renamed`, `before a rename`);
 //! - settings are declared once, in a crate's `settings.rs` (`Setting::new`): nowhere else;
 //! - every locale key the code names (`t("tasks.title")`, `tr!("console.error_at", …)`) is
-//!   in the locales (both have the same keys: the i18n crate's own test).
+//!   in the locales (both have the same keys: the i18n crate's own test);
+//! - what's passed is a DTO, never a long list of arguments: no
+//!   `#[allow(clippy::too_many_arguments)]` anywhere (clippy refuses the list itself).
 //!
 //! Test code (`tests/` folders) and the build-only tools (`xtask`) are left out.
 
@@ -32,8 +34,27 @@ pub fn violations(root: &Path, brand: &str, locale_keys: &BTreeSet<String>) -> V
         found.extend(brand_literals(&source, brand));
         found.extend(settings_outside(&source));
         found.extend(unknown_keys(&source, locale_keys));
+        found.extend(long_arguments(&source));
     }
     found
+}
+
+/// A function let take a long list of arguments (`too_many_arguments` allowed): its data
+/// goes in a DTO (a named struct) instead.
+pub fn long_arguments(source: &Source) -> Vec<String> {
+    source
+        .text
+        .lines()
+        .enumerate()
+        .filter(|(_, line)| code_of(line).contains("clippy::too_many_arguments"))
+        .map(|(n, _)| {
+            format!(
+                "{}:{}: a long list of arguments: pass a DTO (a named struct) instead (code.md)",
+                source.path,
+                n + 1
+            )
+        })
+        .collect()
 }
 
 /// The `.rs` files under each crate's `src` (not its `tests`), paths from `crates/`.

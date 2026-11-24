@@ -1,7 +1,9 @@
-use super::*;
 use code_intelligence::{SymbolHit, SymbolQuery};
-use workspace::FileSystem as _;
-use workspace::PathQuery;
+use ui_components::{KeyReach, PanelContext, ToolPanel, ViewerCursor, ViewerKey};
+use workbench_model::{EntriesRequest, ProjectView};
+use workspace::{FileSystem as _, PathQuery};
+
+use super::*;
 
 /// A project on disk (a scratch folder), as the queries port tells it: the disk's entries,
 /// a fixed list of its files for the search.
@@ -72,6 +74,18 @@ fn project(name: &str) -> (PathBuf, ProjectPanel) {
 }
 
 /// The visible rows' names, in order.
+/// The folders opened meanwhile put in the tree: they're read on the listing's thread (a
+/// click never reads the disk), so a test waits for them as a frame would.
+fn settled(panel: &mut ProjectPanel) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    panel.poll();
+    while panel.in_flight > 0 {
+        assert!(std::time::Instant::now() < deadline, "the folders are read");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        panel.poll();
+    }
+}
+
 fn names(panel: &mut ProjectPanel) -> Vec<String> {
     let tree = panel.tree.as_mut().unwrap();
     let ids: Vec<_> = tree.visible_rows().iter().map(|r| r.id).collect();
@@ -97,6 +111,17 @@ fn the_project_comes_through_the_queries_and_another_one_starts_anew() {
     // A folder opened by a click is kept when the same project's files change.
     let src = row(&mut panel, "src");
     assert_eq!(panel.click(src), None);
+    // Never read: read on the listing's thread, not by the click.
+    assert_eq!(panel.in_flight, 1, "read in the background");
+    settled(&mut panel);
+    assert!(names(&mut panel).contains(&"User.php".to_owned()));
+    // Read before: closed and opened again at once.
+    let src = row(&mut panel, "src");
+    panel.click(src);
+    assert!(!names(&mut panel).contains(&"User.php".to_owned()));
+    let src = row(&mut panel, "src");
+    panel.click(src);
+    assert_eq!(panel.in_flight, 0);
     assert!(names(&mut panel).contains(&"User.php".to_owned()));
     let queries = panel.queries.clone();
     panel.set_data(&ProjectView {
@@ -341,6 +366,7 @@ fn the_panel_follows_the_disk_and_the_app_s_requests() {
     panel.set_data(&EntriesRequest::FocusSearch);
     assert!(panel.wants_text() && panel.keys == Keys::Search);
     panel.set_data(&EntriesRequest::Reveal { path: root.join("src"), expand: true });
+    settled(&mut panel);
     assert!(names(&mut panel).contains(&"User.php".to_owned()));
     assert!(!panel.wants_text());
     let _ = std::fs::remove_dir_all(root);
@@ -370,6 +396,7 @@ fn many_changed_folders_are_read_in_the_background() {
     for dir in &dirs {
         panel.set_data(&EntriesRequest::Reveal { path: dir.clone(), expand: true });
     }
+    settled(&mut panel);
     let made: Vec<PathBuf> = dirs.iter().map(|d| d.join("new.php")).collect();
     for file in &made {
         std::fs::write(file, "").unwrap();
@@ -441,5 +468,23 @@ fn the_search_is_the_apps_search_field_with_the_panels_focus() {
     assert_eq!(panel.keys, Keys::NewEntry, "the search has no caret now");
     assert!(panel.text_input("n"));
     assert_eq!(panel.search.query(), "", "typing reaches the name, not the search");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// A folder clicked twice before it's read stays closed (the second click closes it); read,
+/// it opens on the next click at once.
+#[test]
+fn a_second_click_before_the_folder_is_read_closes_it() {
+    let (root, mut panel) = project("twice");
+    let src = row(&mut panel, "src");
+    panel.click(src);
+    let src = row(&mut panel, "src");
+    panel.click(src);
+    settled(&mut panel);
+    assert!(!names(&mut panel).contains(&"User.php".to_owned()), "left closed");
+    let src = row(&mut panel, "src");
+    panel.click(src);
+    assert_eq!(panel.in_flight, 0, "read before: opened at once");
+    assert!(names(&mut panel).contains(&"User.php".to_owned()));
     let _ = std::fs::remove_dir_all(root);
 }

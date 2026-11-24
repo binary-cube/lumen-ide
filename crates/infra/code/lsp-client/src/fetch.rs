@@ -3,11 +3,10 @@
 //! else.
 
 use std::path::Path;
-use std::sync::atomic::AtomicBool;
 
 #[cfg(any(test, feature = "fake"))]
 pub use pinned_downloads::fetch::Memory;
-pub use pinned_downloads::fetch::{Body, Fetch, FetchError, MAX_REDIRECTS, Pin};
+pub use pinned_downloads::fetch::{Body, Fetch, FetchError, Going, MAX_REDIRECTS, Pin, Wanted};
 
 /// The only hosts anything is downloaded from: Node's releases, npm's registry, GitHub's
 /// releases (and where they redirect: its storage of release files) and its raw files at a
@@ -47,27 +46,19 @@ impl Fetch for Http {
 
 /// [`pinned_downloads::fetch::fetch_bytes`] from [`HOSTS`].
 pub fn fetch_bytes(
-    fetch: &dyn Fetch,
-    url: &str,
-    pin: &Pin,
-    limit: u64,
-    progress: &dyn Fn(u64, Option<u64>),
-    stop: &AtomicBool,
+    going: Going<'_>,
+    (url, pin, limit): (&str, &Pin, u64),
 ) -> Result<Vec<u8>, FetchError> {
-    pinned_downloads::fetch::fetch_bytes(fetch, url, &HOSTS, pin, limit, progress, stop)
+    pinned_downloads::fetch::fetch_bytes(going, Wanted { url, hosts: &HOSTS, pin, limit })
 }
 
 /// [`pinned_downloads::fetch::fetch_file`] from [`HOSTS`].
 pub fn fetch_file(
-    fetch: &dyn Fetch,
-    url: &str,
+    going: Going<'_>,
+    (url, pin, limit): (&str, &Pin, u64),
     part: &Path,
-    pin: &Pin,
-    limit: u64,
-    progress: &dyn Fn(u64, Option<u64>),
-    stop: &AtomicBool,
 ) -> Result<(), FetchError> {
-    pinned_downloads::fetch::fetch_file(fetch, url, &HOSTS, part, pin, limit, progress, stop)
+    pinned_downloads::fetch::fetch_file(going, Wanted { url, hosts: &HOSTS, pin, limit }, part)
 }
 
 #[cfg(test)]

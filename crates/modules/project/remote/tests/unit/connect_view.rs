@@ -1,3 +1,4 @@
+use super::suggestions::{folder_suggestions, server_suggestions, typed_server_path};
 use super::*;
 
 fn entry(path: &str, is_dir: bool) -> RemoteEntry {
@@ -280,16 +281,21 @@ fn the_local_folder_is_completed_as_typed_or_picked() {
     view.focus(Field::Local);
     view.input_mut(Field::Local).set_text("");
     view.type_text(&format!("{base}al"));
+    // Read on a worker (a key never reads the disk): shown at a later poll.
+    assert!(view.suggestions.is_empty());
+    suggested(&mut view);
     assert_eq!(view.suggestions.len(), 2);
     view.edit_key(ViewerKey::Down);
     view.edit_key(ViewerKey::Down);
     view.edit_key(ViewerKey::Tab);
     assert_eq!(view.value(Field::Local), format!("{base}Alps{sep}"));
+    suggested(&mut view);
     assert!(view.suggestions.is_empty(), "nothing inside");
     // Esc closes the list, not the wizard.
     view.type_text("");
     view.input_mut(Field::Local).set_text(&base);
     view.suggest();
+    suggested(&mut view);
     assert!(!view.suggestions.is_empty());
     view.edit_key(ViewerKey::Escape);
     assert!(view.suggestions.is_empty() && view.take_action().is_none());
@@ -724,4 +730,14 @@ fn a_field_keeps_the_keys_and_the_wizard_walks_them() {
     assert_eq!(view.focused(), Field::Host);
     assert!(view.command("select_all"));
     assert_eq!(view.input(Field::Host).selected_text(), "example.com");
+}
+
+/// The local folders asked for put in the list (read on a worker).
+fn suggested(view: &mut ConnectView) {
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while view.local_folders.is_some() {
+        assert!(std::time::Instant::now() < until, "the folders are read");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        view.poll();
+    }
 }

@@ -47,13 +47,17 @@ impl Canvas {
         let trailing = ds::keycap_width(text, ds, key) / ds.px(1.0).max(f32::EPSILON);
         let extras = SearchExtras { trailing, invalid: false };
         let room = match &mut self.search {
-            Some(search) => {
-                search.field.paint_with(layer, text, icons, ds, (field, true), &placeholder, extras)
-            }
+            Some(search) => search.field.paint_with(
+                (layer, text, icons),
+                ds,
+                (field, true),
+                &placeholder,
+                extras,
+            ),
             None => {
                 // Closed: an empty field to open (no caret, nothing kept).
                 let mut closed = SearchField::new();
-                closed.paint_with(layer, text, icons, ds, (field, false), &placeholder, extras)
+                closed.paint_with((layer, text, icons), ds, (field, false), &placeholder, extras)
             }
         };
         let mid = room.min_y() + room.size.height / 2.0;

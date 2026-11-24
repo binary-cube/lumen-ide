@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 
 use pinned_downloads::archive::{Rules, unpack_path};
-use pinned_downloads::fetch::{Fetch, Pin, fetch_file};
+use pinned_downloads::fetch::{Fetch, Going, Pin, Wanted, fetch_file};
 
 use crate::check::Available;
 
@@ -73,8 +73,12 @@ pub fn stage(
     // Downloaded before (another run): checked again (streamed), not fetched again.
     let whole = sha256(&archive).is_some_and(|digest| pin.matches(&digest));
     if !whole {
-        fetch_file(fetch, &available.url, crate::HOSTS, &part, &pin, file.size, progress, stop)
-            .map_err(String::from)?;
+        fetch_file(
+            Going { fetch, progress, stop },
+            Wanted { url: &available.url, hosts: crate::HOSTS, pin: &pin, limit: file.size },
+            &part,
+        )
+        .map_err(String::from)?;
         std::fs::rename(&part, &archive).map_err(|e| format!("{}: {e}", archive.display()))?;
     }
     // An installer (the app its install updates through): run as it is, nothing unpacked.

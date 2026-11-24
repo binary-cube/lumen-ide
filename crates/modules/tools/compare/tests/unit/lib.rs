@@ -213,7 +213,10 @@ impl WorkbenchHost for Tabs {
     fn choose(&mut self, _: workbench_model::ChoiceList, _: workbench_model::OnChoice) -> bool {
         false
     }
-    fn spawn(&mut self, _: workbench_model::Job) {}
+    /// Done at once: the worker's part, then its completion.
+    fn spawn(&mut self, job: workbench_model::Job) {
+        job()(self);
+    }
     fn notify(&mut self, _: workbench_model::Notification) {}
 }
 

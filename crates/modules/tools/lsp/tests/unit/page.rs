@@ -99,7 +99,13 @@ fn a_server_is_added_from_its_fields() {
     add.set_text(scope(&settings, "typescript"), "languages", "lua, luau");
     add.set_text(scope(&settings, "typescript"), "args", "--stdio --log=off");
     add.press(scope(&settings, "typescript"), "add");
-    assert_eq!(status(&add), Some(i18n::tr!("settings.lsp_add_done", name = "lua-ls")));
+    // Written on a worker (a press never writes the disk): said when it's done.
+    let done = Some(i18n::tr!("settings.lsp_add_done", name = "lua-ls"));
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while status(&add) != done {
+        assert!(std::time::Instant::now() < until, "added: {:?}", status(&add));
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
     let catalog = crate::catalog::catalog();
     let added = catalog.named("lua-ls").unwrap();
     assert_eq!(added.languages, ["lua", "luau"]);

@@ -1,5 +1,7 @@
 use super::*;
+use database::Driver;
 use mysql_async::Column;
+use mysql_async::consts::{ColumnFlags, ColumnType};
 
 fn col(kind: ColumnType) -> Column {
     Column::new(kind).with_character_set(255)

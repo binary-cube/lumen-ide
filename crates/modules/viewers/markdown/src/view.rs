@@ -80,6 +80,8 @@ pub struct DiagramView {
     saving: Option<bool>,
     action: Option<ViewerAction>,
     notifications: Vec<workbench_model::Notification>,
+    /// Files being written on the pool: what each says once done.
+    writing: Vec<Receiver<workbench_model::Notification>>,
     wake: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
@@ -130,16 +132,42 @@ impl DiagramView {
         true
     }
 
+    /// `bytes` written to `path` on the pool (never the UI thread's disk), told once done.
     fn write(&mut self, path: &Path, bytes: &[u8]) {
-        let note = match std::fs::write(path, bytes) {
-            Ok(()) => workbench_model::Notification::success(i18n::tr!(
-                "markdown.diagram_saved",
-                path = path.display().to_string()
-            )),
-            Err(e) => workbench_model::Notification::error(i18n::t("markdown.diagram_not_saved"))
-                .with_detail(e.to_string()),
-        };
-        self.notifications.push(note);
+        let (path, bytes, wake) = (path.to_path_buf(), bytes.to_vec(), self.wake.clone());
+        let (tx, rx) = std::sync::mpsc::channel();
+        kernel::work::run(jobs::RENDER_THREAD, move || {
+            let note = match std::fs::write(&path, &bytes) {
+                Ok(()) => workbench_model::Notification::success(i18n::tr!(
+                    "markdown.diagram_saved",
+                    path = path.display().to_string()
+                )),
+                Err(e) => {
+                    workbench_model::Notification::error(i18n::t("markdown.diagram_not_saved"))
+                        .with_detail(e.to_string())
+                }
+            };
+            let _ = tx.send(note);
+            if let Some(wake) = wake {
+                wake();
+            }
+        });
+        self.writing.push(rx);
+    }
+
+    /// The files written meanwhile: their notes (a worker gone without one ends its wait).
+    fn take_written(&mut self) -> bool {
+        let before = self.writing.len();
+        let notes = &mut self.notifications;
+        self.writing.retain(|rx| match rx.try_recv() {
+            Ok(note) => {
+                notes.push(note);
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => true,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
+        });
+        self.writing.len() != before
     }
 
     fn svg(&self) -> Option<String> {
@@ -280,7 +308,7 @@ impl Viewer for DiagramView {
     }
 
     fn poll(&mut self) -> bool {
-        self.tiles.poll() | self.take_export()
+        self.tiles.poll() | self.take_export() | self.take_written()
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
@@ -421,7 +449,7 @@ impl DiagramView {
 
     /// What the view asked for meanwhile (a copy).
     pub fn waiting(&self) -> bool {
-        self.export.is_some()
+        self.export.is_some() || !self.writing.is_empty()
     }
 
     pub fn set_waker(&mut self, wake: Option<Arc<dyn Fn() + Send + Sync>>) {
@@ -431,6 +459,7 @@ impl DiagramView {
     /// The export arrived: what it asks for.
     pub fn settle(&mut self) -> (Option<ViewerAction>, Vec<workbench_model::Notification>) {
         self.take_export();
+        self.take_written();
         (self.action.take(), std::mem::take(&mut self.notifications))
     }
 }

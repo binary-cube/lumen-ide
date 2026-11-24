@@ -51,6 +51,18 @@ pub struct DialogButton {
     pub kind: ButtonKind,
 }
 
+/// What a dialog's list section is drawn from: the dialog, its entries' common folder,
+/// where the section starts and how its rows are laid out, the card's geometry, the look.
+struct ListSection<'a> {
+    spec: &'a DialogSpec,
+    folder: &'a str,
+    y: f32,
+    list: &'a ListLayout,
+    geo: &'a Geometry,
+    style: &'a Style<'a>,
+    icons: &'a Icons,
+}
+
 impl DialogButton {
     pub fn new(id: &'static str, label: impl Into<String>, kind: ButtonKind) -> Self {
         Self { id, label: label.into(), kind }
@@ -371,7 +383,9 @@ impl Dialog {
         let mut y = paint_message((&title_rows, title_h), &rows, &geo, &style, text, layer);
         if list.rows > 0 {
             let at = card.min_y() + list_top;
-            self.paint_list(spec, folder, (at, &list), &geo, (&style, icons), text, scene);
+            let section =
+                ListSection { spec, folder, y: at, list: &list, geo: &geo, style: &style, icons };
+            self.paint_list(section, text, scene);
         }
         // The text field (e.g. the new name), below the message.
         if let Some(input) = &mut self.input {
@@ -432,14 +446,9 @@ impl Dialog {
     /// The list's section from `y` down to the footer, the card's whole width on its own
     /// color (a line above it): the common `folder` on its row, then the entries, only those
     /// in sight shaped.
-    #[allow(clippy::too_many_arguments)]
     fn paint_list(
         &mut self,
-        spec: &DialogSpec,
-        folder: &str,
-        (y, list): (f32, &ListLayout),
-        geo: &Geometry,
-        (style, icons): (&Style<'_>, &Icons),
+        ListSection { spec, folder, y, list, geo, style, icons }: ListSection<'_>,
         text: &mut TextSystem,
         scene: &mut Scene,
     ) {

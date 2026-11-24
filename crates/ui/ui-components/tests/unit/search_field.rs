@@ -60,9 +60,7 @@ fn edits_are_told_and_the_view_keeps_room_on_the_right() {
     let (mut layer, mut text, icons) =
         (Layer::default(), TextSystem::new(), icons::Icons::builtin());
     let room = field.paint_with(
-        &mut layer,
-        &mut text,
-        &icons,
+        (&mut layer, &mut text, &icons),
         &ctx,
         (Rect::new(0.0, 0.0, 300.0, 34.0), true),
         "Search",

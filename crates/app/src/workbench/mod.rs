@@ -70,17 +70,21 @@ struct Swatches {
 }
 
 /// The default width of the project panel and its limits, in logical pixels.
+mod appearance;
 mod assists;
 mod caches;
 mod chrome;
 mod concealed;
+mod construct;
 mod context_actions;
+mod copy_paste;
 mod decorations;
 mod diagnostics;
 mod dialogs;
 mod dividers;
 mod editing;
 mod editor_full;
+mod editor_keys;
 mod editor_popups;
 mod editor_toolbars;
 mod emphasis;
@@ -89,6 +93,7 @@ mod everywhere;
 mod file_drop;
 mod file_format;
 mod files;
+mod find_bar;
 mod find_search;
 mod frame_askers;
 pub(crate) mod frameworks;
@@ -120,6 +125,7 @@ mod project_data;
 mod project_groups;
 mod recent_writes;
 mod refactorings;
+mod results;
 mod running;
 mod saving;
 mod search;
@@ -131,13 +137,18 @@ mod splits;
 mod status;
 mod syntax;
 mod task_data;
+mod text_fields;
 mod theme_decorations;
 mod toasts;
 mod tool_area;
 mod tool_windows;
 mod tree;
 mod viewers;
+mod window_layout;
 mod window_menu;
+
+use syntax::{ScopeStyle, scope_color};
+use viewers::paint_viewer;
 mod zoom;
 
 const TREE_WIDTH: f32 = 280.0;
@@ -284,6 +295,9 @@ pub use menu_states::RowState;
 pub use navigation::Related;
 pub use ports::{Disk, Ports};
 pub(crate) use project_groups::{RECENT_MENU, delete_project_dialog};
+pub use results::MouseResult;
+pub(crate) use results::cursor_icon;
+use results::picker_result;
 pub use running::RunningRequest;
 pub use side_panel::PANEL_MENU;
 pub use status::STATUS_MENU;
@@ -685,6 +699,8 @@ pub struct Workbench {
     /// The menu's target file's text read from disk (not open): read once while the menu
     /// asks its commands whether they apply, not once per command.
     menu_text: std::cell::RefCell<Option<(PathBuf, Arc<str>)>>,
+    /// Whether the menu's target file (not open) is text, looked at once per menu.
+    menu_probe: std::cell::RefCell<Option<(PathBuf, bool)>>,
     /// The status bar's cursor position, by what it was computed from.
     status_cursor: std::cell::RefCell<Memo<StatusCursorKey, (usize, String)>>,
     /// The About window.
@@ -846,215 +862,6 @@ pub struct Workbench {
 }
 
 impl Workbench {
-    pub fn new(support: Arc<LanguageSupport>, ports: Ports) -> Self {
-        crate::config::isolate_tests();
-        let reporters = support.resource_reporters.clone();
-        let modules = Arc::clone(&support.manager);
-        let mut settings = SettingsView::default();
-        settings.set_card_previews(support.card_previews.clone());
-        let idle = vec![
-            workbench_model::IdleWatch::new(std::time::Instant::now());
-            support.idle_actions.len()
-        ];
-        let data = ProjectData::new();
-        let entry_changes = entry_events::EntryChanges::listen(&data.events);
-        let palette = Palette::dark();
-        let tools = tool_area::ToolArea::new(&palette);
-        let icons = shared_icons(&support);
-        let sessions = session::QueuedSessions::new(Arc::clone(&ports.sessions));
-        let recent_writes = recent_writes::QueuedRecentFiles::new(Arc::clone(&ports.recent_files));
-        Self {
-            code_font: palette.code_font.clone(),
-            palette,
-            blur: true,
-            renderer: None,
-            ports,
-            project: None,
-            tabs: Vec::new(),
-            active: 0,
-            tab_bar: TabBar::default(),
-            status: StatusBar::default(),
-            editor_full: None,
-            focus: Focus::Editor,
-            next_untitled: 1,
-            size: PhysicalSize::default(),
-            scale: 1.0,
-            editor_area: Rect::default(),
-            card: Rect::default(),
-            support,
-            worker: None,
-            highlighter: Highlighter::new(),
-            spans: Vec::new(),
-            colors: Vec::new(),
-            theme: None,
-            scope_colors: HashMap::new(),
-            levels_warmed: 0,
-            theme_generation: 0,
-            file_icons: FileIcons::default(),
-            resources: None,
-            resource_trail: Default::default(),
-            resources_pinned: None,
-            laid_for_headers: Vec::new(),
-            icons,
-            drag_unit: None,
-            settings,
-            settings_model: SettingsModel::default(),
-            settings_language: None,
-            choice_menu: Default::default(),
-            dropdown_list: Default::default(),
-            dropdown_anchor: kernel::Rect::default(),
-            dropdown_ids: Vec::new(),
-            context_menu: Default::default(),
-            menu_drawer: None,
-            choice_purpose: ChoicePurpose::None,
-            toasts: Default::default(),
-            status_popover: Default::default(),
-            page_pictures: Vec::new(),
-            page_holes_ok: false,
-            resource_pills: Default::default(),
-            toast_clock: None,
-            file_drop: None,
-            toast_position: None,
-            pending_goto: None,
-            pending_offset: None,
-            menu_context: None,
-            menu_text: std::cell::RefCell::default(),
-            status_cursor: std::cell::RefCell::default(),
-            request: None,
-            running_request: None,
-            held_view_action: None,
-            panel_actions: Vec::new(),
-            about: Default::default(),
-            editor_zoom: 1.0,
-            project_theme: None,
-            level_language: None,
-            entry_changes,
-            progress: Vec::new(),
-            files_clipboard: None,
-            session: workbench_model::SessionKeeper::default(),
-            sessions,
-            recent_writes,
-            data,
-            syntax_swept: std::time::Instant::now(),
-            paint_phases: paint_phases::PaintPhases::default(),
-            wheel_zoom: false,
-            link_mode: false,
-            link: None,
-            pointer_text: None,
-            tooltips: ui_workbench::Tooltips::default(),
-            error_tip: None,
-            code_hover: ui_workbench::CodeHover::default(),
-            typed_insert: None,
-            framework_checked: None,
-            shown_indicators: Vec::new(),
-            project_windows: Vec::new(),
-            capture_wanted: false,
-            param_hint: ui_workbench::ParamHint::default(),
-            last_edit: None,
-            lock_hint: None,
-            tree_watcher: None,
-            completion: CompletionPopup::default(),
-            completion_replace: None,
-            completion_assist: None,
-            remember_projects: true,
-            waker: None,
-            window_subscriptions: Vec::new(),
-            saving: saving::Saving::default(),
-            reloads: std::sync::mpsc::channel(),
-            files_checking: Arc::default(),
-            format_reads: std::sync::mpsc::channel(),
-            found: std::sync::mpsc::channel(),
-            link_files: None,
-            clipboard: None,
-            themes: None,
-            back: Vec::new(),
-            forward: Vec::new(),
-            breadcrumbs: Default::default(),
-            crumbs: Memo::default(),
-            swatches: Memo::default(),
-            viewer_drag: false,
-            modal_view: None,
-            everywhere: everywhere::Everywhere::default(),
-            idle,
-            fetching: Vec::new(),
-            task_data: task_data::AppResources::new(reporters, Some(modules)),
-            task_refreshed: None,
-            occluded: false,
-            index_memory: std::cell::Cell::new(None),
-            beside_compare: None,
-            chrome: chrome::Chrome::default(),
-            dialogs: dialogs::Dialogs::default(),
-            home: home::HomeScreen::default(),
-            tools,
-            dividers: ui_workbench::control::Controls::default(),
-            editors: groups::EditorGroups::default(),
-            emphasis: emphasis::WindowEmphasis::default(),
-        }
-    }
-
-    /// The icon set (also for the renderer, which rasterizes them).
-    /// The modules and languages (shared by all windows).
-    pub fn support(&self) -> Arc<LanguageSupport> {
-        Arc::clone(&self.support)
-    }
-
-    pub fn icons(&self) -> &Arc<Icons> {
-        &self.icons
-    }
-
-    /// Updates the displayed usage. `true` if it changed.
-    pub fn set_resources(&mut self, sample: Sample, gpu: Option<render_api::GpuMemory>) -> bool {
-        let value = Some((sample, gpu));
-        let changed = self.resources != value;
-        self.resource_trail.push(
-            std::time::Instant::now(),
-            sample.cpu,
-            sample.ram_bytes as f32,
-            gpu.map(|g| g.total() as f32),
-        );
-        self.resources = value;
-        // Only a new sample, and no more than the Task Manager's own pace.
-        if changed {
-            self.refresh_task_data_if_watched();
-        }
-        changed
-    }
-
-    // ─── Syntax ───
-
-    /// Wakes the event loop when a background job finishes (indexing).
-    pub fn set_waker(&mut self, waker: Arc<dyn Fn() + Send + Sync>) {
-        // The window's own, once: the modules' services follow it, a project or none.
-        if self.waker.is_none() {
-            let support = Arc::clone(&self.support);
-            for service in &support.project_services {
-                let subscriptions = service.window_opened(&waker);
-                self.window_subscriptions.extend(subscriptions);
-            }
-        }
-        self.waker = Some(Waker(waker));
-    }
-
-    /// How the system clipboard's text is read (the window's clipboard).
-    /// How the system clipboard's files are read and written (the window's clipboard).
-    pub fn set_files_clipboard(&mut self, clipboard: FilesClipboard) {
-        self.files_clipboard = Some(clipboard);
-    }
-
-    pub fn set_clipboard_reader(&mut self, read: std::rc::Rc<dyn Fn() -> Option<String>>) {
-        self.clipboard = Some(ClipboardReader(read));
-    }
-
-    /// Where the configurator's themes come from (the app's).
-    pub fn set_theme_source(&mut self, themes: ThemeSource) {
-        self.themes = Some(Themes(themes));
-    }
-
-    /// The configurator's themes, with this project's own theme as the current one.
-    pub(crate) fn studio_input(&self) -> Option<theming::studio::StudioInput> {
-        self.themes.as_ref().map(|themes| (themes.0)(self.project_theme()))
-    }
-
     // ─── The tree: changes on disk, new files / directories ───
 
     /// The window's title: the project, the active file, the app.
@@ -1077,71 +884,6 @@ impl Workbench {
             (None, Some(p)) => format!("{p} — {app}"),
             (None, None) => app.to_owned(),
         }
-    }
-
-    pub fn palette(&self) -> &Palette {
-        &self.palette
-    }
-
-    /// Where the diagnostics overlay may go: the work area between the tool strips, below
-    /// the top bar and above the status bar, inset by the popover gap (never over chrome).
-    pub fn overlay_area(&self) -> Rect {
-        let s = self.scale;
-        let gap = (ui_workbench::ds::POPOVER_GAP * s).round();
-        let (w, h) = (self.size.width as f32, self.size.height as f32);
-        let top = TopBar::height(s) + gap;
-        let bottom = h - StatusBar::height(s) - gap;
-        let left = self.tools.strip.bounds().max_x() + gap;
-        let right_strip = self.tools.right_strip.bounds();
-        let right = if right_strip.size.width > 0.0 { right_strip.min_x() } else { w } - gap;
-        Rect::new(left, top, (right - left).max(0.0), (bottom - top).max(0.0))
-    }
-
-    pub fn set_palette(&mut self, palette: Palette) {
-        self.tools.set_palette(&palette);
-        // The code font is the one found on the system (not the theme's generic family).
-        let code_font = self.code_font.clone();
-        let backdrop = self.backdrop_style(&palette.backdrop);
-        let floating = crate::floating::style(&palette.floating, self.blur);
-        self.palette = Palette { code_font, backdrop, floating, ..palette };
-        // The icons' colors come from the palette.
-        self.file_icons.purge();
-    }
-
-    /// What draws the window, as its driver says.
-    pub fn set_renderer(&mut self, description: String) {
-        self.renderer = Some(description);
-    }
-
-    /// Whether the window's renderer draws backdrop blurs.
-    pub fn set_backdrop_blur(&mut self, blur: bool) {
-        self.blur = blur;
-        self.refresh_backdrop();
-    }
-
-    /// The backdrop and the floating panels' glass again (the user's choice changed).
-    pub fn refresh_backdrop(&mut self) {
-        self.palette.backdrop = self.backdrop_style(&self.palette.backdrop);
-        self.palette.floating = crate::floating::style(&self.palette.floating, self.blur);
-    }
-
-    /// The backdrop a window draws: the theme's (what `style` was resolved from), never
-    /// blurred where the renderer can't.
-    fn backdrop_style(&self, style: &ui_workbench::BackdropStyle) -> ui_workbench::BackdropStyle {
-        crate::backdrop::style(style, self.blur)
-    }
-
-    pub fn set_font_family(&mut self, family: FontFamily) {
-        // Also in the palette: the terminal and the other components use the same code font.
-        self.palette.code_font = family.clone();
-        self.code_font = family.clone();
-        for tab in &mut self.tabs {
-            tab.view.set_font_family(family.clone());
-        }
-    }
-
-    pub fn background(&self) -> Rgba {
-        self.palette.window_background
     }
 
     pub fn resize(&mut self, size: PhysicalSize, scale: f32) {
@@ -1180,213 +922,6 @@ impl Workbench {
         self.tab_bar.reveal_active();
         self.layout();
     }
-
-    /// The left dock's width (logical): the project's, as dragged, else the default — the
-    /// same for every tool window shown there.
-    /// A width dragged is never narrower than its panel's header needs (one kept from
-    /// before it was); the default stays as it is.
-    fn left_dock_width(&self) -> f32 {
-        match self.data.sizes.get(workbench_model::sizes::DOCK_LEFT) {
-            Some(kept) => kept.max(self.header_min(ui_workbench::Dock::Left)),
-            None => TREE_WIDTH,
-        }
-    }
-
-    /// The right dock's width (logical), as the left's.
-    fn right_dock_width(&self) -> f32 {
-        match self.data.sizes.get(workbench_model::sizes::DOCK_RIGHT) {
-            Some(kept) => kept.max(self.header_min(ui_workbench::Dock::Right)),
-            None => SIDE_PANEL_WIDTH,
-        }
-    }
-
-    /// The bottom dock's height (physical) in `available` (the height below the top bar,
-    /// physical; `gap`: its separator's): the project's, as dragged, the editor keeping
-    /// 120 px; never dragged, [`BOTTOM_SHARE`] of it, the editor keeping
-    /// [`EDITOR_MIN_SHARE`]. The same for every tool window shown there.
-    fn bottom_dock_height(&self, available: f32, gap: f32) -> f32 {
-        let s = self.scale;
-        match self.data.sizes.get(workbench_model::sizes::DOCK_BOTTOM) {
-            Some(height) => (height * s).round().min((available - gap - 120.0 * s).max(0.0)),
-            None => {
-                let most = (available * (1.0 - EDITOR_MIN_SHARE) - gap).max(0.0);
-                (available * BOTTOM_SHARE).max(TERMINAL_MIN_HEIGHT * s).min(most).round()
-            }
-        }
-    }
-
-    fn layout(&mut self) {
-        let (w, h) = (self.size.width as f32, self.size.height as f32);
-        let s = self.scale;
-        let margin = (CARD_MARGIN * s).round();
-        let status_h = StatusBar::height(s);
-        let body_h = (h - status_h).max(0.0);
-        self.settings.set_viewport(Rect::new(0.0, 0.0, w, h), s);
-        self.home.projects_menu.set_viewport(Rect::new(0.0, 0.0, w, h), s);
-        self.choice_menu.set_viewport(Rect::new(0.0, 0.0, w, h), s);
-        self.context_menu.set_viewport(Rect::new(0.0, 0.0, w, h), s);
-        self.dialogs.dialog.set_viewport(Rect::new(0.0, 0.0, w, h), s);
-        self.about.set_viewport(Rect::new(0.0, 0.0, w, h), s);
-        self.place_menu_drawer();
-        // The top bar (on macOS, in the title bar); the rest starts below it — or at the
-        // top, the bar hidden (full screen: it comes over the content, see `paint`).
-        let bar_h = TopBar::height(s);
-        self.chrome.top_bar.set_bounds(Rect::new(0.0, 0.0, w, bar_h), s);
-        let y0 = if self.chrome.top_bar_hides() { 0.0 } else { bar_h };
-        let strip_w = ToolStrip::width(s);
-        self.tools.strip.set_bounds(Rect::new(0.0, y0, strip_w, (body_h - y0).max(0.0)), s);
-        // The right bar (the module panels), stuck to the window edge; with no panels, only the
-        // usual margin remains.
-        let right = self.support.tools.iter().any(|t| t.dock() == ui_workbench::Dock::Right);
-        let right_w = if right { strip_w } else { 0.0 };
-        self.tools
-            .right_strip
-            .set_bounds(Rect::new(w - right_w, y0, right_w, (body_h - y0).max(0.0)), s);
-        let right_edge = w - if right_w > 0.0 { right_w } else { margin };
-        // The top area (project + editor) and the terminal below it, split horizontally.
-        let gap = (SPLITTER_WIDTH * s).round();
-        let available = (body_h - y0).max(0.0);
-        // The terminal or a module's tool window (Git): the same area, one at a time.
-        let bottom = self.tools.bottom.is_some();
-        let size = if bottom { Some(self.tools.bottom_size) } else { None };
-        let (term_h, top_h) = match size {
-            None => (0.0, available),
-            // All of it: nothing above, no separator.
-            Some(tool_windows::BottomSize::Full) => (available, 0.0),
-            Some(tool_windows::BottomSize::Half) => {
-                let half = ((available - gap) / 2.0).max(0.0).round();
-                (half, (available - half - gap).max(0.0))
-            }
-            Some(tool_windows::BottomSize::Kept) => {
-                let term_h = self.bottom_dock_height(available, gap);
-                (term_h, (available - term_h - gap).max(0.0))
-            }
-        };
-        let full = size == Some(tool_windows::BottomSize::Full);
-        let full_w = (right_edge - strip_w).max(0.0);
-        let splitter_w = if bottom && !full { full_w } else { 0.0 };
-        self.tools.terminal_splitter.set_bounds(Rect::new(strip_w, y0 + top_h, splitter_w, gap), s);
-        let below = if full { 0.0 } else { gap };
-        self.tools.bottom_bounds = Rect::new(strip_w, y0 + top_h + below, full_w, term_h);
-        self.layout_tool_groups();
-        // The left side: the panel open there (the project panel, or one in its place).
-        let left_panel = self.tools.sides.iter().any(|p| p.dock == ui_workbench::Dock::Left);
-        let (tree_w, splitter_w) = if left_panel {
-            ((self.left_dock_width() * s).round().min(w * 0.6), (SPLITTER_WIDTH * s).round())
-        } else {
-            (0.0, 0.0)
-        };
-        // Its card, next to the toolbar.
-        self.tools.sidebar = Rect::new(strip_w, y0, tree_w, top_h);
-        let border = s.round().max(1.0);
-        self.tools
-            .splitter
-            .set_bounds(Rect::new(self.tools.sidebar.max_x(), y0, splitter_w, top_h), s);
-        self.status.set_bounds(Rect::new(0.0, body_h, w, status_h), s);
-
-        // The main card: rounded, with margins from the window (after the separator on the left).
-        let left = if tree_w > 0.0 { self.tools.sidebar.max_x() + splitter_w } else { strip_w };
-        // The right side panel (if open), as a separate card.
-        let right_panel = self.tools.sides.iter().any(|p| p.dock == ui_workbench::Dock::Right);
-        let side_w = if right_panel {
-            (self.right_dock_width() * s).round().min(((right_edge - left) * 0.5).max(0.0))
-        } else {
-            0.0
-        };
-        let side_gap = if side_w > 0.0 { (SPLITTER_WIDTH * s).round() } else { 0.0 };
-        let right_bounds = Rect::new(right_edge - side_w, y0, side_w, top_h);
-        self.tools
-            .side_splitter
-            .set_bounds(Rect::new(right_bounds.min_x() - side_gap, y0, side_gap, top_h), s);
-        // Each side panel's card, and its content below the header the app draws for it.
-        let (sidebar, bottom_bounds) = (self.tools.sidebar, self.tools.bottom_bounds);
-        for side in &mut self.tools.sides {
-            side.bounds = match side.dock {
-                ui_workbench::Dock::Left => sidebar,
-                // A panel at the bottom: the bottom windows' area (and their header's height).
-                ui_workbench::Dock::Bottom => bottom_bounds,
-                _ => right_bounds,
-            };
-            let header_h = if side.dock == ui_workbench::Dock::Bottom {
-                PanelHeader::bottom_height(s)
-            } else {
-                PanelHeader::height(s)
-            };
-            let b = side.bounds;
-            let inner = Rect::new(
-                b.min_x() + border,
-                b.min_y() + border,
-                (b.size.width - 2.0 * border).max(0.0),
-                (b.size.height - 2.0 * border).max(0.0),
-            );
-            let header = if side.panel.header().is_some() { header_h } else { 0.0 };
-            side.header.set_bounds(Rect::new(b.min_x(), b.min_y(), b.size.width, header), s);
-            side.content = Rect::new(
-                inner.min_x(),
-                inner.min_y() + header,
-                inner.size.width,
-                (inner.size.height - header).max(0.0),
-            );
-        }
-        self.card = Rect::new(left, y0, (right_edge - left - side_w - side_gap).max(0.0), top_h);
-        let inner = Rect::new(
-            self.card.min_x() + border,
-            self.card.min_y() + border,
-            (self.card.size.width - 2.0 * border).max(0.0),
-            (self.card.size.height - 2.0 * border).max(0.0),
-        );
-        // The editor groups, following the split tree, with a strip (and handle) between them.
-        let gap = (SPLIT_GAP * s).round();
-        let palette = self.palette.clone();
-        let rects = self.editors.split.layout(&self.editors.tree, inner, gap, s, &palette);
-        for (g, rect) in rects {
-            if g >= self.editors.groups.len() {
-                continue;
-            }
-            self.editors.groups[g].bounds = rect;
-            if g == self.editors.current {
-                self.layout_group(rect);
-            } else {
-                self.swap_group(g);
-                self.layout_group(rect);
-                self.swap_group(g);
-            }
-        }
-    }
-}
-
-/// The color of a syntax capture in the theme: first the language-specific variant
-/// (`property.json`, `variable.php`), then the general one (`property`, `variable`), each
-/// with hierarchical fallback (`function.method` → `function`).
-/// A highlight scope as the theme draws it: its color, bold, italic.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(super) struct ScopeStyle {
-    pub color: Rgba,
-    pub bold: bool,
-    pub italic: bool,
-}
-
-impl ScopeStyle {
-    /// A colored span of `range` in this style.
-    pub(super) fn span(self, range: std::ops::Range<usize>) -> ColorSpan {
-        ColorSpan { range, color: self.color, bold: self.bold, italic: self.italic }
-    }
-}
-
-fn scope_color(
-    support: &LanguageSupport,
-    theme: Option<&ResolvedTheme>,
-    key: ScopeKey,
-) -> Option<ScopeStyle> {
-    let theme = theme?;
-    let (language, capture) = support.syntax.scope(key)?;
-    // Theme lookup is hierarchical: `property.json` falls back to `property` on its own.
-    let style = theme.syntax(&format!("{capture}.{language}"))?;
-    // Only bold / italic (no color of its own): the code's color.
-    let color = style.foreground.or_else(|| {
-        (style.bold || style.italic).then(|| theme.color("editor.foreground")).flatten()
-    })?;
-    Some(ScopeStyle { color, bold: style.bold, italic: style.italic })
 }
 
 /// What the empty screen's files were made for: the query, the project, its files'
@@ -1418,95 +953,6 @@ struct FileIcons {
     icons: kernel::GenerationalCache<Box<str>, (IconId, Rgba)>,
 }
 
-/// The tab's viewer (image, preview) and, for previews, the Editor / Split / Preview
-/// switcher in the top-right corner.
-fn paint_viewer(
-    v: &mut TabViewer,
-    doc: &Document,
-    area: Rect,
-    scale: f32,
-    painter: ui_workbench::Painter<'_>,
-    waker: Option<Arc<dyn Fn() + Send + Sync>>,
-) {
-    let ui_workbench::Painter { text, scene, palette, icons } = painter;
-    let px = |x: f32| (x * scale).round();
-    if v.viewer_visible() {
-        // The preview gets the text only when the document changed.
-        // A preview reading its file itself only hears whether the text is saved.
-        if v.kind == ui_workbench::ViewerKind::Preview && v.viewer.reads_file() {
-            v.viewer.set_unsaved(doc.is_dirty());
-        } else if v.kind == ui_workbench::ViewerKind::Preview
-            && v.source_version != Some(doc.version())
-        {
-            v.viewer.set_source(&doc.buffer().text());
-            v.source_version = Some(doc.version());
-        }
-        // Its separator dragged: painted at the width it was last laid out at, clipped to
-        // its half (laid out again every so often, and once released).
-        let live = v.split.live_width().filter(|_| v.splits());
-        let bounds = live.map_or(v.bounds, |w| {
-            Rect::new(v.bounds.min_x(), v.bounds.min_y(), w, v.bounds.size.height)
-        });
-        let first = scene.layers().len();
-        {
-            // Timed for a profile: the view's own paint only.
-            let _busy = kernel::probe::time(v.provider, "paint");
-            v.viewer.paint(ui_workbench::ViewerPaint {
-                bounds,
-                scale,
-                text,
-                scene,
-                palette,
-                icons,
-                focused: true,
-                waker,
-            });
-        }
-        // The view's color (its data source's): a thin strip along its top.
-        if let Some(accent) = v.viewer.accent(palette) {
-            let strip = Rect::new(v.bounds.min_x(), v.bounds.min_y(), v.bounds.size.width, px(2.0));
-            scene.push_layer(None).quad(Quad::filled(strip, accent));
-        }
-        if live.is_some() {
-            preview_split::clip_layers(scene, first, v.bounds);
-        }
-        // The separator over both halves (its handle reaches over them): painted after both.
-        if v.splits() {
-            v.split.splitter.set_style(SplitterStyle::from_palette(palette));
-            v.split.splitter.paint(scene);
-        }
-    }
-    v.toggles.clear();
-    if v.kind != ui_workbench::ViewerKind::Preview {
-        return;
-    }
-    let modes = [
-        (ViewMode::Editor, "view-editor"),
-        (ViewMode::Split, "view-split"),
-        (ViewMode::Preview, "view-preview"),
-    ];
-    let (bw, bh, pad) = (px(ui_workbench::ds::button_size::LARGE), px(24.0), px(3.0));
-    let ctx = ui_workbench::ds::Ctx::new(palette, scale);
-    let width = bw * modes.len() as f32 + 2.0 * pad;
-    let bar =
-        Rect::new(area.max_x() - width - px(22.0), area.min_y() + px(10.0), width, bh + 2.0 * pad);
-    let layer = scene.push_layer(None);
-    layer.quad(
-        Quad::filled(bar, palette.popup_background.with_alpha(0.94))
-            .rounded(px(8.0))
-            .bordered(scale.round().max(1.0), palette.popup_border),
-    );
-    for (i, (mode, icon)) in modes.into_iter().enumerate() {
-        let r = Rect::new(bar.min_x() + pad + i as f32 * bw, bar.min_y() + pad, bw, bh);
-        let spec = ui_workbench::ds::ButtonSpec::new(ui_workbench::ds::ButtonKind::Ghost)
-            .icon(icon)
-            .rest_tone(ui_workbench::ds::Tone::Neutral)
-            .on(v.mode == mode);
-        ui_workbench::ds::button(layer, text, icons, &ctx, r, spec);
-        v.toggles.push((r, mode));
-    }
-}
-
 /// The language level menu (built by the app as a native menu).
 #[derive(Debug, Clone)]
 pub struct LevelMenu {
@@ -1522,45 +968,6 @@ pub struct LevelMenu {
     pub detected: Option<String>,
     /// Where the detected level comes from (e.g. `composer.json`, `php 8.3.6`).
     pub source: Option<String>,
-}
-
-/// What the app must do after a click.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MouseResult {
-    None,
-    Redraw,
-    /// Click in the editor: subsequent moves with the button pressed extend the selection.
-    StartDrag,
-    Open(PathBuf),
-    CloseTab(usize),
-    /// An app command (the identifier from `commands.rs`), e.g. "file.new".
-    Command(&'static str),
-    /// A choice in settings (theme etc.), applied by the app.
-    Settings(SettingsAction),
-    /// A project from the recent list.
-    OpenProject(PathBuf),
-    /// A past session's windows reopened, one after the other (plan 78).
-    RestoreSession(u128),
-    /// A menu command (from our context menu), handled like the native menus' commands.
-    MenuCommand(String),
-    /// Text for the clipboard (e.g. from the "Copy" menu).
-    CopyText(String),
-    /// Shows the path in the system's file manager.
-    Reveal(PathBuf),
-    /// Bring this window to the front (another project's).
-    FocusWindow(u64),
-    /// This window's project takes this number (it swaps with the one that had it).
-    NumberProject(u8),
-    /// An external link (from a preview): opened in the browser.
-    OpenUrl(String),
-    /// A viewer's request for the app (e.g. `theme.preview` from the configurator).
-    ViewerRequest(ui_workbench::AppRequest),
-    /// Click on an empty area of the top bar: moves the window; double click: maximizes.
-    DragWindow,
-    ToggleMaximize,
-    /// The window's own buttons (Windows, drawn in the top bar).
-    MinimizeWindow,
-    CloseWindow,
 }
 
 /// The prefix of the virtual tabs' extensions (modules' views use it too).
@@ -1581,30 +988,6 @@ fn about_lines(modules: usize) -> Vec<String> {
     ]
 }
 
-/// What a choice from the project list does.
-fn picker_result(action: ProjectsAction) -> MouseResult {
-    match action {
-        ProjectsAction::OpenProject => MouseResult::Command("project.open"),
-        ProjectsAction::OpenRemote => MouseResult::Command(workbench_model::OPEN_REMOTE_PROJECT.0),
-        ProjectsAction::SearchProject => MouseResult::Command("project.search"),
-        ProjectsAction::OpenPath(path) => MouseResult::Open(path),
-        ProjectsAction::OpenFile => MouseResult::Command("file.open"),
-        ProjectsAction::NewFile => MouseResult::Command("file.new"),
-        ProjectsAction::OpenRecent(path) => MouseResult::OpenProject(path),
-        ProjectsAction::RestoreSession(id) => MouseResult::RestoreSession(id),
-        ProjectsAction::CloseProject => MouseResult::Command(crate::commands::CLOSE_PROJECT.0),
-        // Opened by its module, before this result (`Workbench::picker_action`).
-        ProjectsAction::EditProject(_) => MouseResult::Redraw,
-        ProjectsAction::Close
-        | ProjectsAction::ToggleGroup(_)
-        | ProjectsAction::MoveProject { .. }
-        | ProjectsAction::MoveGroup { .. }
-        | ProjectsAction::NewGroup
-        | ProjectsAction::ToggleSession(_)
-        | ProjectsAction::ToggleSessionWindow(..) => MouseResult::Redraw,
-    }
-}
-
 /// A test's folder as the app keeps paths: canonical (macOS' `/private/var`), in Windows'
 /// usual form (`C:\…`, not the `\\?\C:\…` `canonicalize` gives).
 #[cfg(test)]
@@ -1615,18 +998,6 @@ pub(crate) fn canonical(path: &Path) -> PathBuf {
 #[cfg(test)]
 #[path = "../../tests/unit/workbench.rs"]
 pub(crate) mod tests;
-
-/// The system's cursor for what a view asks over one of its parts.
-pub(crate) fn cursor_icon(cursor: ui_workbench::ViewerCursor) -> CursorIcon {
-    use ui_workbench::ViewerCursor as C;
-    match cursor {
-        C::Arrow => CursorIcon::Default,
-        C::Pointer => CursorIcon::Pointer,
-        C::Text => CursorIcon::Text,
-        C::ResizeHorizontal => CursorIcon::ResizeHorizontal,
-        C::ResizeVertical => CursorIcon::ResizeVertical,
-    }
-}
 
 /// The most characters of the active file's and of the project's names in the window's
 /// title (cut in the middle beyond).

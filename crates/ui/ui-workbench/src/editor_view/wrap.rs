@@ -19,8 +19,8 @@ use crate::folding::Folds;
 type WidthKey = (kernel::DocumentId, u32);
 
 /// What the rows hold for besides the widths: the folds' generation, the columns a row
-/// holds.
-type RowsKey = (u64, usize);
+/// holds, the inlay hints shown (their list's identity: a new one counts the rows again).
+type RowsKey = (u64, usize, usize);
 
 /// The wrapped rows (see the module's doc).
 #[derive(Debug, Default)]
@@ -37,8 +37,11 @@ pub(super) struct WrapRows {
     /// Each document line's first row (a hidden line: the next shown one's).
     firsts: Vec<u32>,
     total: u32,
-    /// Scratch, reused: a line's text and its rows.
+    /// The inlay hints shown (sorted by offset): a line's count as room in it.
+    hints: std::sync::Arc<[super::Inlay]>,
+    /// Scratch, reused: a line's text, its hints' room, its rows.
     line: String,
+    room: Vec<(usize, usize)>,
     rows: Vec<Range<usize>>,
     /// How many lines were read last (the tests check an edit reads only its own).
     #[cfg(test)]
@@ -47,10 +50,18 @@ pub(super) struct WrapRows {
 
 impl WrapRows {
     /// Made again for `doc`, `folds` and `columns` when one changed (see the module's doc).
-    pub(super) fn refresh(&mut self, doc: &Document, folds: &Folds, columns: usize) {
+    pub(super) fn refresh(
+        &mut self,
+        doc: &Document,
+        folds: &Folds,
+        columns: usize,
+        hints: &std::sync::Arc<[super::Inlay]>,
+    ) {
         let buffer = doc.buffer();
         let width_key = (doc.id(), doc.tab_width());
-        let rows_key = (folds.generation(), columns);
+        let hints_id = std::sync::Arc::as_ptr(hints).cast::<()>() as usize;
+        let rows_key = (folds.generation(), columns, hints_id);
+        self.hints = std::sync::Arc::clone(hints);
         let version = (doc.version(), buffer.len());
         let same_widths = self.width_key == Some(width_key);
         let same_rows = self.rows_key == Some(rows_key);
@@ -146,12 +157,26 @@ impl WrapRows {
             let is_hidden = hidden
                 .get(next_hidden)
                 .is_some_and(|&(start, end)| (start as usize..=end as usize).contains(&line));
-            let wide = self.widths.get(line).is_some_and(|&w| w as usize > columns);
+            // Its hints' room (bytes in the line, columns), counted in its width.
+            self.room.clear();
+            let (start, end) = (buffer.line_start(line), buffer.line_end(line));
+            let first = self.hints.partition_point(|h| h.offset < start);
+            for hint in self.hints[first..].iter().take_while(|h| h.offset <= end) {
+                self.room.push((hint.offset - start, hint.columns()));
+            }
+            let room: usize = self.room.iter().map(|(_, c)| c).sum();
+            let wide = self.widths.get(line).is_some_and(|&w| w as usize + room > columns);
             let rows = if is_hidden {
                 0
             } else if wide {
                 buffer.write_line(line, &mut self.line);
-                ui_components::text_options::wrap_rows(&self.line, columns, tab, &mut self.rows);
+                let hang = super::rows::hang_of(&self.line, tab, columns);
+                ui_components::text_options::wrap_rows_with(
+                    &self.line,
+                    (columns, tab, hang),
+                    &self.room,
+                    &mut self.rows,
+                );
                 #[cfg(test)]
                 {
                     self.measured += 1;
