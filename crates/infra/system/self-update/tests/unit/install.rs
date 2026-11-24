@@ -68,6 +68,28 @@ fn nothing_staged_leaves_the_app_and_the_result_is_told_once() {
     std::fs::remove_dir_all(&root).unwrap();
 }
 
+/// The installer's log, when it didn't finish: its last lines (where it stopped), the
+/// empty ones left out; read once, then removed.
+#[test]
+fn the_installer_s_log_says_where_it_stopped() {
+    let root = temp();
+    std::fs::create_dir_all(&root).unwrap();
+    let log = root.join(SETUP_LOG);
+    let mut text: String = (0..30).map(|n| format!("line {n}\n\n")).collect();
+    text += "Fatal exception: DeleteFile failed; code 5. Access is denied.\n";
+    std::fs::write(&log, text).unwrap();
+    let end = setup_log_end(&log).unwrap();
+    assert_eq!(end.lines().count(), SETUP_LOG_TOLD);
+    assert!(end.ends_with("code 5. Access is denied."), "{end}");
+    assert!(end.starts_with("line 19"), "{end}");
+    assert_eq!(setup_log_end(&root.join("none.log")), None);
+    // Read with the result, then gone.
+    note(&root, &Outcome { version: "0.0.1-other".into(), error: None }).unwrap();
+    assert!(take_result(&root).is_some());
+    assert!(!log.exists());
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
 /// What's replaced: the bundle on macOS, the program elsewhere; a folder that takes files
 /// is writable.
 #[test]
@@ -138,10 +160,18 @@ fn an_ended_process_is_not_waited_for() {
 /// The installer run silent, told the process to wait for and the session to reopen.
 #[test]
 fn the_installer_runs_silent_and_reopens_the_session() {
-    let args = setup_args(42, Some("ab12"));
+    let args = setup_args(42, Some("ab12"), Some(Path::new("updates/setup.log")));
     assert_eq!(
         args,
-        ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/WAITPID=42", "/REOPEN=ab12"]
+        [
+            "/VERYSILENT",
+            "/SUPPRESSMSGBOXES",
+            "/NORESTART",
+            "/LOGCLOSEAPPLICATIONS",
+            "/LOG=updates/setup.log",
+            "/WAITPID=42",
+            "/REOPEN=ab12"
+        ]
     );
-    assert_eq!(setup_args(1, None).len(), 4);
+    assert_eq!(setup_args(1, None, None).len(), 5);
 }

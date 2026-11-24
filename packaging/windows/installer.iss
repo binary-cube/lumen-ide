@@ -76,8 +76,10 @@ Filename: "{app}\{#AppId}.exe"; Parameters: "--reopen-session {code:ReopenId}"; 
 Type: files; Name: "{app}\{#AppId}.exe.old*"
 
 [Code]
-// Run by the app to update: /WAITPID=<the app's process> (waited for: it's closing) and
-// /REOPEN=<its session> (the app started after with it).
+// Run by the app to update: /WAITPID=<the app's process> (waited for: it's closing, its
+// language servers and terminals ending with it, up to two minutes) and /REOPEN=<its
+// session> (the app started after with it); /LOG=<file> tells the app, at its next start,
+// why it stopped if it did.
 
 function ReopenId(Param: String): String;
 begin
@@ -98,7 +100,7 @@ begin
   if Pid > 0 then
     Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
       '-NoProfile -NonInteractive -Command "Wait-Process -Id ' + IntToStr(Pid) +
-      ' -Timeout 30 -ErrorAction SilentlyContinue"',
+      ' -Timeout 120 -ErrorAction SilentlyContinue"',
       '', SW_HIDE, ewWaitUntilTerminated, Code);
   Result := True;
 end;

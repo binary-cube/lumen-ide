@@ -21,6 +21,13 @@ pub const REOPEN_ARG: &str = "--reopen-session";
 pub const WAIT_ARG: &str = "--wait-for";
 /// How the last update went, in the updates' folder.
 pub const RESULT: &str = "result.toml";
+
+/// The installer's own log in the updates' folder (Inno Setup's `/LOG=`): what it did, and
+/// why it stopped if it did, read once at the next start.
+pub const SETUP_LOG: &str = "setup.log";
+
+/// The installer's log lines told when it didn't finish, at most (the last ones).
+const SETUP_LOG_TOLD: usize = 12;
 /// How long a new start waits for the old process at most.
 const WAIT_MOST: Duration = Duration::from_secs(30);
 
@@ -98,7 +105,10 @@ pub fn restart(dir: &Path, reopen: Option<u128>) -> bool {
     let reopen = reopen.map(kernel::id::uuid_text);
     let pid = std::process::id();
     let (program, args) = match stage::read(dir).filter(stage::Staged::is_setup) {
-        Some(setup) => (setup.app, setup_args(pid, reopen.as_deref())),
+        Some(setup) => {
+            let log = crate::folder().map(|f| f.join(SETUP_LOG));
+            (setup.app, setup_args(pid, reopen.as_deref(), log.as_deref()))
+        }
         None => restart_command(&target, pid, reopen.as_deref()),
     };
     let mut command = Command::new(program);
@@ -134,13 +144,20 @@ pub fn restart_command(target: &Path, pid: u32, reopen: Option<&str>) -> (PathBu
     (program, args)
 }
 
-/// The installer's arguments: silent, no restart of Windows; it waits for `pid` and
-/// starts the app reopening `reopen` (`packaging/windows/installer.iss`).
-pub fn setup_args(pid: u32, reopen: Option<&str>) -> Vec<OsString> {
-    let mut args: Vec<OsString> = ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
-        .into_iter()
-        .map(OsString::from)
-        .collect();
+/// The installer's arguments: silent, no restart of Windows, its log at `log`; it waits
+/// for `pid` and starts the app reopening `reopen` (`packaging/windows/installer.iss`).
+pub fn setup_args(pid: u32, reopen: Option<&str>, log: Option<&Path>) -> Vec<OsString> {
+    // The programs it had to close, in its log (one still holding the app: why it stopped).
+    let mut args: Vec<OsString> =
+        ["/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/LOGCLOSEAPPLICATIONS"]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+    if let Some(log) = log {
+        let mut arg = OsString::from("/LOG=");
+        arg.push(log.as_os_str());
+        args.push(arg);
+    }
     args.push(format!("/WAITPID={pid}").into());
     if let Some(id) = reopen {
         args.push(format!("/REOPEN={id}").into());
@@ -301,7 +318,12 @@ fn note(root: &Path, outcome: &Outcome) -> std::io::Result<()> {
 pub fn take_result(root: &Path) -> Option<Outcome> {
     clean_helpers();
     let path = root.join(RESULT);
-    let text = std::fs::read_to_string(&path).ok()?;
+    // The installer's log of an update that went through goes too (it names the user's
+    // folders): read only when one didn't.
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        let _ = std::fs::remove_file(root.join(SETUP_LOG));
+        return None;
+    };
     let _ = std::fs::remove_file(&path);
     let table: toml::Table = text.parse().ok()?;
     let version = table.get("version")?.as_str()?.to_owned();
@@ -310,8 +332,22 @@ pub fn take_result(root: &Path) -> Option<Outcome> {
     let running = kernel::brand::version();
     if error.is_none() && running != "0.0.0" && version != running {
         error = Some("the installer didn't finish; the app is still the version it was".into());
+        // Why, as the installer wrote it (its last lines: where it stopped).
+        if let Some(lines) = setup_log_end(&root.join(SETUP_LOG)) {
+            tracing::warn!(version, installer = %lines, "the installer didn't finish");
+        }
     }
+    let _ = std::fs::remove_file(root.join(SETUP_LOG));
     Some(Outcome { version, error })
+}
+
+/// The last lines of the installer's log at `path` (`None`: there's none), one text.
+pub fn setup_log_end(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let text = String::from_utf8_lossy(&bytes);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let from = lines.len().saturating_sub(SETUP_LOG_TOLD);
+    (!lines.is_empty()).then(|| lines[from..].join("\n"))
 }
 
 /// The copies of the program earlier versions left in the temporary folder (their update
