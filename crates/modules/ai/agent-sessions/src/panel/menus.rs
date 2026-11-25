@@ -8,8 +8,8 @@ use crate::favorites::Label;
 
 use super::{
     COPY, COPY_WHAT, DONE, FAVORITE, FOLDER_DELETE, FOLDER_RENAME, LABEL, MOVE, MOVE_NEW,
-    NEW_FOLDER, NEW_WITH, OPEN_CHAT, OPEN_TERMINAL, PIN, RENAME, Renamed, SessionsPanel, UNREAD,
-    session_file,
+    NEW_FOLDER, NEW_WITH, OPEN_CHAT, OPEN_TERMINAL, PIN, RENAME, Renamed, SLEEP, SessionsPanel,
+    UNREAD, WAKE, session_file,
 };
 
 impl SessionsPanel {
@@ -53,6 +53,9 @@ impl SessionsPanel {
         ];
         if self.chats() {
             rows.push(ViewMenuEntry::item(OPEN_CHAT, t("agents.open_chat")).with_icon(crate::ICON));
+        }
+        if let Some(row) = sleep_row(session.agent, &session.id) {
+            rows.push(row);
         }
         rows.push(ViewMenuEntry::Separator);
         let pin = if mark.pinned { "agents.unpin" } else { "agents.pin" };
@@ -98,6 +101,26 @@ impl SessionsPanel {
             .collect();
         rows.push(ViewMenuEntry::submenu(t("agents.copy_info"), copies).with_icon("copy"));
         Some(rows)
+    }
+
+    /// Session `agent` / `id`'s terminal put to sleep by hand, asked of the terminal (its tab
+    /// known by its key): nobody answers, or not now — nothing happens.
+    pub(super) fn sleep(&mut self, agent: &str, id: &str) {
+        let Some(key) = crate::follow::key_of(agent, id) else { return };
+        crate::follow::expect(&key, contracts::terminal::CanSleep::Sleeping);
+        let asked = contracts::terminal::SleepTerminal { key };
+        self.action =
+            Some(ToolPanelAction::View(ViewerAction::Ask(ui_components::Asked::new(asked))));
+    }
+
+    /// Session `agent` / `id`'s sleeping terminal woken, asked of the terminal (its tab
+    /// brought to the front): nobody answers, or it isn't asleep — nothing happens.
+    pub(super) fn wake(&mut self, agent: &str, id: &str) {
+        let Some(key) = crate::follow::key_of(agent, id) else { return };
+        crate::follow::expect(&key, contracts::terminal::CanSleep::Waking);
+        let asked = contracts::terminal::WakeTerminal { key };
+        self.action =
+            Some(ToolPanelAction::View(ViewerAction::Ask(ui_components::Asked::new(asked))));
     }
 
     /// "Move to Folder ›": the project's folders (the one it's in checked), a new one, out
@@ -182,4 +205,35 @@ impl SessionsPanel {
         let job = ui_components::WithHost::once(move |host| host.set_clipboard_text(&text));
         self.action = Some(ToolPanelAction::View(ViewerAction::WithHost(job)));
     }
+}
+
+/// "Put to Sleep" for session `agent` / `id`: only while its terminal is open, someone puts
+/// terminals to sleep, and it could sleep (greyed out, saying why, while something typed
+/// isn't sent or it's on its way to sleep); "Wake Up" in its place while it sleeps (greyed
+/// out while it wakes). Read from what the terminal said last, or what was just asked of it.
+pub(super) fn sleep_row(agent: &str, id: &str) -> Option<ViewMenuEntry> {
+    use contracts::terminal::CanSleep;
+    let state = crate::follow::state_of(agent, id)?;
+    let waking = state.can_sleep == CanSleep::Waking;
+    if state.asleep || waking {
+        let wakes = workbench_model::presence::request::<contracts::terminal::WakeTerminal>();
+        let label = t(if waking { "agents.waking" } else { "agents.wake" });
+        return wakes
+            .then(|| ViewMenuEntry::item(WAKE, label).with_icon("sun").disabled_if(waking));
+    }
+    if !workbench_model::presence::request::<contracts::terminal::SleepTerminal>() {
+        return None;
+    }
+    let can = state.can_sleep;
+    let label = match can {
+        CanSleep::No | CanSleep::Waking => return None,
+        CanSleep::Yes => t("agents.sleep"),
+        CanSleep::Typed => t("agents.sleep_typed"),
+        CanSleep::Sleeping => t("agents.going_to_sleep"),
+    };
+    Some(
+        ViewMenuEntry::item(SLEEP, label)
+            .with_icon(super::paint::ASLEEP_ICON)
+            .disabled_if(can != CanSleep::Yes),
+    )
 }

@@ -284,7 +284,32 @@ pub trait TerminalSession: Send {
     fn watch(&self) -> Option<std::sync::Arc<dyn SessionWatch>> {
         None
     }
+    /// Where its history goes once it has been out of sight long enough (out of memory, to
+    /// disk); none given: it stays in memory.
+    fn set_spill(&mut self, store: std::sync::Arc<dyn SpillStore>) {
+        let _ = store;
+    }
 }
+
+/// Where a terminal's history waits while it isn't shown (the port: the terminal's module
+/// keeps it on disk, encrypted). What's written is opaque bytes, read back once.
+pub trait SpillStore: Send + Sync + std::fmt::Debug {
+    /// `bytes` kept: what reads them back, `None` if they couldn't be.
+    fn write(&self, bytes: &[u8]) -> Option<SpillToken>;
+    /// What `token` kept (`None`: lost, refused): it's let go either way.
+    fn take(&self, token: &SpillToken) -> Option<Vec<u8>>;
+    /// What `token` kept, let go unread (the history erased, the terminal closed).
+    fn remove(&self, token: &SpillToken);
+    /// Whether it can keep something now (cheap: asked before a history is encoded for it;
+    /// `false`: it failed lately, it's tried again later).
+    fn ready(&self) -> bool {
+        true
+    }
+}
+
+/// What a [`SpillStore`] gave for something it keeps (a name of its own: a UUID).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpillToken(pub String);
 
 /// What a session is doing, asked from anywhere (each a cheap question to the system) —
 /// e.g. before closing, whether a program the user started still runs in it. Once the
@@ -296,6 +321,11 @@ pub trait SessionWatch: Send + Sync {
     fn program(&self) -> Option<String>;
     /// The title set by the shell (OSC 0 / 2), if any.
     fn title(&self) -> Option<String>;
+    /// How long since its program last wrote anything (`None`: not known): a program at
+    /// work writes (its results, a spinner), one waiting for its user doesn't.
+    fn quiet_for(&self) -> Option<std::time::Duration> {
+        None
+    }
 }
 
 /// A key sent to the terminal.

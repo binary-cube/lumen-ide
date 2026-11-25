@@ -68,6 +68,8 @@ pub struct LanguageSupport {
     pub commands: Vec<workbench_model::CommandContribution>,
     /// Menus contributed by modules (`Git ›`…).
     pub menus: Vec<workbench_model::MenuContribution>,
+    /// The hints modules offer (shown when they ask).
+    pub hints: Vec<workbench_model::HintContribution>,
     /// What a click on a gutter mark runs (the git module's change actions).
     pub gutter_actions: Vec<workbench_model::GutterAction>,
     /// The app's commands the modules implement (Search in Project: indexing).
@@ -616,6 +618,7 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
             decorators: contributions.take(),
             commands,
             menus: contributions.take(),
+            hints: contributions.take(),
             context_items,
             listed_items,
             file_refactorings: contributions.take(),
@@ -669,6 +672,7 @@ pub(crate) fn hide_contributions(
     contributions.drop_from::<Arc<dyn ui_workbench::result_pane::ResultPaneProvider>>(hidden);
     contributions.drop_from::<workbench_model::CommandContribution>(hidden);
     contributions.drop_from::<workbench_model::MenuContribution>(hidden);
+    contributions.drop_from::<workbench_model::HintContribution>(hidden);
     contributions.drop_from::<workbench_model::ContextMenuItem>(hidden);
     contributions.drop_from::<workbench_model::ListedMenuItems>(hidden);
     contributions.drop_from::<command_model::MenuSectionSpec>(hidden);

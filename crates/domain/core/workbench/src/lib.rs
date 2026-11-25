@@ -11,6 +11,7 @@ pub mod embeddings;
 pub mod emphasis;
 pub mod formatting;
 pub mod framework_names;
+pub mod hints;
 pub mod host;
 pub mod idle;
 pub mod indexing;
@@ -47,6 +48,10 @@ pub use emphasis::{
     EmphasisRequest, Follow, Region, RegionEmphasis, RegionFocus, RegionKind, region_at,
 };
 pub use formatting::{FormatOutcome, format_active};
+pub use hints::{
+    Hint, HintAction, HintActionKind, HintAnchor, HintBook, HintButton, HintContribution,
+    HintOutcome, HintStep, HintTour,
+};
 pub use host::{
     ActiveFile, BadgeKind, CHOOSE_ENGINE, CLOSE_TAB, COMMENT_LINE, ChoiceItem, ChoiceList,
     CommandContribution, CommandHandler, CommandImplementation, Completion, EditorHost,

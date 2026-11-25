@@ -120,3 +120,26 @@ fn the_history_clear_choice() {
         )));
     }
 }
+
+/// Sleeping is off by default (nothing stopped unasked); turned on, an hour unless another
+/// offered time is chosen (one not offered is refused); its time shown only while it's on.
+#[test]
+fn sleeping_is_off_until_chosen() {
+    let settings = service();
+    assert_eq!(read(&settings).sleep_after, None);
+    let block = SleepSettings.block(scope(&settings));
+    assert_eq!(block.rows.len(), 1, "only the switch while it's off");
+    SleepSettings.choose(scope(&settings), "sleep_idle", 1);
+    assert_eq!(read(&settings).sleep_after, Some(std::time::Duration::from_secs(3600)));
+    SleepSettings.choose(scope(&settings), "sleep_after", 15);
+    assert_eq!(read(&settings).sleep_after, Some(std::time::Duration::from_secs(900)));
+    SleepSettings.choose(scope(&settings), "sleep_after", 7);
+    assert_eq!(read(&settings).sleep_after, Some(std::time::Duration::from_secs(900)));
+    let block = SleepSettings.block(scope(&settings));
+    assert_eq!(block.rows.len(), 2, "its time too");
+    SleepSettings.choose(scope(&settings), "sleep_idle", 0);
+    assert_eq!(read(&settings).sleep_after, None);
+    enable_sleep(&settings);
+    assert!(settings.get(&SLEEP_IDLE), "turned on from elsewhere (a hint)");
+    crate::config::configure(TerminalConfig::default());
+}

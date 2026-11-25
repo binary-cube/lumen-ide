@@ -98,3 +98,31 @@ fn the_oldest_go_past_the_limit_and_widths_stay_apart() {
     parked.keep(0);
     assert!(parked.is_empty());
 }
+
+/// Encoded (what goes to disk) and decoded with what stayed in memory: every kind of cell
+/// comes back the same; anything changed or cut short is refused, never misread.
+#[test]
+fn encoded_rows_come_back_the_same() {
+    let term = term_after(40, &styled_output(300));
+    let rows = history_rows(&term);
+    let mut parked = Parked::default();
+    parked.push(&rows[..100], 40);
+    parked.push(&rows[100..], 40);
+    parked.keep(rows.len() - 7);
+    let len = parked.len();
+    let (bytes, kept) = parked.encode();
+    assert!(parked.is_empty(), "emptied");
+    assert!(bytes.windows(4).any(|w| w == b"wide"), "plain bytes (the store seals them)");
+    let mut back = Parked::decode(&bytes, kept).unwrap();
+    assert_eq!(back.len(), len);
+    let back: Vec<Row<Cell>> = back.take().into_iter().flat_map(|(_, r)| r).collect();
+    assert!(back == rows[7..], "the same rows, the 7 let go still gone");
+    // Changed or short: refused.
+    let mut parked = Parked::default();
+    parked.push(&rows, 40);
+    let (bytes, kept) = parked.encode();
+    assert!(Parked::decode(&bytes[..bytes.len() - 1], Vec::new()).is_none());
+    let mut wrong = bytes;
+    wrong[0] = b'X';
+    assert!(Parked::decode(&wrong, kept).is_none());
+}

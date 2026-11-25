@@ -124,6 +124,7 @@ impl ProcessRates {
                     processes: tree.processes,
                     running: tree.running,
                     project: None,
+                    title: None,
                 },
             );
             last.insert(pid, (tree.cpu, moved));
@@ -258,6 +259,11 @@ pub fn frame(
                 .filter_map(|pid| {
                     let mut row = programs.get(pid).cloned()?;
                     row.project = project_of(&snapshot, p, *pid);
+                    row.title = p
+                        .process_titles
+                        .iter()
+                        .find(|(at, _)| at == pid)
+                        .map(|(_, title)| title.clone());
                     Some(row)
                 })
                 .collect();

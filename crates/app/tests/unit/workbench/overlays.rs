@@ -149,6 +149,8 @@ fn the_keyboard_order_is_the_drawing_order() {
         Overlay::ParamHint,
         // The completion list: floating, under the windows that could open over it.
         Overlay::Completion,
+        // A module's hint: over the editor's cards, under every menu and modal.
+        Overlay::Hint,
         Overlay::ProjectsMenu,
         Overlay::Settings,
         Overlay::About,
@@ -223,6 +225,7 @@ fn the_kinds_are_modals_and_popovers() {
                 | Overlay::DropdownList
                 | Overlay::ChoiceMenu
                 | Overlay::Toasts
+                | Overlay::Hint
                 | Overlay::StatusPopover
                 | Overlay::ResourcePills
                 | Overlay::FileDrop

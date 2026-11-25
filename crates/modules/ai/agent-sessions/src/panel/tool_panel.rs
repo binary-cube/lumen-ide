@@ -288,6 +288,16 @@ impl ToolPanel for SessionsPanel {
             let key = if self.starred(*star) { "agents.unfavorite" } else { "agents.favorite" };
             return Some(ui_components::tooltip::Tip::new(*rect, t(key)));
         }
+        // What a session's terminal holds: its memory, or asleep.
+        if let Some((rect, state)) = self.holds.iter().find(|(r, _)| r.contains(p)) {
+            let tip = if state.asleep {
+                t("agents.asleep")
+            } else {
+                let size = i18n::bytes(state.memory.unwrap_or(0));
+                i18n::tr!("agents.memory", size = size.as_str())
+            };
+            return Some(ui_components::tooltip::Tip::new(*rect, tip));
+        }
         let n = self.row_index(p)?;
         let label = match self.rows.get(n)? {
             Row::Session { i, .. } => self.sessions.get(*i)?.title.clone(),
@@ -435,6 +445,16 @@ impl ToolPanel for SessionsPanel {
                 return false;
             };
             crate::favorites::toggle(project, &f.agent, &f.id, &f.title);
+            return true;
+        }
+        if id == super::SLEEP || id == super::WAKE {
+            if let Some((agent, session)) = self.menu_on.take() {
+                if id == super::SLEEP {
+                    self.sleep(agent, &session);
+                } else {
+                    self.wake(agent, &session);
+                }
+            }
             return true;
         }
         if let Some((agent, session)) =

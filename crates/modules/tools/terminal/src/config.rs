@@ -68,6 +68,9 @@ pub struct TerminalConfig {
     pub copy_on_select: bool,
     /// Links and paths underlined under the pointer, opened with a click.
     pub highlight_links: bool,
+    /// A program another module runs (an agent's session) stopped after this long unseen
+    /// and doing nothing, resumed when shown (`None`: never; see `crate::sleep`).
+    pub sleep_after: Option<std::time::Duration>,
 }
 
 /// The id of "Other…" among the shells.
@@ -93,6 +96,7 @@ impl Default for TerminalConfig {
             mouse_reporting: true,
             copy_on_select: false,
             highlight_links: true,
+            sleep_after: None,
         }
     }
 }
@@ -112,6 +116,8 @@ pub fn configure(config: TerminalConfig) {
     if let Ok(mut current) = current_slot().write() {
         *current = Arc::new(config);
     }
+    // Sleeping turned on: the keyed terminals watched again.
+    crate::sleep::ensure_running();
 }
 
 /// How a new tab starts its shell in `cwd`: the one chosen, or "Other…"'s command; the

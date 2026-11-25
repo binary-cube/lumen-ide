@@ -17,8 +17,9 @@ pub const LOG_MODULES: Setting<String> = Setting::new("log", "modules", String::
 /// Saving automatically once typing pauses (`[editor] autosave`).
 pub const AUTOSAVE: Setting<bool> = Setting::new("editor", "autosave", || true);
 
-/// How many of the app's past sessions are kept (the home screen lists them).
-pub const SESSIONS_KEPT: Setting<i64> = Setting::new("sessions", "kept", || 10);
+/// How many of the app's past sessions are kept (the home screen lists them all: six by
+/// default, so the recent projects under them stay near).
+pub const SESSIONS_KEPT: Setting<i64> = Setting::new("sessions", "kept", || 6);
 /// How many windows a session's "Reopen" opens at most (0: all), one after the other.
 pub const SESSIONS_REOPEN: Setting<i64> = Setting::new("sessions", "reopen", || 10);
 
@@ -211,6 +212,9 @@ pub const STARTUP: &str = "startup";
 
 /// The modules whose data is read at startup even `on-demand` (`[modules] preload`).
 pub const MODULES_PRELOAD: Setting<Vec<String>> = Setting::new("modules", "preload", Vec::new);
+
+/// The hints seen for good (`[hints] seen`: their ids): never shown again.
+pub const HINTS_SEEN: Setting<Vec<String>> = Setting::new("hints", "seen", Vec::new);
 
 /// The modules turned off (`[modules] disabled`); applied at the next start.
 pub const MODULES_DISABLED: Setting<Vec<String>> = Setting::new("modules", "disabled", Vec::new);

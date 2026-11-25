@@ -61,6 +61,7 @@ every caller has today: a new option never moves a pixel where it isn't asked fo
 | A log's lines (Output) | `log_view` |
 | Tooltips (one manager; wide items show by the mouse) | `tooltip::{Tip, Tooltips}` |
 | Toasts | `toast` (a view returns `Notification`s, never draws them) |
+| A hint (coach mark) or a tour pointing at a part of the window; where a part is, by an id | `hint_card` + `anchors` (a module contributes a `HintContribution` and asks `host.show_hint`, never draws it) |
 | A bar whose items may not fit (an "…" menu) | `overflow` |
 | A slider over stops, a color picker, a date range, a multi-line field | `slider`, `color_picker`, `date_range`, `multiline` |
 | Work prepared off the UI thread for a click | `deferred::Deferred` |

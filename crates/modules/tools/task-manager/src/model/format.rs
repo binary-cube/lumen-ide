@@ -131,7 +131,8 @@ impl ProcessTexts {
             (None, None) => String::new(),
         };
         let project = row.project.as_deref().map(|p| format!("{p} · ")).unwrap_or_default();
-        let mut name = format!("{program}{project}{}", row.pid);
+        let title = row.title.as_deref().map(|t| format!("{t} · ")).unwrap_or_default();
+        let mut name = format!("{title}{program}{project}{}", row.pid);
         if !row.running.is_zero() {
             name.push_str(" · ");
             name.push_str(&running(row.running));

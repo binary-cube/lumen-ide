@@ -74,6 +74,10 @@ const NEW_WITH: &str = "new:";
 /// A session's menu rows.
 const OPEN_CHAT: &str = "open-chat";
 const OPEN_TERMINAL: &str = "open-terminal";
+/// A session's terminal put to sleep by hand (asked of the terminal: `SleepTerminal`).
+const SLEEP: &str = "sleep";
+/// A session's sleeping terminal woken (asked of the terminal: `WakeTerminal`).
+const WAKE: &str = "wake";
 /// A session added to the favorites, or taken off them.
 const FAVORITE: &str = "favorite";
 /// The header's agent chooser: which agent "+" starts.
@@ -195,6 +199,11 @@ pub struct SessionsPanel {
     /// Each row's star as drawn (a click on it adds the session to the favorites or takes
     /// it off), and the one under the mouse.
     stars: Vec<(Rect, Star)>,
+    /// Where each row's terminal says what it holds (its memory, or asleep), from the last
+    /// paint: its tooltip explains.
+    holds: Vec<(Rect, contracts::terminal::TerminalState)>,
+    /// The memory labels shaped, by their value and font size (see `paint::held_label`).
+    held_labels: Vec<((u64, u32), std::sync::Arc<text_layout::ShapedLine>)>,
     hover_star: Option<Star>,
     /// "Show more…" (the row after the last).
     more_rect: Option<Rect>,
@@ -279,6 +288,8 @@ impl Default for SessionsPanel {
             filter_rows: Vec::new(),
             list_event: None,
             stars: Vec::new(),
+            holds: Vec::new(),
+            held_labels: Vec::new(),
             hover_star: None,
             more_rect: None,
             action: None,
@@ -706,6 +717,24 @@ impl SessionsPanel {
 /// The poison-proof lock (kept here for the title counter).
 pub(crate) fn lock<T>(m: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether session `agent` / `id`'s "Put to Sleep" row shows, and greyed out (the tests).
+#[cfg(test)]
+pub(crate) fn sleep_row_for_tests(agent: &str, id: &str) -> Option<bool> {
+    menus::sleep_row(agent, id).map(|row| match row {
+        ui_components::ViewMenuEntry::Item { look, .. } => look.disabled,
+        _ => false,
+    })
+}
+
+/// Whether session `agent` / `id`'s row offers "Wake Up" (the tests).
+#[cfg(test)]
+pub(crate) fn wake_row_for_tests(agent: &str, id: &str) -> Option<bool> {
+    menus::sleep_row(agent, id).map(|row| match row {
+        ui_components::ViewMenuEntry::Item { id, .. } => id == WAKE,
+        _ => false,
+    })
 }
 
 #[cfg(test)]

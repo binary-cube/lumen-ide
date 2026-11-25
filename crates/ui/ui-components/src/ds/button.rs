@@ -136,6 +136,9 @@ pub struct ButtonSpec<'a> {
     pub start: Option<f32>,
     /// A name's avatar in its icon's place (a project's), as big as an icon would be.
     pub avatar: Option<Avatar<'a>>,
+    /// As wide as its label with the usual padding (a filled or bordered one in a small
+    /// card's footer), not the dialogs' wider minimum.
+    pub compact: bool,
 }
 
 impl<'a> ButtonSpec<'a> {
@@ -173,6 +176,7 @@ impl<'a> ButtonSpec<'a> {
             outlined: false,
             font: None,
             start: None,
+            compact: false,
             avatar: None,
         }
     }
@@ -247,6 +251,12 @@ impl<'a> ButtonSpec<'a> {
 
     pub fn hovered(mut self, hovered: bool) -> Self {
         self.hovered = hovered;
+        self
+    }
+
+    /// As wide as its label with the usual padding ([`Self::compact`]).
+    pub fn compact(mut self) -> Self {
+        self.compact = true;
         self
     }
 
@@ -432,6 +442,8 @@ const CLEAR_GAP: f32 = 4.0;
 /// The room around a ghost or soft button's content, and between its icon and its label
 /// (logical pixels).
 const PAD: f32 = 8.0;
+/// A compact button's room on each side of its label (logical pixels).
+const COMPACT_PAD: f32 = 10.0;
 const GAP: f32 = 6.0;
 
 /// The fills of a light button (alphas): a ghost's under the mouse, a soft's at rest and
@@ -503,6 +515,13 @@ pub fn button_width(
 ) -> f32 {
     let trailing = trailing_room(text, ctx, spec);
     match (spec.kind, spec.label) {
+        (ButtonKind::Primary | ButtonKind::Danger | ButtonKind::Secondary, Some(label))
+            if spec.compact =>
+        {
+            // The dialogs' buttons' font, as their label is drawn.
+            let font = button_font(ctx);
+            (text.shape_line(label, &font).width + trailing + 2.0 * ctx.px(COMPACT_PAD)).round()
+        }
         (ButtonKind::Primary | ButtonKind::Danger | ButtonKind::Secondary, Some(label)) => {
             primary_width(text, ctx, &[label]) + trailing
         }

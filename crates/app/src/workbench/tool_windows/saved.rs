@@ -62,6 +62,8 @@ impl Workbench {
                     provider,
                     viewer,
                     text_told: 0,
+                    shown: false,
+                    active: false,
                 });
             }
             if made.is_empty() {

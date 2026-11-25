@@ -128,6 +128,11 @@ impl Workbench {
         fn tell(tabs: &mut [Tab], active: usize, (visible, focused): (bool, bool)) {
             for (i, tab) in tabs.iter_mut().enumerate() {
                 if let Some(v) = &mut tab.viewer {
+                    // The tab chosen (whatever covers the window): told apart from seen.
+                    if v.active != Some(i == active) {
+                        v.active = Some(i == active);
+                        v.viewer.set_active(i == active);
+                    }
                     let shown = visible && i == active && v.viewer_visible();
                     if v.shown != shown {
                         v.shown = shown;
@@ -148,6 +153,29 @@ impl Workbench {
             // The current group's slot holds nothing: its tabs are the fields'.
             if g != current {
                 tell(&mut group.tabs, group.active, window);
+            }
+        }
+        // The bottom window's views too: the active one of each group of the window shown
+        // (told chosen whatever covers the window, seen only when nothing does). Found by
+        // its place: nothing copied per frame.
+        let bottom = self.tools.bottom.as_deref();
+        let here = bottom.and_then(|id| self.tools.windows.iter().position(|w| w.id == id));
+        for (w, tool) in self.tools.windows.iter_mut().enumerate() {
+            let chosen_window = here == Some(w);
+            for group in &mut tool.groups {
+                let current = group.active;
+                for (i, view) in group.views.iter_mut().enumerate() {
+                    let chosen = chosen_window && i == current;
+                    if view.active != chosen {
+                        view.active = chosen;
+                        view.viewer.set_active(chosen);
+                    }
+                    let shown = chosen && window.0;
+                    if view.shown != shown {
+                        view.shown = shown;
+                        view.viewer.set_shown(shown);
+                    }
+                }
             }
         }
     }
@@ -838,15 +866,15 @@ impl Workbench {
                 // tab bar shows of it changed (its unsaved mark): a request streaming, a
                 // console running in a tab behind another doesn't redraw what's shown.
                 let dirty = v.viewer.is_dirty();
+                let icon = v.viewer.tab_icon();
                 let polled = {
                     let _busy = kernel::probe::time(v.provider, "poll");
                     v.viewer.poll()
                 };
-                changed |= asked(
-                    v.provider,
-                    Cause::Poll,
-                    polled && (v.shown || v.viewer.is_dirty() != dirty),
-                );
+                // What the tab bar shows of it changed (its unsaved mark, its icon: a
+                // session fallen asleep shows a moon): drawn though the tab is behind others.
+                let tab_changed = v.viewer.is_dirty() != dirty || v.viewer.tab_icon() != icon;
+                changed |= asked(v.provider, Cause::Poll, polled && (v.shown || tab_changed));
             }
         }
         changed |= asked("toolbars", Cause::Poll, self.poll_toolbars());
@@ -965,6 +993,47 @@ pub(super) fn menu_under(anchor: Rect, scale: f32) -> Point {
 
 /// The prefix of a view's menu rows' ids among the app's menu commands.
 pub const VIEW_MENU: &str = "view-menu:";
+
+/// What a tab's menu row added by its view is prefixed with (then the tab's document, `:`,
+/// the view's own id): it goes back to that view, whichever tab is active.
+pub const TAB_VIEW_MENU: &str = "tab-view-menu:";
+
+impl Workbench {
+    /// The rows tab `i`'s view adds to its tab's menu, as the app's (back to it by
+    /// [`TAB_VIEW_MENU`]).
+    pub fn tab_view_menu(&self, i: usize) -> Vec<ui_workbench::MenuEntry> {
+        let Some(tab) = self.tabs.get(i) else { return Vec::new() };
+        let Some(viewer) = tab.viewer.as_ref() else { return Vec::new() };
+        let prefix = format!("{TAB_VIEW_MENU}{}:", tab.doc.id().get());
+        prefixed_menu(viewer.viewer.tab_menu(), &prefix)
+    }
+
+    /// A row of a tab's menu its view added (`<doc>:<id>`): back to that tab's view.
+    pub fn run_tab_view_menu(&mut self, text: &mut TextSystem, row: &str) -> bool {
+        let Some((doc, id)) = row.split_once(':') else { return false };
+        let Some(i) = doc.parse().ok().and_then(|raw| self.tab_index_raw(raw)) else {
+            return false;
+        };
+        // A row that brings its tab to the front first (its view says), as a click would.
+        let activates = self
+            .tabs
+            .get(i)
+            .and_then(|t| t.viewer.as_ref())
+            .is_some_and(|v| v.viewer.tab_row_activates(id));
+        if activates && i != self.active {
+            self.activate(i);
+        }
+        let used = self
+            .tabs
+            .get_mut(i)
+            .and_then(|t| t.viewer.as_mut())
+            .is_some_and(|v| v.viewer.command(id));
+        if i == self.active {
+            self.take_viewer_action(text);
+        }
+        used
+    }
+}
 
 fn view_menu(entries: Vec<ui_workbench::ViewMenuEntry>) -> Vec<ui_workbench::MenuEntry> {
     prefixed_menu(entries, VIEW_MENU)

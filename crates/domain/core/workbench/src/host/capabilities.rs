@@ -90,6 +90,18 @@ pub trait ViewHost {
         let _ = (extension, data, popover);
         false
     }
+    /// Shows hint `id` (a module's [`crate::HintContribution`]) next to its anchor, unless
+    /// it was seen for good or closed during this run. `false`: not shown (or a host
+    /// without hints).
+    fn show_hint(&mut self, id: &str) -> bool {
+        let _ = id;
+        false
+    }
+    /// [`Self::show_hint`] pointing at `anchor` instead of its steps' (the tab it's about).
+    fn show_hint_by(&mut self, id: &str, anchor: crate::HintAnchor) -> bool {
+        let _ = anchor;
+        self.show_hint(id)
+    }
     /// Opens bare view `extension` over every window of the app at once, as one (a dimmed
     /// screen, a calm scene: what stands for the whole app, not a window): here with `data`
     /// (as [`Self::open_overlay`], a modal), in the others without; closed in any, it closes

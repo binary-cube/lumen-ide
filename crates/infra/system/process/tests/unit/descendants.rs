@@ -133,3 +133,23 @@ fn the_forest_under_roots_leaves_them_out() {
         .collect();
     assert_eq!(pids, [12, 21], "the roots out; 30 is another program now");
 }
+
+/// The root first, then its tree; nothing for a root not running.
+#[test]
+fn a_program_with_its_tree_starts_with_itself() {
+    let rows =
+        [row(1, None, 0), row(10, Some(1), 100), row(11, Some(10), 110), row(20, Some(1), 105)];
+    let pids = rooted(&rows, 10).into_iter().map(|f| f.pid).collect::<Vec<_>>();
+    assert_eq!(pids, [10, 11]);
+    assert!(rooted(&rows, 99).is_empty());
+}
+
+/// Joined: each program once, by its id and start time (a reused id is another one).
+#[test]
+fn joined_lists_keep_each_program_once() {
+    let found = |pid, start| Found { pid, start, name: String::new() };
+    let a = Descendants(vec![found(10, 100), found(11, 110)]);
+    let b = Descendants(vec![found(11, 110), found(12, 120), found(11, 200)]);
+    let pids: Vec<(u32, u64)> = a.joined(b).found().iter().map(|f| (f.pid, f.start)).collect();
+    assert_eq!(pids, [(10, 100), (11, 110), (12, 120), (11, 200)]);
+}

@@ -13,6 +13,18 @@ use ui_kit::draw_text;
 use super::{AGE_COLUMN, DropOn, ROW, Renamed, Row, SessionsPanel, Star, around, now};
 use i18n::t;
 
+/// A sleeping session's sign on its row (its terminal's tab shows the same).
+pub(super) const ASLEEP_ICON: &str = "moon";
+/// What a session's terminal holds on its row: the moon's size, and the room after it
+/// (logical pixels).
+const HELD_ICON: f32 = 13.0;
+const HELD_GAP: f32 = 6.0;
+/// The room between a row's memory (or moon) and its star's button (logical pixels): the
+/// star's hover fill reaches right up to where the memory would otherwise end.
+const BESIDE_STAR: f32 = 6.0;
+/// The most memory labels kept shaped (a list's sessions with a tab open).
+const HELD_LABELS: usize = 64;
+
 /// How far a folder's sessions are set in (logical pixels).
 const INDENT: f32 = 18.0;
 /// A row's fills (alphas): under the mouse (of the text), dragged (of the text), tinted by
@@ -60,6 +72,9 @@ impl SessionsPanel {
         let first = (scroll / self.row_h) as usize;
         let visible = (self.list.size.height / self.row_h) as usize + 2;
         self.stars.clear();
+        self.holds.clear();
+        // Shown: what the sessions' terminals hold is asked meanwhile.
+        crate::follow::panel_drawn();
         self.more_button = None;
         let rows: Vec<(usize, Row)> =
             self.rows.iter().copied().enumerate().skip(first).take(visible).collect();
@@ -181,6 +196,53 @@ impl SessionsPanel {
         true
     }
 
+    /// `memory` as its row says it (`412 MB`), shaped once for the value and the font's size
+    /// (kept while the value stays: a frame formats and shapes nothing for it).
+    fn held_label(
+        &mut self,
+        pen: &mut Pen<'_, '_>,
+        memory: u64,
+    ) -> std::sync::Arc<text_layout::ShapedLine> {
+        let key = (memory, pen.small.size.to_bits());
+        if let Some((_, shaped)) = self.held_labels.iter().find(|(k, _)| *k == key) {
+            return shaped.clone();
+        }
+        let shaped = pen.text.shape_line(&i18n::bytes(memory), &pen.small);
+        if self.held_labels.len() >= HELD_LABELS {
+            self.held_labels.clear();
+        }
+        self.held_labels.push((key, shaped.clone()));
+        shaped
+    }
+
+    /// What a session's terminal holds, ending at `right` on the row at `top`: its memory
+    /// (muted), or a moon while it sleeps. Where it starts.
+    fn paint_held(
+        &mut self,
+        pen: &mut Pen<'_, '_>,
+        state: contracts::terminal::TerminalState,
+        (right, top): (f32, f32),
+    ) -> f32 {
+        let (ds, p) = (pen.ds, pen.ds.palette);
+        let px = |v: f32| ds.px(v);
+        let s = px(HELD_ICON);
+        let rect = if state.asleep {
+            let at = Rect::new(right - s, top + (self.row_h - s) / 2.0, s, s);
+            if let Some(id) = pen.icons.id(ASLEEP_ICON) {
+                ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.text_muted);
+            }
+            at
+        } else {
+            let Some(memory) = state.memory else { return right };
+            let label = self.held_label(pen, memory);
+            let base = ds::optical_baseline(top, self.row_h, &pen.small);
+            draw_text(pen.layer, &label, right - label.width, base, p.text_muted);
+            Rect::new(right - label.width, top, label.width, self.row_h)
+        };
+        self.holds.push((rect, state));
+        rect.min_x()
+    }
+
     /// A session: its label's tint, its unread dot, its agent's icon, its title (dimmed when
     /// done), its pin, its star, its age — or, under the mouse, its "⋮".
     fn paint_session(&mut self, pen: &mut Pen<'_, '_>, i: usize, nested: bool, top: f32) {
@@ -232,6 +294,13 @@ impl SessionsPanel {
             let at = Rect::new(column - px(42.0), top + (self.row_h - s) / 2.0, s, s);
             ui_kit::draw_icon(pen.layer, pen.icons, id, at, p.text_muted);
             right -= px(22.0);
+        } else {
+            // Room between what it holds and the star's button (its hover reaches here).
+            right -= px(BESIDE_STAR);
+        }
+        // What its terminal holds (a tab open): its memory, or a moon while it sleeps.
+        if let Some(state) = crate::follow::state_of(agent, &session.id) {
+            right = self.paint_held(pen, state, (right, top)) - px(HELD_GAP);
         }
         let at = Rect::new(column - px(20.0), top + (self.row_h - s) / 2.0, s, s);
         let star = around(at, px(5.0));

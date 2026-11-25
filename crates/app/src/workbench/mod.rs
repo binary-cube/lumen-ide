@@ -98,6 +98,7 @@ mod find_search;
 mod frame_askers;
 pub(crate) mod frameworks;
 mod groups;
+mod hints;
 mod home;
 mod host;
 mod idle;
@@ -302,7 +303,7 @@ pub use running::RunningRequest;
 pub use side_panel::PANEL_MENU;
 pub use status::STATUS_MENU;
 pub use tool_windows::TOOL_VIEW_MENU;
-pub use viewers::{PagePopup, Sight, VIEW_MENU};
+pub use viewers::{PagePopup, Sight, TAB_VIEW_MENU, VIEW_MENU};
 pub use window_menu::WINDOW_MENU;
 
 mod disk;
@@ -454,6 +455,9 @@ struct TabViewer {
     /// What its viewer was last told of its visibility ([`ui_workbench::Viewer::set_shown`]):
     /// hidden until the first frame shows it.
     shown: bool,
+    /// What its viewer was last told of its tab being the active one
+    /// ([`ui_workbench::Viewer::set_active`]): `None` until first told.
+    active: Option<bool>,
     /// What its viewer was last told of the window's focus
     /// ([`ui_workbench::Viewer::set_window_focused`]): `None` until first told.
     window_focused: Option<bool>,
@@ -487,6 +491,7 @@ impl TabViewer {
             below: false,
             keys: false,
             shown: false,
+            active: None,
             window_focused: None,
             text_told: 0,
             split: preview_split::PreviewSplit::default(),
@@ -675,6 +680,11 @@ pub struct Workbench {
     /// The notifications drawn (their layout, where each went, what's under the mouse);
     /// what they are is the project's (`data.notifications`).
     toasts: ui_workbench::toast::ToastStack,
+    /// The hint shown (a module's, see `hints`), its card as last drawn, and whether it has
+    /// the keyboard (clicked).
+    hint: Option<workbench_model::HintTour>,
+    hint_card: ui_workbench::hint_card::HintCard,
+    hint_focused: bool,
     /// A status bar item's window (the file's details, the resources).
     status_popover: ui_workbench::status_popover::StatusPopover,
     /// The pictures drawn in place of the pages a window is open over (page id, picture):

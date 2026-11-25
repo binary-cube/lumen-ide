@@ -756,3 +756,609 @@ fn a_selection_held_past_an_edge_scrolls_the_history() {
     view.end_selection();
     assert!(!view.auto_scroll(now + AUTO_EVERY * 20));
 }
+
+/// A keyed program's terminal (an agent's session) with a fake session drawn once.
+fn keyed_view(key: &str) -> (TerminalView, TextSystem) {
+    let start = TerminalStart {
+        key: Some(key.into()),
+        launch: Some(agents::Launch::new("agent", &[], None)),
+        ..TerminalStart::default()
+    };
+    let mut view = TerminalView::default();
+    ui_components::Viewer::set_data(&mut view, &start);
+    view.session = Some(Box::new(FakeSession::new(100, 80, 24)));
+    let mut text = TextSystem::new();
+    paint(&mut view, &mut text);
+    (view, text)
+}
+
+/// Put to sleep: its program stopped at its poll, its last screen kept, a moon on its tab,
+/// how it resumes kept as its launch; its slot says it's asleep and was shown.
+#[test]
+fn a_sleeping_terminal_keeps_its_screen_and_how_it_resumes() {
+    let (mut view, _text) = keyed_view("sleep-test-key");
+    let screen = view.grid.cells.clone();
+    let slot = named("sleep-test-key").unwrap();
+    assert!(asked(&slot).shown.is_some(), "drawn: its slot knows when");
+    let at = std::time::Instant::now();
+    asked(&slot).sleep = Some((agents::Launch::new("agent", &["--resume", "id-1"], None), at));
+    assert!(view.poll(), "asleep: its tab changes");
+    assert!(view.session.is_none() && view.asleep);
+    assert_eq!(view.launch.as_ref().unwrap().args, ["--resume", "id-1"]);
+    assert_eq!(view.grid.cells, screen, "its last screen kept");
+    assert_eq!(view.tab_icon(), Some(ASLEEP_ICON));
+    assert!(!view.closed(), "its tab stays");
+    assert_eq!(state("sleep-test-key").map(|s| s.asleep), Some(true));
+    assert!(!running("sleep-test-key"), "its program doesn't run");
+    assert!(view.options.is_none() && view.answered.is_none(), "told again to the next one");
+}
+
+/// A tab on screen never sleeps, frames or not: the app tells it's shown; an order given
+/// while it's shown is let go.
+#[test]
+fn a_tab_on_screen_never_sleeps() {
+    let (mut view, _text) = keyed_view("on-screen-key");
+    let slot = named("on-screen-key").unwrap();
+    ui_components::Viewer::set_shown(&mut view, true);
+    assert!(asked(&slot).visible);
+    let long_ago = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    asked(&slot).shown = Some(long_ago);
+    asked(&slot).sleep = Some((agents::Launch::new("agent", &[], None), std::time::Instant::now()));
+    view.poll();
+    assert!(view.session.is_some() && !view.asleep, "shown: awake");
+    ui_components::Viewer::set_shown(&mut view, false);
+    assert!(!asked(&slot).visible);
+    assert!(asked(&slot).shown.is_some_and(|at| at > long_ago), "unseen from now on");
+}
+
+/// Text typed and not sent keeps a terminal awake: ↵ (or Ctrl+C) clears it.
+#[test]
+fn text_typed_and_not_sent_is_told() {
+    let (mut view, _text) = keyed_view("typed-test-key");
+    let slot = named("typed-test-key").unwrap();
+    assert!(!asked(&slot).typed);
+    view.text_input("refactor the");
+    assert!(asked(&slot).typed);
+    // ⇧↵ / ⌥↵ only add a line to the draft.
+    let shift_enter = KeyPress { key: PressedKey::Enter, shift: true, ctrl: false, alt: false };
+    view.key_press(shift_enter);
+    assert!(asked(&slot).typed, "a line added, nothing sent");
+    let alt_enter = KeyPress { key: PressedKey::Enter, shift: false, ctrl: false, alt: true };
+    view.key_press(alt_enter);
+    assert!(asked(&slot).typed, "a line added, nothing sent");
+    let enter = KeyPress { key: PressedKey::Enter, shift: false, ctrl: false, alt: false };
+    view.key_press(enter);
+    assert!(!asked(&slot).typed, "sent");
+    view.paste("more");
+    assert!(asked(&slot).typed);
+    let ctrl_c = KeyPress { key: PressedKey::Char('c'), shift: false, ctrl: true, alt: false };
+    view.key_press(ctrl_c);
+    assert!(!asked(&slot).typed, "dropped");
+}
+
+/// A program another module runs starts only when its tab is first drawn: opened and never
+/// shown (a tab behind others), nothing runs; it's never reopened at the next start (its
+/// module resumes it its own way).
+#[test]
+fn a_program_starts_only_when_its_tab_is_first_drawn() {
+    let start = TerminalStart {
+        key: Some("lazy-test-key".into()),
+        launch: Some(agents::Launch::new("/bin/sh", &["-c", "sleep 5"], None)),
+        ..TerminalStart::default()
+    };
+    let mut view = TerminalView::default();
+    ui_components::Viewer::set_data(&mut view, &start);
+    assert!(view.session.is_none(), "not drawn: nothing started");
+    assert!(!ui_components::Viewer::restorable(&view), "not reopened by the terminal");
+    assert_eq!(ui_components::Viewer::memory(&view).ram, 0);
+    #[cfg(unix)]
+    {
+        let mut text = TextSystem::new();
+        paint(&mut view, &mut text);
+        assert!(view.session.is_some(), "drawn: started");
+        assert!(view.settling.is_some(), "its first output let run");
+    }
+}
+
+/// Woken from a sleep (drawn again): its program started the way it resumes, its last
+/// screen drawn meanwhile with a band saying so.
+#[cfg(unix)]
+#[test]
+fn a_sleeping_terminal_resumes_when_shown() {
+    let (mut view, mut text) = keyed_view("wake-test-key");
+    let slot = named("wake-test-key").unwrap();
+    let at = std::time::Instant::now();
+    asked(&slot).sleep = Some((agents::Launch::new("/bin/sh", &["-c", "sleep 5"], None), at));
+    view.poll();
+    let screen = view.grid.cells.clone();
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "started again");
+    assert!(!view.asleep && view.resuming);
+    assert_eq!(view.grid.cells, screen, "its last screen while the new one settles");
+    assert_eq!(state("wake-test-key").map(|s| s.asleep), Some(false));
+    assert!(asked(&slot).pid.is_some(), "measured again");
+    assert!(view.options.is_some() && view.answered.is_some(), "the new session told them");
+}
+
+/// What a keyed terminal holds is answered from memory (its memory as last measured), and
+/// its program is called by its tab's title in the Task Manager, renamed with it.
+#[test]
+fn a_keyed_terminal_tells_what_it_holds_and_its_title() {
+    let start = TerminalStart {
+        key: Some("holds-test-key".into()),
+        title: Some("Fix the login form".into()),
+        ..TerminalStart::default()
+    };
+    let mut view = TerminalView::default();
+    ui_components::Viewer::set_data(&mut view, &start);
+    let slot = named("holds-test-key").unwrap();
+    {
+        let mut asked = asked(&slot);
+        asked.pid = Some(4_000_777);
+        asked.memory = Some(300 << 20);
+    }
+    let held = state("holds-test-key").unwrap();
+    assert_eq!((held.memory, held.asleep), (Some(300 << 20), false));
+    assert!(program_titles().contains(&(4_000_777, "Fix the login form".to_owned())));
+    assert!(rename("holds-test-key", "Review"));
+    view.poll();
+    assert!(program_titles().contains(&(4_000_777, "Review".to_owned())));
+    assert_eq!(state("no-such-key"), None);
+}
+
+/// Asked to sleep but drawn since (shown again meanwhile): it stays awake, the order let go.
+#[test]
+fn a_terminal_shown_since_it_was_asked_to_sleep_stays_awake() {
+    let (mut view, mut text) = keyed_view("shown-since-key");
+    let slot = named("shown-since-key").unwrap();
+    let at = std::time::Instant::now();
+    asked(&slot).sleep = Some((agents::Launch::new("agent", &[], None), at));
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    paint(&mut view, &mut text);
+    view.poll();
+    assert!(view.session.is_some() && !view.asleep, "awake");
+    assert!(asked(&slot).sleep.is_none(), "the order let go");
+}
+
+/// A program quiet for a given time (what "at work" is read from).
+struct QuietFor(std::time::Duration);
+
+impl terminal_session::SessionWatch for QuietFor {
+    fn foreground(&self) -> terminal_session::history::Foreground {
+        terminal_session::history::Foreground::Unknown
+    }
+    fn program(&self) -> Option<String> {
+        None
+    }
+    fn title(&self) -> Option<String> {
+        None
+    }
+    fn quiet_for(&self) -> Option<std::time::Duration> {
+        Some(self.0)
+    }
+}
+
+/// A keyed terminal its owner knows how to resume, quiet for `quiet`, on screen.
+fn resumable(key: &str, quiet: std::time::Duration) -> (TerminalView, TextSystem, Arc<NameSlot>) {
+    let (mut view, text) = keyed_view(key);
+    ui_components::Viewer::set_active(&mut view, true);
+    ui_components::Viewer::set_shown(&mut view, true);
+    let slot = named(key).unwrap();
+    {
+        let mut asked = asked(&slot);
+        asked.resume = Some(agents::Launch::new("/bin/sh", &["-c", "sleep 5"], None));
+        asked.watch = Some(Arc::new(QuietFor(quiet)));
+        asked.pid = Some(4_000_888);
+    }
+    (view, text, slot)
+}
+
+/// "Put to Sleep" in its tab's menu: only when its owner knows how it resumes; greyed out,
+/// saying why, while something typed isn't sent. Its program writing (a spinner every
+/// moment) doesn't stop the user: they chose.
+#[test]
+fn put_to_sleep_is_offered_as_it_can_be() {
+    use ui_components::{ViewMenuEntry, Viewer};
+    let row = |view: &TerminalView| {
+        view.tab_menu().into_iter().next().map(|e| match e {
+            ViewMenuEntry::Item { id, look, .. } => (id, look.disabled),
+            _ => panic!("a row"),
+        })
+    };
+    let (view, _text) = keyed_view("menu-none-key");
+    assert_eq!(row(&view), None, "nobody knows how it resumes: hidden");
+    let (mut view, _text, slot) = resumable("menu-key", std::time::Duration::from_secs(60));
+    assert_eq!(row(&view), Some((crate::SLEEP_ACTION.to_owned(), false)));
+    view.text_input("draft");
+    assert_eq!(row(&view).map(|r| r.1), Some(true), "something typed: greyed out");
+    assert_eq!(state("menu-key").map(|s| s.can_sleep), Some(contracts::terminal::CanSleep::Typed));
+    assert!(!sleep_by_key("menu-key"), "not now");
+    asked(&slot).typed = false;
+    asked(&slot).watch = Some(Arc::new(QuietFor(std::time::Duration::from_millis(100))));
+    assert_eq!(row(&view).map(|r| r.1), Some(false), "writing a spinner: still offered");
+    assert!(!sleep_by_key("no-such-key"));
+}
+
+/// One click puts it to sleep, even while its program writes every moment (a spinner): the
+/// order is taken at once (the click's own poll), never left for a later one; refused (text
+/// typed and not sent), it says why — never silently nothing.
+#[test]
+fn one_click_puts_a_busy_looking_session_to_sleep() {
+    use ui_components::Viewer;
+    let (mut view, _text, _slot) = resumable("one-click-key", std::time::Duration::from_millis(50));
+    assert!(view.command(crate::SLEEP_ACTION));
+    assert!(view.asleep && view.session.is_none(), "asleep after one click");
+    assert!(view.take_notifications().is_empty());
+    let (mut view, _text, _slot) = resumable("typed-click-key", std::time::Duration::from_secs(60));
+    view.text_input("draft");
+    assert!(view.command(crate::SLEEP_ACTION));
+    assert!(!view.asleep, "something typed: not put to sleep");
+    assert_eq!(view.take_notifications().len(), 1, "told why");
+}
+
+/// Asked from elsewhere (the panel), its window is woken at once: the order is taken at the
+/// poll that wake brings, not at an unrelated one; even while its first output settles.
+#[test]
+fn a_sleep_asked_from_elsewhere_wakes_its_window() {
+    use ui_components::Viewer;
+    let (mut view, _text, slot) = resumable("far-click-key", std::time::Duration::from_millis(50));
+    let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = Arc::clone(&woken);
+    asked(&slot).waker = Some(Arc::new(move || {
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }));
+    let now = std::time::Instant::now();
+    view.settling = Some(Settling { started: now, last: now });
+    assert!(sleep_by_key("far-click-key"));
+    assert_eq!(woken.load(std::sync::atomic::Ordering::SeqCst), 1, "its window woken");
+    assert!(view.poll(), "taken at that poll");
+    assert!(view.asleep, "though its first output was still settling");
+}
+
+/// Put to sleep by hand while on screen: it stays asleep (its last screen, the band) through
+/// paints, until a key resumes it (the key itself sent nowhere).
+#[cfg(unix)]
+#[test]
+fn a_tab_put_to_sleep_by_hand_waits_for_the_user() {
+    use ui_components::Viewer;
+    let (mut view, mut text, _slot) = resumable("by-hand-key", std::time::Duration::from_secs(60));
+    assert!(view.command(crate::SLEEP_ACTION), "asleep now");
+    assert!(view.asleep && view.session.is_none());
+    for _ in 0..3 {
+        paint(&mut view, &mut text);
+    }
+    assert!(view.session.is_none(), "shown, still asleep: not resumed at a paint");
+    let key = KeyPress { key: PressedKey::Char('x'), shift: false, ctrl: false, alt: false };
+    assert!(view.key_press(key));
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "a key resumed it");
+}
+
+/// Asleep by hand: a click resumes it, and so does showing its tab again after leaving it;
+/// the panel's request does what the tab's menu does.
+#[cfg(unix)]
+#[test]
+fn a_click_or_coming_back_resumes_a_tab_asleep_by_hand() {
+    use ui_components::Viewer;
+    let (mut view, mut text, _slot) = resumable("click-key", std::time::Duration::from_secs(60));
+    assert!(sleep_by_key("click-key"), "asked from elsewhere (the panel)");
+    view.poll();
+    assert!(view.asleep && view.held);
+    view.press(Point::new(10.0, 10.0), 1);
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "a click resumed it");
+    let (mut view, mut text, _slot) = resumable("back-key", std::time::Duration::from_secs(60));
+    view.command(crate::SLEEP_ACTION);
+    // The window to the background (or a modal over it) and back: not a choice — asleep.
+    view.set_shown(false);
+    view.set_shown(true);
+    paint(&mut view, &mut text);
+    assert!(view.session.is_none(), "covered and uncovered: still asleep");
+    // Another tab chosen, then this one again: resumed.
+    view.set_active(false);
+    view.set_shown(false);
+    paint(&mut view, &mut text);
+    assert!(view.session.is_none(), "still asleep");
+    view.set_active(true);
+    view.set_shown(true);
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "chosen again: resumed");
+}
+
+/// Asleep: its tab's menu offers "Wake Up" in place of "Put to Sleep", which resumes it; a
+/// wake asked from elsewhere (the panel) is taken at its poll; one not asleep refuses.
+#[cfg(unix)]
+#[test]
+fn an_asleep_tab_offers_wake_up_and_wakes() {
+    use ui_components::{ViewMenuEntry, Viewer};
+    let first_id = |view: &TerminalView| match view.tab_menu().into_iter().next() {
+        Some(ViewMenuEntry::Item { id, .. }) => Some(id),
+        _ => None,
+    };
+    let (mut view, mut text, _slot) =
+        resumable("wake-menu-key", std::time::Duration::from_secs(60));
+    assert_eq!(first_id(&view).as_deref(), Some(crate::SLEEP_ACTION));
+    assert_eq!(wake_by_key("wake-menu-key"), None, "awake: nothing to wake");
+    view.command(crate::SLEEP_ACTION);
+    assert_eq!(first_id(&view).as_deref(), Some(crate::WAKE_ACTION), "asleep: Wake Up");
+    assert!(view.command(crate::WAKE_ACTION));
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "woken from its menu");
+    // From elsewhere.
+    let (mut view, mut text, _slot) = resumable("wake-far-key", std::time::Duration::from_secs(60));
+    view.command(crate::SLEEP_ACTION);
+    assert_eq!(
+        wake_by_key("wake-far-key"),
+        Some(false),
+        "a bottom-less test tab: not the editor's"
+    );
+    assert!(view.poll());
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "woken from the panel");
+}
+
+/// Asleep by hand: a card over its last screen says so — why, the memory it freed — with a
+/// "Wake Up" button that resumes it (a press there, or ↵).
+#[cfg(unix)]
+#[test]
+fn an_asleep_tab_shows_its_card_and_its_button_wakes_it() {
+    use ui_components::Viewer;
+    let (mut view, mut text, slot) = resumable("card-key", std::time::Duration::from_secs(60));
+    asked(&slot).memory = Some(412 << 20);
+    view.command(crate::SLEEP_ACTION);
+    let slept = view.slept.unwrap();
+    assert!(slept.by_hand);
+    assert_eq!(slept.freed, Some(412 << 20), "what it held, said freed");
+    assert!(slept.why().contains(&i18n::bytes(412 << 20)));
+    paint(&mut view, &mut text);
+    let button = view.wake_button.expect("its button drawn");
+    assert!(view.grid_area.contains(Point::new(button.min_x() + 1.0, button.min_y() + 1.0)));
+    view.press(Point::new(button.min_x() + 2.0, button.min_y() + 2.0), 1);
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "its button woke it");
+    // ↵ too.
+    let (mut view, mut text, _slot) =
+        resumable("card-enter-key", std::time::Duration::from_secs(60));
+    view.command(crate::SLEEP_ACTION);
+    paint(&mut view, &mut text);
+    let enter = KeyPress { key: PressedKey::Enter, shift: false, ctrl: false, alt: false };
+    assert!(view.key_press(enter));
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "↵ woke it");
+}
+
+/// What "Put Session to Sleep" acts on follows the keyboard: a keyed terminal drawn with it;
+/// a plain shell drawn with it, or the keyed one drawn without it: none.
+#[test]
+fn the_session_with_the_keyboard_is_the_one_acted_on() {
+    let (mut keyed, mut text, _slot) = resumable("focus-key", std::time::Duration::from_secs(60));
+    paint(&mut keyed, &mut text);
+    assert_eq!(focused_can_sleep(), contracts::terminal::CanSleep::Yes);
+    let (mut plain, mut plain_text) = painted(FakeSession::new(10, 80, 24));
+    paint(&mut plain, &mut plain_text);
+    assert_eq!(focused_can_sleep(), contracts::terminal::CanSleep::No, "a plain shell has it");
+    paint(&mut keyed, &mut text);
+    assert_eq!(focused_can_sleep(), contracts::terminal::CanSleep::Yes);
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    keyed.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 2400.0, 1000.0),
+        scale: 2.0,
+        text: &mut text,
+        scene: &mut render_api::Scene::default(),
+        palette: &palette,
+        icons: &icons,
+        focused: false,
+        waker: None,
+    });
+    assert_eq!(focused_can_sleep(), contracts::terminal::CanSleep::No, "it lost the keyboard");
+}
+
+/// Woken but its program can't start again (gone): no longer asleep — its
+/// failure shows, keys aren't eaten to wake it, nobody's told it sleeps.
+#[cfg(unix)]
+#[test]
+fn a_session_that_cant_resume_is_no_longer_asleep() {
+    use ui_components::Viewer;
+    let (mut view, mut text, slot) = resumable("no-resume-key", std::time::Duration::from_secs(60));
+    let gone = std::env::temp_dir().join(format!("gone-{:032x}", kernel::id::new_uuid()));
+    let program = gone.to_string_lossy().into_owned();
+    asked(&slot).resume = Some(agents::Launch::new(program, &[], None));
+    assert!(view.command(crate::SLEEP_ACTION));
+    let key = KeyPress { key: PressedKey::Char('x'), shift: false, ctrl: false, alt: false };
+    assert!(view.key_press(key), "the key wakes it");
+    paint(&mut view, &mut text);
+    assert!(view.session.is_none() && view.failed.is_some(), "it didn't start");
+    assert!(!view.asleep && !view.held);
+    assert_eq!(state("no-resume-key").map(|s| s.asleep), Some(false));
+    assert_eq!(wake_by_key("no-resume-key"), None, "nothing to wake");
+    assert!(!view.key_press(key), "keys no longer eaten to wake it");
+}
+
+/// The asleep card is drawn over the screen's text, never under it: in a layer after the
+/// grid's (a layer draws its quads before its glyphs), opaque, the screen dimmed under it.
+#[cfg(unix)]
+#[test]
+fn the_asleep_card_covers_the_screen_s_text() {
+    let (mut view, mut text, _slot) = resumable("cover-key", std::time::Duration::from_secs(60));
+    view.command(crate::SLEEP_ACTION);
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 2400.0, 1000.0),
+        scale: 2.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let layers = scene.layers();
+    let grid = layers.iter().position(|l| !l.glyphs.is_empty()).expect("the screen's text");
+    let surface = palette.popup_background.with_alpha(1.0);
+    let card = layers.iter().rposition(|l| l.quads.iter().any(|q| q.color == surface));
+    assert!(card.is_some_and(|c| c > grid), "the card's layer after the grid's text");
+    let scrim = layers[card.unwrap()].quads.iter().any(|q| q.bounds == view.grid_area);
+    assert!(scrim, "the screen dimmed under it");
+}
+
+/// An order waiting is said (the app polls the view even unseen); one too old is let go,
+/// never applied late — when its tab is shown again, it doesn't fall asleep.
+#[test]
+fn an_order_not_taken_in_time_is_let_go() {
+    use ui_components::Viewer;
+    let (mut view, _text, slot) = resumable("stale-key", std::time::Duration::from_secs(60));
+    assert!(!view.wants_poll());
+    let long_ago = std::time::Instant::now() - SLEEP_ORDER_FRESH * 2;
+    {
+        let mut asked = asked(&slot);
+        asked.sleep = Some((agents::Launch::new("agent", &[], None), long_ago));
+        asked.by_hand = true;
+    }
+    assert!(view.wants_poll(), "an order waits: polled even unseen");
+    view.poll();
+    assert!(view.session.is_some() && !view.asleep, "too old: let go");
+    assert!(!view.wants_poll());
+}
+
+/// Asleep or coming back, its last screen stays still: the wheel neither scrolls it nor
+/// reaches a program, no selection by drag, no link, no scrollbar, the arrow (a hand on the
+/// card's button); back awake, all of it works again.
+#[test]
+fn a_sleeping_screen_stays_still() {
+    use ui_components::Viewer;
+    let session = FakeSession::new(5000, 200, 50);
+    let written = Arc::clone(&session.written);
+    let (mut view, mut text) = painted(session);
+    // Coming back from a sleep: its first output settling under its last screen.
+    let now = std::time::Instant::now();
+    view.resuming = true;
+    view.settling = Some(Settling { started: now, last: now + std::time::Duration::from_secs(60) });
+    let before = view.grid.display_offset;
+    assert!(!view.scroll(0.0, -400.0), "the wheel does nothing");
+    assert_eq!(view.grid.display_offset, before);
+    assert!(written.lock().unwrap().is_empty(), "nothing sent to the program");
+    assert!(view.bar_metrics().is_none(), "no scrollbar");
+    let at = Point::new(view.grid_area.min_x() + 40.0, view.grid_area.min_y() + 40.0);
+    assert!(view.press(at, 1).is_none());
+    assert!(!view.drag(Point::new(at.x + 300.0, at.y + 200.0)));
+    view.release();
+    assert!(view.selected_text().is_none(), "no selection");
+    assert!(!view.link_hover(Some(at)) || view.link.is_none());
+    assert_eq!(view.cursor_at(at), Some(ViewerCursor::Arrow));
+    view.wake_button = Some(Rect::new(at.x - 5.0, at.y - 5.0, 40.0, 20.0));
+    assert_eq!(view.cursor_at(at), Some(ViewerCursor::Pointer), "a hand on its button");
+    // Back awake: the wheel scrolls again.
+    view.settling = None;
+    view.resuming = false;
+    view.wake_button = None;
+    paint(&mut view, &mut text);
+    assert!(view.bar_metrics().is_some());
+    assert!(view.scroll(0.0, -400.0), "scrolls again");
+    assert!(view.grid.display_offset > before, "into the history");
+}
+
+/// What waits unsent, as an estimate: ⌫ takes back what was typed (all of it: nothing
+/// waits); Esc, Ctrl+U drop it; a paste ending in a new line is sent as it lands.
+#[test]
+fn what_waits_unsent_follows_erasing_and_dropping() {
+    use ui_components::Viewer;
+    let (mut view, _text) = keyed_view("estimate-key");
+    let slot = named("estimate-key").unwrap();
+    let key = |key, ctrl| KeyPress { key, shift: false, ctrl, alt: false };
+    view.text_input("ab");
+    view.key_press(key(PressedKey::Backspace, false));
+    assert!(asked(&slot).typed, "one left");
+    view.key_press(key(PressedKey::Backspace, false));
+    assert!(!asked(&slot).typed, "all erased: nothing waits");
+    view.text_input("draft");
+    view.key_press(key(PressedKey::Escape, false));
+    assert!(!asked(&slot).typed, "Esc drops it");
+    view.text_input("draft");
+    view.key_press(key(PressedKey::Char('u'), true));
+    assert!(!asked(&slot).typed, "Ctrl+U drops it");
+    view.paste("make test\n");
+    assert!(!asked(&slot).typed, "a paste ending in a new line is sent");
+    view.paste("half a line");
+    assert!(asked(&slot).typed);
+}
+
+/// On its way to sleep or back, its menu still offers the row, greyed out (never gone, never
+/// the opposite of what's happening).
+#[test]
+fn the_menu_greys_out_sleep_and_wake_while_they_happen() {
+    use contracts::terminal::CanSleep;
+    use ui_components::{ViewMenuEntry, Viewer};
+    let row = |view: &TerminalView| {
+        view.tab_menu().into_iter().next().map(|e| match e {
+            ViewMenuEntry::Item { id, look, .. } => (id, look.disabled),
+            _ => panic!("a row"),
+        })
+    };
+    let (view, _text, slot) = resumable("menu-changing-key", std::time::Duration::from_secs(60));
+    assert!(sleep_by_key("menu-changing-key"), "the order given, not yet taken");
+    assert_eq!(asked(&slot).can_sleep(), CanSleep::Sleeping);
+    assert_eq!(row(&view), Some((crate::SLEEP_ACTION.to_owned(), true)), "going to sleep");
+    asked(&slot).sleep = None;
+    asked(&slot).waking = true;
+    assert_eq!(asked(&slot).can_sleep(), CanSleep::Waking);
+    assert_eq!(row(&view), Some((crate::WAKE_ACTION.to_owned(), true)), "waking up");
+}
+
+/// How it stands is told on its project's bus as it moves (an order to sleep, then asleep),
+/// each change once: what shows it follows without asking.
+#[test]
+fn its_state_is_published_as_it_moves() {
+    use contracts::terminal::{CanSleep, TerminalStateChanged};
+    let key = "published-state-key";
+    let bus = kernel::EventBus::new();
+    let heard: Arc<Mutex<Vec<contracts::terminal::TerminalState>>> = Arc::default();
+    let into = Arc::clone(&heard);
+    let _listening = bus.subscribe(move |e: &TerminalStateChanged| {
+        if e.key == key {
+            into.lock().unwrap().extend(e.state);
+        }
+    });
+    let _bus = crate::sleep::hear(kernel::ProjectId::new(), bus);
+    let (mut view, _text, slot) = resumable(key, std::time::Duration::from_secs(60));
+    shells::announce(&slot, key);
+    let told = heard.lock().unwrap().len();
+    assert!(told >= 1, "told as it stands");
+    shells::announce(&slot, key);
+    assert_eq!(heard.lock().unwrap().len(), told, "nothing again while nothing moves");
+    assert!(sleep_by_key(key));
+    assert_eq!(heard.lock().unwrap().last().map(|s| s.can_sleep), Some(CanSleep::Sleeping));
+    ui_components::Viewer::poll(&mut view);
+    assert!(heard.lock().unwrap().last().is_some_and(|s| s.asleep), "then asleep");
+}
+
+/// An order to sleep let go (too old when its view polled) is told as undone, and a view
+/// closed tells it's gone: what shows it is never left mid-way.
+#[test]
+fn an_order_let_go_and_a_closed_tab_are_told() {
+    use contracts::terminal::{CanSleep, TerminalStateChanged};
+    let key = "told-undone-key";
+    let bus = kernel::EventBus::new();
+    let heard: Arc<Mutex<Vec<Option<CanSleep>>>> = Arc::default();
+    let into = Arc::clone(&heard);
+    let _listening = bus.subscribe(move |e: &TerminalStateChanged| {
+        if e.key == key {
+            into.lock().unwrap().push(e.state.map(|s| s.can_sleep));
+        }
+    });
+    let _bus = crate::sleep::hear(kernel::ProjectId::new(), bus);
+    let (mut view, _text, slot) = resumable(key, std::time::Duration::from_secs(60));
+    assert!(sleep_by_key(key));
+    assert_eq!(heard.lock().unwrap().last(), Some(&Some(CanSleep::Sleeping)));
+    // Too old by the time its view polls: let go.
+    if let Some((_, at)) = asked(&slot).sleep.as_mut() {
+        *at -= SLEEP_ORDER_FRESH;
+    }
+    ui_components::Viewer::poll(&mut view);
+    assert!(!view.asleep);
+    assert_eq!(heard.lock().unwrap().last(), Some(&Some(CanSleep::Yes)), "told undone");
+    drop(view);
+    assert_eq!(heard.lock().unwrap().last(), Some(&None), "told gone");
+}

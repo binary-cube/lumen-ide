@@ -268,6 +268,14 @@ impl ViewHost for Workbench {
         self.focus_view_tab(extension)
     }
 
+    fn show_hint(&mut self, id: &str) -> bool {
+        Workbench::show_hint(self, id)
+    }
+
+    fn show_hint_by(&mut self, id: &str, anchor: workbench_model::HintAnchor) -> bool {
+        Workbench::show_hint_by(self, id, Some(anchor))
+    }
+
     fn open_view_below(&mut self, title: &str, extension: &str, data: &dyn std::any::Any) -> bool {
         Workbench::open_view_below(self, title, extension, data)
     }

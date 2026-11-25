@@ -1,7 +1,12 @@
 //! Secrets kept safe (the kernel's [`SecretStore`], for remote projects and data sources): the system's keychain
 //! ([`Keychain`]: macOS Keychain, Windows Credential Manager, the Secret Service), or a
 //! project file encrypted with a key that lives in the keychain ([`ProjectVault`]: the file
-//! alone reveals nothing). Secrets are never written in plain text, nor printed.
+//! alone reveals nothing). Secrets are never written in plain text, nor printed. Data that
+//! only leaves memory for a while is sealed with a key of the run ([`RunKey`]).
+
+mod run_key;
+
+pub use run_key::RunKey;
 
 use std::path::PathBuf;
 use std::sync::Arc;

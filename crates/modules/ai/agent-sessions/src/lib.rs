@@ -15,7 +15,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 
 use contracts::agents::RenameSession;
-use contracts::terminal::TerminalRunning;
+use contracts::terminal::{ResumeLaunch, TerminalRunning, TerminalUse};
 use extensions::{Module, ModuleContext, ModuleError, ModuleId, ModuleManifest};
 use ui_components::{Dock, ToolContent, ToolPanel, ToolWindowProvider};
 
@@ -66,6 +66,11 @@ impl Module for SessionsModule {
         ctx.contribute(workbench_model::Answers::of(|asked: RenameSession, _host| {
             let title = one_line(&asked.title);
             !title.is_empty() && follow::renamed(&asked.key, &title).is_some()
+        }));
+        // A session's terminal put to sleep (unseen, idle): how it resumes, its agent's way
+        // — only for one whose file has been still as long (no turn running).
+        ctx.contribute(workbench_model::Answers::of(|asked: ResumeLaunch, _host| {
+            follow::resume_launch(&asked.key, asked.idle)
         }));
         Ok(())
     }
@@ -120,12 +125,23 @@ impl workbench_model::ProjectService for Renamer {
     fn attach(&self, project: &workbench_model::ProjectContext<'_>) -> Vec<kernel::Subscription> {
         follow::set_wake(project.id, Arc::clone(&project.wake));
         favorites::set_storage(project.id, project.storage);
+        // How its sessions' terminals stand, as they tell it (asleep, on their way, back):
+        // the rows and menus follow at once, its window woken to draw them.
+        let (wake, id) = (Arc::clone(&project.wake), project.id);
+        let states =
+            project.events.subscribe(move |e: &contracts::terminal::TerminalStateChanged| {
+                follow::told(id, &e.key, e.state);
+                wake();
+            });
         // The project closed: its window not woken, its favorites let go.
-        let id = project.id;
-        vec![kernel::Subscription::on_end(move || {
-            follow::unset_wake(id);
-            favorites::release(id);
-        })]
+        vec![
+            states,
+            kernel::Subscription::on_end(move || {
+                follow::unset_wake(id);
+                follow::take_told(Some(id));
+                favorites::release(id);
+            }),
+        ]
     }
 
     fn poll(&self, host: &mut dyn workbench_model::WorkbenchHost) -> bool {
@@ -153,8 +169,27 @@ impl workbench_model::ProjectService for Renamer {
                 });
             }
         }
+        // What each session's terminal holds (its memory, asleep), for the rows: asked now
+        // and then while the panel shows (read from the terminal's memory, measured on its
+        // thread only while asked).
+        // Told by their events since: drawn again.
+        let mut states_changed = follow::take_told(host.project_id());
+        if follow::panel_shown()
+            && STATES.lock().is_ok_and(|mut at| {
+                let due = at.is_none_or(|t: Instant| t.elapsed() >= STATE_EVERY);
+                if due {
+                    *at = Some(Instant::now());
+                }
+                due
+            })
+        {
+            for key in follow::keys() {
+                let state = host.ask(TerminalUse { key: key.clone() }).flatten();
+                states_changed |= follow::set_state(&key, state);
+            }
+        }
         let renames = follow::take_renames();
-        let any = !renames.is_empty();
+        let any = !renames.is_empty() || states_changed;
         for (key, title) in renames {
             let asked = contracts::terminal::RenameTerminal { key: key.clone(), title };
             // No such tab any more (closed): let go.
@@ -165,6 +200,10 @@ impl workbench_model::ProjectService for Renamer {
         any
     }
 }
+
+/// When the sessions' terminals were last asked what they hold, and how often.
+static STATES: Mutex<Option<Instant>> = Mutex::new(None);
+const STATE_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// When the names waiting for their agents were last looked at, and how often.
 static LOOKED: Mutex<Option<Instant>> = Mutex::new(None);

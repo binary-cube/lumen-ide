@@ -636,6 +636,9 @@ pub(super) enum Overlay {
     About,
     Settings,
     ProjectsMenu,
+    /// A module's hint: under the menus and modals (hidden while one is), floating until
+    /// clicked, then it has the keyboard (see `hints`).
+    Hint,
     /// The completion list: floating, the editor keeping the keyboard (see `editor_popups`).
     Completion,
     /// The parameters' hint over a call: floating, only shown (see `editor_popups`).
@@ -656,7 +659,7 @@ pub(super) fn switch_title(name: String, on: Option<bool>) -> String {
 }
 
 impl Overlay {
-    pub const ALL: [Overlay; 16] = [
+    pub const ALL: [Overlay; 17] = [
         Overlay::CodeHover,
         Overlay::FileDrop,
         Overlay::Toasts,
@@ -670,6 +673,7 @@ impl Overlay {
         Overlay::About,
         Overlay::Settings,
         Overlay::ProjectsMenu,
+        Overlay::Hint,
         Overlay::Completion,
         Overlay::ParamHint,
         Overlay::ResourcePills,

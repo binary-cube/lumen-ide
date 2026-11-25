@@ -17,6 +17,8 @@
 //! | `FIND=<text>` | the find bar is open with the text |
 //! | `FILES=<text>` | the project panel's file search has the text |
 //! | `TERMINAL=<command>` | the terminal is open and runs the command (`BOTTOM=half\|full`: the bottom window that tall, as its buttons make it) |
+//! | `SESSION_TAB=<title>` | a program run for a module (as an agent's session) in a terminal tab of the editor, a few lines of made-up output on its screen (`VIEW_COMMAND=snapshot:asleep`: then put to sleep by hand, its card saying it freed 412 MB); the hint it asks for closed unless `HINT` says |
+//! | `HINT=<id>` | after the window's other steps, the contributed hint shown by its anchor (`terminal.sleep`, by the active tab; `HINT_FOCUS=1`: given the keyboard, its focus ring on the main button) |
 //! | `TYPE=<text>` | the text is typed at the end of line `LINE` (default: the last), after indexing (`\\n` Enter, `{sc}` a semicolon) |
 //! | `SEARCH=<text>` | "Search in Project" is open with the text (`⇥`: Tab, to the folder's field: `Order⇥src/`) |
 //! | `SELECT=<text>` | the first occurrence is selected |
@@ -165,6 +167,11 @@ pub struct Options {
     find: Option<String>,
     files: Option<String>,
     terminal: Option<String>,
+    /// `SESSION_TAB`: a keyed terminal tab in the editor, by its title.
+    session_tab: Option<String>,
+    /// `HINT`: a hint shown at the end; `HINT_FOCUS`: with the keyboard.
+    hint: Option<String>,
+    hint_focus: bool,
     /// The terminal's first shell split (`right` / `down`: another shell beside / below).
     terminal_split: Option<String>,
     /// The bottom window's size: `half`, `full`.
@@ -366,6 +373,9 @@ impl Steps<'_> {
             settle(200);
             self.frame();
         }
+        if let Some(id) = &o.hint {
+            self.hint(id, o.hint_focus);
+        }
         if let Some(seconds) = o.soak {
             self.soak(seconds);
         }
@@ -409,6 +419,9 @@ impl Steps<'_> {
         }
         if let Some(command) = &o.terminal {
             self.terminal(command);
+        }
+        if let Some(title) = &o.session_tab {
+            self.session_tab(title, o.hint.is_some());
         }
         if let Some(split) = &o.terminal_split {
             use crate::commands::ToolTabAction as A;

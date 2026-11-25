@@ -606,6 +606,20 @@ fn a_program_runs_in_a_terminal_tab_of_the_editor() {
     let name = tab.doc.path().and_then(Path::file_stem).unwrap().to_string_lossy().into_owned();
     assert_eq!(name, "claude-1----x", "known by its key, never a path");
     assert_eq!(wb.keyed_view_kind(), Some(terminal_panel::VIEWER), "its own keys (⌘K)");
+    // Sleeping idle sessions is off: the terminal's hint tells it could be on.
+    assert_eq!(wb.hint_shown(), Some(terminal_panel::SLEEP_HINT));
+    // Nobody knows how it resumes (no agent follows this key): no "Put to Sleep" on its tab,
+    // the command off; a row asked anyway refused, saying why (never silently nothing).
+    assert!(wb.tab_view_menu(wb.active).is_empty());
+    let doc = wb.tab_id(wb.active).get();
+    let mut text = TextSystem::new();
+    assert!(wb.run_tab_view_menu(&mut text, &format!("{doc}:sleep-now")));
+    paint(&mut wb);
+    assert_eq!(wb.last_notification(), Some(i18n::t("terminal.cant_sleep")), "told why");
+    assert!(!wb.run_tab_view_menu(&mut text, "not-a-doc:sleep-now"));
+    let host: &dyn workbench_model::WorkbenchHost = &wb;
+    let sleep = wb.support.commands.iter().find(|c| c.spec.id == terminal_panel::SLEEP_NOW);
+    assert!(sleep.is_some_and(|c| !c.handler.enabled(host)), "off: it can't sleep now");
     let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
     assert_eq!(host.ask(run()), Some(true));
     assert_eq!(wb.tabs.iter().filter(|t| terminal(t)).count(), 1, "not started twice");
@@ -1087,4 +1101,187 @@ fn a_view_is_told_how_text_is_shown_when_it_changes() {
     crate::text_options::set(before);
     let told = told.lock().unwrap().clone();
     assert!(told.len() >= 2 && told[1] == !before.word_wrap, "told the change: {told:?}");
+}
+
+/// The bottom window's views are told when they're seen, as the tabs' are: the active one of
+/// the window shown; hidden with it (a session's terminal there never sleeps while seen).
+#[test]
+fn the_bottom_window_s_views_are_told_when_they_re_seen() {
+    use contracts::terminal::{RunInTerminal, TerminalPlace};
+    let (mut wb, dir) = with_project("bottom-shown");
+    let run = RunInTerminal {
+        launch: agents::Launch::new("/bin/cat", &[], None),
+        key: "bottom-session".into(),
+        title: "Session".into(),
+        icon: None,
+        place: TerminalPlace::Bottom,
+    };
+    let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
+    assert_eq!(host.ask(run), Some(true));
+    paint(&mut wb);
+    let shown = |wb: &Workbench| {
+        wb.tools.windows.iter().flat_map(|w| &w.groups).flat_map(|g| &g.views).any(|v| v.shown)
+    };
+    assert!(shown(&wb), "its window shown: told");
+    wb.set_bottom(None);
+    paint(&mut wb);
+    assert!(!shown(&wb), "hidden with its window");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A tab's view is told it's the chosen one apart from being seen: the window hidden (or a
+/// modal over it) and back changes only what's seen; another tab chosen changes both.
+#[test]
+fn a_view_is_told_chosen_apart_from_seen() {
+    let (mut wb, dir) = with_project("chosen");
+    let run = contracts::terminal::RunInTerminal {
+        launch: agents::Launch::new("/bin/cat", &[], None),
+        key: "chosen-session".into(),
+        title: "Session".into(),
+        icon: None,
+        place: contracts::terminal::TerminalPlace::Editor,
+    };
+    let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
+    assert_eq!(host.ask(run), Some(true));
+    paint(&mut wb);
+    let told = |wb: &Workbench| {
+        let v = wb.tabs[wb.active].viewer.as_ref().unwrap();
+        (v.active, v.shown)
+    };
+    assert_eq!(told(&wb), (Some(true), true));
+    wb.set_occluded(true);
+    paint(&mut wb);
+    assert_eq!(told(&wb), (Some(true), false), "covered: still the chosen one");
+    wb.set_occluded(false);
+    paint(&mut wb);
+    assert_eq!(told(&wb), (Some(true), true));
+    let session = wb.active;
+    wb.open_file(&dir.join("a.txt")).unwrap();
+    paint(&mut wb);
+    let v = wb.tabs[session].viewer.as_ref().unwrap();
+    assert_eq!((v.active, v.shown), (Some(false), false), "another tab chosen");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// The terminal's hint points at the session's own tab, not whichever is active: another
+/// tab chosen, it still rings the session's.
+#[test]
+fn a_session_s_hint_points_at_its_own_tab() {
+    let (mut wb, dir) = with_project("hint-tab");
+    let run = contracts::terminal::RunInTerminal {
+        launch: agents::Launch::new("/bin/cat", &[], None),
+        key: "hint-tab-session".into(),
+        title: "Session".into(),
+        icon: None,
+        place: contracts::terminal::TerminalPlace::Editor,
+    };
+    let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
+    assert_eq!(host.ask(run), Some(true));
+    let session = wb.active;
+    wb.open_file(&dir.join("a.txt")).unwrap();
+    paint(&mut wb);
+    assert_ne!(wb.active, session, "another tab chosen");
+    let tab = wb.tab_bar.tab_rect(session).unwrap();
+    let notch = wb.hint_card.notch().expect("pointing at a tab");
+    assert!(notch.x >= tab.min_x() && notch.x <= tab.max_x(), "at the session's own tab");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// "Wake Up" chosen on a tab behind others brings that tab to the front (its view asks);
+/// a tab whose icon changes at its poll while behind others is drawn again.
+#[test]
+fn a_tab_row_can_bring_its_tab_to_the_front() {
+    let (mut wb, dir) = with_project("tab-front");
+    let run = contracts::terminal::RunInTerminal {
+        launch: agents::Launch::new("/bin/cat", &[], None),
+        key: "front-session".into(),
+        title: "Session".into(),
+        icon: None,
+        place: contracts::terminal::TerminalPlace::Editor,
+    };
+    let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
+    assert_eq!(host.ask(run), Some(true));
+    let session = wb.active;
+    wb.open_file(&dir.join("a.txt")).unwrap();
+    paint(&mut wb);
+    assert_ne!(wb.active, session);
+    let doc = wb.tab_id(session).get();
+    let mut text = TextSystem::new();
+    wb.run_tab_view_menu(&mut text, &format!("{doc}:wake-now"));
+    assert_eq!(wb.active, session, "brought to the front");
+    // Another row ("Put to Sleep"): acts where the tab is.
+    wb.open_file(&dir.join("a.txt")).unwrap();
+    let other = wb.active;
+    wb.run_tab_view_menu(&mut text, &format!("{doc}:sleep-now"));
+    assert_eq!(wb.active, other, "left where it is");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A view whose tab icon changes at its first poll (as a session falling asleep).
+struct Dozing(bool);
+
+impl ui_workbench::Viewer for Dozing {
+    fn paint(&mut self, _: ui_workbench::ViewerPaint<'_>) {}
+    fn poll(&mut self) -> bool {
+        let changed = !self.0;
+        self.0 = true;
+        changed
+    }
+    fn tab_icon(&self) -> Option<&'static str> {
+        self.0.then_some("moon")
+    }
+}
+
+/// A tab behind others whose icon changes at its poll is drawn again (the tab bar shows it).
+#[test]
+fn a_hidden_tab_s_new_icon_is_drawn() {
+    let (mut wb, dir) = with_project("hidden-icon");
+    let mut doc = Document::new("");
+    doc.mark_saved(PathBuf::from("/virtual/dozing"));
+    let mut tab = Tab::new(doc, wb.code_font.clone(), None, LanguageId::PLAIN_TEXT);
+    tab.viewer = Some(TabViewer::new(
+        Box::new(Dozing(false)),
+        "test",
+        ui_workbench::ViewerKind::Replace,
+        ViewMode::Preview,
+    ));
+    wb.push_tab(tab);
+    wb.open_file(&dir.join("a.txt")).unwrap();
+    paint(&mut wb);
+    assert!(wb.poll_viewers(), "its icon changed: a frame");
+    assert!(!wb.poll_viewers(), "nothing more");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A hint about a tab finds it in another editor group too (the tab it names, not the
+/// current group's).
+#[test]
+fn a_hint_finds_its_tab_in_another_group() {
+    let (mut wb, dir) = with_project("hint-group");
+    wb.open_file(&dir.join("a.txt")).unwrap();
+    let run = contracts::terminal::RunInTerminal {
+        launch: agents::Launch::new("/bin/cat", &[], None),
+        key: "group-session".into(),
+        title: "Session".into(),
+        icon: None,
+        place: contracts::terminal::TerminalPlace::Editor,
+    };
+    let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
+    assert_eq!(host.ask(run), Some(true));
+    let session = wb.active;
+    assert!(wb.split_tab(session, Split::Right, true), "moved to a group of its own");
+    paint(&mut wb);
+    let moved_to = wb.editors.current;
+    wb.focus_group(1 - moved_to);
+    paint(&mut wb);
+    assert_ne!(wb.editors.current, moved_to, "another group current");
+    let group = &wb.editors.groups[moved_to];
+    let i = group
+        .tabs
+        .iter()
+        .position(|t| t.doc.path().and_then(Path::file_stem).is_some_and(|n| n == "group-session"));
+    let tab = group.tab_bar.tab_rect(i.unwrap()).unwrap();
+    let notch = wb.hint_card.notch().expect("pointing at its tab");
+    assert!(notch.x >= tab.min_x() && notch.x <= tab.max_x(), "at its tab, in its group");
+    let _ = std::fs::remove_dir_all(dir);
 }

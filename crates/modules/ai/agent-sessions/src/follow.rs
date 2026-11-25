@@ -47,6 +47,11 @@ struct Followed {
     /// The title the agent gave it at the last read: the tab renamed only when that changes
     /// (a name the user gave the tab is kept until the agent says another).
     said: Option<String>,
+    /// When its agent last wrote to it, at the last read (seconds since the epoch; 0: not
+    /// read yet).
+    active: i64,
+    /// What its terminal said at the last look ([`set_state`]): its memory, asleep.
+    state: Option<contracts::terminal::TerminalState>,
 }
 
 static FOLLOWED: Mutex<Vec<Followed>> = Mutex::new(Vec::new());
@@ -152,7 +157,17 @@ pub(crate) fn follow(
             followed.remove(0);
         }
         let said = id.is_some().then(|| title.clone());
-        followed.push(Followed { key, agent, id, folder, since: now(), title, said });
+        followed.push(Followed {
+            key,
+            agent,
+            id,
+            folder,
+            since: now(),
+            title,
+            said,
+            active: 0,
+            state: None,
+        });
     }
     if !RUNNING.swap(true, Ordering::AcqRel) {
         // A thread of its own: it waits between reads for as long as something is followed
@@ -241,6 +256,104 @@ pub(crate) fn due(
     out
 }
 
+/// How the session whose tab is `key` resumes, for its terminal to sleep: `None` when it
+/// isn't followed, has no id yet (it never wrote a file), its agent is gone, or its file was
+/// written within `idle` (a turn may run) or never read.
+pub(crate) fn resume_launch(key: &str, idle: Duration) -> Option<agents::Launch> {
+    let f = lock(&FOLLOWED).iter().find(|f| f.key == key)?.clone();
+    let id = f.id?;
+    let quiet = now().saturating_sub(f.active);
+    let idle = i64::try_from(idle.as_secs()).unwrap_or(i64::MAX);
+    if f.active <= 0 || quiet < idle {
+        return None;
+    }
+    let session = agents::AgentSession {
+        agent: f.agent,
+        id,
+        title: f.title,
+        folder: f.folder,
+        started: None,
+        active: f.active,
+        file: None,
+    };
+    Some(agents::provider(f.agent)?.resume(&session))
+}
+
+/// When the sessions' panel was last drawn (what their terminals hold is asked only while
+/// it's shown), and for how long after that it still is.
+static PANEL_DRAWN: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+const PANEL_SHOWN_FOR: Duration = Duration::from_secs(30);
+
+/// The sessions' panel drawn just now.
+pub(crate) fn panel_drawn() {
+    *lock(&PANEL_DRAWN) = Some(std::time::Instant::now());
+}
+
+/// Whether the sessions' panel was drawn lately (its rows show what the terminals hold).
+pub(crate) fn panel_shown() -> bool {
+    lock(&PANEL_DRAWN).is_some_and(|at| at.elapsed() < PANEL_SHOWN_FOR)
+}
+
+/// The keys of the sessions' tabs followed now.
+pub(crate) fn keys() -> Vec<String> {
+    lock(&FOLLOWED).iter().map(|f| f.key.clone()).collect()
+}
+
+/// What the terminal of tab `key` said (its memory, asleep): kept for the panel's rows.
+/// `true` if it changed.
+pub(crate) fn set_state(key: &str, state: Option<contracts::terminal::TerminalState>) -> bool {
+    let mut followed = lock(&FOLLOWED);
+    let Some(f) = followed.iter_mut().find(|f| f.key == key) else { return false };
+    let changed = f.state != state;
+    f.state = state;
+    changed
+}
+
+/// The projects whose panel has a terminal's state to draw since it last did ([`told`]).
+static TOLD: Mutex<Vec<kernel::ProjectId>> = Mutex::new(Vec::new());
+
+/// What a terminal published on project `project`'s bus of how it stands
+/// (`TerminalStateChanged`; `None`: gone), kept for its tab's row and menus; that project's
+/// panel draws again ([`take_told`]).
+pub(crate) fn told(
+    project: kernel::ProjectId,
+    key: &str,
+    state: Option<contracts::terminal::TerminalState>,
+) {
+    set_state(key, state);
+    let mut told = lock(&TOLD);
+    if !told.contains(&project) {
+        told.push(project);
+    }
+}
+
+/// Whether a terminal's state was told to project `project` since this was last asked
+/// (taken: each project's panel its own).
+pub(crate) fn take_told(project: Option<kernel::ProjectId>) -> bool {
+    let Some(project) = project else { return false };
+    let mut told = lock(&TOLD);
+    let before = told.len();
+    told.retain(|p| *p != project);
+    told.len() != before
+}
+
+/// Tab `key` just asked to sleep or to wake (`to`: `Sleeping` or `Waking`): its menus say
+/// so at once, before its terminal tells how it went (its `TerminalStateChanged`).
+pub(crate) fn expect(key: &str, to: contracts::terminal::CanSleep) {
+    let mut followed = lock(&FOLLOWED);
+    let Some(f) = followed.iter_mut().find(|f| f.key == key) else { return };
+    let state = f.state.get_or_insert_with(Default::default);
+    state.can_sleep = to;
+}
+
+/// What the terminal of agent `agent`'s session `id` said last, if it has a tab followed.
+pub(crate) fn state_of(agent: &str, id: &str) -> Option<contracts::terminal::TerminalState> {
+    lock(&FOLLOWED)
+        .iter()
+        .find(|f| f.agent == agent && f.id.as_deref() == Some(id))
+        .and_then(|f| f.state)
+}
+
 /// Tab `key` gone: not followed any more.
 pub(crate) fn forget(key: &str) {
     lock(&FOLLOWED).retain(|f| f.key != key);
@@ -296,6 +409,7 @@ fn update(
             f.id = Some(session.id.clone());
             adopted.push((session.agent, session.id.clone()));
         }
+        f.active = session.active;
         if f.said.as_ref() != Some(&session.title) {
             f.said = Some(session.title.clone());
             if session.title != f.title {
@@ -347,6 +461,7 @@ fn run() {
                 let was = before.iter().find(|b| b.key == f.key);
                 f.id.clone_from(&read.id);
                 f.said.clone_from(&read.said);
+                f.active = read.active;
                 if was.is_some_and(|b| b.title != read.title) {
                     f.title.clone_from(&read.title);
                 }

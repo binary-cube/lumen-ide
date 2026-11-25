@@ -15,6 +15,8 @@ terminal-session.workspace = true
 alacritty_terminal.workspace = true
 tracing.workspace = true
 files.workspace = true
+# A program that outlives its hangup is stopped with its tree.
+process.workspace = true
 # alacritty's PTY trait names its poller's types.
 polling = "3"
 
@@ -23,6 +25,10 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+
+[dev-dependencies]
+# The measurement's compressed size (the terminal's store compresses what it's given).
+miniz_oxide.workspace = true
 
 [lints]
 workspace = true

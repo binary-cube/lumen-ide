@@ -721,6 +721,16 @@ pub trait Viewer: Send {
     /// only when it changes (a view starts hidden until told); a view that works in the
     /// background while shown (the Task Manager's sampling) pauses on `false`.
     fn set_shown(&mut self, _shown: bool) {}
+    /// Its tab became the active one of its group (`true`) or stopped being it (`false`):
+    /// what the user chose, apart from what covers it (a modal over the window, the window
+    /// in the background — [`Self::set_shown`] says those). Told by the app when it changes.
+    fn set_active(&mut self, _active: bool) {}
+    /// Unseen (a view behind another of the window at the bottom, or its window hidden), it
+    /// still has something to take now (an order from elsewhere: a session put to sleep):
+    /// the app polls it then. Asked at every poll: from memory only. `false` by default.
+    fn wants_poll(&self) -> bool {
+        false
+    }
     /// The window has the keyboard (`true`) or another program took it (`false`). Told by
     /// the app when it changes, and to a view at its first frame; what moves only for the
     /// user's eye (a preview's effects) stands still while the window is in the background,
@@ -754,6 +764,19 @@ pub trait Viewer: Send {
     fn pointer_down(&mut self, p: Point, clicks: u32, mods: PressMods) -> Option<ViewerAction> {
         let _ = (clicks, mods);
         self.click(p)
+    }
+    /// In a tab: the rows its tab's right-click menu adds for it (a session's "Put to Sleep"),
+    /// asked as the menu opens — from what it holds, never the disk. A chosen row's id comes
+    /// back as a [`Self::command`] (to this view, whichever tab is active).
+    fn tab_menu(&self) -> Vec<ViewMenuEntry> {
+        Vec::new()
+    }
+    /// Whether choosing row `id` of its tab's menu brings its tab to the front first (a
+    /// session woken: shown, it starts again), as a click on the tab would. `false` by
+    /// default: the row acts where the tab is.
+    fn tab_row_activates(&self, id: &str) -> bool {
+        let _ = id;
+        false
     }
     /// A right click at `p`: the menu to show there (`None`: none of its own). The chosen
     /// row's id comes back as a [`Self::command`].

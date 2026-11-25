@@ -20,6 +20,8 @@ impl Workbench {
     ) {
         // This window's caret (its theme's: windows can have different ones).
         ui_kit::caret::configure(self.caret_look());
+        // What this frame draws says where it is (a hint points at it).
+        ui_workbench::anchors::begin();
         // The installed PHP (…) found in the background since: the levels take it.
         self.refresh_levels_if_warmed();
         self.paint_phases.mark("levels");
@@ -66,6 +68,11 @@ impl Workbench {
         } else {
             self.paint_groups(text, scene);
         }
+        if let Some(tab) = self.tab_bar.tab_rect(self.active) {
+            ui_workbench::anchors::report(workbench_model::hints::ANCHOR_ACTIVE_TAB, tab);
+        }
+        // The tab a hint is about (by its name), only while one is shown: in whichever group.
+        self.report_hint_tab();
         self.paint_phases.mark("editors");
         self.paint_side_panels(text, scene, keyboard_in_overlay);
         self.paint_phases.mark("side_panels");
@@ -102,6 +109,33 @@ impl Workbench {
         self.save_session_soon();
         self.release_unseen_syntax();
         self.paint_phases.mark("overlays");
+    }
+
+    /// The tab the shown hint points at (its name), reported as an anchor where it's drawn
+    /// — in the current group or another; nothing while no hint names a tab.
+    fn report_hint_tab(&self) {
+        let Some(workbench_model::HintAnchor::Tab(name)) =
+            self.hint.as_ref().and_then(|h| h.anchor.as_ref())
+        else {
+            return;
+        };
+        let named = |tab: &Tab| {
+            tab.doc.path().and_then(Path::file_stem).and_then(|n| n.to_str()) == Some(name)
+        };
+        let current = self.tabs.iter().position(named).and_then(|i| self.tab_bar.tab_rect(i));
+        let other = || {
+            self.editors
+                .groups
+                .iter()
+                .enumerate()
+                .filter(|(g, _)| *g != self.editors.current)
+                .find_map(|(_, group)| {
+                    group.tabs.iter().position(named).and_then(|i| group.tab_bar.tab_rect(i))
+                })
+        };
+        if let Some(rect) = current.or_else(other) {
+            ui_workbench::anchors::report_keyed(workbench_model::hints::ANCHOR_TAB, name, rect);
+        }
     }
 
     /// What must be up to date before a frame: a pending jump, the syntax, the version

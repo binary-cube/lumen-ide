@@ -43,6 +43,8 @@ interaction, accessibility, cost, example, don't). Start from [the guide](../REA
 
 - [feedback](feedback.md)
 - [toast](toast.md)
+- [hint-card](hint-card.md)
+- [anchors](anchors.md)
 - [tooltip](tooltip.md)
 - [badges](badges.md)
 - [text](text.md)

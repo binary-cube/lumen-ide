@@ -29,10 +29,22 @@ workbench-model.workspace = true
 settings-model.workspace = true
 agents.workspace = true
 contracts.workspace = true
+# Writes kept private and whole (the histories spilled to disk).
+files.workspace = true
+# The histories spilled to disk sealed with the run's key.
+secrets.workspace = true
+# The histories spilled to disk compressed first.
+miniz_oxide.workspace = true
+# What each program run by a module holds (its process tree), measured on a thread.
+process-stats.workspace = true
 
 [dev-dependencies]
-# The app's folders made in the test's own (never the user's).
-files.workspace = true
+# A test host's repository (none).
+version-control.workspace = true
+
+[features]
+# The app's `--snapshot`: a session's tab put to sleep by hand (`snapshot:asleep`).
+snapshot = []
 
 [lints]
 workspace = true

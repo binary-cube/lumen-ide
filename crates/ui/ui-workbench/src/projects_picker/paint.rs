@@ -67,8 +67,8 @@ impl ProjectsPicker {
         let Painter { text, scene, palette, icons } = painter;
         let ctx = Ctx::new(palette, scale);
         let px = |v: f32| ctx.px(v);
-        let w = px(560.0).min(area.size.width - px(48.0));
-        let h = px(520.0).min(area.size.height - px(48.0));
+        let w = px(HOME_WIDTH).min(area.size.width - px(48.0));
+        let h = px(HOME_HEIGHT).min(area.size.height - px(48.0));
         if w <= px(160.0) || h <= px(160.0) {
             return;
         }
@@ -527,6 +527,13 @@ pub(super) fn paint_text_button(
     ds::button(list.layer, list.text, list.icons, ctx, r, spec);
     r
 }
+
+/// The home screen card's width at most (logical pixels); a narrower window gives it what
+/// it has.
+const HOME_WIDTH: f32 = 640.0;
+/// The home screen card's height at most (logical pixels): the past sessions and the recent
+/// projects under them shown without scrolling at first; a lower window gives it what it has.
+const HOME_HEIGHT: f32 = 720.0;
 
 /// The height of a [`paint_text_button`] (logical pixels).
 const TEXT_BUTTON_H: f32 = 24.0;

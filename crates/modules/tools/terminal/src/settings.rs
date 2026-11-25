@@ -68,6 +68,18 @@ pub const COPY_ON_SELECT: Setting<bool> = Setting::new("terminal", "copy_on_sele
 /// Links and file paths underlined under the pointer, opened with a click.
 pub const HIGHLIGHT_LINKS: Setting<bool> = Setting::new("terminal", "highlight_links", || true);
 
+/// Programs other modules run (an agents' sessions) put to sleep when unseen and idle: stopped,
+/// their tabs kept, resumed when shown (off by default: nothing is stopped unasked).
+pub const SLEEP_IDLE: Setting<bool> = Setting::new("terminal", "sleep_idle", || false);
+/// After how many minutes unseen and idle.
+pub const SLEEP_AFTER: Setting<i64> =
+    Setting::new("terminal", "sleep_after", || DEFAULT_SLEEP_AFTER)
+        .valid(|n| SLEEP_AFTERS.contains(n));
+/// The idle time it starts at (minutes): an hour.
+const DEFAULT_SLEEP_AFTER: i64 = 60;
+/// The idle times offered (minutes).
+pub const SLEEP_AFTERS: [i64; 5] = [15, 30, 60, 120, 240];
+
 const TAB_TITLE_IDS: [&str; 3] = ["never", "running", "always"];
 
 /// The stops offered.
@@ -117,7 +129,20 @@ pub fn read(settings: &SettingsService) -> TerminalConfig {
         mouse_reporting: settings.get(&MOUSE_REPORTING),
         copy_on_select: settings.get(&COPY_ON_SELECT),
         highlight_links: settings.get(&HIGHLIGHT_LINKS),
+        sleep_after: settings.get(&SLEEP_IDLE).then(|| sleep_minutes(settings.get(&SLEEP_AFTER))),
     }
+}
+
+/// `minutes` as a duration (never below the shortest offered).
+fn sleep_minutes(minutes: i64) -> std::time::Duration {
+    let minutes = u64::try_from(minutes.max(SLEEP_AFTERS[0])).unwrap_or(DEFAULT_SLEEP_AFTER as u64);
+    std::time::Duration::from_secs(minutes.saturating_mul(60))
+}
+
+/// Sleeping turned on (the hint's "Turn on", a command) and handed to the terminal at once.
+pub fn enable_sleep(settings: &SettingsService) {
+    save(settings, &SLEEP_IDLE, true);
+    crate::config::configure(read(settings));
 }
 
 /// `setting` turned the other way and handed to the terminal at once (from its window's
@@ -468,6 +493,73 @@ impl SettingsContribution for BehaviorSettings {
             "highlight_links" => save(settings, &HIGHLIGHT_LINKS, value != 0),
             _ => {}
         }
+    }
+}
+
+/// The "Sleeping sessions" block: programs other modules run, stopped when unseen and idle.
+#[derive(Debug)]
+pub(crate) struct SleepSettings;
+
+impl SettingsContribution for SleepSettings {
+    fn id(&self) -> &'static str {
+        "terminal-sleep"
+    }
+
+    fn page(&self) -> &'static str {
+        "terminal"
+    }
+
+    fn page_info(&self) -> Option<SettingsPage> {
+        Some(PAGE)
+    }
+
+    fn order(&self) -> u16 {
+        40
+    }
+
+    fn block(&self, scope: SettingsScope<'_>) -> SettingsBlock {
+        let settings = scope.settings;
+        let mut rows = vec![SettingsRow::Toggle {
+            key: "sleep_idle",
+            detail: t("settings.terminal_sleep_idle_detail"),
+            default: Some(SLEEP_IDLE.default_value()),
+            label: t("settings.terminal_sleep_idle"),
+            on: settings.get(&SLEEP_IDLE),
+        }];
+        if settings.get(&SLEEP_IDLE) {
+            rows.push(SettingsRow::Dropdown {
+                key: "sleep_after",
+                label: t("settings.terminal_sleep_after"),
+                detail: t("settings.terminal_sleep_after_detail"),
+                icon: None,
+                choices: SLEEP_AFTERS.iter().map(|&m| (m, sleep_label(m))).collect(),
+                current: settings.get(&SLEEP_AFTER),
+                default: Some(SLEEP_AFTER.default_value()),
+            });
+        }
+        SettingsBlock {
+            title: t("settings.terminal_sleep"),
+            detail: t("settings.terminal_sleep_detail"),
+            rows,
+        }
+    }
+
+    fn choose(&self, scope: SettingsScope<'_>, key: &'static str, value: i64) {
+        let settings = scope.settings;
+        match key {
+            "sleep_idle" => save(settings, &SLEEP_IDLE, value != 0),
+            "sleep_after" if SLEEP_AFTERS.contains(&value) => save(settings, &SLEEP_AFTER, value),
+            _ => {}
+        }
+    }
+}
+
+/// An idle time offered, as shown: `15 min`, `1 h`.
+fn sleep_label(minutes: i64) -> String {
+    if minutes % 60 == 0 {
+        i18n::tr!("settings.terminal_sleep_hours", n = minutes / 60)
+    } else {
+        i18n::tr!("settings.terminal_sleep_minutes", n = minutes)
     }
 }
 

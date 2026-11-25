@@ -5,6 +5,7 @@
 // What modules build their views with lives in `ui-components` (it changes rarely; these
 // screens often): re-exported, the workbench's paths stay.
 pub use ui_components::Painter;
+pub use ui_components::anchors;
 pub use ui_components::backdrop::{self, BackdropStyle};
 pub use ui_components::card_preview::{self, CardPreview};
 pub use ui_components::charts;
@@ -13,6 +14,7 @@ pub use ui_components::data_grid;
 pub use ui_components::decorations;
 pub use ui_components::ds;
 pub use ui_components::editor_toolbar;
+pub use ui_components::hint_card;
 pub use ui_components::picker;
 pub use ui_components::result_pane;
 pub use ui_components::screen_widgets;

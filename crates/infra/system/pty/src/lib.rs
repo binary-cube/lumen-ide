@@ -18,6 +18,8 @@
 //! The history of a terminal not drawn for a while is parked in a compact form and put back
 //! before anything reads it ([`parking`]).
 
+#[cfg(unix)]
+mod ending;
 mod filtered;
 mod foreground;
 mod parked;
@@ -60,6 +62,10 @@ struct Shared {
     history_clear: Arc<AtomicU8>,
     /// The colors programs are answered (see [`Colors`]).
     colors: Mutex<Colors>,
+    /// When it started, and when its program last wrote (ms since then): how long it has
+    /// been quiet ([`terminal_session::SessionWatch::quiet_for`]).
+    started: Instant,
+    output_at: AtomicU64,
 }
 
 /// What a program asking a color (OSC 10 / 11 / 12 / 4) is answered: the colors redefined
@@ -81,6 +87,18 @@ impl Colors {
 }
 
 impl Shared {
+    /// Its program wrote something just now.
+    fn wrote(&self) {
+        let ms = u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX);
+        self.output_at.store(ms, Ordering::Relaxed);
+    }
+
+    /// How long since its program last wrote.
+    fn quiet_for(&self) -> Duration {
+        let at = Duration::from_millis(self.output_at.load(Ordering::Relaxed));
+        self.started.elapsed().saturating_sub(at)
+    }
+
     fn mark_dirty(&self) {
         if !self.dirty.swap(true, Ordering::AcqRel) {
             self.wakes.wake();
@@ -108,7 +126,10 @@ impl EventListener for Listener {
     fn send_event(&self, event: Event) {
         let shared = &self.0;
         match event {
-            Event::Wakeup => shared.mark_dirty(),
+            Event::Wakeup => {
+                shared.wrote();
+                shared.mark_dirty();
+            }
             Event::Title(title) => {
                 if let Ok(mut t) = shared.title.lock() {
                     *t = Some(title);
@@ -168,6 +189,10 @@ pub struct PtySession {
     memory: AtomicU64,
     /// Its history, parked while it isn't drawn.
     parking: Arc<parking::Parking<Listener>>,
+    /// When its program started (a program under its id that started at another time is
+    /// another one).
+    #[cfg(unix)]
+    born: ending::Born,
 }
 
 /// How long the panel's size must stay still before the program is told it (`TIOCSWINSZ`,
@@ -416,7 +441,11 @@ pub fn spawn(profile: &ShellProfile, size: TermSize, waker: Waker) -> io::Result
         #[cfg(target_os = "windows")]
         escape_args: true,
     };
+    #[cfg(unix)]
+    let after = ending::now_secs();
     let pty = tty::new(&options, window_size(size), NEXT_ID.fetch_add(1, Ordering::Relaxed))?;
+    #[cfg(unix)]
+    let born = ending::Born { after, before: ending::now_secs() };
     #[cfg(unix)]
     let pid = Some(pty.child().id());
     #[cfg(windows)]
@@ -445,6 +474,8 @@ pub fn spawn(profile: &ShellProfile, size: TermSize, waker: Waker) -> io::Result
         sender: OnceLock::new(),
         history_clear,
         colors: Mutex::default(),
+        started: Instant::now(),
+        output_at: AtomicU64::new(0),
     });
     let listener = Listener(Arc::clone(&shared));
     let term = Arc::new(FairMutex::new(Term::new(
@@ -479,6 +510,8 @@ pub fn spawn(profile: &ShellProfile, size: TermSize, waker: Waker) -> io::Result
         resizes: OnceLock::new(),
         memory: AtomicU64::new(0),
         parking,
+        #[cfg(unix)]
+        born,
     })
 }
 
@@ -578,6 +611,13 @@ fn resize_thread(sender: EventLoopSender) -> std::sync::mpsc::Sender<WindowSize>
 impl Drop for PtySession {
     fn drop(&mut self) {
         let _ = self.sender.send(Msg::Shutdown);
+        // Ended already (its id may be another program's by now): nothing to see to.
+        #[cfg(unix)]
+        if let Some(pid) = self.pid
+            && self.shared.exit.lock().is_ok_and(|e| e.is_none())
+        {
+            ending::see_ended(pid, self.born);
+        }
     }
 }
 
@@ -626,6 +666,10 @@ impl terminal_session::SessionWatch for PtyWatch {
 
     fn title(&self) -> Option<String> {
         self.shared.upgrade()?.title.lock().ok().and_then(|t| t.clone())
+    }
+
+    fn quiet_for(&self) -> Option<Duration> {
+        Some(self.shared.upgrade()?.quiet_for())
     }
 }
 
@@ -680,7 +724,7 @@ impl TerminalSession for PtySession {
             }
         }
         // Reflowed with the rest of the history.
-        self.parking.restore(true);
+        self.parking.restore_now();
         // Asked before the terminal is locked (the reader asks it with the terminal held).
         let redrawn = self.redrawing_now();
         let mut term = self.term.lock();
@@ -701,7 +745,7 @@ impl TerminalSession for PtySession {
         if self.parking.must_restore() {
             // Parked just now, scrolled back: what's shown is in the rows parked.
             drop(term);
-            self.parking.restore(true);
+            self.parking.restore_now();
             self.snapshot_parked(&self.term.lock(), out);
         } else {
             self.snapshot_parked(&term, out);
@@ -757,12 +801,12 @@ impl TerminalSession for PtySession {
     }
 
     fn scroll(&mut self, lines: i32) {
-        self.parking.restore(true);
+        self.parking.restore_now();
         self.term.lock().scroll_display(Scroll::Delta(lines));
     }
 
     fn scroll_to_bottom(&mut self) {
-        self.parking.restore(true);
+        self.parking.restore_now();
         let mut term = self.term.lock();
         if term.grid().display_offset() != 0 {
             term.scroll_display(Scroll::Bottom);
@@ -785,6 +829,10 @@ impl TerminalSession for PtySession {
 
     fn take_dirty(&self) -> bool {
         self.shared.dirty.swap(false, Ordering::AcqRel)
+    }
+
+    fn set_spill(&mut self, store: Arc<dyn terminal_session::SpillStore>) {
+        self.parking.set_spill(store);
     }
 }
 

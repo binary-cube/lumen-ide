@@ -16,6 +16,16 @@
 //!   `ESC c`) erases the parked rows too: the reader counts the erases it hands the emulator
 //!   ([`Parking::erased`]); rows parked before the last one are let go.
 //!
+//! - **Out of memory**: once not drawn for [`SPILL_AFTER`] (and not scrolled back), the
+//!   parked rows go to the session's [`SpillStore`] (the terminal's module keeps them on disk,
+//!   compressed and sealed with the run's key): only their counts and their rare cells with
+//!   more stay. Rows parked later go in files of their own (newer). Coming back, they're read
+//!   first, oldest first, on a worker (a frame never reads a file); erased or forgotten,
+//!   their files are let go unread. Over the history's limit, the oldest go by their counts:
+//!   whole files let go, the oldest one left cut when read — never read for it. The files are
+//!   written and read with the history's lock let go (only their rows taken out and put back
+//!   under it; a generation tells what was let go meanwhile).
+//!
 //! One thread looks at every session's last draw (asleep until the next one is due; gone
 //! when there are none).
 
@@ -30,7 +40,9 @@ use alacritty_terminal::sync::FairMutex;
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Term, TermMode};
 
-use crate::parked::Parked;
+use terminal_session::{SpillStore, SpillToken};
+
+use crate::parked::{Kept, Parked};
 
 /// How long a terminal goes without being drawn before its history is parked.
 pub(crate) const PARK_AFTER: Duration = Duration::from_secs(120);
@@ -41,6 +53,18 @@ pub(crate) const PARK_AGAIN: Duration = Duration::from_secs(15);
 
 /// The fewest history rows worth parking.
 const PARK_LEAST: usize = 256;
+
+/// After writing out failed, how long before it's tried again.
+const SPILL_RETRY: Duration = Duration::from_secs(60);
+
+/// How long a worker waits for rows on their way out before putting rows back, and how
+/// often it looks.
+const MOVING_WAIT: Duration = Duration::from_secs(5);
+const MOVING_STEP: Duration = Duration::from_millis(2);
+
+/// How long a terminal goes without being drawn before its parked history leaves memory
+/// (to its [`SpillStore`]).
+pub(crate) const SPILL_AFTER: Duration = Duration::from_secs(600);
 
 /// The history's rows taken out of `grid`, oldest first: its history emptied, the rows it
 /// keeps made ahead let go. Each row is moved, not copied.
@@ -119,10 +143,38 @@ pub(crate) fn reflow(mut rows: Vec<Row<Cell>>, from: usize, to: usize) -> Vec<Ro
     rows
 }
 
+/// Parked rows out of memory: what reads them back, what stayed, how many.
+#[derive(Debug)]
+struct Spilled {
+    token: SpillToken,
+    kept: Vec<Kept>,
+    rows: usize,
+    /// Its oldest rows let go (past the history's limit), dropped once it's read.
+    skip: usize,
+}
+
+impl Spilled {
+    /// The rows it still counts for.
+    fn len(&self) -> usize {
+        self.rows - self.skip
+    }
+}
+
 /// What is kept of a parked history.
 #[derive(Debug, Default)]
 struct Store {
     parked: Parked,
+    /// Its oldest parked rows, out of memory, oldest first (older than `parked`'s).
+    spilled: Vec<Spilled>,
+    /// Rows on their way to or from the store (written or read with the lock let go), and
+    /// how many of their oldest are let go when they arrive (a lower limit told meanwhile).
+    moving: usize,
+    moving_skip: usize,
+    /// Counts the times its rows were let go (erased, forgotten): rows moving meanwhile are
+    /// let go when they arrive.
+    generation: u64,
+    /// Files let go, deleted once the lock is released ([`Parking::release`]).
+    gone: Vec<Spilled>,
     /// The erases counted when its rows left (older ones: let go).
     erased: u64,
     /// How far back the view was (rows from the bottom; 0: at the bottom).
@@ -153,6 +205,13 @@ pub(crate) struct Parking<L> {
     restored: Box<dyn Fn() + Send + Sync>,
     /// How long without being drawn before it parks (ms: [`PARK_AFTER`]; the tests' sooner).
     pub(crate) park_after: AtomicU64,
+    /// Where parked rows go out of memory (none given: they stay), and after how long
+    /// without being drawn (ms: [`SPILL_AFTER`]; the tests' sooner).
+    spill: OnceLock<Arc<dyn SpillStore>>,
+    pub(crate) spill_after: AtomicU64,
+    /// When writing out last failed (ms since [`epoch`]; 0: it didn't): not tried again for
+    /// [`SPILL_RETRY`] (a history isn't encoded for nothing).
+    spill_failed: AtomicU64,
 }
 
 impl<L> std::fmt::Debug for Parking<L> {
@@ -198,7 +257,178 @@ impl<L: EventListener> Parking<L> {
             limit: AtomicUsize::new(limit),
             restored,
             park_after: AtomicU64::new(PARK_AFTER.as_millis() as u64),
+            spill: OnceLock::new(),
+            spill_after: AtomicU64::new(SPILL_AFTER.as_millis() as u64),
+            spill_failed: AtomicU64::new(0),
         }
+    }
+
+    /// Where its parked rows go out of memory (the first store given is kept).
+    pub(crate) fn set_spill(&self, store: Arc<dyn SpillStore>) {
+        let _ = self.spill.set(store);
+    }
+
+    /// Its rows out of memory let go unread (on a worker: deleting a file), and those on
+    /// their way when they arrive.
+    fn let_go_spilled(&self, store: &mut Store) {
+        store.generation = store.generation.wrapping_add(1);
+        store.moving = 0;
+        store.moving_skip = 0;
+        let spilled = std::mem::take(&mut store.spilled);
+        store.gone.extend(spilled);
+    }
+
+    /// The files let go meanwhile (in `store.gone`) deleted on a worker, the lock released
+    /// first: nothing is started under it.
+    fn release(&self, mut store: MutexGuard<'_, Store>) {
+        let gone = std::mem::take(&mut store.gone);
+        drop(store);
+        let Some(spill) = self.spill.get().cloned().filter(|_| !gone.is_empty()) else {
+            return;
+        };
+        kernel::work::run("terminal-park", move || {
+            for s in gone {
+                spill.remove(&s.token);
+            }
+        });
+    }
+
+    /// The oldest rows past `limit` let go, by their counts: whole files of the oldest let
+    /// go, the oldest one left cut when it's read; then the parked ones in memory. Nothing
+    /// is read for it.
+    fn trim(&self, store: &mut Store, limit: usize) {
+        let mut extra = store.total().saturating_sub(limit);
+        let mut gone = Vec::new();
+        while extra > 0 && !store.spilled.is_empty() {
+            let oldest = &mut store.spilled[0];
+            if oldest.len() <= extra {
+                extra -= oldest.len();
+                gone.push(store.spilled.remove(0));
+            } else {
+                oldest.skip += extra;
+                extra = 0;
+            }
+        }
+        store.gone.extend(gone);
+        // Then those on their way (older than the parked ones), cut when they arrive.
+        let on_the_way = store.moving.saturating_sub(store.moving_skip).min(extra);
+        store.moving_skip += on_the_way;
+        extra -= on_the_way;
+        if extra > 0 {
+            let keep = store.parked.len().saturating_sub(extra);
+            store.parked.keep(keep);
+        }
+    }
+
+    /// Its rows out of memory read back (the files read with the lock let go), put before the
+    /// parked ones (they're older). One that can't be read is lost (said in the log).
+    fn read_spilled(&self) {
+        let Some(spill) = self.spill.get() else { return };
+        let (spilled, generation) = {
+            let mut store = lock(&self.store);
+            // Nothing out, or rows on their way (a spill writing): not now (decided under the
+            // lock: a spill and a read never cross).
+            if store.spilled.is_empty() || store.moving > 0 {
+                return;
+            }
+            let spilled = std::mem::take(&mut store.spilled);
+            store.moving += spilled.iter().map(Spilled::len).sum::<usize>();
+            (spilled, store.generation)
+        };
+        let moving: usize = spilled.iter().map(Spilled::len).sum();
+        let mut back = Parked::default();
+        for s in spilled {
+            let (rows, skip) = (s.rows, s.skip);
+            let read = spill.take(&s.token).and_then(|bytes| Parked::decode(&bytes, s.kept));
+            match read {
+                Some(mut older) => {
+                    older.keep(rows - skip);
+                    back.append(older);
+                }
+                None => tracing::warn!(rows, "a terminal's history wasn't read back"),
+            }
+        }
+        let mut store = lock(&self.store);
+        if store.generation == generation {
+            let skip = store.moving_skip.min(moving);
+            store.moving_skip -= skip;
+            store.moving = store.moving.saturating_sub(moving);
+            back.keep(back.len().saturating_sub(skip));
+            back.append(std::mem::take(&mut store.parked));
+            store.parked = back;
+        }
+        self.counted(&store);
+    }
+
+    /// The parked rows out of memory now, if it hasn't been drawn for [`SPILL_AFTER`], isn't
+    /// scrolled back (what's shown would be in them) and has enough newly parked. Encoded and
+    /// written with the lock let go.
+    fn spill_if_due(&self) {
+        let Some(spill) = self.spill.get() else { return };
+        let now = now_ms();
+        let failed = self.spill_failed.load(Ordering::Relaxed);
+        if !self.parked.load(Ordering::Acquire)
+            || self.restoring.load(Ordering::Acquire)
+            || self.used.load(Ordering::Relaxed) + self.spill_after.load(Ordering::Relaxed) > now
+            || (failed > 0 && now < failed + SPILL_RETRY.as_millis() as u64)
+            || !spill.ready()
+        {
+            return;
+        }
+        let (mut parked, generation) = {
+            let mut store = lock(&self.store);
+            // Rows on their way (a read under way): not now (decided under the lock).
+            if store.scrolled > 0 || store.parked.len() < PARK_LEAST || store.moving > 0 {
+                return;
+            }
+            let parked = std::mem::take(&mut store.parked);
+            store.moving += parked.len();
+            (parked, store.generation)
+        };
+        let rows = parked.len();
+        let (bytes, kept) = parked.encode();
+        let token = spill.write(&bytes);
+        let failed_at = if token.is_some() { 0 } else { now_ms().max(1) };
+        self.spill_failed.store(failed_at, Ordering::Relaxed);
+        let mut store = lock(&self.store);
+        if store.generation != generation {
+            // Let go meanwhile (erased, forgotten): so are these.
+            if let Some(token) = token {
+                store.gone.push(Spilled { token, kept, rows, skip: 0 });
+            }
+            self.counted(&store);
+            self.release(store);
+            return;
+        }
+        store.moving = store.moving.saturating_sub(rows);
+        // Its oldest let go meanwhile (a lower limit): cut when read, or now.
+        let skip = store.moving_skip.min(rows);
+        store.moving_skip -= skip;
+        match token {
+            Some(token) => store.spilled.push(Spilled { token, kept, rows, skip }),
+            // Not written: kept in memory as it was, before what was parked meanwhile; not
+            // tried again for a while.
+            None => match Parked::decode(&bytes, kept) {
+                Some(mut back) => {
+                    back.keep(rows - skip);
+                    back.append(std::mem::take(&mut store.parked));
+                    store.parked = back;
+                }
+                None => tracing::warn!(rows, "a terminal's history was lost"),
+            },
+        }
+        self.trim(&mut store, self.limit.load(Ordering::Relaxed));
+        self.counted(&store);
+        self.release(store);
+        drop(bytes);
+        kernel::memory::release_free();
+    }
+
+    /// The rows counted while `more` leave the grid for the parked ones (with those out of
+    /// memory and on their way): a frame sees the history's length whole.
+    fn counting(&self, store: &Store, more: usize) {
+        self.rows.store(store.total() + more, Ordering::Release);
+        self.parked.store(true, Ordering::Release);
     }
 
     /// The rows parked now (counted in the history's length shown).
@@ -220,30 +450,42 @@ impl<L: EventListener> Parking<L> {
         if self.parked.load(Ordering::Acquire) { self.bytes.load(Ordering::Relaxed) } else { 0 }
     }
 
-    /// The history's limit changed (the user's setting): parked rows past it let go.
+    /// The history's limit changed (the user's setting, told as a frame is drawn): parked
+    /// rows past it let go — now if the history is free, else at the parking thread's next
+    /// look (the length shown is bounded by the limit meanwhile). Nothing is read.
     pub(crate) fn set_limit(&self, limit: usize) {
         self.limit.store(limit, Ordering::Relaxed);
-        if self.parked.load(Ordering::Acquire) {
-            let mut store = lock(&self.store);
-            store.parked.keep(limit);
-            self.counted(&store);
+        if !self.parked.load(Ordering::Acquire) {
+            return;
         }
+        let mut store = match self.store.try_lock() {
+            Ok(store) => store,
+            Err(TryLockError::Poisoned(p)) => p.into_inner(),
+            Err(TryLockError::WouldBlock) => return,
+        };
+        self.trim(&mut store, limit);
+        self.counted(&store);
+        self.release(store);
     }
 
-    /// The user cleared the history (Clear Terminal): the parked rows go with it.
+    /// The user cleared the history (Clear Terminal): the parked rows go with it (the lock
+    /// only moves them out; the files are deleted on a worker, never read).
     pub(crate) fn forget(&self) {
         let mut store = lock(&self.store);
         store.parked = Parked::default();
+        self.let_go_spilled(&mut store);
         store.scrolled = 0;
         self.counted(&store);
+        self.release(store);
     }
 
     /// Its counts as `store` holds them.
     fn counted(&self, store: &Store) {
-        self.rows.store(store.parked.len(), Ordering::Release);
-        self.bytes.store(store.parked.bytes(), Ordering::Relaxed);
+        let kept: usize = store.spilled.iter().map(|s| Kept::bytes(&s.kept)).sum();
+        self.rows.store(store.total(), Ordering::Release);
+        self.bytes.store(store.parked.bytes() + kept, Ordering::Relaxed);
         self.scrolled.store(store.scrolled > 0, Ordering::Release);
-        self.parked.store(!store.parked.is_empty(), Ordering::Release);
+        self.parked.store(store.holds(), Ordering::Release);
     }
 
     /// It's being drawn: parked rows come back — on a worker, or at once (`false`: it's busy,
@@ -258,7 +500,7 @@ impl<L: EventListener> Parking<L> {
             return true;
         }
         if self.scrolled.load(Ordering::Acquire) {
-            return self.restore(wait);
+            return self.restore_with(wait, false);
         }
         if !self.restoring.swap(true, Ordering::AcqRel) {
             let me = Arc::clone(self);
@@ -280,11 +522,62 @@ impl<L: EventListener> Parking<L> {
     /// when the emulator or a park is busy). Rows parked before an erase are let go; while a
     /// full-screen program has its own screen they stay parked.
     pub(crate) fn restore(&self, wait: bool) -> bool {
+        self.restore_with(wait, wait)
+    }
+
+    /// The rows in memory put back now, from the UI thread (a resize, a scroll): never a
+    /// file read there — what's out of memory comes back on a worker, after (it's older:
+    /// above what's put back now). `false` when it had to wait.
+    pub(crate) fn restore_now(self: &Arc<Self>) -> bool
+    where
+        L: Send + 'static,
+    {
+        let done = self.restore_with(true, false);
+        let left = {
+            let store = lock(&self.store);
+            !store.spilled.is_empty() || store.moving > 0
+        };
+        if left && !self.restoring.swap(true, Ordering::AcqRel) {
+            let me = Arc::clone(self);
+            kernel::work::run("terminal-park", move || {
+                me.restore(true);
+                me.restoring.store(false, Ordering::Release);
+                (me.restored)();
+            });
+        }
+        done
+    }
+
+    /// Waits (a worker: a little at a time, at most [`MOVING_WAIT`]) for rows on their way
+    /// out to land. `false` if they didn't.
+    fn moving_done(&self) -> bool {
+        let until = Instant::now() + MOVING_WAIT;
+        loop {
+            if lock(&self.store).moving == 0 {
+                return true;
+            }
+            if Instant::now() >= until {
+                return false;
+            }
+            std::thread::sleep(MOVING_STEP);
+        }
+    }
+
+    /// [`Self::restore`]; `read`: the rows out of memory read back first (a worker's only).
+    fn restore_with(&self, wait: bool, read: bool) -> bool {
         self.used.store(now_ms(), Ordering::Relaxed);
         if !self.parked.load(Ordering::Acquire) {
             return true;
         }
         let Some(term) = self.term.upgrade() else { return true };
+        // Out of memory: read back first, once what's on its way out has landed (else it
+        // would come back after older rows: out of order).
+        if read
+            && self.moving_done()
+            && self.erased.load(Ordering::Acquire) == lock(&self.store).erased
+        {
+            self.read_spilled();
+        }
         let mut store = if wait {
             lock(&self.store)
         } else {
@@ -296,11 +589,23 @@ impl<L: EventListener> Parking<L> {
         };
         if store.erased != self.erased.load(Ordering::Acquire) {
             store.parked = Parked::default();
+            self.let_go_spilled(&mut store);
         }
-        if store.parked.is_empty() {
+        if !store.holds() {
             store.scrolled = 0;
             self.counted(&store);
+            self.release(store);
             return true;
+        }
+        // Out of memory: read back on a worker (a frame never reads a file). Written out
+        // meanwhile (with a wait): the rest comes back now, those at the next draw.
+        if !store.spilled.is_empty() && !wait {
+            return false;
+        }
+        // Rows on their way (written out or read back): newer or older than these — none put
+        // back until they've landed.
+        if store.moving > 0 {
+            return false;
         }
         // A look first: nothing unpacked for a full-screen program's screen, nor more
         // than the history's limit leaves room for.
@@ -342,6 +647,8 @@ impl<L: EventListener> Parking<L> {
         store.scrolled = 0;
         // Counted with the grid still locked: a frame sees the history's length whole.
         self.counted(&store);
+        drop(term);
+        self.release(store);
         true
     }
 
@@ -364,6 +671,7 @@ impl<L: EventListener> Parking<L> {
             if store.erased != erased {
                 // Erased since the last park: those rows are gone.
                 store.parked = Parked::default();
+                self.let_go_spilled(&mut store);
                 store.scrolled = 0;
                 store.erased = erased;
                 self.counted(&store);
@@ -376,22 +684,18 @@ impl<L: EventListener> Parking<L> {
             let columns = term.columns();
             let rows = take_history(term.grid_mut());
             // Counted while still locked: a frame sees the history's length whole.
-            self.rows.store(store.parked.len() + rows.len(), Ordering::Release);
-            self.parked.store(true, Ordering::Release);
+            self.counting(&store, rows.len());
             (rows, columns, erased, offset)
         };
-        store.scrolled = if store.parked.is_empty() {
-            offset
-        } else if store.scrolled > 0 {
-            store.scrolled + rows.len()
-        } else {
-            0
-        };
+        // How far back the view is: within what was parked before (it grows by these rows), or
+        // within these (out of memory, older rows never hold the view: spilled only at the
+        // bottom).
+        store.scrolled = if store.scrolled > 0 { store.scrolled + rows.len() } else { offset };
         store.parked.push(&rows, columns);
-        store.parked.keep(self.limit.load(Ordering::Relaxed));
+        self.trim(&mut store, self.limit.load(Ordering::Relaxed));
         store.erased = erased;
         self.counted(&store);
-        drop(store);
+        self.release(store);
         drop(rows);
         kernel::memory::release_free();
     }
@@ -424,6 +728,45 @@ impl<L: EventListener + Send + 'static> Parkable for Parking<L> {
 
     fn park(&self) {
         Parking::park(self);
+        // A lower limit told while the history was busy: applied now.
+        {
+            let mut store = lock(&self.store);
+            if store.total() > self.limit.load(Ordering::Relaxed) {
+                self.trim(&mut store, self.limit.load(Ordering::Relaxed));
+                self.counted(&store);
+            }
+            self.release(store);
+        }
+        self.spill_if_due();
+    }
+}
+
+impl Store {
+    /// The rows parked, in memory and out of it.
+    fn total(&self) -> usize {
+        self.parked.len() + self.spilled.iter().map(Spilled::len).sum::<usize>() + self.moving
+            - self.moving_skip
+    }
+
+    /// Some rows are parked (in memory, out of it, or on their way).
+    fn holds(&self) -> bool {
+        !self.parked.is_empty() || !self.spilled.is_empty() || self.moving > 0
+    }
+}
+
+impl<L> Drop for Parking<L> {
+    /// Its rows out of memory let go with it (the terminal closed).
+    fn drop(&mut self) {
+        let store = self.store.get_mut().unwrap_or_else(PoisonError::into_inner);
+        let mut spilled = std::mem::take(&mut store.spilled);
+        spilled.append(&mut store.gone);
+        if let Some(spill) = self.spill.get().cloned().filter(|_| !spilled.is_empty()) {
+            kernel::work::run("terminal-park", move || {
+                for s in spilled {
+                    spill.remove(&s.token);
+                }
+            });
+        }
     }
 }
 

@@ -168,7 +168,7 @@ git = ["vcs-git"]
 history-fs = ["local-history"]
 lsp-client = ["language-servers"]
 web-fetch = ["viewer-markdown"]
-process-stats = ["task-manager", "profiler"]
+process-stats = ["task-manager", "profiler", "terminal-panel"]
 # A profile recording made: the profiler's.
 profiling-collect = ["profiler"]
 power-system = ["keep-awake"]
@@ -181,7 +181,7 @@ agent-files = ["agent-claude", "agent-cline"]
 mcp-transport = ["mcp-server"]
 remote-ftp = ["remote-projects"]
 remote-sftp = ["remote-projects"]
-secrets = ["remote-projects", "database-explorer", "language-servers", "mcp-server"]
+secrets = ["remote-projects", "database-explorer", "language-servers", "mcp-server", "terminal-panel"]
 # Requests sent: the HTTP client's.
 http-transport = ["http-client"]
 # The request files' environments read: the HTTP client's (runs, its bar) and the language's

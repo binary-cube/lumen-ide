@@ -64,6 +64,11 @@ pub(super) struct PanelView {
     pub(super) viewer: Box<dyn ui_workbench::Viewer>,
     /// The text options' generation its viewer was last told (0: never).
     pub(super) text_told: u64,
+    /// Whether its viewer was last told it's shown ([`ui_workbench::Viewer::set_shown`]).
+    pub(super) shown: bool,
+    /// Whether its viewer was last told its tab is the active one of the window at the
+    /// bottom ([`ui_workbench::Viewer::set_active`]).
+    pub(super) active: bool,
 }
 
 impl PanelView {
@@ -538,6 +543,8 @@ impl Workbench {
             provider,
             viewer,
             text_told: 0,
+            shown: false,
+            active: false,
         });
         Some((w, g, window.groups[g].views.len() - 1))
     }
@@ -601,7 +608,20 @@ impl Workbench {
             self.layout();
         }
         for window in &mut self.tools.windows {
-            if shown.as_deref() == Some(window.id.as_str()) {
+            let here = shown.as_deref() == Some(window.id.as_str());
+            // The unseen views with something to take now (an order from elsewhere) polled
+            // too: nothing waits for them to be shown.
+            for group in &mut window.groups {
+                let current = group.active;
+                for (i, view) in group.views.iter_mut().enumerate() {
+                    let seen = here && i == current;
+                    if !seen && view.viewer.wants_poll() {
+                        view.viewer.poll();
+                        self.panel_actions.extend(view.viewer.take_action());
+                    }
+                }
+            }
+            if here {
                 for group in &mut window.groups {
                     if let Some(view) = group.active_view_mut() {
                         busy |= view.viewer.poll();

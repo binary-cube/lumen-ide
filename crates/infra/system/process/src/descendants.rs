@@ -43,6 +43,12 @@ impl Descendants {
         Self(tree(&rows(), root))
     }
 
+    /// `root` itself and everything under it, now (empty if `root` isn't running): a
+    /// program to stop whole.
+    pub fn with_root(root: u32) -> Self {
+        Self(rooted(&rows(), root))
+    }
+
     /// What each of `roots` started, and what those started, now — the roots themselves not
     /// among them, each program once. A root is named by its id and its start time: one
     /// whose id names another program now is left out.
@@ -51,6 +57,26 @@ impl Descendants {
             return Self::default();
         }
         Self(forest(&rows(), roots))
+    }
+
+    /// Those found still running as the same programs (id and start time), now.
+    pub fn running(&self) -> Self {
+        Self(still_running(&mut System::new(), &self.0))
+    }
+
+    /// The first found alone (with [`Self::with_root`]: the root).
+    pub fn first(&self) -> Self {
+        Self(self.0.first().cloned().into_iter().collect())
+    }
+
+    /// These and those of `other` not among them (by id and start time).
+    pub fn joined(mut self, other: Self) -> Self {
+        for f in other.0 {
+            if !self.0.iter().any(|g| g.pid == f.pid && g.start == f.start) {
+                self.0.push(f);
+            }
+        }
+        self
     }
 
     /// Whether nothing was found.
@@ -117,9 +143,6 @@ pub(crate) struct Row {
     pub name: String,
 }
 
-/// The descendants of `root` in `rows`: each once, a child only if it started no earlier
-/// than its parent (an id reused later never adopts an older program); `root` not among
-/// them, nor a cycle a stale table could hold.
 /// The system's processes now, those ended left out.
 fn rows() -> Vec<Row> {
     let mut system = System::new();
@@ -155,6 +178,17 @@ pub(crate) fn forest(rows: &[Row], roots: &[(u32, u64)]) -> Vec<Found> {
     found
 }
 
+/// `root` (as `rows` has it) first, then its tree; empty if it isn't there.
+pub(crate) fn rooted(rows: &[Row], root: u32) -> Vec<Found> {
+    let Some(row) = rows.iter().find(|r| r.pid == root) else { return Vec::new() };
+    let mut found = vec![Found { pid: row.pid, start: row.start, name: row.name.clone() }];
+    found.extend(tree(rows, root));
+    found
+}
+
+/// The descendants of `root` in `rows`: each once, a child only if it started no earlier
+/// than its parent (an id reused later never adopts an older program); `root` not among
+/// them, nor a cycle a stale table could hold.
 pub(crate) fn tree(rows: &[Row], root: u32) -> Vec<Found> {
     let Some(root_start) = rows.iter().find(|r| r.pid == root).map(|r| r.start) else {
         return Vec::new();

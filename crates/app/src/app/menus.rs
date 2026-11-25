@@ -171,11 +171,13 @@ impl EditorApp {
         // The modules' menus (Git ›, Local History ›) act on the tab's file, if it's the
         // project's.
         self.workbench.set_menu_target(path.filter(|_| in_project));
-        let extra = if in_project {
-            self.workbench.contributed_menus(workbench_model::MenuPlace::TreeFile)
-        } else {
-            Vec::new()
-        };
+        let mut extra = self.workbench.tab_view_menu(tab);
+        if in_project {
+            if !extra.is_empty() {
+                extra.push(ui_workbench::MenuEntry::Separator);
+            }
+            extra.extend(self.workbench.contributed_menus(workbench_model::MenuPlace::TreeFile));
+        }
         self.show_entries(entries, extra, position);
     }
 }

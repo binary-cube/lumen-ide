@@ -119,3 +119,16 @@ fn a_program_s_row_says_its_project() {
     });
     assert_eq!(texts.name, "claude (2.1.327) · api.acme.test · 76008");
 }
+
+/// A program a terminal tab shows says that tab's title first: two sessions running the
+/// same program are told apart.
+#[test]
+fn a_program_s_row_says_its_tab_first() {
+    let texts = ProcessTexts::of(&crate::collector::ProcessRow {
+        pid: 76009,
+        name: Some("agent".into()),
+        title: Some("Fix the login form".into()),
+        ..Default::default()
+    });
+    assert_eq!(texts.name, "Fix the login form · agent · 76009");
+}

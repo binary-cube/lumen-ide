@@ -146,7 +146,7 @@ impl SettingsContribution for SessionSettings {
                     key: "sessions_kept",
                     label: t("settings.sessions_kept"),
                     detail: t("settings.sessions_kept_detail"),
-                    stops: stops(&[3, 5, 10, 20, 30]),
+                    stops: stops(&[3, 6, 10, 20, 30]),
                     current: scope.settings.get(&SESSIONS_KEPT),
                     default: Some(SESSIONS_KEPT.default_value()),
                 },

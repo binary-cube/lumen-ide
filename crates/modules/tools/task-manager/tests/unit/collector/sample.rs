@@ -242,6 +242,7 @@ fn a_terminal_s_programs_name_their_projects() {
     let mut terminal = ResourceUse::new("Terminal", "terminal");
     terminal.processes = vec![1, 2, 3];
     terminal.process_projects = vec![(1, here.id), (2, there.id)];
+    terminal.process_titles = vec![(2, "Fix the login form".into())];
     let row = |pid| ProcessRow { pid, ..ProcessRow::default() };
     let rows: HashMap<u32, ProcessRow> = [(1, row(1)), (2, row(2)), (3, row(3))].into();
     let snapshot = ResourceSnapshot {
@@ -255,6 +256,8 @@ fn a_terminal_s_programs_name_their_projects() {
     let line = frame.lines.iter().find(|l| l.name == "Terminal").unwrap();
     let projects: Vec<Option<&str>> = line.processes.iter().map(|p| p.project.as_deref()).collect();
     assert_eq!(projects, [Some("php-editor"), Some("api.acme.test"), None]);
+    let titles: Vec<Option<&str>> = line.processes.iter().map(|p| p.title.as_deref()).collect();
+    assert_eq!(titles, [None, Some("Fix the login form"), None], "a tab's title on its row");
 }
 
 /// With the heap counted, the memory nobody reported splits into the data nobody reported

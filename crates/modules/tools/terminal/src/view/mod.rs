@@ -27,6 +27,7 @@ use crate::colors::TermColors;
 use crate::config::{Colors, Cursor};
 use ui_kit::{centered_baseline, draw_text};
 
+mod asleep;
 mod grid;
 mod selection;
 mod shells;
@@ -37,6 +38,50 @@ pub(crate) use shells::*;
 
 /// Spacing between the view's edge and the grid (logical).
 const PADDING: f32 = 12.0;
+/// How the screen is drawn this frame: its font, colors, cells, and the settings' looks.
+struct ScreenLook<'a> {
+    font: &'a Font,
+    colors: &'a TermColors,
+    palette: &'a Palette,
+    cell: (f32, f32),
+    focused: bool,
+    scale: f32,
+    blink: bool,
+    bold_bright: bool,
+}
+
+/// Why a session can't be put to sleep by hand now, as told to the user.
+pub(crate) fn cant_sleep(can: contracts::terminal::CanSleep) -> workbench_model::Notification {
+    let why = match can {
+        contracts::terminal::CanSleep::Typed => "terminal.cant_sleep_typed",
+        contracts::terminal::CanSleep::Sleeping => "terminal.cant_sleep_sleeping",
+        contracts::terminal::CanSleep::Waking => "terminal.cant_sleep_waking",
+        _ => "terminal.cant_sleep",
+    };
+    workbench_model::Notification::warning(i18n::t(why))
+}
+
+/// What a key or a text does to what waits unsent ([`TerminalView::note_typed`]).
+#[derive(Debug, Clone, Copy)]
+enum Typing {
+    Typed(usize),
+    Erased,
+    Sent,
+}
+
+/// A notice drawn on a band at the grid's foot: its text, its font, the band's color.
+struct Band<'a> {
+    text: &'a str,
+    font: &'a Font,
+    background: Rgba,
+}
+
+/// How much of the terminal's background covers its last screen under the asleep card (the
+/// screen still seen, plainly behind it).
+const SCRIM_ALPHA: f32 = 0.78;
+
+/// A sleeping terminal's tab icon (in place of its own).
+pub(crate) const ASLEEP_ICON: &str = "moon";
 /// The scrollbar's lane on the right, beside the grid (logical): it never covers text.
 const LANE: f32 = 10.0;
 
@@ -64,6 +109,10 @@ pub struct TerminalStart {
     pub title: Option<String>,
     /// What it's known by (a program another module runs: renamed by that key).
     pub key: Option<String>,
+    /// Its project's root (`None`: none open).
+    pub root: Option<PathBuf>,
+    /// Its tab is in the editor (a program another module runs there).
+    pub in_editor: bool,
 }
 
 /// What a link in the terminal opens.
@@ -127,6 +176,8 @@ pub struct TerminalView {
     /// The shell didn't start (said in the view).
     failed: Option<String>,
     cwd: Option<PathBuf>,
+    /// Its project's root (its history spills under the project's data folder).
+    root: Option<PathBuf>,
     size: TermSize,
     grid_area: Rect,
     /// The grid, reused across frames.
@@ -189,8 +240,29 @@ pub struct TerminalView {
     title: Option<String>,
     /// What's asked of it by its key (a name, text to type), taken at its poll.
     renamed: Option<Arc<NameSlot>>,
+    /// Tells it's gone when the view goes (a keyed terminal only).
+    _gone: Option<Gone>,
     /// What it's known by (a program another module runs).
     key: Option<String>,
+    /// Its program stopped while unseen and idle (`crate::sleep`): its last screen kept, its
+    /// program started again with `launch` (how it resumes) when it's shown.
+    asleep: bool,
+    /// Started again after a sleep: its last screen stays drawn while the new output settles.
+    resuming: bool,
+    /// Asleep by hand: not started again when drawn, only once the user acts on it (a key,
+    /// a click, the tab shown again after leaving it).
+    held: bool,
+    /// Its tab is the active one of its group (told by the app: what the user chose).
+    active: bool,
+    /// What it tells the user, taken by the app (why it couldn't be put to sleep).
+    notices: Vec<workbench_model::Notification>,
+    /// Characters typed since the last send, an estimate (the program's own line editing —
+    /// a word erased, history recalled — isn't seen): anything left keeps it from sleeping.
+    typed: usize,
+    /// Why it sleeps (said on its card until it's back), and where its card's "Wake Up"
+    /// button was drawn last.
+    slept: Option<asleep::Slept>,
+    wake_button: Option<Rect>,
     /// Its own settings in place of the saved ones (tests: never the shared ones).
     #[cfg(test)]
     config: Option<std::sync::Arc<crate::config::TerminalConfig>>,
@@ -272,7 +344,7 @@ impl TerminalView {
 
     /// The shell, started on the first paint (the waker and the size known then).
     fn start(&mut self, waker: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
-        if self.session.is_some() || self.failed.is_some() {
+        if self.session.is_some() || self.failed.is_some() || self.held {
             return;
         }
         let waker = waker.unwrap_or_else(|| std::sync::Arc::new(|| {}));
@@ -298,8 +370,30 @@ impl TerminalView {
                     process::launched::shell(pid, program.as_ref(), profile.cwd.as_deref(), agent);
                 }
                 self.shell = session.pid().map(|pid| ShellPid::new(Shell { pid, project, watch }));
-                self.session = Some(Box::new(session));
+                if let Some(slot) = &self.renamed {
+                    let mut asked = asked(slot);
+                    asked.pid = session.pid();
+                    asked.watch.clone_from(&self.watch);
+                    asked.asleep = false;
+                    asked.typed = false;
+                }
+                self.typed = 0;
+                // A new session: the options and colors are told to it at its first paint; its
+                // screen at the bottom, where the program goes on.
+                self.options = None;
+                self.smooth.reset();
+                self.pending_scroll = 0;
+                self.selection = None;
+                self.answered = None;
+                let mut session: Box<dyn TerminalSession> = Box::new(session);
+                session.set_spill(crate::spill::store(self.root.as_deref()));
+                self.session = Some(session);
                 self.size = size;
+                // Woken from a sleep: its last screen stays until the new one settles.
+                self.resuming = std::mem::take(&mut self.asleep);
+                if let Some(slot) = &self.renamed {
+                    asked(slot).waking = self.resuming;
+                }
                 if self.launch.is_some() {
                     let now = std::time::Instant::now();
                     self.settling = Some(Settling { started: now, last: now });
@@ -308,8 +402,197 @@ impl TerminalView {
             Err(e) => {
                 tracing::error!(error = %e, "the terminal didn't start");
                 self.failed = Some(e.to_string());
+                // Woken and not started: no longer asleep (its failure shows instead; no key
+                // is taken to wake it, nobody's told it sleeps).
+                self.asleep = false;
+                self.held = false;
+                self.slept = None;
+                if let Some(slot) = &self.renamed {
+                    let mut asked = asked(slot);
+                    asked.asleep = false;
+                    asked.waking = false;
+                }
             }
         }
+    }
+
+    /// Put to sleep (`crate::sleep`): its program stopped (its process ends as when its tab
+    /// closes), its last screen kept, `launch` how it starts again once shown. Nothing done
+    /// if its program ended meanwhile.
+    fn fall_asleep(&mut self, launch: agents::Launch, by_hand: bool) {
+        let Some(session) = &self.session else { return };
+        if session.exit_status().is_some() {
+            return;
+        }
+        self.session = None;
+        self.watch = None;
+        self.shell = None;
+        self.settling = None;
+        self.stale_since = None;
+        self.selection = None;
+        self.launch = Some(launch);
+        self.asleep = true;
+        self.selecting = false;
+        self.drag_at = None;
+        self.link = None;
+        // Its last screen without a cursor: nothing runs there to type to.
+        self.grid.cursor = None;
+        self.held = by_hand;
+        // What the next program is told comes from the settings again (its options, the
+        // colors it's answered): a new session knows none of them.
+        self.options = None;
+        self.answered = None;
+        let freed = self.renamed.as_ref().and_then(|slot| asked(slot).memory);
+        let idle = if by_hand { None } else { self.config().sleep_after };
+        self.slept = Some(asleep::Slept { by_hand, idle, freed });
+        if let Some(slot) = &self.renamed {
+            let mut asked = asked(slot);
+            asked.asleep = true;
+            asked.running = false;
+            asked.pid = None;
+            asked.watch = None;
+            asked.memory = None;
+        }
+        self.announce();
+        tracing::info!(by_hand, "a session was put to sleep");
+    }
+
+    /// Asleep, or coming back (its last screen shown while the new one settles): the screen
+    /// stays still — no scroll, selection, link or scrollbar.
+    pub(super) fn frozen(&self) -> bool {
+        self.asleep || (self.resuming && self.settling.is_some())
+    }
+
+    /// Asleep by hand and acted on by the user: resumed at its next paint. `true` if so.
+    fn wake_by_user(&mut self) -> bool {
+        if !self.asleep {
+            return false;
+        }
+        self.held = false;
+        if let Some(slot) = &self.renamed {
+            asked(slot).waking = true;
+        }
+        self.announce();
+        true
+    }
+
+    /// How it stands told on its project's bus, if that changed (a keyed terminal only).
+    pub(super) fn announce(&self) {
+        if let (Some(slot), Some(key)) = (&self.renamed, &self.key) {
+            shells::announce(slot, key);
+        }
+    }
+
+    /// Drawn now: its slot says when (a terminal shown never sleeps).
+    fn mark_shown(&self) {
+        if let Some(slot) = &self.renamed {
+            asked(slot).shown = Some(std::time::Instant::now());
+        }
+    }
+
+    /// What was typed since the last send, as an estimate ([`Self::typed`]): `Typed` adds
+    /// characters, `Erased` takes one back (⌫), `Sent` empties it (↵, Ctrl+C, Ctrl+U, Esc, a
+    /// paste ending in a new line). Told to its slot as "text waits unsent".
+    fn note_typed(&mut self, typed: Typing) {
+        self.typed = match typed {
+            Typing::Typed(n) => self.typed.saturating_add(n),
+            Typing::Erased => self.typed.saturating_sub(1),
+            Typing::Sent => 0,
+        };
+        if let Some(slot) = &self.renamed {
+            asked(slot).typed = self.typed > 0;
+        }
+    }
+
+    /// The screen as it stands (the grid copied last): the selection, the ⌘-hovered link,
+    /// the cells, and `notice` on a band at its foot.
+    fn paint_screen(&mut self, layer: &mut Layer, text: &mut TextSystem, look: &ScreenLook<'_>) {
+        let (cell_w, cell_h) = look.cell;
+        let (palette, s) = (look.palette, look.scale);
+        // Moved by itself (the output followed, the history cleared, a full-screen program):
+        // nothing partial left where there's nothing to show.
+        if self.grid.alt_screen {
+            self.smooth.reset();
+        }
+        self.smooth.settle(self.grid.display_offset, self.grid.history);
+        // The selection under the text, and the ⌘-hovered link underlined; all of it shifted
+        // down by the part of a line scrolled (the line above in the gap).
+        let shift = self.smooth.shift(cell_h);
+        let area = Rect::new(
+            self.grid_area.min_x(),
+            self.grid_area.min_y() + shift,
+            self.grid_area.size.width,
+            self.grid_area.size.height,
+        );
+        let x_of = |col: u16| (area.min_x() + f32::from(col) * cell_w).round();
+        if let Some(selection) = self.selection.filter(|s| !s.is_empty()) {
+            for row in 0..self.grid.rows {
+                let line = self.grid.point(row, 0).line;
+                if let Some(cols) = selection.columns(line, self.grid.cols) {
+                    let top = area.min_y() + f32::from(row) * cell_h;
+                    layer.quad(Quad::filled(
+                        Rect::new(x_of(cols.start), top, x_of(cols.end) - x_of(cols.start), cell_h),
+                        palette.selection,
+                    ));
+                }
+            }
+        }
+        if let Some((line, cols)) = &self.link
+            && let Some(row) = self.grid.visible_row(*line)
+        {
+            let thin = s.round().max(1.0);
+            let y = area.min_y() + f32::from(row + 1) * cell_h - 3.0 * thin;
+            layer.quad(Quad::filled(
+                Rect::new(x_of(cols.start), y.round(), x_of(cols.end) - x_of(cols.start), thin),
+                palette.accent,
+            ));
+        }
+        let style = GridStyle {
+            cell: look.cell,
+            font: look.font,
+            focused: look.focused,
+            blink: look.blink,
+            caret_id: std::ptr::from_ref(self) as u64,
+            colors: look.colors,
+            bold_bright: look.bold_bright,
+            scale: s,
+        };
+        paint_grid(layer, &self.grid, area, text, &style);
+    }
+
+    /// The last screen dimmed under what's said over it (a sleeping session's card): the
+    /// terminal's background over it, partly.
+    fn paint_scrim(&self, layer: &mut Layer, colors: &TermColors) {
+        let scrim = colors.background.with_alpha(SCRIM_ALPHA);
+        layer.quad(Quad::filled(self.grid_area, scrim));
+    }
+
+    /// The history's place: where the screen is in it (none without history, nor on a
+    /// full-screen program's own screen).
+    fn paint_bar(&mut self, scene: &mut render_api::Scene, palette: &Palette, scale: f32) {
+        if let Some((content, offset)) = self.bar_metrics() {
+            self.bar.paint(scene, palette, scale, self.bar_area, content, offset);
+        }
+    }
+
+    /// A notice on a band at the grid's foot (the session ended, it's being resumed).
+    fn paint_band(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        (band, color): (Band<'_>, Rgba),
+    ) {
+        let h = self.cell.1;
+        let rect = Rect::new(
+            self.grid_area.min_x(),
+            (self.grid_area.max_y() - h).round(),
+            self.grid_area.size.width,
+            h,
+        );
+        layer.quad(Quad::filled(rect, band.background));
+        let shaped = text.shape_line(band.text, band.font);
+        let baseline = centered_baseline(rect.min_y(), h, &text.metrics(band.font));
+        draw_text(layer, &shaped, rect.min_x(), baseline, color);
     }
 
     /// The tab's name from its program, read again (the screen changed): as the settings
@@ -354,7 +637,8 @@ impl TerminalView {
     /// when there's nothing to scroll (no history, or a full-screen program's screen).
     fn bar_metrics(&self) -> Option<(f32, f32)> {
         let g = &self.grid;
-        if g.alt_screen || g.history == 0 || g.rows == 0 {
+        // Asleep: no bar (nothing to scroll on a still screen).
+        if self.frozen() || g.alt_screen || g.history == 0 || g.rows == 0 {
             return None;
         }
         let h = self.cell.1.max(1.0);

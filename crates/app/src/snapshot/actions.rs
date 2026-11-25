@@ -265,6 +265,59 @@ impl Steps<'_> {
         }
     }
 
+    /// A program run for a module in a terminal tab of the editor (as an agent's session),
+    /// a few lines of made-up output on its screen, its first output settled; the hint it
+    /// asks for closed unless one is wanted.
+    pub(super) fn session_tab(&mut self, title: &str, keep_hint: bool) {
+        use contracts::terminal::{RunInTerminal, TerminalPlace};
+        // A transcript as an agent prints one (made up), then a prompt waiting.
+        // A long transcript (a full screen behind the card), then the summary and a prompt.
+        let script = concat!(
+            "i=1; while [ $i -le 90 ]; do ",
+            "printf '\\033[32m●\\033[0m Edit src/Cart/Line%02d.php: totals moved, %d callers checked, ",
+            "the old helper removed and its tests updated\\r\\n' $i $((i * 3)); i=$((i + 1)); done; ",
+            "printf '\\033[1m> \\033[0mrefactor the cart totals into a service\\r\\n\\r\\n",
+            "\\033[32m●\\033[0m Read src/Shop.php (42 lines)\\r\\n",
+            "\\033[32m●\\033[0m Update src/Lib/Cart.php: totals() moved, 3 callers changed\\r\\n",
+            "\\033[32m●\\033[0m Ran the tests: 18 passed\\r\\n\\r\\n",
+            "Done. The totals live in CartTotals now.\\r\\n\\r\\n\\033[2m> \\033[0m'; sleep 600"
+        );
+        let run = RunInTerminal {
+            launch: agents::Launch::new("/bin/sh", &["-c", script], None),
+            key: "snapshot-session".into(),
+            title: title.to_owned(),
+            icon: Some("terminal"),
+            place: TerminalPlace::Editor,
+        };
+        let host: &mut dyn workbench_model::WorkbenchHost = &mut *self.wb;
+        if host.ask(run) != Some(true) {
+            tracing::error!("no terminal tab for the session");
+        }
+        if !keep_hint {
+            self.wb.close_hint(false);
+        }
+        // Its first paint starts it; its first output settles.
+        let deadline = Instant::now() + Duration::from_millis(2500);
+        while Instant::now() < deadline {
+            self.frame();
+            self.wb.poll_viewers();
+            settle(50);
+        }
+    }
+
+    /// Hint `id` shown by its anchor (`focus`: with the keyboard, its main button focused).
+    pub(super) fn hint(&mut self, id: &str, focus: bool) {
+        self.frame();
+        if !self.wb.show_hint(id) {
+            tracing::error!(hint = id, "no such hint to show");
+        }
+        self.frame();
+        if focus {
+            self.wb.focus_hint_for_snapshot();
+        }
+        self.frame();
+    }
+
     pub(super) fn type_at_line(&mut self, typed: &str, line: Option<usize>) {
         self.wait_for_indexing(Duration::from_secs(20));
         self.wb.place_cursor_at_line_end(self.text, line);

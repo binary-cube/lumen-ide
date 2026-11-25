@@ -36,6 +36,9 @@ pub struct ProcessRow {
     /// The project it works for, by name, when its part is every project's (a terminal's
     /// shell or agent).
     pub project: Option<String>,
+    /// What it's called where the user sees it (its terminal tab's title), when its part
+    /// says.
+    pub title: Option<String>,
 }
 
 /// A part's row.

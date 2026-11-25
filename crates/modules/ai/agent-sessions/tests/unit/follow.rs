@@ -22,6 +22,8 @@ fn followed(key: &str, id: Option<&str>, since: i64, title: &str) -> Followed {
         since,
         title: title.into(),
         said: id.map(|_| title.to_owned()),
+        active: 0,
+        state: None,
     }
 }
 
@@ -130,4 +132,116 @@ fn a_session_resumed_early_finds_its_new_tab() {
     lock(&FOLLOWED).push(new("k-c", 2_999));
     assert_eq!(tab_of(&other), None);
     lock(&FOLLOWED).retain(|f| f.folder != folder);
+}
+
+/// An agent that resumes a session with `--resume <id>`.
+#[derive(Debug)]
+struct Resumer;
+
+impl agents::AgentProvider for Resumer {
+    fn id(&self) -> &'static str {
+        "fake-resume"
+    }
+    fn name(&self) -> String {
+        "Fake".into()
+    }
+    fn icon(&self) -> &'static str {
+        "x"
+    }
+    fn detect(&self) -> Option<agents::AgentInstall> {
+        None
+    }
+    fn sessions(&self, _: &Path, _: usize) -> Vec<agents::AgentSession> {
+        Vec::new()
+    }
+    fn new_session(&self, root: &Path) -> agents::Launch {
+        agents::Launch::new("agent", &[], Some(root))
+    }
+    fn resume(&self, session: &agents::AgentSession) -> agents::Launch {
+        agents::Launch::new("agent", &["--resume", &session.id], Some(&session.folder))
+    }
+}
+
+/// A followed session whose file has been still for the idle time resumes its agent's way;
+/// one written lately (a turn may run), never read, without an id, or not followed: none.
+#[test]
+fn a_quiet_followed_session_says_how_it_resumes() {
+    agents::register(std::sync::Arc::new(Resumer));
+    let idle = Duration::from_secs(3_600);
+    let key = format!("resume-{:x}", kernel::id::new_uuid());
+    let mut f = followed(&key, Some("s-1"), 0, "Work");
+    f.agent = "fake-resume";
+    f.active = now() - 7_200;
+    lock(&FOLLOWED).push(f);
+    let launch = resume_launch(&key, idle).unwrap();
+    assert_eq!(launch.args, ["--resume", "s-1"]);
+    assert_eq!(launch.cwd.as_deref(), Some(Path::new("/p")));
+    let set = |active: i64, id: Option<&str>| {
+        let mut all = lock(&FOLLOWED);
+        let f = all.iter_mut().find(|f| f.key == key).unwrap();
+        f.active = active;
+        f.id = id.map(str::to_owned);
+    };
+    set(now() - 60, Some("s-1"));
+    assert_eq!(resume_launch(&key, idle), None, "written lately");
+    set(0, Some("s-1"));
+    assert_eq!(resume_launch(&key, idle), None, "never read");
+    set(now() - 7_200, None);
+    assert_eq!(resume_launch(&key, idle), None, "no id yet");
+    assert_eq!(resume_launch("no-such-tab", idle), None);
+    // What its terminal said, kept for its row.
+    set(now() - 7_200, Some("s-1"));
+    let said = contracts::terminal::TerminalState {
+        memory: Some(42),
+        asleep: true,
+        can_sleep: contracts::terminal::CanSleep::No,
+    };
+    set_state(&key, Some(said));
+    assert_eq!(state_of("fake-resume", "s-1"), Some(said));
+    forget(&key);
+    agents::unregister("fake-resume");
+}
+
+/// A session's "Put to Sleep" row: only with its tab followed and its terminal able to; greyed
+/// out while something typed isn't sent.
+#[test]
+fn a_session_s_sleep_row_follows_its_terminal() {
+    use contracts::terminal::{CanSleep, TerminalState};
+    let key = format!("sleep-row-{:x}", kernel::id::new_uuid());
+    let id = format!("s-{:x}", kernel::id::new_uuid());
+    assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "no tab");
+    let mut f = followed(&key, Some(&id), 0, "Work");
+    f.agent = "fake";
+    lock(&FOLLOWED).push(f);
+    assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "nothing said yet");
+    let said = |can_sleep| TerminalState { memory: None, asleep: false, can_sleep };
+    set_state(&key, Some(said(CanSleep::No)));
+    assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "it can't");
+    set_state(&key, Some(said(CanSleep::Typed)));
+    assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(true), "greyed out");
+    set_state(&key, Some(said(CanSleep::Yes)));
+    assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(false));
+    // Asleep: "Wake Up" in its place.
+    let asleep = TerminalState { memory: None, asleep: true, can_sleep: CanSleep::No };
+    set_state(&key, Some(asleep));
+    assert_eq!(crate::panel::wake_row_for_tests("fake", &id), Some(true));
+    set_state(&key, Some(said(CanSleep::Yes)));
+    assert_eq!(crate::panel::wake_row_for_tests("fake", &id), Some(false));
+    // Asked to sleep: greyed out at once, asked again soon; asked to wake, likewise.
+    expect(&key, CanSleep::Sleeping);
+    assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(true), "going to sleep");
+    // Its terminal tells it's asleep (its event): "Wake Up" at once, drawn again.
+    let (project, other) = (kernel::ProjectId::new(), kernel::ProjectId::new());
+    told(project, &key, Some(asleep));
+    assert!(!take_told(Some(other)), "another project's panel isn't drawn for it");
+    assert!(take_told(Some(project)) && !take_told(Some(project)));
+    assert_eq!(crate::panel::wake_row_for_tests("fake", &id), Some(true));
+    assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(false), "it can be woken");
+    expect(&key, CanSleep::Waking);
+    assert_eq!(crate::panel::wake_row_for_tests("fake", &id), Some(true), "still Wake Up");
+    assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(true), "greyed out");
+    // Its tab closed (told gone): no row left mid-way.
+    told(project, &key, None);
+    assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none());
+    forget(&key);
 }

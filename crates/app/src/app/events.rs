@@ -546,6 +546,13 @@ impl EditorApp {
             self.relayout();
             return Control::Continue;
         }
+        // A row a tab's view added to its tab's menu: back to that view.
+        if let Some(row) = id.strip_prefix(crate::workbench::TAB_VIEW_MENU) {
+            let row = row.to_owned();
+            self.with_text(|wb, text| wb.run_tab_view_menu(text, &row));
+            self.redraw();
+            return Control::Continue;
+        }
         // A row of a view's own menu (a grid's): back to the view.
         if let Some(command) = id.strip_prefix(crate::workbench::VIEW_MENU) {
             let command = command.to_owned();

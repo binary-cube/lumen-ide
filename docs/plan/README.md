@@ -40,6 +40,7 @@ Un editor de cod rapid, desenat integral pe placa video, cu organizarea clasică
 | 54 | [Mici reparații](54-mici.md) | Suprapunerea de diagnostic în colțul zonei de lucru, istoricul terminalului față de programele care cer ștergerea lui, antetele grupurilor din navigarea setărilor, butoanele compacte din antetele ferestrelor |
 | 55 | [Resturi](55-resturi.md) | Conflictele de scurtături rămase după 51, File › Open Recent ›, Help › Keyboard Shortcuts…, iconițe pentru toate rândurile, rândurile meniului nativ la zi, diagnosticele PHP peste fișiere, un test instabil reparat, setările rescrise din afară, indexul planurilor |
 | 79 | [Agenți AI și serverul MCP](79-agenti-si-mcp.md) | Sesiunile agenților (Claude Code, Codex, Gemini) ca terminale în editor, o față grafică prin ACP, serverul MCP al editorului cu uneltele contribuite de module — propus |
+| 100 | [Memoria sesiunilor de agenți și indiciile interactive](100-agenti-memorie-si-indicii.md) | Sesiunile de agenți adormite când nu lucrează și reluate la revenire, reluarea leneșă la pornire, istoricul terminalelor ascunse pe disc criptat, memoria fiecărei sesiuni în panou și Task Manager, un sistem generic de indicii (coach marks) |
 | — | [ADR-uri](adr/) | Deciziile de arhitectură, fiecare cu motivarea ei |
 
 ## Principii (pe scurt)

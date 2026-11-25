@@ -5,6 +5,7 @@
 //! screens (settings, editor, tabs…), which change often: changing those recompiles only the
 //! app, not every module.
 
+pub mod anchors;
 pub mod anim;
 pub mod backdrop;
 pub mod card_preview;
@@ -23,6 +24,7 @@ pub mod drag_card;
 pub mod ds;
 pub mod editor_toolbar;
 pub mod form;
+pub mod hint_card;
 pub mod icicle;
 pub mod level_picker;
 pub mod log_view;

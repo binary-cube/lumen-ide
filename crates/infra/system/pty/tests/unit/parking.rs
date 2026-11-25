@@ -325,3 +325,431 @@ fn measure_park_and_restore() {
     }
     let _ = parking;
 }
+
+/// A store keeping what it's given in memory (the terminal's keeps it on disk, sealed);
+/// `refuse`: every write fails.
+#[derive(Debug, Default)]
+struct Kept {
+    files: std::sync::Mutex<Vec<(String, Vec<u8>)>>,
+    refuse: AtomicBool,
+    /// How many times something was read back.
+    takes: std::sync::atomic::AtomicUsize,
+    /// While set, a write waits until it's cleared (a slow disk: rows stay on their way).
+    hold: AtomicBool,
+    /// A read takes this long (a slow disk).
+    slow_take: AtomicBool,
+    /// While set, a read waits until it's cleared.
+    hold_take: AtomicBool,
+    /// How many writes were asked; whether it says it's ready.
+    writes: std::sync::atomic::AtomicUsize,
+    not_ready: AtomicBool,
+}
+
+impl Kept {
+    fn count(&self) -> usize {
+        self.files.lock().unwrap().len()
+    }
+}
+
+impl SpillStore for Kept {
+    fn ready(&self) -> bool {
+        !self.not_ready.load(Ordering::SeqCst)
+    }
+    fn write(&self, bytes: &[u8]) -> Option<SpillToken> {
+        self.writes.fetch_add(1, Ordering::SeqCst);
+        while self.hold.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        if self.refuse.load(Ordering::SeqCst) {
+            return None;
+        }
+        let name = format!("{:032x}", kernel::id::new_uuid());
+        self.files.lock().unwrap().push((name.clone(), bytes.to_vec()));
+        Some(SpillToken(name))
+    }
+    fn take(&self, token: &SpillToken) -> Option<Vec<u8>> {
+        self.takes.fetch_add(1, Ordering::SeqCst);
+        while self.hold_take.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        if self.slow_take.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(400));
+        }
+        let mut files = self.files.lock().unwrap();
+        let at = files.iter().position(|(n, _)| *n == token.0)?;
+        Some(files.remove(at).1)
+    }
+    fn remove(&self, token: &SpillToken) {
+        self.files.lock().unwrap().retain(|(n, _)| *n != token.0);
+    }
+}
+
+/// A session whose parked rows leave memory as soon as they're parked.
+fn spilling(cols: usize, limit: usize) -> (Session, Arc<Kept>) {
+    let session = shared(cols, limit);
+    let store = Arc::new(Kept::default());
+    session.1.set_spill(Arc::clone(&store) as Arc<dyn SpillStore>);
+    session.1.spill_after.store(0, Ordering::Relaxed);
+    (session, store)
+}
+
+/// Waits until `done` (a worker's work), at most a few seconds.
+fn until(done: impl Fn() -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !done() {
+        assert!(Instant::now() < deadline, "never done");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// Unseen long enough, the parked rows leave memory (only their count stays); a frame never
+/// reads them back itself (a worker does), and they come back the same.
+#[test]
+fn parked_rows_leave_memory_and_come_back_the_same() {
+    let ((term, parking, _, told), store) = spilling(40, 10_000);
+    feed(&mut term.lock(), &styled_output(800));
+    let before = state(&term.lock());
+    parking.spill_after.store(3_600_000, Ordering::Relaxed);
+    Parkable::park(&*parking);
+    let parked = parking.bytes();
+    parking.spill_after.store(0, Ordering::Relaxed);
+    parking.spill_if_due();
+    assert_eq!(store.count(), 1, "out of memory");
+    assert_eq!(parking.rows(), before.1, "still counted in the history's length");
+    // What stays: the rare cells with more (this output has a link or a mark every 8 lines).
+    assert!(parking.bytes() * 3 < parked, "{} of {parked} bytes", parking.bytes());
+    assert!(!parking.restore(false), "a frame doesn't read it");
+    assert!(parking.shown(false));
+    until(|| told.load(Ordering::SeqCst));
+    assert_eq!((parking.rows(), store.count()), (0, 0), "read back and let go");
+    assert!(state(&term.lock()) == before);
+}
+
+/// Rows parked after others went out of memory go out on their own and come back after
+/// them (newer), in order.
+#[test]
+fn later_rows_leave_memory_apart_and_come_back_in_order() {
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    let mut kept = super::super::parked::tests::term_after(40, b"");
+    feed(&mut term.lock(), &numbered(0, 600));
+    feed(&mut kept, &numbered(0, 600));
+    Parkable::park(&*parking);
+    feed(&mut term.lock(), &numbered(600, 1300));
+    feed(&mut kept, &numbered(600, 1300));
+    Parkable::park(&*parking);
+    assert_eq!(store.count(), 2);
+    assert!(parking.restore(true));
+    assert!(state(&term.lock()) == state(&kept));
+}
+
+/// Erased or cleared while out of memory: let go unread; the terminal closed: the same;
+/// a store that can't keep them: they stay in memory.
+#[test]
+fn rows_out_of_memory_are_let_go_with_the_history() {
+    let ((term, parking, erased, _), store) = spilling(40, 10_000);
+    feed(&mut term.lock(), &numbered(0, 800));
+    Parkable::park(&*parking);
+    erased.fetch_add(1, Ordering::SeqCst);
+    assert!(parking.restore(true));
+    until(|| store.count() == 0);
+    feed(&mut term.lock(), &numbered(800, 1600));
+    Parkable::park(&*parking);
+    assert_eq!(store.count(), 1);
+    parking.forget();
+    until(|| store.count() == 0);
+    feed(&mut term.lock(), &numbered(1600, 2400));
+    Parkable::park(&*parking);
+    assert_eq!(store.count(), 1);
+    drop(parking);
+    until(|| store.count() == 0);
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    store.refuse.store(true, Ordering::SeqCst);
+    feed(&mut term.lock(), &numbered(0, 800));
+    let before = state(&term.lock());
+    Parkable::park(&*parking);
+    assert!(parking.rows() > 0 && parking.bytes() > 4_096, "kept in memory");
+    assert!(parking.restore(true));
+    assert!(state(&term.lock()) == before);
+}
+
+/// Not while it's drawn, nor scrolled back (what's shown is in those rows).
+#[test]
+fn rows_stay_in_memory_while_drawn_or_scrolled_back() {
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    feed(&mut term.lock(), &numbered(0, 800));
+    parking.spill_after.store(3_600_000, Ordering::Relaxed);
+    Parkable::park(&*parking);
+    assert_eq!(store.count(), 0, "drawn lately");
+    parking.restore(true);
+    parking.spill_after.store(0, Ordering::Relaxed);
+    term.lock().scroll_display(Scroll::Delta(50));
+    Parkable::park(&*parking);
+    assert_eq!(store.count(), 0, "scrolled back");
+}
+
+/// What leaving memory saves, a busy terminal's worth (`--ignored`, in release: the numbers
+/// in the plan): 5000 history rows at 200 columns as in `measure_park_and_restore`.
+#[test]
+#[ignore = "a measurement"]
+fn measure_spill() {
+    let ((term, parking, _, _), store) = spilling(200, 5_000);
+    let mut out = Vec::new();
+    for i in 0..6_000 {
+        out.extend(
+            format!(
+                "\x1b[38;2;{};120;80m{i:6}\x1b[0m \x1b[1mthe quick brown fox jumps over the lazy dog\x1b[0m {}\r\n",
+                i % 200,
+                "function return const let ".repeat(i % 4)
+            )
+            .into_bytes(),
+        );
+    }
+    feed(&mut term.lock(), &out);
+    let before = state(&term.lock());
+    let cells = before.1 * 200 * std::mem::size_of::<Cell>();
+    parking.spill_after.store(3_600_000, Ordering::Relaxed);
+    Parkable::park(&*parking);
+    let parked = parking.bytes();
+    parking.spill_after.store(0, Ordering::Relaxed);
+    let at = Instant::now();
+    parking.spill_if_due();
+    let spilled = at.elapsed();
+    let left = parking.bytes();
+    let encoded = store.files.lock().unwrap()[0].1.clone();
+    let at = Instant::now();
+    let packed = miniz_oxide::deflate::compress_to_vec(&encoded, 1);
+    let compressed = at.elapsed();
+    let at = Instant::now();
+    assert!(parking.restore(true));
+    let back = at.elapsed();
+    eprintln!(
+        "{} rows × 200: cells {:.1} MB → parked {:.2} MB → out of memory {} B left; \
+         encoded {:.2} MB, compressed {:.0} KB (+28 B sealed); encoded in {spilled:?}, \
+         compressed in {compressed:?}, read back and put back {back:?}",
+        before.1,
+        cells as f64 / 1048576.0,
+        parked as f64 / 1048576.0,
+        left,
+        encoded.len() as f64 / 1048576.0,
+        packed.len() as f64 / 1024.0,
+    );
+    assert!(state(&term.lock()) == before);
+}
+
+/// A busy hidden terminal at its limit: the oldest rows out of memory go by their counts —
+/// whole files let go, the oldest one left cut when read — never read back for it; what
+/// comes back is the newest rows, in order.
+#[test]
+fn over_the_limit_the_oldest_rows_go_unread() {
+    let ((term, parking, _, _), store) = spilling(40, 1_000);
+    let mut kept = super::super::parked::tests::term_after(40, b"");
+    kept.set_options(Config { scrolling_history: 1_000, ..Config::default() });
+    let mut fed = 0;
+    for _ in 0..4 {
+        feed(&mut term.lock(), &numbered(fed, fed + 600));
+        feed(&mut kept, &numbered(fed, fed + 600));
+        fed += 600;
+        Parkable::park(&*parking);
+    }
+    assert_eq!(store.takes.load(Ordering::SeqCst), 0, "nothing read back to trim");
+    assert_eq!(parking.rows(), 1_000);
+    until(|| store.count() <= 2); // whole files let go (on a worker)
+    assert!(parking.restore(true));
+    assert!(state(&term.lock()) == state(&kept), "the newest 1000, in order");
+}
+
+/// The UI thread's calls (a limit told as a frame is drawn, Clear Terminal, a frame's
+/// restore) never read the rows out of memory back.
+#[test]
+fn the_ui_thread_never_reads_rows_out_of_memory() {
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    feed(&mut term.lock(), &numbered(0, 3000));
+    Parkable::park(&*parking);
+    assert_eq!(store.count(), 1);
+    parking.set_limit(1_000);
+    assert_eq!(parking.rows(), 1_000, "trimmed by its count");
+    assert!(!parking.restore(false), "a frame waits for the worker");
+    parking.forget();
+    assert_eq!(parking.rows(), 0);
+    assert_eq!(store.takes.load(Ordering::SeqCst), 0);
+    until(|| store.count() == 0);
+}
+
+/// While new rows leave the grid, the length counted takes those out of memory too (the
+/// scrollbar never jumps for a frame).
+#[test]
+fn the_count_while_parking_includes_rows_out_of_memory() {
+    let ((term, parking, _, _), _store) = spilling(40, 10_000);
+    feed(&mut term.lock(), &numbered(0, 800));
+    Parkable::park(&*parking);
+    let out = parking.rows();
+    assert!(out > 0);
+    let store = parking.store.lock().unwrap();
+    parking.counting(&store, 300);
+    assert_eq!(parking.rows(), out + 300);
+}
+
+/// A resize or a scroll (the UI thread) never reads rows out of memory: what's in memory is
+/// put back at once, the rest by a worker after, in order.
+#[test]
+fn the_ui_thread_puts_back_only_what_is_in_memory() {
+    let ((term, parking, _, told), store) = spilling(40, 10_000);
+    let mut kept = super::super::parked::tests::term_after(40, b"");
+    for (from, to) in [(0, 700), (700, 1400)] {
+        feed(&mut term.lock(), &numbered(from, to));
+        feed(&mut kept, &numbered(from, to));
+        Parkable::park(&*parking);
+    }
+    assert_eq!(store.count(), 2);
+    store.slow_take.store(true, Ordering::SeqCst);
+    let at = Instant::now();
+    parking.restore_now();
+    assert!(at.elapsed() < Duration::from_millis(200), "no file read: {:?}", at.elapsed());
+    until(|| told.load(Ordering::SeqCst));
+    assert_eq!(parking.rows(), 0);
+    assert!(state(&term.lock()) == state(&kept), "all back, in order");
+}
+
+/// A restore while newer rows are on their way out waits for them (never puts older ones
+/// back first, which the newer would then land above).
+#[test]
+fn rows_come_back_in_order_around_a_spill_in_flight() {
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    let mut kept = super::super::parked::tests::term_after(40, b"");
+    feed(&mut term.lock(), &numbered(0, 700));
+    feed(&mut kept, &numbered(0, 700));
+    Parkable::park(&*parking);
+    feed(&mut term.lock(), &numbered(700, 1400));
+    feed(&mut kept, &numbered(700, 1400));
+    parking.spill_after.store(3_600_000, Ordering::Relaxed);
+    parking.park();
+    parking.spill_after.store(0, Ordering::Relaxed);
+    store.hold.store(true, Ordering::SeqCst);
+    let writer = {
+        let parking = Arc::clone(&parking);
+        std::thread::spawn(move || parking.spill_if_due())
+    };
+    until(|| parking.store.lock().unwrap().moving > 0);
+    assert!(!parking.restore(false), "on their way: nothing put back");
+    store.hold.store(false, Ordering::SeqCst);
+    writer.join().unwrap();
+    assert!(parking.restore(true));
+    assert!(state(&term.lock()) == state(&kept), "in order");
+}
+
+/// A lower limit told while rows are on their way out cuts those (the oldest), never the
+/// newest parked ones.
+#[test]
+fn a_lower_limit_meanwhile_cuts_the_rows_on_their_way() {
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    let mut kept = super::super::parked::tests::term_after(40, b"");
+    kept.set_options(Config { scrolling_history: 1_000, ..Config::default() });
+    feed(&mut term.lock(), &numbered(0, 1500));
+    feed(&mut kept, &numbered(0, 1500));
+    parking.spill_after.store(3_600_000, Ordering::Relaxed);
+    parking.park();
+    parking.spill_after.store(0, Ordering::Relaxed);
+    store.hold.store(true, Ordering::SeqCst);
+    let writer = {
+        let parking = Arc::clone(&parking);
+        std::thread::spawn(move || parking.spill_if_due())
+    };
+    until(|| parking.store.lock().unwrap().moving > 0);
+    term.lock().set_options(Config { scrolling_history: 1_000, ..Config::default() });
+    parking.set_limit(1_000);
+    assert_eq!(parking.rows(), 1_000);
+    store.hold.store(false, Ordering::SeqCst);
+    writer.join().unwrap();
+    assert_eq!(parking.rows(), 1_000);
+    assert!(parking.restore(true));
+    assert!(state(&term.lock()) == state(&kept), "the newest 1000 kept");
+}
+
+/// A store that couldn't write isn't given the history again before a while (nothing encoded
+/// for nothing); one saying it isn't ready isn't given it at all.
+#[test]
+fn a_failing_store_is_left_alone_for_a_while() {
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    store.refuse.store(true, Ordering::SeqCst);
+    feed(&mut term.lock(), &numbered(0, 800));
+    Parkable::park(&*parking);
+    assert_eq!(store.writes.load(Ordering::SeqCst), 1);
+    feed(&mut term.lock(), &numbered(800, 1600));
+    Parkable::park(&*parking);
+    assert_eq!(store.writes.load(Ordering::SeqCst), 1, "not asked again so soon");
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    store.not_ready.store(true, Ordering::SeqCst);
+    feed(&mut term.lock(), &numbered(0, 800));
+    Parkable::park(&*parking);
+    assert_eq!(store.writes.load(Ordering::SeqCst), 0, "not ready: not asked");
+    assert!(parking.rows() > 0, "kept in memory");
+}
+
+/// A read back never starts while newer rows are being written out, and a write never
+/// starts while rows are being read back: the history comes back in order either way.
+#[test]
+fn a_spill_and_a_read_never_cross() {
+    // A write under way: a read doesn't start.
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    let mut kept = super::super::parked::tests::term_after(40, b"");
+    for (from, to) in [(0, 700), (700, 1400)] {
+        feed(&mut term.lock(), &numbered(from, to));
+        feed(&mut kept, &numbered(from, to));
+        parking.spill_after.store(if from == 0 { 0 } else { 3_600_000 }, Ordering::Relaxed);
+        Parkable::park(&*parking);
+    }
+    parking.spill_after.store(0, Ordering::Relaxed);
+    store.hold.store(true, Ordering::SeqCst);
+    let writer = {
+        let parking = Arc::clone(&parking);
+        std::thread::spawn(move || parking.spill_if_due())
+    };
+    until(|| parking.store.lock().unwrap().moving > 0);
+    parking.read_spilled();
+    assert_eq!(store.takes.load(Ordering::SeqCst), 0, "no read while a write is under way");
+    store.hold.store(false, Ordering::SeqCst);
+    writer.join().unwrap();
+    assert!(parking.restore(true));
+    assert!(state(&term.lock()) == state(&kept), "in order");
+    // A read under way: a write doesn't start.
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    let mut kept = super::super::parked::tests::term_after(40, b"");
+    feed(&mut term.lock(), &numbered(0, 700));
+    feed(&mut kept, &numbered(0, 700));
+    Parkable::park(&*parking);
+    store.hold_take.store(true, Ordering::SeqCst);
+    let reader = {
+        let parking = Arc::clone(&parking);
+        std::thread::spawn(move || parking.read_spilled())
+    };
+    until(|| parking.store.lock().unwrap().moving > 0);
+    feed(&mut term.lock(), &numbered(700, 1400));
+    feed(&mut kept, &numbered(700, 1400));
+    parking.park();
+    let writes = store.writes.load(Ordering::SeqCst);
+    parking.spill_if_due();
+    assert_eq!(store.writes.load(Ordering::SeqCst), writes, "no write while a read is under way");
+    store.hold_take.store(false, Ordering::SeqCst);
+    reader.join().unwrap();
+    assert!(parking.restore(true));
+    assert!(state(&term.lock()) == state(&kept), "in order");
+}
+
+/// Parked scrolled back while older rows are out of memory: where the view was is kept
+/// (it comes back at once, drawn as it was).
+#[test]
+fn a_scrolled_back_park_is_kept_with_rows_out_of_memory() {
+    let ((term, parking, _, _), store) = spilling(40, 10_000);
+    feed(&mut term.lock(), &numbered(0, 700));
+    Parkable::park(&*parking);
+    assert_eq!(store.count(), 1);
+    feed(&mut term.lock(), &numbered(700, 1400));
+    term.lock().scroll_display(Scroll::Delta(50));
+    let before = state(&term.lock());
+    parking.spill_after.store(3_600_000, Ordering::Relaxed);
+    parking.park();
+    assert!(parking.must_restore(), "scrolled back: put back at once when drawn");
+    assert!(parking.shown(true));
+    let after = state(&term.lock());
+    assert_eq!(after.2, before.2, "the same place in the history");
+}

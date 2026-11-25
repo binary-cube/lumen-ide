@@ -53,6 +53,10 @@ pub struct ResourceUse {
     /// The project each of its programs works for, when the part is every project's (the
     /// terminals: a shell or an agent of a project's): said on the program's row.
     pub process_projects: Vec<(u32, ProjectId)>,
+    /// What each of its programs is called where the user sees it (a terminal's tab title):
+    /// said first on its row, so a session is told from another running the same program.
+    /// Shown only, never recorded (it's the user's text).
+    pub process_titles: Vec<(u32, String)>,
     /// What can be done to it from the Task Manager (stop a program, close a session,
     /// release its data): done by whoever reported it ([`ResourceReporter::act`]), never by
     /// the Task Manager itself.
@@ -602,6 +606,7 @@ impl ResourceUse {
             activities: Vec::new(),
             processes: Vec::new(),
             process_projects: Vec::new(),
+            process_titles: Vec::new(),
             actions: Vec::new(),
             facts: Vec::new(),
         }

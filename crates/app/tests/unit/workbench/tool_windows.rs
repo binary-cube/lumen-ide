@@ -236,6 +236,8 @@ fn clearing_the_caches_reaches_the_windows_views_and_the_side_panels() {
         provider: "test",
         viewer: Box::new(Purged(Arc::clone(&purged))),
         text_told: 0,
+        shown: false,
+        active: false,
     };
     let mut window = ToolWindow::new("test");
     window.groups[0].views = vec![view("a"), view("b")];
@@ -1212,4 +1214,50 @@ fn a_press_opening_a_bottom_view_s_menu_is_released_in_it() {
     wb.mouse_up(&mut text);
     assert_eq!(released.load(std::sync::atomic::Ordering::SeqCst), 1, "its release");
     assert!(!wb.tools.panel_dragging, "nothing held after");
+}
+
+/// A view with an order to take (`wants_poll`).
+struct Waiting(Arc<std::sync::atomic::AtomicUsize>);
+
+impl ui_workbench::Viewer for Waiting {
+    fn paint(&mut self, _: ui_workbench::ViewerPaint<'_>) {}
+    fn wants_poll(&self) -> bool {
+        true
+    }
+    fn poll(&mut self) -> bool {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        false
+    }
+}
+
+/// A view of the window at the bottom with something to take now is polled though unseen
+/// (its window hidden, or behind another view): its order isn't left for when it's shown.
+#[test]
+fn an_unseen_view_with_an_order_is_polled() {
+    let (support, _) = crate::modules::load(&extensions::ModuleSelection::default());
+    let mut wb = Workbench::new(Arc::new(support), Ports::local());
+    wb.forget_projects();
+    let polled = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let view = |key: &str, viewer: Box<dyn ui_workbench::Viewer>| PanelView {
+        id: ViewId::next(),
+        key: key.to_owned(),
+        title: key.to_owned(),
+        extension: "view-test".to_owned(),
+        pinned: false,
+        provider: "test",
+        viewer,
+        text_told: 0,
+        shown: false,
+        active: false,
+    };
+    let mut window = ToolWindow::new("test");
+    let unused = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    window.groups[0].views = vec![
+        view("front", Box::new(Purged(Arc::clone(&unused)))),
+        view("behind", Box::new(Waiting(Arc::clone(&polled)))),
+    ];
+    wb.tools.windows.push(window);
+    assert_eq!(wb.tools.bottom, None, "its window hidden");
+    wb.poll_tool_windows();
+    assert_eq!(polled.load(std::sync::atomic::Ordering::Relaxed), 1);
 }
