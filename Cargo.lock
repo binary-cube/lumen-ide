@@ -376,7 +376,7 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "app"
-version = "1.0.0-beta.23"
+version = "1.0.0-beta.24"
 dependencies = [
  "agent-chat",
  "agent-claude",
@@ -5387,7 +5387,7 @@ dependencies = [
 
 [[package]]
 name = "language-server"
-version = "1.0.0-beta.23"
+version = "1.0.0-beta.24"
 dependencies = [
  "code-intelligence",
  "document",
