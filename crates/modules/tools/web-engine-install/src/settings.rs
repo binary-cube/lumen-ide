@@ -90,7 +90,8 @@ impl SettingsContribution for WebEngineSettings {
             label: "web_engine.settings_title",
             icon: crate::ICON,
             group: SettingsGroup::Application,
-            order: 92,
+            // Right after the modules: what pages of the modules need.
+            order: 25,
         })
     }
 

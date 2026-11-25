@@ -208,6 +208,9 @@ pub struct SettingsPage {
 }
 
 impl SettingsPage {
+    /// The place of a page shown last in its group, whatever else is added (Updates).
+    pub const LAST: u16 = u16::MAX;
+
     /// Editing › Editor: the caret, what's shown in the code.
     pub const EDITOR: Self = Self {
         id: "editor",

@@ -82,7 +82,7 @@ impl SettingsContribution for UpdatesSettings {
             label: "updates.settings_title",
             icon: crate::ICON,
             group: SettingsGroup::Application,
-            order: 90,
+            order: SettingsPage::LAST,
         })
     }
 

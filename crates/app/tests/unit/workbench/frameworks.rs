@@ -150,6 +150,26 @@ fn a_module_off_takes_its_page() {
     assert!(!wb.settings_model.blocks.iter().any(|b| b.page == "database"));
 }
 
+/// The Application group's pages the modules describe: the web engine right after the
+/// modules (before the language, order 30), the updates last whatever else comes.
+#[test]
+fn the_web_engine_follows_the_modules_and_the_updates_come_last() {
+    let wb = workbench(&[]);
+    let mut pages: Vec<workbench_model::SettingsPage> = wb
+        .settings_model
+        .blocks
+        .iter()
+        .filter_map(|b| b.page_info)
+        .filter(|p| p.group == workbench_model::SettingsGroup::Application)
+        .collect();
+    pages.sort_by_key(workbench_model::SettingsPage::sort_key);
+    pages.dedup_by_key(|p| p.id);
+    let order = |id: &str| pages.iter().find(|p| p.id == id).map(|p| p.order);
+    let engine = order("web_engine").expect("the web engine's page");
+    assert!((21..30).contains(&engine), "between the modules (20) and the language (30)");
+    assert_eq!(pages.last().map(|p| p.id), Some("updates"), "the updates last");
+}
+
 /// A route added (its file written) is suggested at once: only Symfony's own generation
 /// moves (a file of its own), not for a file it doesn't watch — nothing else is redone.
 #[test]
