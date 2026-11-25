@@ -64,3 +64,52 @@ fn chord_with(event: &KeyEvent, key: ChordKey) -> KeyChord {
     let m = event.modifiers;
     KeyChord { primary: m.primary(), shift: m.shift, alt: m.alt, control: MAC && m.ctrl, key }
 }
+
+/// What a key does with the clipboard in a view taking the whole keyboard (the terminal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum TerminalClip {
+    Copy,
+    Paste,
+}
+
+/// The system the terminal's clipboard keys follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum KeysOf {
+    Mac,
+    Windows,
+    Linux,
+}
+
+impl KeysOf {
+    /// The system this build runs on.
+    pub(super) const HERE: Self = if cfg!(target_os = "macos") {
+        Self::Mac
+    } else if cfg!(windows) {
+        Self::Windows
+    } else {
+        Self::Linux
+    };
+}
+
+/// The terminal's clipboard keys, as the system's own terminals have them: on macOS none
+/// (⌘C / ⌘V are the app's Copy and Paste); elsewhere Ctrl+Shift+C / V and Shift+Insert,
+/// Ctrl+C when something is selected (else it interrupts the program), and on Windows
+/// Ctrl+V too (elsewhere it stays the program's: a shell's literal next key).
+/// `selected` is asked only for Ctrl+C (it reads the view's selection).
+pub(super) fn terminal_clip(
+    event: &KeyEvent,
+    selected: impl FnOnce() -> bool,
+    keys: KeysOf,
+) -> Option<TerminalClip> {
+    if keys == KeysOf::Mac {
+        return None;
+    }
+    let m = event.modifiers;
+    let letter = |l: char| matches!(&event.key, Key::Character(c) if c.chars().next().is_some_and(|c| c.eq_ignore_ascii_case(&l)) && c.chars().count() == 1);
+    if m.ctrl && !m.alt && letter('c') && (m.shift || selected()) {
+        return Some(TerminalClip::Copy);
+    }
+    let ctrl_v = m.ctrl && !m.alt && letter('v') && (m.shift || keys == KeysOf::Windows);
+    let insert = m.shift && !m.ctrl && matches!(&event.key, Key::Named(NamedKey::Insert));
+    (ctrl_v || insert).then_some(TerminalClip::Paste)
+}

@@ -209,3 +209,43 @@ fn a_drawer_command_s_closing_reaches_the_event_loop() {
     app.exit_after(Control::Continue);
     assert_eq!(app.pending.exit_request, None, "anything else asks nothing");
 }
+
+/// The terminal's clipboard keys follow the system's terminals: Ctrl+C copies only what's
+/// selected (else it's the program's interrupt), Ctrl+Shift+C / V and Shift+Insert always;
+/// Ctrl+V pastes on Windows and stays the program's on Linux; macOS leaves them to ⌘.
+#[test]
+fn the_terminal_s_clipboard_keys_follow_the_system() {
+    use super::chords::{KeysOf, TerminalClip, terminal_clip};
+    let ctrl = |c: &str, shift: bool| KeyEvent {
+        modifiers: platform_api::Modifiers { shift, ctrl: true, alt: false, meta: false },
+        ..key(c, true, false, None)
+    };
+    let insert = KeyEvent {
+        key: Key::Named(NamedKey::Insert),
+        modifiers: platform_api::Modifiers { shift: true, ctrl: false, alt: false, meta: false },
+        ..key("x", false, false, None)
+    };
+    let (copy, paste) = (Some(TerminalClip::Copy), Some(TerminalClip::Paste));
+    for keys in [KeysOf::Windows, KeysOf::Linux] {
+        assert_eq!(terminal_clip(&ctrl("c", false), || true, keys), copy, "{keys:?}");
+        assert_eq!(terminal_clip(&ctrl("c", false), || false, keys), None, "{keys:?} interrupts");
+        assert_eq!(terminal_clip(&ctrl("C", true), || false, keys), copy, "{keys:?}");
+        assert_eq!(terminal_clip(&ctrl("V", true), || false, keys), paste, "{keys:?}");
+        assert_eq!(terminal_clip(&insert, || false, keys), paste, "{keys:?}");
+        assert_eq!(terminal_clip(&ctrl("d", false), || true, keys), None, "{keys:?}");
+    }
+    assert_eq!(terminal_clip(&ctrl("v", false), || false, KeysOf::Windows), paste);
+    assert_eq!(terminal_clip(&ctrl("v", false), || false, KeysOf::Linux), None);
+    assert_eq!(terminal_clip(&ctrl("c", false), || true, KeysOf::Mac), None);
+    assert_eq!(terminal_clip(&ctrl("v", false), || false, KeysOf::Mac), None);
+    let mut asked = 0;
+    terminal_clip(
+        &ctrl("v", false),
+        || {
+            asked += 1;
+            true
+        },
+        KeysOf::Windows,
+    );
+    assert_eq!(asked, 0, "the selection is read only for Ctrl+C");
+}

@@ -1,7 +1,7 @@
 //! The window's keyboard and mouse (including a bottom view taking the whole keyboard,
 //! the terminal).
 
-use super::chords::{altgr_text, chord};
+use super::chords::{KeysOf, TerminalClip, altgr_text, chord, terminal_clip};
 use super::*;
 
 impl EditorApp {
@@ -11,24 +11,19 @@ impl EditorApp {
     /// windows' toggles.
     pub(super) fn panel_key(&mut self, event: &KeyEvent) -> Control {
         let m = event.modifiers;
-        // Windows / Linux: Ctrl+Shift+C copies the selection; Ctrl+C too when something is
-        // selected (otherwise it interrupts the program, as in Windows Terminal). On macOS
-        // ⌘C is the app's Copy.
-        let ctrl_c = matches!(&event.key, Key::Character(c) if c.eq_ignore_ascii_case("c"));
-        if !MAC && m.ctrl && ctrl_c && (m.shift || self.workbench.view_selection().is_some()) {
-            if let (Some(text), Some(window)) = (self.workbench.copy(), &self.window) {
-                window.set_clipboard_text(&text);
+        let selected = || self.workbench.view_selection().is_some();
+        match terminal_clip(event, selected, KeysOf::HERE) {
+            Some(TerminalClip::Copy) => {
+                if let (Some(text), Some(window)) = (self.workbench.copy(), &self.window) {
+                    window.set_clipboard_text(&text);
+                }
+                if !m.shift && self.workbench.clear_view_selection() {
+                    self.redraw();
+                }
+                return Control::Continue;
             }
-            if !m.shift && self.workbench.clear_view_selection() {
-                self.redraw();
-            }
-            return Control::Continue;
-        }
-        // Windows / Linux: Ctrl+Shift+V and Shift+Insert paste (Ctrl+V stays the program's).
-        let ctrl_v = matches!(&event.key, Key::Character(c) if c.eq_ignore_ascii_case("v"));
-        let insert = matches!(&event.key, Key::Named(NamedKey::Insert));
-        if !MAC && ((m.ctrl && m.shift && ctrl_v) || (m.shift && !m.ctrl && insert)) {
-            return self.command(cmd::PASTE);
+            Some(TerminalClip::Paste) => return self.command(cmd::PASTE),
+            None => {}
         }
         // The panel's own view (the terminal's) is where its keys are looked up.
         let place: Vec<command_model::When> = self.workbench.key_places();
