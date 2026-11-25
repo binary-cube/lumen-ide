@@ -8,6 +8,12 @@
 //! nothing to draw costs nothing. On Windows and Linux the same program runs CEF's
 //! subprocesses; on macOS they are the helper apps (`helper.rs`).
 
+// Windows: a program of the windows' kind, never the console's. CEF starts this same
+// program for each of its processes (a page's, the GPU's, the network's): as a console
+// program, each opened a console window, and closing one ended that process (the engine
+// then made again). Its `--version`, read through a pipe at packing, still prints.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
