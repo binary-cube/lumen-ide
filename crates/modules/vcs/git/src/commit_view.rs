@@ -139,6 +139,28 @@ fn show_log(reference: Option<String>) -> ViewerAction {
 /// What a repository job ends with.
 type Done = Result<(), VcsError>;
 
+/// A file's group in the lists, shown in this order: what's new (added, not tracked yet),
+/// then what's deleted, then the rest (modified, renamed, in conflict).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ListGroup {
+    New,
+    Deleted,
+    Changed,
+}
+
+impl ListGroup {
+    /// The groups in the order shown.
+    const SHOWN: [Self; 3] = [Self::New, Self::Deleted, Self::Changed];
+
+    fn of(state: FileState) -> Self {
+        match state {
+            FileState::Added | FileState::Untracked => Self::New,
+            FileState::Deleted => Self::Deleted,
+            FileState::Modified | FileState::Renamed | FileState::Conflicted => Self::Changed,
+        }
+    }
+}
+
 /// The current branch and the files, read together in the background.
 type StatusRead = (Option<String>, Result<Vec<StagedFile>, VcsError>);
 
@@ -372,10 +394,19 @@ impl CommitView {
         Some(ViewerAction::OpenFile { path, line: None, column: None })
     }
 
-    /// The places in `files` of the staged (or not staged) list.
+    /// The places in `files` of the staged (or not staged) list: the new files first, then
+    /// the deleted ones, then the rest, each group by path (as read), so nothing new is
+    /// missed among the changes.
     fn list(&self, staged: bool) -> Vec<usize> {
-        let on = |f: &StagedFile| if staged { f.staged.is_some() } else { f.unstaged.is_some() };
-        (0..self.files.len()).filter(|i| on(&self.files[*i])).collect()
+        let state = |f: &StagedFile| if staged { f.staged } else { f.unstaged };
+        let mut out = Vec::new();
+        for group in ListGroup::SHOWN {
+            out.extend(
+                (0..self.files.len())
+                    .filter(|&i| state(&self.files[i]).is_some_and(|s| ListGroup::of(s) == group)),
+            );
+        }
+        out
     }
 
     fn staged_paths(&self) -> Vec<String> {

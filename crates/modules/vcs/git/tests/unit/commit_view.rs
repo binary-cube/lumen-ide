@@ -832,3 +832,28 @@ fn a_press_in_the_message_gives_it_the_keys_back() {
     view.scroll(0.0, 40.0);
     assert_eq!(view.scrolls, scrolls, "the panes stay: the wheel was the message's");
 }
+
+/// Each list shows what's new first, then what's deleted, then the rest, each group by
+/// path: a new file is never lost among the changes. A file changed on both sides takes its
+/// place in each list by that side's state.
+#[test]
+fn the_lists_show_new_files_first_then_deleted_then_the_rest() {
+    let file = |path: &str, staged, unstaged| StagedFile { path: path.into(), staged, unstaged };
+    let view = CommitView {
+        files: vec![
+            file("a.txt", None, Some(FileState::Modified)),
+            file("b.txt", None, Some(FileState::Deleted)),
+            file("c.txt", Some(FileState::Added), Some(FileState::Modified)),
+            file("d.txt", None, Some(FileState::Untracked)),
+            file("e.txt", Some(FileState::Modified), None),
+            file("f.txt", Some(FileState::Deleted), None),
+            file("g.txt", None, Some(FileState::Renamed)),
+        ],
+        ..CommitView::default()
+    };
+    let paths = |staged| -> Vec<String> {
+        view.list(staged).into_iter().map(|i| view.files[i].path.clone()).collect()
+    };
+    assert_eq!(paths(true), ["c.txt", "f.txt", "e.txt"]);
+    assert_eq!(paths(false), ["d.txt", "b.txt", "a.txt", "c.txt", "g.txt"]);
+}

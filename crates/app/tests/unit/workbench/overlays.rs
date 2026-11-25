@@ -484,17 +484,28 @@ fn the_window_s_buttons_act_on_their_release_over_them() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// How long a notification may take to show (its fade-in, frames slow under load).
+const TOAST_SHOWS: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// What closes at a press over the editor (a notification's ×) leaves nothing for the
 /// release: let go over the text under it, the text isn't touched.
 #[test]
 fn a_release_after_a_press_that_closed_something_reaches_nothing() {
     let (mut wb, dir, mut text) = opened("release-after-close");
     wb.show_notification(workbench_model::Notification::info("saved"));
-    paint(&mut wb, &mut text);
-    let close = (0..1200)
-        .flat_map(|x| (0..160).map(move |y| Point::new(x as f32, y as f32 * 5.0)))
-        .find(|p| matches!(wb.toasts.hit(*p), Some(ui_workbench::toast::ToastHit::Close(_))))
-        .expect("the notification's ×");
+    // The card fades in: it's placed (and its × found) once it shows, a frame or so later.
+    let started = std::time::Instant::now();
+    let close = loop {
+        paint(&mut wb, &mut text);
+        let found = (0..1200)
+            .flat_map(|x| (0..160).map(move |y| Point::new(x as f32, y as f32 * 5.0)))
+            .find(|p| matches!(wb.toasts.hit(*p), Some(ui_workbench::toast::ToastHit::Close(_))));
+        if let Some(p) = found {
+            break p;
+        }
+        assert!(started.elapsed() < TOAST_SHOWS, "the notification's ×");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
     let before = wb.tabs[wb.active].doc.selections().clone();
     assert_eq!(wb.mouse_down(&mut text, close, false, false, false, 1), MouseResult::Redraw);
     wb.mouse_up(&mut text);
