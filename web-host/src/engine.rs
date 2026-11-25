@@ -19,7 +19,7 @@ use crate::transfer::Transfer;
 /// Our build of the engine for one Chromium: raised for every package made again with the
 /// same Chromium (a fix of ours, another configuration), back to 1 with a new Chromium. The
 /// engine's version is Chromium's, then this (`156.0.8078.100-2`).
-pub const BUILD: u32 = 2;
+pub const BUILD: u32 = 3;
 
 /// The engine's version told to the apps and written in its package: Chromium's, then ours.
 pub fn version() -> String {

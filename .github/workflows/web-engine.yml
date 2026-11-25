@@ -180,11 +180,30 @@ jobs:
       - name: Build and bundle the engine (Windows)
         if: runner.os == 'Windows'
         working-directory: web-host
+        # Laid out here rather than by `bundle-cef-app` (which stops on a file it doesn't name):
+        # CEF's files beside the program (no programs of its own), its languages, the
+        # program, its manifest — each step saying what it lacks.
         run: |
-          bundle-cef-app web-host --release -o "$RUNNER_TEMP/bundle"
-          program="$(find "$RUNNER_TEMP/bundle" -name web-host.exe | head -1)"
-          test -n "$program" || { echo "::error::no web-host.exe in the bundle"; exit 1; }
-          echo "BUNDLE=$(dirname "$program")" >> "$GITHUB_ENV"
+          cargo build --release --locked --bins
+          cef="$(ls -d "$CEF_PATH"/*/cef_windows_x86_64 2>/dev/null | head -1)"
+          if [ ! -d "$cef" ]; then
+            echo "::error::no CEF under $CEF_PATH"; ls -R "$CEF_PATH" | head -40; exit 1
+          fi
+          bundle="$RUNNER_TEMP/bundle"
+          mkdir -p "$bundle"
+          find "$cef" -maxdepth 1 -type f ! -name '*.exe' -exec cp {} "$bundle/" \;
+          if [ ! -d "$cef/locales" ]; then
+            echo "::error::no locales in $cef"; ls "$cef"; exit 1
+          fi
+          cp -R "$cef/locales" "$bundle/"
+          program="$GITHUB_WORKSPACE/target/web-host/release/web-host.exe"
+          if [ ! -f "$program" ]; then
+            echo "::error::no $program"; ls "$(dirname "$program")" | head -20; exit 1
+          fi
+          cp "$program" "$bundle/"
+          cp "$GITHUB_WORKSPACE/packaging/web-host.exe.manifest" "$bundle/web-host.exe.manifest"
+          ls "$bundle" | head -40
+          echo "BUNDLE=$bundle" >> "$GITHUB_ENV"
       # Chromium's languages but ours taken out of the bundle before it's signed, so the
       # signature seals exactly what's shipped (`cargo xtask web-engine-trim`; the packing
       # leaves them out too).
