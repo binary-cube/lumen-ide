@@ -270,8 +270,9 @@ impl Drawer {
         let assumed = comparable
             && self.whole_streak >= WHOLE_STREAK
             && !self.whole_streak.is_multiple_of(WHOLE_CHECK);
+        // Not compared: whole, its live images' frames noted as drawn now.
         if assumed {
-            damage.set_full();
+            damage.set_full_of(scene);
         } else if comparable {
             let mut state = ctx.state();
             let mut glyph_box = |key| match state.atlas.get_or_insert(key, rasterizer) {
@@ -283,7 +284,7 @@ impl Drawer {
             };
             self.tracker.damage(scene, size, &mut glyph_box, &mut damage);
         } else {
-            damage.set_full();
+            damage.set_full_of(scene);
         }
         // Whole frames in a row (not those whole for want of a frame to compare with).
         self.whole_streak = match (comparable, damage.is_full()) {
@@ -355,15 +356,7 @@ impl Drawer {
                     continue;
                 };
                 if ctx.upload_image(&mut state, &instance.image) {
-                    let tint =
-                        instance.image.tint.map_or([0.0, 0.0, 0.0, -1.0], |c| [c.r, c.g, c.b, c.a]);
-                    let gpu = ImageGpu {
-                        rect: rect_array(&instance.bounds),
-                        tint,
-                        opacity: instance.opacity,
-                        _pad: [0.0; 3],
-                    };
-                    self.layer_images.push((gpu, instance.image.id, r));
+                    self.layer_images.push((ImageGpu::of(instance), instance.image.id, r));
                 }
             }
             let glyphs = self.layer_glyphs.len();
@@ -417,18 +410,7 @@ impl Drawer {
         let ids = state.shown.entry(self.id).or_default();
         ids.clear();
         ids.extend(scene.layers().iter().flat_map(|l| l.images.iter().map(|i| i.image.id)));
-        let shown: std::collections::HashSet<u64> =
-            state.shown.values().flatten().copied().collect();
-        state.textures.retain(|id, t| {
-            let keep = (shown.contains(id) && !t.image.released())
-                || (frame.saturating_sub(t.last_frame) < IMAGE_TTL
-                    && t.last_used.elapsed() < IMAGE_IDLE
-                    && !t.image.released());
-            if !keep {
-                t.image.evicted();
-            }
-            keep
-        });
+        state.release_unshown();
         if full { Err(AtlasFull) } else { Ok(()) }
     }
 
@@ -796,7 +778,8 @@ impl Drawer {
         }
         self.direct_frames = 0;
         let drawn = self.draw(ctx, encoder, scene, size, rasterizer, None);
-        self.tracker.commit(scene, size);
+        // Live images as compared (a frame come since is drawn by the next).
+        self.tracker.commit_drawn(scene, size, &self.damage);
         drawn
     }
 
@@ -813,7 +796,8 @@ impl Drawer {
         view: &wgpu::TextureView,
     ) -> (usize, u64) {
         let drawn = self.draw(ctx, encoder, scene, size, rasterizer, Some(view));
-        self.tracker.commit(scene, size);
+        // Live images as compared, as for a kept frame.
+        self.tracker.commit_drawn(scene, size, &self.damage);
         self.kept_stale = true;
         self.direct_frames = self.direct_frames.saturating_add(1);
         if self.direct_frames >= DIRECT_RELEASE {

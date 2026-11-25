@@ -184,3 +184,41 @@ fn a_hidden_tab_asks_for_no_frames() {
     view.set_shown(true);
     assert!(view.frame_deadline().is_some());
 }
+
+/// While the page loads a loader turns under it; once it's drawn (or its tab hidden) it
+/// stops, and a page made anew turns it again.
+#[test]
+fn a_loader_turns_until_the_page_is_drawn() {
+    let mut view = DiagramWebView::default();
+    view.path = Some(PathBuf::from("a.drawio"));
+    view.page_dir = Some(Arc::from(Path::new("page")));
+    view.status = Status::Installed(Arc::from(Path::new("drawio")));
+    view.entry = Arc::from("index.html");
+    assert!(view.is_loading(), "loading");
+    view.set_shown(false);
+    assert!(!view.is_loading(), "hidden: no frames for it");
+    view.set_shown(true);
+    view.web_event(view.page_id + 1, WebEvent::Shown);
+    assert!(view.is_loading(), "another page's news changes nothing");
+    view.web_event(view.page_id, WebEvent::Shown);
+    assert!(!view.is_loading(), "drawn");
+    view.new_page();
+    assert!(view.is_loading(), "made anew: loading again");
+}
+
+/// A page that can't be made (no web engine here) stops the loader for good and says why
+/// in its place; drawn later (an engine came), it's shown as usual.
+#[test]
+fn a_page_that_cant_be_made_stops_the_loader() {
+    let mut view = DiagramWebView::default();
+    view.path = Some(PathBuf::from("a.drawio"));
+    view.page_dir = Some(Arc::from(Path::new("page")));
+    view.status = Status::Installed(Arc::from(Path::new("drawio")));
+    view.entry = Arc::from("index.html");
+    view.web_event(view.page_id, WebEvent::Failed);
+    assert!(!view.is_loading(), "failed: no loader turning forever");
+    assert_eq!(view.page, PageState::Failed, "its explanation painted");
+    view.web_event(view.page_id, WebEvent::Shown);
+    assert_eq!(view.page, PageState::Shown);
+    assert!(!view.is_loading());
+}

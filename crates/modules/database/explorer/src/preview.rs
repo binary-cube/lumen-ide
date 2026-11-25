@@ -325,9 +325,9 @@ impl Viewer for PreviewView {
         self.action.take()
     }
 
-    /// A hand over what can be pressed.
+    /// Its parts' (the statements' scrollbar), else a hand over what can be pressed.
     fn cursor_at(&self, p: Point) -> Option<ui_components::ViewerCursor> {
-        self.hit(p).map(|_| ui_components::ViewerCursor::Pointer)
+        self.controls.cursor_or(p, || self.hit(p).map(|_| ui_components::ViewerCursor::Pointer))
     }
 
     /// Its hover says when what it shows changed.

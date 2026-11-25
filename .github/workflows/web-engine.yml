@@ -1,0 +1,407 @@
+# The web engine's packages (plan 99b, 99g): a tag `web-engine-v<version>` (the version
+# `web-host --version` says: Chromium's, then `engine::BUILD`) builds the engine for each
+# system, bundles CEF with it, signs it, packs it (`cargo xtask web-engine-package`) and makes
+# a DRAFT release with the packages and their list, merged into the published one and signed
+# (`cargo xtask web-engine-manifest`). A human checks it, then runs this workflow by hand with
+# `publish` and the version: the draft is checked again (`cargo xtask web-engine-verify`) and
+# its files go to the rolling `web-engine` release, the one the app reads
+# (`<repository>/releases/download/web-engine/web-engine.json`).
+#
+# Once published, the draft release is deleted (its tag stays), and the rolling release's
+# archives the new list no longer names are deleted after the list is uploaded.
+#
+# The oldest version still safe (`minimum`), alone: run this workflow by hand with `relist`
+# and `minimum`. Nothing is built: the published list is downloaded (its signature checked),
+# its minimum set (one every system still has a package for), signed anew and uploaded with
+# its signature; no archive is touched. A draft takes the published list's minimum, or the
+# `minimum` given when the workflow is run by hand on a tag (after deleting the push's
+# draft, if it made one: a tag has one draft).
+#
+# macOS (Apple Silicon, Intel), Windows (x64) and Linux (x64: its frames as pixels until its
+# dmabufs, 99e).
+name: Web engine
+
+on:
+  push:
+    tags: ["web-engine-v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish a draft's packages to the app (the rolling `web-engine` release)"
+        type: boolean
+        default: false
+      version:
+        description: "The version to publish (`156.0.8078.100-1`), with publish"
+        type: string
+        default: ""
+      minimum:
+        description: "The oldest version still safe (`156.0.8078.100-1`), with relist or for a draft; empty: the published list's"
+        type: string
+        default: ""
+      relist:
+        description: "Only set the published list's minimum (nothing built, no archive touched)"
+        type: boolean
+        default: false
+
+# Read only by default: the build jobs run code that isn't ours (the bundling tool installed
+# from its repository, CEF's download and CMake build, the package managers' tools), so only
+# the jobs that write a release (draft, publish, relist) get to write.
+permissions:
+  contents: read
+
+# One run per tag (or per publish, per relist) at a time; a later one waits instead of
+# cancelling a signing or an upload halfway. GitHub keeps only one waiting per group: another
+# one arriving while one waits cancels the waiting one (it never runs). The jobs' own group
+# (`web-engine-list`: draft, publish, relist) is the same: a draft waiting behind a publish
+# is cancelled by a second draft, publish or relist queued meanwhile; its tag is then run
+# again by hand (the run's "Re-run all jobs").
+concurrency:
+  group: web-engine-${{ inputs.publish && 'publish' || inputs.relist && 'relist' || github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # The CEF the engine is built with (cef-rs's tag, as `web-host/Cargo.toml` pins it) and the
+  # commit that tag names: the bundling tool is installed by the commit, so a tag moved
+  # later can't change what's built.
+  CEF_RS_TAG: "cef-v156.7.0+156.0.31"
+  CEF_RS_REV: "7b6bf84e76e919790bd61df077e29dc4132eb5e2"
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    if: ${{ !inputs.publish && !inputs.relist }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            os: macos-latest
+          - platform: macos-x64
+            os: macos-15-intel
+          - platform: windows-x64
+            os: windows-latest
+          # The oldest image still offered: the engine needs the glibc it was built against
+          # or newer (as the app's own release).
+          - platform: linux-x64
+            os: ubuntu-22.04
+    runs-on: ${{ matrix.os }}
+    # Every step in bash, Windows too (Git Bash): the steps read `$VAR`s.
+    defaults:
+      run:
+        shell: bash
+    env:
+      HAS_MACOS_SIGNING: ${{ secrets.MACOS_SIGNING_P12 != '' }}
+    steps:
+      # One CEF for the whole job: the bundling tool's build and the engine's (cef-dll-sys
+      # downloads it there when the folder is missing), and the tool finds it there when it
+      # runs (without `CEF_PATH` it looks in its build's `OUT_DIR`, gone after the install).
+      - name: Where CEF goes
+        run: echo "CEF_PATH=$RUNNER_TEMP/cef" >> "$GITHUB_ENV"
+      # No token left in the checkout: nothing here pushes, and the build runs others' code.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      # The workspace (xtask) and the host, which `web-host/.cargo/config.toml` builds into
+      # the repository's `target/web-host`.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: web-engine-${{ matrix.platform }}
+          workspaces: |
+            . -> target
+            web-host -> ../target/web-host
+      # Only what the image lacks: installing one it has from elsewhere can fail on a link.
+      - name: "Build tools (CEF's build: CMake and Ninja)"
+        if: runner.os == 'macOS'
+        run: |
+          for tool in ninja cmake; do
+            command -v "$tool" >/dev/null || brew install "$tool"
+          done
+      - name: "Build tools (CEF's build: Ninja)"
+        if: runner.os == 'Windows'
+        run: choco install ninja -y
+      # CEF's build, and what Chromium loads (its `--version` runs at packing).
+      - name: Build tools and Chromium's libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build cmake libnss3 libatk1.0-0 libatk-bridge2.0-0 \
+            libcups2 libxcomposite1 libxdamage1 libxrandr2 libgbm1 libxkbcommon0 \
+            libpango-1.0-0 libasound2 libdrm2 libxshmfence1
+      # CEF's bundling tool, of the same cef-rs as the engine.
+      - name: The bundling tool
+        run: cargo install --locked --git https://github.com/tauri-apps/cef-rs --rev "$CEF_RS_REV" cef --bin bundle-cef-app --features build-util
+      # The host's dependencies as `web-host/Cargo.lock` pins them: refused if the lock would
+      # change, so the bundling tool's own build (which takes no `--locked`) finds nothing to
+      # update.
+      - name: The host's dependencies, locked
+        working-directory: web-host
+        run: cargo fetch --locked
+      # The macOS bundling builds and copies debug programs (it has no `--release`): it
+      # makes the bundle's layout (the helper apps, their Info.plist, the framework), then
+      # the release programs replace the debug ones — the host's, and the one helper program
+      # copied into each helper app under that app's name. Its identifier is the app's
+      # (`brand.toml`'s `bundle_id`) with `.web-engine`.
+      - name: Build and bundle the engine (macOS)
+        if: runner.os == 'macOS'
+        working-directory: web-host
+        run: |
+          bundle_id="$(sed -n 's/^bundle_id *= *"\(.*\)"/\1/p' "$GITHUB_WORKSPACE/brand.toml")"
+          test -n "$bundle_id" || { echo "::error::no bundle_id in brand.toml"; exit 1; }
+          cargo build --release --bins --locked
+          bundle-cef-app web-host -o "$RUNNER_TEMP/bundle" --identifier "$bundle_id.web-engine"
+          app="$RUNNER_TEMP/bundle/web-host.app"
+          release="$GITHUB_WORKSPACE/target/web-host/release"
+          install -m 0755 "$release/web-host" "$app/Contents/MacOS/web-host"
+          helpers=0
+          for helper in "$app/Contents/Frameworks/web-host Helper"*.app; do
+            name="$(basename "$helper" .app)"
+            test -f "$helper/Contents/MacOS/$name" || { echo "::error::no program in $name"; exit 1; }
+            install -m 0755 "$release/web-host-helper" "$helper/Contents/MacOS/$name"
+            helpers=$((helpers + 1))
+          done
+          test "$helpers" -eq 5 || { echo "::error::$helpers helper apps, 5 expected"; exit 1; }
+          echo "BUNDLE=$RUNNER_TEMP/bundle" >> "$GITHUB_ENV"
+      # The program and CEF's files beside it (one program: it runs CEF's subprocesses too).
+      # It finds `libcef.so` beside itself by its rpath (`$ORIGIN`, `web-host/.cargo/config.toml`),
+      # as when the app starts it: no library path is set here, so packing (which runs its
+      # `--version`) proves it.
+      - name: Build and bundle the engine (Linux)
+        if: runner.os == 'Linux'
+        working-directory: web-host
+        run: |
+          bundle-cef-app web-host --release -o "$RUNNER_TEMP/bundle"
+          program="$(find "$RUNNER_TEMP/bundle" -name web-host -type f -perm -u+x | head -1)"
+          test -n "$program" || { echo "::error::no web-host in the bundle"; exit 1; }
+          echo "BUNDLE=$(dirname "$program")" >> "$GITHUB_ENV"
+      - name: Build and bundle the engine (Windows)
+        if: runner.os == 'Windows'
+        working-directory: web-host
+        run: |
+          bundle-cef-app web-host --release -o "$RUNNER_TEMP/bundle"
+          program="$(find "$RUNNER_TEMP/bundle" -name web-host.exe | head -1)"
+          test -n "$program" || { echo "::error::no web-host.exe in the bundle"; exit 1; }
+          echo "BUNDLE=$(dirname "$program")" >> "$GITHUB_ENV"
+      # Chromium's languages but ours taken out of the bundle before it's signed, so the
+      # signature seals exactly what's shipped (`cargo xtask web-engine-trim`; the packing
+      # leaves them out too).
+      - name: Trim the languages
+        run: cargo xtask web-engine-trim --bundle "$BUNDLE"
+      # The project's certificate, as the app's (release.yml); without it, ad hoc.
+      - name: Signing certificate
+        if: runner.os == 'macOS' && env.HAS_MACOS_SIGNING == 'true'
+        env:
+          MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
+          MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
+        run: bash scripts/ci/macos-keychain.sh
+      # Inside out, with the hardened runtime: the framework's libraries, the framework, each
+      # helper, then the host. Only the renderer and the GPU helper may JIT (their own
+      # entitlements); the host and the other helpers get none. Ad hoc (no certificate),
+      # library validation is turned off on every program, which has no team to match the
+      # framework's by (`packaging/web-engine.entitlements` says why).
+      - name: Sign the engine (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          identity="${MACOS_SIGN_IDENTITY:--}"
+          app="$BUNDLE/web-host.app"
+          framework="$app/Contents/Frameworks/Chromium Embedded Framework.framework"
+          sign() {
+            local target="$1" entitlements="${2:-}"
+            local args=(--force --options runtime --sign "$identity")
+            if [ "$identity" != "-" ]; then args+=(--timestamp); fi
+            if [ -n "$entitlements" ]; then
+              local plist="$RUNNER_TEMP/$(basename "$entitlements")"
+              cp "$entitlements" "$plist"
+              if [ "$identity" = "-" ]; then
+                /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$plist"
+              fi
+              args+=(--entitlements "$plist")
+            fi
+            codesign "${args[@]}" "$target"
+          }
+          for library in "$framework"/Libraries/*.dylib; do sign "$library"; done
+          sign "$framework"
+          for helper in "$app/Contents/Frameworks/web-host Helper"*.app; do
+            case "$(basename "$helper")" in
+              *"(Renderer).app") sign "$helper" packaging/web-engine-renderer.entitlements ;;
+              *"(GPU).app") sign "$helper" packaging/web-engine-gpu.entitlements ;;
+              *) sign "$helper" packaging/web-engine.entitlements ;;
+            esac
+          done
+          sign "$app" packaging/web-engine.entitlements
+          codesign --verify --deep --strict "$app"
+      # Windows: unsigned for now (SignPath, as the app's, to come); downloaded by the app
+      # itself, it carries no mark of the web.
+      - name: Pack it
+        run: cargo xtask web-engine-package --bundle "$BUNDLE" --platform "${{ matrix.platform }}" --out dist-engine
+      # The package as the app gets it: unpacked, its signature still holds.
+      - name: Check the package's signature (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          unpacked="$RUNNER_TEMP/unpacked"
+          mkdir -p "$unpacked"
+          tar -xJf dist-engine/web-engine-*.tar.xz -C "$unpacked"
+          codesign --verify --deep --strict "$unpacked/web-host.app"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: web-engine-${{ matrix.platform }}
+          path: dist-engine/web-engine-*
+          if-no-files-found: error
+
+  draft:
+    name: Draft release
+    needs: build
+    # Only for a tag: its name is the release's version.
+    if: ${{ startsWith(github.ref, 'refs/tags/web-engine-v') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # The published list is read here and written by publish: one at a time (one waiting:
+    # see the workflow's concurrency).
+    concurrency:
+      group: web-engine-list
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: web-engine-lists
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist-engine
+          merge-multiple: true
+      # The list published now, merged into the new one (its signature checked by xtask):
+      # each system keeps its newest package for every protocol. None only when nothing was
+      # published yet; a list there but not read fails the job (`scripts/ci`).
+      - name: The published list
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous="$(bash scripts/ci/web-engine-published.sh "${{ github.repository }}" published)"
+          if [ -n "$previous" ]; then echo "PREVIOUS=$previous" >> "$GITHUB_ENV"; fi
+      - name: The list, signed
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          MINIMUM: ${{ inputs.minimum }}
+        run: |
+          version="${GITHUB_REF_NAME#web-engine-v}"
+          cargo xtask web-engine-manifest --dir dist-engine \
+            --base-url "https://github.com/${{ github.repository }}/releases/download/web-engine" \
+            --version "$version" ${PREVIOUS:+--previous "$PREVIOUS"} --minimum "$MINIMUM" --signed
+          cargo xtask web-engine-verify --dir dist-engine --version "$version"
+      - name: The draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#web-engine-v}"
+          gh release create "$GITHUB_REF_NAME" --repo "${{ github.repository }}" --draft --verify-tag \
+            --title "Web engine $version" \
+            --notes "The web engine $version (Chromium, CEF $CEF_RS_TAG). Checked: run this workflow with publish and $version." \
+            dist-engine/*.tar.xz dist-engine/web-engine.json dist-engine/web-engine.json.sig
+
+  publish:
+    name: Publish ${{ inputs.version }}
+    if: ${{ inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: web-engine-list
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: web-engine-lists
+      - name: The draft, checked
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          test -n "$VERSION" || { echo "::error::no version to publish"; exit 1; }
+          gh release download "web-engine-v$VERSION" --repo "${{ github.repository }}" --dir files
+          now="$(bash scripts/ci/web-engine-published.sh "${{ github.repository }}" published)"
+          published=()
+          if [ -n "$now" ]; then published=(--published "$now"); fi
+          cargo xtask web-engine-verify --dir files --version "$VERSION" "${published[@]}"
+      # The archives first (new names: nothing a client reads changes), then the signature,
+      # then the list, one after the other. A client reading the list and its signature in
+      # the seconds between the last two finds them not matching (or one missing while it's
+      # replaced) and refuses both, as for any list whose signature isn't the project's: it
+      # keeps the engine it has and looks again later. It never takes a list unsigned.
+      - name: The draft's files to the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="${{ github.repository }}"
+          gh release view web-engine --repo "$repo" >/dev/null 2>&1 \
+            || gh release create web-engine --repo "$repo" --latest=false \
+                 --title "Web engine" --notes "The app's web engine: its packages and their signed list."
+          gh release upload web-engine --repo "$repo" --clobber files/*.tar.xz
+          gh release upload web-engine --repo "$repo" --clobber files/web-engine.json.sig
+          gh release upload web-engine --repo "$repo" --clobber files/web-engine.json
+      # Once the list is up: the archives it no longer names, and the draft (its files are
+      # all in the rolling release now; its tag stays, the version's record).
+      - name: What the list no longer needs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          bash scripts/ci/web-engine-prune.sh "${{ github.repository }}" files/web-engine.json
+          gh release delete "web-engine-v$VERSION" --repo "${{ github.repository }}" --yes
+
+  relist:
+    name: Relist with minimum ${{ inputs.minimum }}
+    if: ${{ inputs.relist && !inputs.publish }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: web-engine-list
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.99"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: web-engine-lists
+      # The published list (required: there's nothing to relist otherwise), its minimum set
+      # by xtask, which checks its signature, refuses a minimum some system has no package
+      # for, signs the new list and checks the signature is the project's.
+      - name: The list, with its new minimum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+          MINIMUM: ${{ inputs.minimum }}
+        run: |
+          test -n "$MINIMUM" || { echo "::error::relist needs a minimum"; exit 1; }
+          previous="$(bash scripts/ci/web-engine-published.sh "${{ github.repository }}" published --required)"
+          mkdir -p relisted
+          cargo xtask web-engine-manifest --dir relisted \
+            --base-url "https://github.com/${{ github.repository }}/releases/download/web-engine" \
+            --previous "$previous" --minimum "$MINIMUM" --relist --signed
+      # The signature, then the list (as publish does); no archive is touched.
+      - name: The list to the rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo="${{ github.repository }}"
+          gh release upload web-engine --repo "$repo" --clobber relisted/web-engine.json.sig
+          gh release upload web-engine --repo "$repo" --clobber relisted/web-engine.json

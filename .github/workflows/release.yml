@@ -85,18 +85,7 @@ jobs:
         env:
           MACOS_SIGNING_P12: ${{ secrets.MACOS_SIGNING_P12 }}
           MACOS_SIGNING_PASSWORD: ${{ secrets.MACOS_SIGNING_PASSWORD }}
-        run: |
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          password="$(openssl rand -hex 16)"
-          echo "$MACOS_SIGNING_P12" | base64 --decode > "$RUNNER_TEMP/signing.p12"
-          security create-keychain -p "$password" "$keychain"
-          security set-keychain-settings -lut 3600 "$keychain"
-          security unlock-keychain -p "$password" "$keychain"
-          security import "$RUNNER_TEMP/signing.p12" -k "$keychain" -P "$MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          rm -f "$RUNNER_TEMP/signing.p12"
-          echo "MACOS_SIGN_IDENTITY=Binary Cube Code Signing" >> "$GITHUB_ENV"
+        run: bash scripts/ci/macos-keychain.sh
       - name: Build (macOS, Apple Silicon)
         if: matrix.os == 'macos-latest'
         run: ./scripts/build.sh mac --full

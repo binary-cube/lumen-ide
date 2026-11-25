@@ -53,7 +53,8 @@ pub enum ButtonShape {
 pub struct ButtonColors {
     pub icon: Rgba,
     pub hover: Rgba,
-    pub on_back: Rgba,
+    /// Its back while on; `None`: the shared accent tint, eased under the mouse.
+    pub on_back: Option<Rgba>,
     pub on_icon: Rgba,
 }
 
@@ -879,8 +880,8 @@ fn light_fill(ctx: &Ctx<'_>, spec: &ButtonSpec<'_>) -> Option<Rgba> {
     let soft = spec.kind == ButtonKind::Soft;
     if spec.on {
         return Some(match spec.colors {
-            Some(c) => c.on_back,
-            None => p.accent.with_alpha(lerp(ON_REST, ON_HOVER)),
+            Some(ButtonColors { on_back: Some(back), .. }) => back,
+            _ => p.accent.with_alpha(lerp(ON_REST, ON_HOVER)),
         });
     }
     if let (Some(tone), true) = (spec.hover_tone, amount > 0.0) {

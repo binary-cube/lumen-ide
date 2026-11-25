@@ -96,3 +96,70 @@ fn a_glyph_without_room_leaves_the_rest_drawn() {
     let (_, _, pixels) = gpu.pixels().expect("a frame drawn");
     assert_eq!(&pixels[(8 * 16 + 8) * 4..][..4], [255, 0, 0, 255], "the quad drawn");
 }
+
+/// An image with rounded corners (a page in its card): what's past a rounded corner isn't
+/// drawn, a square one is whole, the middle is the image.
+#[test]
+fn an_image_is_drawn_with_its_rounded_corners() {
+    let Ok(mut gpu) = Offscreen::new(PhysicalSize::new(32, 32)) else { return };
+    let white = render_api::ImageData::new(2, 2, vec![255; 16]);
+    let mut scene = Scene::default();
+    scene.reset(Rgba::rgb(0x000000));
+    let corners = render_api::ImageCorners {
+        radius: 10.0,
+        which: kernel::Corners::TOP_LEFT | kernel::Corners::BOTTOM_RIGHT,
+    };
+    scene.push_layer(None).image_rounded(&white, Rect::new(0.0, 0.0, 32.0, 32.0), corners);
+    gpu.draw(&scene, &mut NoGlyphs, true);
+    let (_, _, pixels) = gpu.pixels().expect("drawn");
+    let at = |x: usize, y: usize| &pixels[(y * 32 + x) * 4..][..4];
+    assert_eq!(at(0, 0), [0, 0, 0, 255], "the top left corner rounded off");
+    assert_eq!(at(31, 31), [0, 0, 0, 255], "the bottom right too");
+    assert_eq!(at(31, 0), [255, 255, 255, 255], "the top right square");
+    assert_eq!(at(16, 16), [255, 255, 255, 255]);
+}
+
+/// A page's frame given as pixels (rows wider than the frame, as an engine pads them) is
+/// written into its live image and drawn; a frame larger than its pixels is refused.
+#[test]
+fn a_frame_given_as_pixels_is_drawn() {
+    let Ok(mut gpu) = Offscreen::new(PhysicalSize::new(8, 4)) else { return };
+    let importer = gpu.frame_importer();
+    let page = render_api::ImageData::live();
+    let stride = 8 * 4 + 16;
+    // BGRA: blue.
+    let mut bgra = vec![0u8; stride * 4];
+    for row in bgra.chunks_mut(stride) {
+        for pixel in row[..8 * 4].chunks_mut(4) {
+            pixel.copy_from_slice(&[255, 0, 0, 255]);
+        }
+    }
+    let frame =
+        |bgra| render_api::PixelFrame { bgra, size: (8, 4), stride: stride as u32, changed: &[] };
+    assert!(importer.write(&page, frame(&bgra)));
+    assert!(page.has_frame());
+    assert!(!importer.write(&page, frame(&bgra[..10])), "too few pixels");
+    let mut scene = Scene::default();
+    scene.reset(Rgba::rgb(0x000000));
+    scene.push_layer(None).image(&page, Rect::new(0.0, 0.0, 8.0, 4.0));
+    gpu.draw(&scene, &mut NoGlyphs, true);
+    let (_, _, pixels) = gpu.pixels().expect("drawn");
+    assert_eq!(&pixels[(2 * 8 + 4) * 4..][..4], [0, 0, 255, 255], "the page's blue");
+}
+
+/// A rounded quarter's straight edges are drawn as a square quarter's, even at a fraction
+/// of a pixel: no seam where they meet (only the corner itself is cut).
+#[test]
+fn a_rounded_images_straight_edges_match_its_square_ones() {
+    let Ok(mut gpu) = Offscreen::new(PhysicalSize::new(32, 32)) else { return };
+    let white = render_api::ImageData::new(2, 2, vec![255; 16]);
+    let mut scene = Scene::default();
+    scene.reset(Rgba::rgb(0x000000));
+    let corners = render_api::ImageCorners { radius: 8.0, which: kernel::Corners::TOP_LEFT };
+    scene.push_layer(None).image_rounded(&white, Rect::new(0.25, 0.0, 31.0, 32.0), corners);
+    gpu.draw(&scene, &mut NoGlyphs, true);
+    let (_, _, pixels) = gpu.pixels().expect("drawn");
+    let at = |x: usize, y: usize| pixels[(y * 32 + x) * 4..][..4].to_vec();
+    assert_eq!(at(0, 12), at(0, 20), "the left edge, above and below the middle");
+    assert_eq!(at(0, 0), [0, 0, 0, 255], "the corner cut");
+}

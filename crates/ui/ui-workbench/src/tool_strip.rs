@@ -187,7 +187,7 @@ impl ToolStrip {
             let colors = crate::ds::ButtonColors {
                 icon: st.icon,
                 hover: st.hover,
-                on_back: lit,
+                on_back: Some(lit),
                 on_icon: st.active_icon,
             };
             let spec = crate::ds::ButtonSpec::new(crate::ds::ButtonKind::Ghost)

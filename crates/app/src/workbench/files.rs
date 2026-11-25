@@ -104,7 +104,7 @@ impl Workbench {
         // Its panels (the tree, the structure…) were made for it: made again when shown.
         self.tools.sides.clear();
         self.tools.parked.clear();
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         // What pointed into it.
         self.back.clear();
         self.forward.clear();
@@ -590,7 +590,7 @@ impl Workbench {
         if self.active >= i && self.active > 0 {
             self.active -= 1;
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.layout();
         self.drop_empty_group();
     }
@@ -817,11 +817,8 @@ impl Workbench {
         if i < self.tabs.len() {
             self.tab_bar.reveal_active();
             self.active = i;
-            self.focus = if self.tabs[i].find_open && self.focus == Focus::Find {
-                Focus::Find
-            } else {
-                Focus::Editor
-            };
+            let find = self.tabs[i].find_open && self.focus == Focus::Find;
+            self.move_focus(if find { Focus::Find } else { Focus::Editor });
             self.layout();
         }
     }

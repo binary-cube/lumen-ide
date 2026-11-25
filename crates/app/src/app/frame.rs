@@ -11,6 +11,9 @@ const VIEWS: &str = "views";
 impl EditorApp {
     pub(super) fn render(&mut self) {
         let Some(window) = self.window.clone() else { return };
+        // The app moved its focus since (a command, a tab opened): the pages give the
+        // keyboard back.
+        self.pages_follow_focus();
         // Typing paused long enough: the changed files are saved.
         self.workbench.autosave(false);
         // The view that took the whole screen closed, however it did.
@@ -71,16 +74,20 @@ impl EditorApp {
         }
         // Nothing happened since the last whole frame and nothing else is due: only the
         // theme's decorations are drawn again, over the scene kept.
-        let only_decorations = !self.frames.dirty
+        let quiet = !self.frames.dirty
             && self.frames.full_due.is_some_and(|due| frame_start < due)
             && self.startup.splash.is_gone()
-            && self.startup.first_frame_logged
-            && self.workbench.decorations_drawn();
+            && self.startup.first_frame_logged;
+        let only_decorations = quiet && self.workbench.decorations_drawn();
+        // Only a page the app draws has a new frame: the scene kept is drawn again (the
+        // renderer redraws only where its image changed), nothing of the window repainted.
+        let only_pages =
+            std::mem::take(&mut self.frames.only_pages) && quiet && !self.workbench.animating();
 
         self.ensure_text();
         self.workbench.paint_phases.mark("text_system");
         // A page on screen: what floats is drawn on the layer over it.
-        if !only_decorations {
+        if !only_decorations && !only_pages {
             self.sync_floating(&window);
         }
         let shared = Rc::clone(&self.shared);
@@ -90,8 +97,19 @@ impl EditorApp {
         };
         let only_decorations =
             only_decorations && self.workbench.repaint_decorations(&mut self.frames.scene);
+        // The scene kept (its decorations drawn again, or only the pages' frames new).
+        let only_decorations = only_decorations || only_pages;
         let access =
             access::begin(self.window.as_deref(), &mut self.frames.access, only_decorations);
+        // The pages' own trees made only while a screen reader runs.
+        let reading = self.window.as_deref().and_then(|w| w.access_asked()).is_some();
+        self.web_views.set_access(reading);
+        if access.is_some() {
+            self.workbench.set_page_access(self.web_views.access_trees());
+        } else if !reading {
+            // The last trees let go with the screen reader (once: nothing held after).
+            self.workbench.clear_page_access();
+        }
         // The earliest moment the next whole frame is needed, whatever happens meanwhile.
         let looks_ahead = frame_start + Duration::from_secs(1);
         let mut full_due = looks_ahead;
@@ -141,6 +159,13 @@ impl EditorApp {
                 self.workbench.paint_with_floating(text, &mut self.frames.scene, floating);
                 // The pages over the views, where the views just drew themselves; a page
                 // something opened over, its picture in its place from the next frame.
+                // Asked of the renderer only when a page is made (it copies the frames).
+                let drawing: &dyn render_api::Renderer = &**renderer;
+                self.web_views.set_scale(scale);
+                // The engine just installed: the system's pages made again by it.
+                if web_engine::became_usable(self.web_views.engine_seen()) {
+                    self.web_views.let_go_system_pages();
+                }
                 let pictured = self.web_views.sync(
                     self.workbench.web_pages(),
                     self.workbench.overlay_open(),
@@ -154,27 +179,54 @@ impl EditorApp {
                                 platform_api::WebSource::App { root, entry }
                             }
                         };
-                        window.web_view(source, area, &web_views::data_dir(), inbox)
+                        // Drawn by the app's own engine when it's there; else the system's.
+                        let importer = web_engine::usable().then(|| drawing.frame_importer());
+                        if let Some(importer) = importer.flatten() {
+                            let made = web_engine::Made {
+                                source: &source,
+                                area,
+                                scale,
+                                inbox,
+                                wake: window.waker(),
+                                importer,
+                            };
+                            let page = web_engine::EnginePage::new(made);
+                            let drawn = Some(page.image().clone());
+                            let popup = Some(page.popup_image().clone());
+                            let view = Box::new(page);
+                            return Some(web_views::MadePage { view, drawn, popup });
+                        }
+                        let view = window.web_view(source, area, &web_views::data_dir(), inbox)?;
+                        Some(web_views::MadePage { view, drawn: None, popup: None })
                     },
                 );
                 if pictured {
-                    self.workbench.set_page_pictures(self.web_views.pictures());
+                    let popups = self.web_views.popups();
+                    self.workbench.set_page_pictures(&self.web_views.pictures(), &popups);
                     window.request_redraw();
                 }
-                // What floats over the pages: the mouse there the app's; drawn over them on
-                // the floating layer, else cut out of them (shows through).
-                let holes = self.workbench.page_holes();
+                // What floats over the system's pages: drawn over them on the floating
+                // layer, else cut out of them (shows through). The app's engine's pages are
+                // drawn under it by the app: nothing to cut.
+                let holes = match self.web_views.any_shown() {
+                    true => self.workbench.page_holes(),
+                    false => Vec::new(),
+                };
                 self.web_views.set_holes(&holes, self.frames.floating.is_none());
                 // Their corners as the cards they're in.
                 let workbench = &self.workbench;
                 self.web_views.set_corners(|area| workbench.page_corners(area));
                 if let Some(floating) = &self.frames.floating {
                     // Something open over the views (a menu, a dialog; the pages hidden
-                    // under it): all of the layer; else only where something floats.
-                    let shapes = if self.workbench.overlay_open() {
-                        vec![(kernel::Rect::from_size(viewport), 0.0)]
-                    } else {
-                        holes
+                    // under it): all of the layer; else only where something floats — while
+                    // the layer is there, even on the frame the last system page hides
+                    // (what floats was drawn on it: shown nowhere else).
+                    let shapes = match () {
+                        _ if self.workbench.overlay_open() => {
+                            vec![(kernel::Rect::from_size(viewport), 0.0)]
+                        }
+                        _ if self.web_views.any_shown() => holes,
+                        _ => self.workbench.page_holes(),
                     };
                     floating.layer.set_shapes(&shapes, (FLOATING_SHADOW * scale).ceil());
                     floating.layer.raise();
@@ -347,7 +399,11 @@ impl EditorApp {
         }
         // The caret's place for the system's input methods: told when it moves, not each
         // frame (a frame per hover would bring back their popups, macOS's "US").
-        let area = self.workbench.caret_rect(text);
+        // A page with the keyboard composing text: its; else the editor's caret.
+        let area = self
+            .web_views
+            .caret(!self.workbench.overlay_open())
+            .or_else(|| self.workbench.caret_rect(text));
         if let Some(area) = area
             && self.window_state.ime_area != Some(area)
         {

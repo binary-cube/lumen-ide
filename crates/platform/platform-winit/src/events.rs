@@ -248,6 +248,7 @@ impl ApplicationHandler<UserEvent> for Handler {
                 modifiers: self.state(id).map(|s| s.modifiers).unwrap_or_default(),
                 text: event.text.map(|t| t.to_string()),
                 numpad: event.location == keyboard::KeyLocation::Numpad,
+                physical: physical(event.physical_key),
             }),
             WindowEvent::Ime(ime) => {
                 // A composition starting tells the system the caret's place (its candidates
@@ -379,4 +380,70 @@ fn key(key: &keyboard::Key) -> Key {
         }),
         _ => Key::Unidentified,
     }
+}
+
+/// The character a key's place gives on a US layout (see [`KeyEvent::physical`]).
+fn physical(key: keyboard::PhysicalKey) -> Option<char> {
+    use keyboard::KeyCode as K;
+    let keyboard::PhysicalKey::Code(code) = key else { return None };
+    const LETTERS: [K; 26] = [
+        K::KeyA,
+        K::KeyB,
+        K::KeyC,
+        K::KeyD,
+        K::KeyE,
+        K::KeyF,
+        K::KeyG,
+        K::KeyH,
+        K::KeyI,
+        K::KeyJ,
+        K::KeyK,
+        K::KeyL,
+        K::KeyM,
+        K::KeyN,
+        K::KeyO,
+        K::KeyP,
+        K::KeyQ,
+        K::KeyR,
+        K::KeyS,
+        K::KeyT,
+        K::KeyU,
+        K::KeyV,
+        K::KeyW,
+        K::KeyX,
+        K::KeyY,
+        K::KeyZ,
+    ];
+    const DIGITS: [K; 10] = [
+        K::Digit0,
+        K::Digit1,
+        K::Digit2,
+        K::Digit3,
+        K::Digit4,
+        K::Digit5,
+        K::Digit6,
+        K::Digit7,
+        K::Digit8,
+        K::Digit9,
+    ];
+    if let Some(i) = LETTERS.iter().position(|k| *k == code) {
+        return char::from_u32(u32::from('a') + i as u32);
+    }
+    if let Some(i) = DIGITS.iter().position(|k| *k == code) {
+        return char::from_digit(i as u32, 10);
+    }
+    Some(match code {
+        K::Minus => '-',
+        K::Equal => '=',
+        K::BracketLeft => '[',
+        K::BracketRight => ']',
+        K::Backslash => '\\',
+        K::Semicolon => ';',
+        K::Quote => '\'',
+        K::Comma => ',',
+        K::Period => '.',
+        K::Slash => '/',
+        K::Backquote => '`',
+        _ => return None,
+    })
 }

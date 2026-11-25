@@ -249,6 +249,27 @@ fn the_list_s_scrollbar_thumb_is_dragged() {
         })
     };
     assert!(grab(30, false, &mut text), "the thumb dragged scrolls the list");
+    // Over the thumb, the bar's cursor; held and dragged anywhere, still the bar's; let go
+    // away from it, the modal's own again.
+    let bar = Some(ui_components::scrollbar::CURSOR);
+    let mut view = opened(30, &mut text);
+    let thumb = (100..200)
+        .step_by(4)
+        .flat_map(|y| {
+            (0..40).map(move |dx| Point::new(bounds.max_x() - 24.0 - dx as f32, y as f32))
+        })
+        .find(|&p| {
+            view.hover(p);
+            view.cursor_at(p) == bar
+        })
+        .expect("the thumb");
+    Viewer::press(&mut view, thumb, 1);
+    let away = Point::new(40.0, 40.0);
+    view.drag(away);
+    view.hover(away);
+    assert_eq!(view.cursor_at(away), bar, "held: the bar's wherever it goes");
+    view.release();
+    assert_eq!(view.cursor_at(away), None, "let go: the modal's own");
     assert!(!grab(3, false, &mut text), "all shown: no scrollbar to take");
     assert!(!grab(30, true, &mut text), "the question has no list: its bar isn't hit");
 }

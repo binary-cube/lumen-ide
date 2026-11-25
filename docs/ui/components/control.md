@@ -32,6 +32,7 @@ component (`Picker`, `SearchField`, `TextInput`, `MultilineField`, `DataGrid`, `
 | `press(p, clicks)` / `press_with(…, mods)` | `Ignored` | `Took`, or `Held` (moves go to `drag` until `release`) |
 | `drag` / `release` / `hover(Option<p>)` | `false` | what it shows changed |
 | `cursor(p)` / `tooltip(p)` / `menu(p)` | none | its cursor, `Tip`, right-click rows |
+| `owns_cursor(p)` | `false` | its cursor wins over the view's own there (a bar's thumb, held or hovered) |
 | `scroll(dx, dy)` / `takes_wheel(p)` | `false` | it scrolled / keeps the wheel at its end |
 | `focusable` / `set_focus` / `in_tab_order` / `keeps_tab` | `false` / — / focusable / `false` | the focus and Tab |
 | `captures_keys` | `false` | while shown, the keys, text and commands are its own (an open list) |
@@ -59,6 +60,16 @@ TextInput`.
   takes the focus. `drag` / `release` go to the held part wherever the mouse is.
 - `hover(parts, p)`: the part left and the one entered are told; cursor and tooltip kept
   (`cursor_at`, `tooltip_at` answer from `&self`).
+- The cursor: a view asks `cursor_or(p, own)` (its parts' cursor, else its own: a row's
+  hand), or `bar_or(p, own)` when its own wins over its parts' but not over a bar's
+  (`bar_cursor(p)` alone where it has more to decide first). Over a scrollbar's thumb, and
+  while it's dragged anywhere, the cursor is always the bar's (`scrollbar::CURSOR`), never
+  a field's or a row's under it. While a part is held, `hover` keeps the held part's cursor
+  (the app hovers before it asks); let go, `release` gives back the cursor of what's under
+  the mouse at once (the app asks again before the mouse moves).
+- A part that is a bar wherever it's hit (a thumb, a lane of its own) says so with
+  `ui_components::bar_cursor!()` in its `Control` impl: its `cursor` is the bar's and it
+  `owns_cursor`.
 - `key`: Tab / ⇧Tab move the focus among parts in the Tab order, unless the focused one
   `keeps_tab`; others go to the part capturing keys, else the focused one. `text`, `paste`,
   `command` likewise (one capturing that doesn't take them passes them on).

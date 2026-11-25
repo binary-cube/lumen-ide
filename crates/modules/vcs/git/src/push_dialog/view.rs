@@ -475,7 +475,7 @@ impl Viewer for PushDialog {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        self.controls.cursor_at(p).or_else(|| self.hit(p).map(|_| ViewerCursor::Pointer))
+        self.controls.cursor_or(p, || self.hit(p).map(|_| ViewerCursor::Pointer))
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {

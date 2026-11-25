@@ -1,0 +1,40 @@
+[package]
+name = "web-engine"
+description = "The app's side of its web engine (plan 99): one connection to the shared web-host for every window and project, started when none runs, the pages opened through it, and the engine downloaded and kept up to date."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+files.workspace = true
+kernel.workspace = true
+interprocess.workspace = true
+pinned-downloads.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+web-engine-protocol.workspace = true
+web-engine-versions.workspace = true
+web-host-core.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# The peer's audit token on macOS (`LOCAL_PEERTOKEN`); the user's id for a private folder.
+libc = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+mach-ports.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_IO", "Win32_System_Threading"] }
+
+[dev-dependencies]
+# Packages made and served in memory; lists signed by the tests.
+pinned-downloads = { workspace = true, features = ["fake"] }
+ring = "0.17"
+
+[lints]
+workspace = true

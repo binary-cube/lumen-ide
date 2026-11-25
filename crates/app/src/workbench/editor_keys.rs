@@ -47,7 +47,7 @@ impl Workbench {
                 let focus = self.focus;
                 self.side_action(text, action);
                 if keeps {
-                    self.focus = focus;
+                    self.move_focus(focus);
                 }
             }
             return Some(used);

@@ -299,6 +299,12 @@ fn the_scrollbar_follows_the_history_and_drags_it() {
     paint(&mut view, &mut text);
     view.press(top, 1);
     assert!(view.grid.display_offset > 0, "the history jumped toward its start");
+    // Over the bar, and held over the text: the bar's cursor, never the text's.
+    assert_eq!(view.cursor_at(top), Some(ui_components::scrollbar::CURSOR), "the bar's");
+    let text_at = view.grid_area.center();
+    view.drag(text_at);
+    view.hover(text_at);
+    assert_eq!(view.cursor_at(text_at), Some(ui_components::scrollbar::CURSOR), "held: the bar's");
     view.release();
     // Nothing to scroll: no bar.
     let (view, _) = painted(FakeSession::new(10, 200, 50));

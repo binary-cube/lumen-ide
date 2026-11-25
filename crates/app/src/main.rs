@@ -24,6 +24,7 @@ mod file_settings;
 mod final_newline;
 mod floating;
 mod frameworks;
+mod gpu_settings;
 mod icon_style;
 mod insight;
 mod instance;
@@ -176,6 +177,10 @@ fn main() -> anyhow::Result<()> {
     }
 
     startup::mark("logging ready");
+    // The web engine lives under the app's data folder (its tests choose their own).
+    if let Some(data) = files::places::data_dir() {
+        web_engine::install::service::place_under(&data);
+    }
 
     let mut args: Vec<_> = std::env::args_os().skip(1).collect();
     let snapshot =
@@ -231,9 +236,13 @@ fn main() -> anyhow::Result<()> {
     let transparent = cfg!(windows)
         && matches!(preferred_api, GpuApi::Auto | GpuApi::Dx12)
         && std::env::var("EDITOR_DX12_HWND").is_err();
+    // The GPU chosen in the settings (where there are several).
+    let gpu = render_api::GpuPreference::parse(&crate::config::settings().get(&settings::GPU))
+        .unwrap_or_default();
     let render_options = RenderOptions {
         vsync: std::env::var("EDITOR_VSYNC").map_or(true, |v| v != "0"),
         preferred_api,
+        gpu,
         transparent,
     };
     if snapshot.is_none() {

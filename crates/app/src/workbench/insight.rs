@@ -567,7 +567,7 @@ impl Workbench {
             .find(|l| buffer.line_of(l.offset.min(buffer.len())) as u32 == line)
             .and_then(|l| Some((l.offset, l.parts.get(part)?.1)));
         let Some((offset, action)) = found else { return false };
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.edit(text, |doc| {
             commands::click(doc, offset.min(doc.buffer().len()) + 1, false, false)
         });

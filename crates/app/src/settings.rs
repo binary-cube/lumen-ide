@@ -247,3 +247,10 @@ pub const TOAST_POSITION: Setting<workbench_model::ToastPosition> =
 /// 1–9, 0 none), chosen by the user; it takes it when it opens, if it's free.
 pub const PROJECT_NUMBER: Setting<i64> =
     Setting::new("project", "number", || 0).valid(|n| (0..=9).contains(n));
+
+/// The GPU that draws where the computer has several (`[graphics] gpu`): `system` (the
+/// default: the system's choice — the user's setting for the app, its power policy),
+/// `integrated` (saves the battery) or `dedicated` (stronger). Applied at the next start:
+/// the GPU is chosen once, before the first window. The web engine draws on the same one.
+pub const GPU: Setting<String> = Setting::new("graphics", "gpu", || "system".to_owned())
+    .valid(|v| render_api::GpuPreference::parse(v).is_some());

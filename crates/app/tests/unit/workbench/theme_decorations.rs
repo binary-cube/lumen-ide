@@ -162,6 +162,8 @@ fn they_move_again_whenever_the_window_comes_back() {
     wb.window_returned(back, true);
     assert!(wb.decorations_deadline(back).is_some(), "back in front: they move");
     // Relax mode started by itself in the unfocused window, closed once back: moving again.
+    // Its settings are the process's (another test's window would set them back).
+    let _alone = crate::modules::hold_process();
     let relax = relax::settings::config();
     relax::settings::set_config(relax::settings::Config {
         idle_minutes: Some(5),

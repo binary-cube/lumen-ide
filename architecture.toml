@@ -75,7 +75,10 @@ external = ["serde", "thiserror", "raw-window-handle"]
 [[layer]]
 name = "platform-impl"
 paths = ["crates/platform/*"]
-may_use = ["kernel", "platform-api"]
+# `infra-shared`: an app page's rules (`web-pages`), the same for every engine. The check
+# allows whole layers, not single crates: `web-pages` is the only one of that layer a
+# platform crate uses, and another needs its reason written here first.
+may_use = ["kernel", "platform-api", "infra-shared"]
 
 [[layer]]
 name = "ui"
@@ -91,8 +94,21 @@ paths = [
     "crates/infra/files/files",
     "crates/infra/files/pinned-downloads",
     "crates/infra/code/lsp-protocol",
+    # What the app and its web engine's process say to each other (plan 99): the app's
+    # `web-engine` and the separate `web-host` program both use it.
+    "crates/infra/system/web-engine-protocol",
+    # The web engine's process apart from the engine (its shared channel, clients, pages):
+    # the separate `web-host` program builds on it; the app's `web-engine` connects through
+    # its channel.
+    "crates/infra/system/web-host-core",
+    # An app's web page apart from the engine (its files, its content policy): the same
+    # rules for the system's engine (`platform-winit`) and Chromium (`web-host`).
+    "crates/infra/system/web-pages",
+    # macOS: Mach ports passed between two processes (the web engine's frames).
+    "crates/infra/system/mach-ports",
 ]
-may_use = ["kernel"]
+# One shared tool may build on another (the web host's core on its protocol).
+may_use = ["kernel", "infra-shared"]
 
 [[layer]]
 name = "infra"
@@ -118,6 +134,14 @@ paths = ["crates/language-server"]
 [[layer]]
 name = "tool"
 paths = ["xtask"]
+
+# Outside every layer: `web-host/`, the web engine's own program (plan 99), is a Cargo
+# project apart from the workspace (CEF is downloaded at its build and exists only for
+# MSVC on Windows), so this check never reads it. It builds on `infra-shared` only
+# (`web-engine-protocol`, `web-host-core`, `web-pages`, `mach-ports`); its consumption test
+# (`web-host/tests/consumption.rs`) also uses, as dev-dependencies, the app's side of the
+# channel (`web-engine`, infra) and a process tree's figures (`process-stats`): the app's
+# side is what that test drives, never code the program ships.
 
 # The app's own screens change often: only these layers build on them, so that changing a
 # screen recompiles only the app (modules use `ui-components`).
@@ -168,5 +192,8 @@ http-scripts = ["http-client"]
 # The app's own updates, checked, downloaded and put in place: the updates' module (and
 # the app, which starts the helper as it quits).
 self-update = ["updates"]
+# The app's web engine (plan 99): drawn through by the app; offered, downloaded and kept up
+# to date by its install's module.
+web-engine = ["web-engine-install"]
 # The app's log, read back: its viewer's.
 logging = ["log-viewer"]

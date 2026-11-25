@@ -350,3 +350,138 @@ fn a_closed_list_has_no_keys() {
     assert_eq!(c.text(&mut parts, "x"), None);
     assert_eq!(c.key(&mut parts, ViewerKey::Down, KeyReach::default()), None);
 }
+
+/// A text area under a bar: the I-beam everywhere it is.
+struct TextArea(Rect);
+
+impl Control for TextArea {
+    fn hit(&self, p: Point) -> bool {
+        self.0.contains(p)
+    }
+
+    fn cursor(&self, _p: Point) -> Option<ViewerCursor> {
+        Some(ViewerCursor::Text)
+    }
+}
+
+/// Over a bar (a thumb, a scrolled area's bar) the cursor is the scrollbar's own, never the
+/// text's under it, whatever was hovered before; while held, the bar's wherever the pointer
+/// goes. Off the bar, a scrolled area leaves the cursor to what's under it.
+#[test]
+fn the_cursor_over_a_bar_is_the_scrollbar_s() {
+    let area = Rect::new(0.0, 0.0, 500.0, 400.0);
+    let mut bar = crate::scrollbar::EdgeScrollbar::default();
+    bar.paint(&mut render_api::Scene::default(), &crate::Palette::dark(), 1.0, area, 4000.0, 0.0);
+    let on_bar = (0..16)
+        .map(|dx| Point::new(area.max_x() - 1.0 - dx as f32, 10.0))
+        .find(|p| bar.contains(*p))
+        .expect("the bar along the right edge");
+    let inside = Point::new(100.0, 100.0);
+    let mut text = TextArea(area);
+    let mut offset = 0.0;
+    let mut c = Controls::default();
+    {
+        let mut thumb = Thumb { bar: &mut bar, offset: &mut offset };
+        let mut parts: [&mut dyn Control; 2] = [&mut thumb, &mut text];
+        for p in [inside, on_bar, inside, on_bar] {
+            c.hover(&mut parts, Some(p));
+        }
+        assert_eq!(c.cursor_at(on_bar), Some(crate::scrollbar::CURSOR));
+        c.hover(&mut parts, Some(inside));
+        assert_eq!(c.cursor_at(inside), Some(ViewerCursor::Text));
+        c.hover(&mut parts, Some(on_bar));
+        assert_eq!(c.press(&mut parts, on_bar, 1).map(|(i, _)| i), Some(0), "the thumb held");
+        c.drag(&mut parts, inside);
+        assert_eq!(c.cursor_at(inside), Some(crate::scrollbar::CURSOR), "held: the bar's");
+        c.release(&mut parts);
+    }
+    let mut scrolled = Scrolled { bar: &mut bar, offset: &mut offset, area, max: 3600.0 };
+    let mut parts: [&mut dyn Control; 2] = [&mut scrolled, &mut text];
+    c.hover(&mut parts, Some(on_bar));
+    assert_eq!(c.cursor_at(on_bar), Some(crate::scrollbar::CURSOR));
+    assert_eq!(c.bar_cursor(on_bar), Some(crate::scrollbar::CURSOR), "known as a bar's");
+    c.hover(&mut parts, Some(inside));
+    assert_eq!(c.cursor_at(inside), Some(ViewerCursor::Text), "off the bar: the text's");
+    assert_eq!(c.bar_cursor(inside), None, "the text's is no bar's");
+    // Its thumb held and dragged into the area: the bar's cursor still, not the text's.
+    c.hover(&mut parts, Some(on_bar));
+    assert_eq!(c.press(&mut parts, on_bar, 1).map(|(i, _)| i), Some(0), "the bar held");
+    c.drag(&mut parts, inside);
+    assert_eq!(c.cursor_at(inside), Some(crate::scrollbar::CURSOR), "held: the bar's");
+    assert_eq!(c.bar_cursor(inside), Some(crate::scrollbar::CURSOR));
+    // The app hovers before it asks: held, the bar's still.
+    c.hover(&mut parts, Some(inside));
+    assert_eq!(c.bar_cursor(inside), Some(crate::scrollbar::CURSOR), "hovered while held");
+    c.release(&mut parts);
+    c.hover(&mut parts, Some(inside));
+    assert_eq!(c.bar_cursor(inside), None, "let go: the view's again");
+}
+
+/// A view's cursor: its parts' first (a bar's, a field's), else its own.
+#[test]
+fn a_view_s_cursor_is_its_parts_else_its_own() {
+    let mut text = TextArea(Rect::new(0.0, 0.0, 10.0, 10.0));
+    let mut c = Controls::default();
+    let mut parts: [&mut dyn Control; 1] = [&mut text];
+    let field = Point::new(5.0, 5.0);
+    let beside = Point::new(50.0, 5.0);
+    c.hover(&mut parts, Some(field));
+    assert_eq!(c.cursor_or(field, || Some(ViewerCursor::Pointer)), Some(ViewerCursor::Text));
+    c.hover(&mut parts, Some(beside));
+    assert_eq!(c.cursor_or(beside, || Some(ViewerCursor::Pointer)), Some(ViewerCursor::Pointer));
+}
+
+/// A bar let go over the text gives it its cursor back at once (the app asks before the
+/// mouse moves again); let go over the bar, the bar's stays.
+#[test]
+fn a_bar_let_go_gives_the_cursor_back() {
+    let area = Rect::new(0.0, 0.0, 500.0, 400.0);
+    let mut bar = crate::scrollbar::EdgeScrollbar::default();
+    bar.paint(&mut render_api::Scene::default(), &crate::Palette::dark(), 1.0, area, 4000.0, 0.0);
+    let on_bar = (0..16)
+        .map(|dx| Point::new(area.max_x() - 1.0 - dx as f32, 10.0))
+        .find(|p| bar.contains(*p))
+        .expect("the bar along the right edge");
+    let inside = Point::new(100.0, 100.0);
+    let mut text = TextArea(area);
+    let mut offset = 0.0;
+    let mut thumb = Thumb { bar: &mut bar, offset: &mut offset };
+    let mut parts: [&mut dyn Control; 2] = [&mut thumb, &mut text];
+    let mut c = Controls::default();
+    c.hover(&mut parts, Some(on_bar));
+    assert!(c.press(&mut parts, on_bar, 1).is_some(), "the thumb held");
+    c.drag(&mut parts, inside);
+    assert_eq!(c.bar_cursor(inside), Some(crate::scrollbar::CURSOR), "held: the bar's");
+    c.release(&mut parts);
+    assert_eq!(c.bar_cursor(inside), None, "let go over the text: no bar's");
+    assert_eq!(c.cursor_at(inside), Some(ViewerCursor::Text), "the text's, before a move");
+    // Let go over the bar itself: still the bar's.
+    c.hover(&mut parts, Some(on_bar));
+    assert!(c.press(&mut parts, on_bar, 1).is_some());
+    c.release(&mut parts);
+    assert_eq!(c.bar_cursor(on_bar), Some(crate::scrollbar::CURSOR));
+}
+
+/// A view whose own cursor wins over its parts' but not over a bar's: the bar's over it
+/// (or held), the view's elsewhere, even over a part that says one.
+#[test]
+fn a_bar_s_cursor_wins_over_the_view_s_own() {
+    let area = Rect::new(0.0, 0.0, 500.0, 400.0);
+    let mut bar = crate::scrollbar::EdgeScrollbar::default();
+    bar.paint(&mut render_api::Scene::default(), &crate::Palette::dark(), 1.0, area, 4000.0, 0.0);
+    let on_bar = (0..16)
+        .map(|dx| Point::new(area.max_x() - 1.0 - dx as f32, 10.0))
+        .find(|p| bar.contains(*p))
+        .expect("the bar along the right edge");
+    let inside = Point::new(100.0, 100.0);
+    let mut text = TextArea(area);
+    let mut offset = 0.0;
+    let mut thumb = Thumb { bar: &mut bar, offset: &mut offset };
+    let mut parts: [&mut dyn Control; 2] = [&mut thumb, &mut text];
+    let mut c = Controls::default();
+    let hand = || Some(ViewerCursor::Pointer);
+    c.hover(&mut parts, Some(on_bar));
+    assert_eq!(c.bar_or(on_bar, hand), Some(crate::scrollbar::CURSOR));
+    c.hover(&mut parts, Some(inside));
+    assert_eq!(c.bar_or(inside, hand), Some(ViewerCursor::Pointer), "the view's, not the text's");
+}

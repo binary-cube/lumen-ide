@@ -12,14 +12,22 @@ serde_json.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
 # `sql-data`: SQLite's functions, from the very SQLite the app bundles.
 rusqlite.workspace = true
-# `lsp-bundle`: the manifest, and the downloads' checksums.
+# `lsp-bundle`: the manifest (the downloads' checksums are `pinned_downloads::digest`'s).
 toml.workspace = true
-sha2 = "0.10"
 # A native server released as one gzipped program (taplo).
 flate2 = "1"
-# `release-key` / `release-manifest`: the release's manifest signed (plan 84b).
-ed25519-dalek = "3"
-getrandom = "0.3"
+# `release-key` / `release-manifest`: the release's manifest signed (plan 84b), with the
+# library the app checks it with; its seed is the key's secret half, as written in hex.
+ring.workspace = true
+# Signatures checked as the app checks them; an engine's package unpacked by the app's own
+# unpacking in the tests.
+pinned-downloads.workspace = true
+# The package's description, the list and versions: the same types the app reads them with.
+web-engine-protocol.workspace = true
+web-engine-versions.workspace = true
+# `web-engine-package`: the package's xz, written by our code (the same Rust library the
+# app reads it with), never a system `tar`.
+lzma-rust2 = { workspace = true, features = ["encoder", "optimization"] }
 
 [lints]
 workspace = true

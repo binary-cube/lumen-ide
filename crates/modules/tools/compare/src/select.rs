@@ -19,6 +19,20 @@ pub(crate) struct TextSelection {
     pub(crate) which: usize,
     pub(crate) anchor: TextPos,
     pub(crate) head: TextPos,
+    /// What a drag goes by: characters, or the word or line the clicks took (never cut).
+    pub(crate) unit: Unit,
+}
+
+/// What a selection's drag goes by: after one click, characters; after two, whole words
+/// (the first one kept whole); after three, whole lines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Unit {
+    #[default]
+    Character,
+    /// The word double-clicked, from where to where.
+    Word(TextPos, TextPos),
+    /// The line triple-clicked.
+    Line(usize),
 }
 
 impl TextSelection {
@@ -31,16 +45,24 @@ impl TextSelection {
     }
 }
 
+/// The columns a tab is drawn as.
+const TAB_COLUMNS: usize = 4;
+
+/// The columns `c` is drawn as (a tab as [`TAB_COLUMNS`]).
+fn drawn_width(c: char) -> usize {
+    if c == '\t' { TAB_COLUMNS } else { 1 }
+}
+
 /// How wide `line` is drawn, in columns (a tab as four).
 fn drawn_len(line: &str) -> usize {
-    line.chars().map(|c| if c == '\t' { 4 } else { 1 }).sum()
+    line.chars().map(drawn_width).sum()
 }
 
 /// The byte where drawn column `col` starts in `line` (a column inside a tab: the tab's).
 fn byte_at(line: &str, col: usize) -> usize {
     let mut at = 0;
     for (i, c) in line.char_indices() {
-        let w = if c == '\t' { 4 } else { 1 };
+        let w = drawn_width(c);
         if at + w > col {
             return i;
         }
@@ -49,34 +71,25 @@ fn byte_at(line: &str, col: usize) -> usize {
     line.len()
 }
 
-/// The drawn columns of the word around `col` (letters, digits, `_`, `$`).
+/// The drawn columns of the word around `col` (letters, digits, `_`, `$`): walked once,
+/// nothing gathered (asked at each move of a drag by words).
 fn word_at(line: &str, col: usize) -> (usize, usize) {
-    let chars: Vec<char> = line.chars().collect();
     let word = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
-    let drawn =
-        |i: usize| -> usize { chars[..i].iter().map(|c| if *c == '\t' { 4 } else { 1 }).sum() };
-    // The character under the column.
-    let mut at = 0;
-    let mut i = 0;
-    while i < chars.len() {
-        let w = if chars[i] == '\t' { 4 } else { 1 };
+    let mut chars = line.chars();
+    // The drawn column reached, and where the run of word characters up to it began.
+    let (mut at, mut start) = (0, None);
+    while let Some(c) = chars.next() {
+        let w = drawn_width(c);
+        start = if word(c) { start.or(Some(at)) } else { None };
         if at + w > col {
-            break;
+            // The character under the column: a word's, or none.
+            let Some(start) = start else { return (col, col) };
+            let rest: usize = chars.by_ref().take_while(|c| word(*c)).map(drawn_width).sum();
+            return (start, at + w + rest);
         }
         at += w;
-        i += 1;
     }
-    if i >= chars.len() || !word(chars[i]) {
-        return (col, col);
-    }
-    let (mut a, mut b) = (i, i + 1);
-    while a > 0 && word(chars[a - 1]) {
-        a -= 1;
-    }
-    while b < chars.len() && word(chars[b]) {
-        b += 1;
-    }
-    (drawn(a), drawn(b))
+    (col, col)
 }
 
 impl Compare {
@@ -122,28 +135,50 @@ impl Compare {
     pub(crate) fn begin_select(&mut self, which: usize, p: Point, clicks: u32) {
         let at = self.text_pos(which, p);
         let line = self.line_in(at.row, which).unwrap_or_default();
-        let (anchor, head) = match clicks {
+        let (anchor, head, unit) = match clicks {
             2 => {
                 let (a, b) = word_at(line, at.col);
-                (TextPos { row: at.row, col: a }, TextPos { row: at.row, col: b })
+                let (from, to) = (TextPos { row: at.row, col: a }, TextPos { row: at.row, col: b });
+                (from, to, Unit::Word(from, to))
             }
             c if c >= 3 => {
-                (TextPos { row: at.row, col: 0 }, TextPos { row: at.row, col: drawn_len(line) })
+                let to = TextPos { row: at.row, col: drawn_len(line) };
+                (TextPos { row: at.row, col: 0 }, to, Unit::Line(at.row))
             }
-            _ => (at, at),
+            _ => (at, at, Unit::Character),
         };
-        self.selection = Some(TextSelection { which, anchor, head });
+        self.selection = Some(TextSelection { which, anchor, head, unit });
         self.selecting = true;
+    }
+
+    /// Where a drag to `at` takes a selection that goes by `unit`, from what the clicks took:
+    /// characters reach `at`; words and lines cover the first one and the one at `at`, never
+    /// cut (as the editor's).
+    fn extended(&self, sel: TextSelection, at: TextPos) -> (TextPos, TextPos) {
+        let line_end =
+            |row: usize| TextPos { row, col: self.line_in(row, sel.which).map_or(0, drawn_len) };
+        match sel.unit {
+            Unit::Character => (sel.anchor, at),
+            Unit::Word(from, to) => {
+                let line = self.line_in(at.row, sel.which).unwrap_or_default();
+                let (a, b) = word_at(line, at.col);
+                let (start, end) =
+                    (TextPos { row: at.row, col: a }, TextPos { row: at.row, col: b });
+                if start < from { (to, start) } else { (from, end.max(to)) }
+            }
+            Unit::Line(row) if at.row < row => (line_end(row), TextPos { row: at.row, col: 0 }),
+            Unit::Line(row) => (TextPos { row, col: 0 }, line_end(at.row)),
+        }
     }
 
     /// The mouse dragged while selecting: the selection reaches it (in its column).
     pub(crate) fn drag_select(&mut self, p: Point) -> bool {
         let Some(mut sel) = self.selection.filter(|_| self.selecting) else { return false };
-        let head = self.text_pos(sel.which, p);
-        if head == sel.head {
+        let (anchor, head) = self.extended(sel, self.text_pos(sel.which, p));
+        if (anchor, head) == (sel.anchor, sel.head) {
             return false;
         }
-        sel.head = head;
+        (sel.anchor, sel.head) = (anchor, head);
         self.selection = Some(sel);
         true
     }
@@ -156,6 +191,7 @@ impl Compare {
             which,
             anchor: TextPos::default(),
             head: TextPos { row: last, col: end },
+            unit: Unit::Character,
         });
     }
 

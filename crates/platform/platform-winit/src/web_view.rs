@@ -5,7 +5,7 @@
 //! - **HTML given** (a response's): its scripts don't run (a response's page can't call out
 //!   from the app, to the user's own network either), a link followed inside it isn't
 //!   (nothing navigates away from what the app showed), it keeps nothing (incognito).
-//! - **A trusted app** (a folder on this computer, [`web_app`]): its files served through
+//! - **A trusted app** (a folder on this computer, [`web_pages`]): its files served through
 //!   the app's own scheme by a worker (`web-app`), its scripts running under a policy that
 //!   keeps it off the network, going nowhere but its own files, opening no window (a link
 //!   it wants opened is told to the host), downloading nothing. Its messages come through
@@ -19,8 +19,6 @@ use std::sync::Arc;
 
 use kernel::Rect;
 use platform_api::{WebEvent, WebInbox, WebSource};
-
-use crate::web_app;
 
 /// What the web engine shows for the app.
 pub(crate) struct WryWebView {
@@ -154,22 +152,37 @@ fn app_page<'a>(
     inbox: WebInbox,
 ) -> wry::WebViewBuilder<'a> {
     let inbox = Rc::new(inbox);
-    let root: Arc<std::path::Path> = Arc::from(root);
+    // Its folder resolved once, at its first request (not per resource).
+    let root = Arc::new(web_pages::Root::new(root));
     let builder = builder
-        .with_url(web_app::entry_url(entry))
+        .with_url(web_pages::entry_url(entry))
         .with_clipboard(true)
-        .with_asynchronous_custom_protocol(web_app::SCHEME.to_owned(), move |_, request, reply| {
-            // Read on a worker: an app asks for hundreds of files as it starts.
-            let root = Arc::clone(&root);
-            let method = request.method().as_str().to_owned();
-            let host = request.uri().host().map(str::to_owned);
-            let path = request.uri().path().to_owned();
-            kernel::work::run("web-app", move || {
-                let served = web_app::serve(&root, &method, host.as_deref(), &path);
-                reply.respond(response_of(served));
-            });
+        .with_asynchronous_custom_protocol(
+            web_pages::SCHEME.to_owned(),
+            move |_, request, reply| {
+                // Read on a worker: an app asks for hundreds of files as it starts.
+                let root = Arc::clone(&root);
+                let method = request.method().as_str().to_owned();
+                let host = request.uri().host().map(str::to_owned);
+                let path = request.uri().path().to_owned();
+                kernel::work::run("web-app", move || {
+                    let served = root.serve(&method, host.as_deref(), &path);
+                    reply.respond(response_of(served));
+                });
+            },
+        )
+        .with_navigation_handler(|url| web_pages::allows_navigation(&url))
+        // Loaded: its view's loader under it stops.
+        .with_on_page_load_handler({
+            let inbox = Rc::clone(&inbox);
+            let window = Arc::clone(window);
+            move |event, _| {
+                if matches!(event, wry::PageLoadEvent::Finished) {
+                    inbox(WebEvent::Shown);
+                    window.request_redraw();
+                }
+            }
         })
-        .with_navigation_handler(|url| web_app::allows_navigation(&url))
         .with_new_window_req_handler({
             let inbox = Rc::clone(&inbox);
             let window = Arc::clone(window);
@@ -187,7 +200,7 @@ fn app_page<'a>(
             let window = Arc::clone(window);
             move |request: wry::http::Request<String>| {
                 let from = request.uri().to_string();
-                if !web_app::allows_navigation(&from) {
+                if !web_pages::allows_navigation(&from) {
                     tracing::warn!(%from, "a message from outside the app dropped");
                     return;
                 }
@@ -211,13 +224,13 @@ fn app_page<'a>(
 }
 
 /// What the engine is answered with for a request to an app's scheme.
-fn response_of(served: web_app::Served) -> wry::http::Response<Vec<u8>> {
+fn response_of(served: web_pages::Served) -> wry::http::Response<Vec<u8>> {
     let mut response = wry::http::Response::builder()
         .status(served.status)
         .header(wry::http::header::CONTENT_TYPE, served.mime)
         .header("X-Content-Type-Options", "nosniff");
     if served.policy {
-        response = response.header("Content-Security-Policy", web_app::CSP);
+        response = response.header("Content-Security-Policy", web_pages::CSP);
     }
     response.body(served.body).unwrap_or_else(|e| {
         tracing::warn!(error = %e, "an app's answer wasn't made");
@@ -317,7 +330,7 @@ impl platform_api::WebView for WryWebView {
         if !self.app {
             return;
         }
-        if let Err(e) = self.view.evaluate_script(&web_app::receive_script(message)) {
+        if let Err(e) = self.view.evaluate_script(&web_pages::receive_script(message)) {
             tracing::warn!(error = %e, "a message wasn't given to the app's page");
         }
     }

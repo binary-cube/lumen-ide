@@ -114,9 +114,20 @@ fn the_statements_thumb_is_dragged() {
         .find(|p| view.bar.contains(*p))
         .expect("a scrollbar along the statements");
     let at = Point::new(on.x + 1.0, on.y + 2.0);
+    let bar = Some(ui_components::scrollbar::CURSOR);
+    view.hover(at);
+    assert_eq!(view.cursor_at(at), bar, "the bar's");
     assert_eq!(view.click(at), None);
     assert!(view.drag(Point::new(at.x, at.y + 40.0)));
     assert!(view.scroll > 0.0, "the statements moved");
+    // Dragged over the tick: the bar's cursor still, not its hand.
+    let tick = Rect::new(20.0, 20.0, 120.0, 30.0);
+    view.hits.push((tick, Hit::Confirm));
+    let tick = tick.center();
+    view.drag(tick);
+    view.hover(tick);
+    assert_eq!(view.cursor_at(tick), bar, "held: the bar's");
     assert!(view.release());
+    assert_eq!(view.cursor_at(tick), Some(ui_components::ViewerCursor::Pointer), "let go");
     assert!(!view.confirmed, "the tick untouched");
 }

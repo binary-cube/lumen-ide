@@ -2,11 +2,17 @@
 
 use super::*;
 
+/// The lines a wheel's notch scrolls, the editor's and the pages' alike.
+pub(super) const WHEEL_LINES: f32 = 3.0;
+
 impl EditorApp {
     pub(super) fn event_inner(&mut self, event: PlatformEvent) -> Control {
         if self.frames.renderer.is_none() {
             return Control::Close;
         }
+        // The app moved its focus since the last event (a command, a tab opened by work
+        // done): the pages give the keyboard back before anything else is routed.
+        self.pages_follow_focus();
         // A profile recording counts what the user did and what the window went through
         // (a wake isn't counted: the poll it leads to names who had something new).
         if kernel::probe::recording() {
@@ -38,6 +44,8 @@ impl EditorApp {
                     // What changed meanwhile in the open files (the folders shown: the
                     // project panel's own check), compared off this thread.
                     self.workbench.check_open_files();
+                    // The page that had the keyboard has it again.
+                    self.web_views.window_back();
                 }
                 self.window_state.occluded = false;
                 self.window_state.hidden = None;
@@ -58,6 +66,8 @@ impl EditorApp {
             }
             PlatformEvent::CursorMoved(p) => self.on_cursor_moved(p),
             PlatformEvent::CursorLeft => {
+                self.web_views.pointer_left(self.pointer.cursor);
+                self.pointer.over_page = false;
                 if self.workbench.pointer_left() {
                     self.redraw();
                 }
@@ -69,22 +79,10 @@ impl EditorApp {
                 }
             }
             PlatformEvent::Scroll(delta) => self.on_scroll(delta),
-            PlatformEvent::MouseDown { button: MouseButton::Left, position, modifiers } => {
-                // On the window, not on a page over it: the keyboard back from the pages.
-                self.web_views.release_focus();
-                self.double_shift.cancel();
-                self.alt_tap.cancel();
-                self.mouse_down(position, modifiers.shift, modifiers.alt, modifiers.primary());
+            PlatformEvent::MouseDown { button, position, modifiers } => {
+                self.on_mouse_down(button, position, modifiers)
             }
-            PlatformEvent::MouseUp { button: MouseButton::Left, .. } => {
-                self.pointer.dragging = false;
-                if self.with_text(Workbench::mouse_up).unwrap_or(false) {
-                    self.redraw();
-                }
-            }
-            PlatformEvent::MouseDown { button: MouseButton::Right, position, .. } => {
-                self.on_right_click(position)
-            }
+            PlatformEvent::MouseUp { button, position } => self.on_mouse_up(button, position),
             PlatformEvent::Ime(ime) => self.on_ime(ime),
             PlatformEvent::Access(request) => self.on_access(request),
             PlatformEvent::SystemAppearanceChanged(appearance) => {
@@ -96,19 +94,27 @@ impl EditorApp {
             // by `sync_menu_states` after the event.
             PlatformEvent::MenuOpening => self.window_state.menu_context = None,
             PlatformEvent::ScreenColor(color) => self.on_screen_color(color),
+            // Files from the system: a page that takes them where it is, else the editor's.
             PlatformEvent::FilesHovered { paths, position } => {
                 self.pointer.cursor = position;
-                self.workbench.drag_files_over(&paths, position);
-                self.redraw();
+                self.web_views.files_entered(&paths);
+                self.files_moved(position);
             }
             PlatformEvent::FilesHoverCancelled => {
+                self.web_views.files_ended(None);
                 if self.workbench.end_file_drag() {
                     self.redraw();
                 }
             }
             PlatformEvent::FilesDropped { paths, position } => {
                 self.pointer.cursor = position;
-                self.drop_files(&paths, position);
+                // Where they're let go (the pointer may have moved since the last move told).
+                if self.web_views.files_dragged() {
+                    self.files_moved(position);
+                }
+                if !self.web_views.files_ended(Some(position)) {
+                    self.drop_files(&paths, position);
+                }
             }
             PlatformEvent::Command(id) => return self.on_menu_command(id),
             PlatformEvent::Key(key) => return self.on_key(key),
@@ -130,6 +136,8 @@ impl EditorApp {
             // the frame kept for quick redraws given back (a window-sized texture, ~24 MB on
             // a large Retina one): it rarely draws now; the next frame is drawn whole.
             PlatformEvent::Focused(false) => {
+                // Its buttons' releases go to the program that took the focus.
+                self.web_views.window_left(self.pointer.cursor);
                 self.workbench.project_left();
                 self.capture_window(false);
                 for renderer in self.frames.renderers() {
@@ -137,9 +145,55 @@ impl EditorApp {
                 }
                 self.workbench.icons().release_drawings();
             }
-            PlatformEvent::MouseDown { .. } | PlatformEvent::MouseUp { .. } => {}
         }
         Control::Continue
+    }
+
+    /// A press: a page the app draws under the mouse takes it (and holds the mouse, and has
+    /// the keyboard); elsewhere the pages give the keyboard back and it's the window's.
+    pub(super) fn on_mouse_down(
+        &mut self,
+        button: MouseButton,
+        position: Point,
+        modifiers: platform_api::Modifiers,
+    ) {
+        let open = (self.pages_open_at(position), self.workbench.overlay_open());
+        let taken = self.web_views.pointer_down(button, position, open);
+        if taken || button == MouseButton::Left {
+            self.double_shift.cancel();
+            self.alt_tap.cancel();
+        }
+        if taken {
+            self.page_took_keyboard();
+            return;
+        }
+        match button {
+            MouseButton::Left => {
+                self.mouse_down(position, modifiers.shift, modifiers.alt, modifiers.primary())
+            }
+            MouseButton::Right => self.on_right_click(position),
+            MouseButton::Middle => {}
+        }
+    }
+
+    /// A button let go: the page a press holds gets it; else the window's left one ends a
+    /// drag, and the pointer is asked again where the mouse is (a bar let go: the arrow
+    /// back without waiting for the mouse to move).
+    pub(super) fn on_mouse_up(&mut self, button: MouseButton, position: Point) {
+        if self.web_views.pointer_up(button, position) || button != MouseButton::Left {
+            return;
+        }
+        self.pointer.dragging = false;
+        let mut redraw = self.with_text(Workbench::mouse_up).unwrap_or(false);
+        if !self.pointer.over_page {
+            let (hovered, icon) = self.workbench.hover(position);
+            redraw |= hovered;
+            let icon = if self.workbench.has_link() { CursorIcon::Pointer } else { icon };
+            self.set_cursor(icon);
+        }
+        if redraw {
+            self.redraw();
+        }
     }
 
     fn on_redraw_requested(&mut self) -> Control {
@@ -169,11 +223,31 @@ impl EditorApp {
     fn on_cursor_moved(&mut self, p: Point) {
         self.pointer.cursor = p;
         // Files dragged over the window: only where they'd go follows the pointer.
+        if self.web_views.files_dragged() {
+            self.files_moved(p);
+            return;
+        }
         if self.workbench.file_drag_active() {
             if self.workbench.move_file_drag(p) {
                 self.redraw();
             }
             return;
+        }
+        // Over a page the app draws (or one a press holds): its, with the pointer it asks;
+        // what the app showed hovered (a tab, a button, a tooltip, a bar's window) let go as
+        // it's entered.
+        if !self.pointer.dragging {
+            let open = self.pages_open_at(p);
+            if let web_views::Pointer::Page(icon) = self.web_views.pointer_moved(p, open) {
+                let redraw = !self.pointer.over_page && self.workbench.hover_cleared();
+                self.pointer.over_page = true;
+                self.set_cursor(icon);
+                if redraw {
+                    self.redraw();
+                }
+                return;
+            }
+            self.pointer.over_page = false;
         }
         if self.pointer.dragging {
             if self.with_text(|wb, text| wb.mouse_drag(text, p)).unwrap_or(false) {
@@ -201,18 +275,14 @@ impl EditorApp {
         if self.workbench.has_link() {
             icon = CursorIcon::Pointer;
         }
-        if icon != self.pointer.cursor_icon {
-            self.pointer.cursor_icon = icon;
-            if let Some(window) = &self.window {
-                window.set_cursor_icon(icon);
-            }
-        }
+        self.set_cursor(icon);
         if redraw && let Some(window) = &self.window {
             window.request_redraw();
         }
     }
 
     fn on_modifiers_changed(&mut self, m: platform_api::Modifiers) {
+        self.web_views.set_modifiers(m);
         if self.double_shift.modifiers(m, Instant::now()) && self.workbench.open_project_search() {
             self.relayout();
         }
@@ -228,12 +298,7 @@ impl EditorApp {
             .unwrap_or(false);
         let icon =
             if self.workbench.has_link() { CursorIcon::Pointer } else { self.workbench.hover(p).1 };
-        if icon != self.pointer.cursor_icon {
-            self.pointer.cursor_icon = icon;
-            if let Some(window) = &self.window {
-                window.set_cursor_icon(icon);
-            }
-        }
+        self.set_cursor(icon);
         if redraw {
             self.redraw();
         }
@@ -241,11 +306,15 @@ impl EditorApp {
 
     fn on_scroll(&mut self, delta: ScrollDelta) {
         self.alt_tap.cancel();
+        // Over a page the app draws: its (physical pixels, a notch as far as the editor's).
+        let line = self.workbench.line_height();
+        let page_delta = super::page_input::page_wheel(delta, line);
+        let p = self.pointer.cursor;
+        if self.web_views.wheel(p, page_delta, self.pages_open_at(p)) {
+            return;
+        }
         let (dx, dy) = match delta {
-            ScrollDelta::Lines { x, y } => {
-                let line = self.workbench.line_height();
-                (-x * 3.0 * line, -y * 3.0 * line)
-            }
+            ScrollDelta::Lines { x, y } => (-x * WHEEL_LINES * line, -y * WHEEL_LINES * line),
             ScrollDelta::Pixels { x, y } => (-x, -y),
         };
         if self.workbench.scroll(self.pointer.cursor, dx, dy) {
@@ -281,6 +350,9 @@ impl EditorApp {
 
     fn on_ime(&mut self, ime: ImeEvent) {
         match ime {
+            // Composed in the page with the keyboard.
+            ImeEvent::Preedit { text, cursor }
+                if self.web_views.compose(&text, cursor, !self.workbench.overlay_open()) => {}
             ImeEvent::Preedit { text, .. } => {
                 if self.workbench.set_preedit(Some(text)) {
                     self.redraw();
@@ -290,6 +362,12 @@ impl EditorApp {
             // input methods send `\r` after the key) would land wherever the key's action
             // left the keyboard — e.g. in the editor, after Enter closed a modal.
             ImeEvent::Commit(typed) if typed.chars().any(char::is_control) => {
+                self.workbench.set_preedit(None);
+            }
+            // The page the app draws with the keyboard: its.
+            ImeEvent::Commit(typed)
+                if self.web_views.text(&typed, !self.workbench.overlay_open()) =>
+            {
                 self.workbench.set_preedit(None);
             }
             ImeEvent::Commit(typed) => {
@@ -343,7 +421,7 @@ impl EditorApp {
     }
 
     /// Background work woke the loop: collects what it finished.
-    fn on_wake(&mut self) {
+    pub(super) fn on_wake(&mut self) {
         self.release_if_hidden();
         let mut changed = self.workbench.poll_syntax();
         changed |= self.workbench.poll_index();
@@ -352,6 +430,9 @@ impl EditorApp {
         changed |= self.workbench.poll_fs();
         changed |= self.workbench.poll_format_reads();
         changed |= self.workbench.poll_viewers();
+        // The pages drawn by the app's engine: what they told (a whole frame hands it to
+        // their views), or only a frame come (drawn again where it is, the rest kept).
+        let pages = self.web_views.poll();
         changed |= self.workbench.poll_decorations();
         changed |= self.workbench.poll_jobs();
         changed |= self.workbench.poll_saves();
@@ -382,8 +463,39 @@ impl EditorApp {
             };
             changed |= self.workbench.set_resources(sample, gpu);
         }
+        // A page asked something of the app: its menu (the app's, its rows the page's
+        // editing), its caret (read at the next frame).
+        if pages.asked
+            && let Some(ask) = self.web_views.take_menu()
+        {
+            self.page_menu(ask);
+        }
+        // Another pointer under the mouse (the mouse may not move): the window's changed at
+        // once, no frame for it.
+        if self.pointer.over_page
+            && let Some(icon) = self.web_views.hovered_cursor()
+        {
+            self.set_cursor(icon);
+        }
+        if pages.told {
+            self.frames.dirty = true;
+        } else if (pages.framed || pages.asked) && !changed {
+            self.frames.only_pages = true;
+        }
+        changed |= pages.any();
         if changed && let Some(window) = &self.window {
             window.request_redraw();
+        }
+    }
+
+    /// The window's pointer, `icon` (told only when it changes).
+    fn set_cursor(&mut self, icon: CursorIcon) {
+        if icon == self.pointer.cursor_icon {
+            return;
+        }
+        self.pointer.cursor_icon = icon;
+        if let Some(window) = &self.window {
+            window.set_cursor_icon(icon);
         }
     }
 
@@ -399,6 +511,12 @@ impl EditorApp {
     /// A menu's command: a tool tab's, a row a module listed (a comparison), one on a tab
     /// (`id@doc`) or a plain one.
     fn on_menu_command(&mut self, id: String) -> Control {
+        // The Edit menu's (and its keys') on the page with the keyboard: its own.
+        if let Some(action) = super::page_input::page_edit(&id)
+            && self.web_views.edit(action, !self.workbench.overlay_open())
+        {
+            return Control::Continue;
+        }
         // A row of the bottom window's view's menu (Git's history): back to that view.
         if let Some(command) = id.strip_prefix(crate::workbench::TOOL_VIEW_MENU) {
             let command = command.to_owned();
@@ -536,6 +654,11 @@ impl EditorApp {
         if key.pressed && key.key != platform_api::Key::Unidentified {
             self.double_shift.cancel();
             self.alt_tap.cancel();
+        }
+        // The page the app draws with the keyboard: its keys, but for the app's own
+        // shortcuts (its editing ones go to the page as such).
+        if self.key_to_page(&key) {
+            return Control::Continue;
         }
         self.key(&key)
     }

@@ -2,8 +2,14 @@
 # The checks before a commit, run in parallel (each in its own job; the clippy ones in their
 # own target dirs, so nothing waits on another's lock — only metadata: small):
 #
-#   ./scripts/check.sh            fmt, then clippy (host), clippy (Windows), tests, check-deps
+#   ./scripts/check.sh            fmt, then clippy (host), clippy (Windows), tests, check-deps,
+#                                 and the web engine's host (`web-host/`, a project of its own)
 #   ./scripts/check.sh -p a -p b  the same, the tests on those packages only
+#
+# The web engine's host: its formatting always checked (never rewritten here: it's built by
+# its own workflow); its clippy only where a CEF is already on the machine (`CEF_PATH`, or
+# cef-rs's usual folder `~/.local/share/cef`), since building it downloads CEF otherwise.
+# Without one, the clippy says "skipped" and the check still passes.
 #
 # First, what the last full check didn't use goes from target/ (scripts/sweep.sh); each job
 # saves which units it used (cargo's JSON messages, under target/.sweep/run), recorded
@@ -102,6 +108,30 @@ clippy_windows() {
         --message-format=json-render-diagnostics >"$RUN/clippy-windows.json"
 }
 
+# The web engine's host: formatted as the workspace is (checked, not rewritten).
+web_host_fmt() {
+    cargo fmt --check --manifest-path "$ROOT/web-host/Cargo.toml"
+}
+
+# A CEF already on the machine, for the host's clippy: `CEF_PATH`, or cef-rs's usual folder.
+# Empty when there's none.
+local_cef() {
+    local cef
+    for cef in "${CEF_PATH:-}" "$HOME/.local/share/cef"; do
+        if [ -n "$cef" ] && [ -d "$cef" ]; then
+            echo "$cef"
+            return
+        fi
+    done
+}
+
+# The host's clippy, from its folder (its `.cargo/config.toml`: its target dir, Linux's
+# rpath), its lock as written.
+web_host_clippy() {
+    (cd "$ROOT/web-host" && CEF_PATH="$1" CARGO_INCREMENTAL=0 \
+        cargo clippy --locked --all-targets)
+}
+
 tests() {
     cargo test -q --message-format=json-render-diagnostics "${SCOPE[@]}" \
         | units_to "$RUN/tests.json"
@@ -117,6 +147,13 @@ run clippy-host clippy_clean "$LOGS/clippy-host" clippy_host &
 run clippy-windows clippy_clean "$LOGS/clippy-windows" clippy_windows &
 run tests tests &
 run check-deps check_deps &
+run web-host-fmt web_host_fmt &
+CEF="$(local_cef)"
+if [ -n "$CEF" ]; then
+    run web-host-clippy clippy_clean "$LOGS/web-host-clippy" web_host_clippy "$CEF" &
+else
+    echo "skipped web-host-clippy  (no CEF here: set CEF_PATH to check it)"
+fi
 
 failed=0
 for job in $(jobs -p); do

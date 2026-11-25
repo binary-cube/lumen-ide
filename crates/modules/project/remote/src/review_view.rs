@@ -605,8 +605,9 @@ impl Viewer for TransferReview {
         None
     }
 
+    /// Its parts' (the list's scrollbar), else a hand over what can be pressed.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        self.hit(p).map(|_| ViewerCursor::Pointer)
+        self.controls.cursor_or(p, || self.hit(p).map(|_| ViewerCursor::Pointer))
     }
 
     fn drag(&mut self, p: Point) -> bool {

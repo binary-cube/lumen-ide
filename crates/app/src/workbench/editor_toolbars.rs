@@ -172,7 +172,7 @@ impl Workbench {
         if !toolbar.bounds.contains(p) {
             return None;
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.tell_toolbar_editor(true);
         let toolbar = self.tabs.get_mut(self.active)?.toolbar.as_mut()?;
         let action = toolbar.bar.pointer_down(p);

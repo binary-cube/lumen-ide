@@ -141,3 +141,66 @@ fn a_clickable_item_is_a_button_on_the_bar_s_baseline() {
     baselines.dedup();
     assert_eq!(baselines.len(), 1, "one baseline: {baselines:?}");
 }
+
+/// A switch that's on is drawn on (a soft accent pill behind it), off as any item; to a
+/// screen reader it's a toggle button, pressed or not, and a plain item stays a button.
+#[test]
+fn a_switch_is_drawn_on_and_told_as_a_toggle() {
+    use ui_kit::access::Role;
+    let (mut ts, palette) = (TextSystem::new(), Palette::dark());
+    let mut bar = StatusBar::default();
+    bar.set_bounds(Rect::new(0.0, 0.0, 800.0, 32.0), 1.0);
+    let accent_backs = |on: bool, ts: &mut TextSystem, bar: &mut StatusBar| {
+        let right = [StatusItem::text("Wrap").clickable("wrap").switched(on)];
+        let mut scene = Scene::default();
+        let recording = ui_kit::access::begin();
+        bar.paint(&[], &right, &Icons::builtin(), ts, &mut scene, &palette);
+        let frame = recording.take();
+        let toggle =
+            frame.nodes().iter().find(|n| n.role == Role::ToggleButton).map(|n| n.state.checked);
+        let backs = scene
+            .layers()
+            .iter()
+            .flat_map(|l| &l.quads)
+            .filter(|q| {
+                q.color.with_alpha(1.0) == palette.accent.with_alpha(1.0) && q.color.a < 1.0
+            })
+            .count();
+        (backs, toggle)
+    };
+    assert_eq!(accent_backs(true, &mut ts, &mut bar), (1, Some(Some(true))), "on: its pill");
+    assert_eq!(accent_backs(false, &mut ts, &mut bar), (0, Some(Some(false))), "off: no pill");
+    let plain = [StatusItem::text("UTF-8").clickable("encoding")];
+    let recording = ui_kit::access::begin();
+    bar.paint(&[], &plain, &Icons::builtin(), &mut ts, &mut Scene::default(), &palette);
+    let frame = recording.take();
+    assert!(!frame.nodes().iter().any(|n| n.role == Role::ToggleButton), "not a switch");
+}
+
+/// A switch's icon with a color of its own keeps it, on or off (its label goes to the
+/// accent when on, muted off); a plain item's icon and label stay muted.
+#[test]
+fn a_switch_s_colored_icon_and_a_plain_item_keep_their_look() {
+    let (mut ts, palette) = (TextSystem::new(), Palette::dark());
+    let icons = Icons::builtin();
+    let icon = icons.id("search").expect("a built-in icon");
+    let red = Rgba::rgb(0xE5_1A_1A);
+    let mut bar = StatusBar::default();
+    bar.set_bounds(Rect::new(0.0, 0.0, 800.0, 32.0), 1.0);
+    // The glyphs drawn (the icon's and the label's), counted by their color.
+    let mut colors = |item: StatusItem| {
+        let mut scene = Scene::default();
+        bar.paint(&[], &[item], &icons, &mut ts, &mut scene, &palette);
+        let glyphs: Vec<Rgba> =
+            scene.layers().iter().flat_map(|l| &l.glyphs).map(|g| g.color).collect();
+        let count = |c: Rgba| glyphs.iter().filter(|g| **g == c).count();
+        (count(red), count(palette.accent), count(palette.text_muted), glyphs.len())
+    };
+    let switch = |on: bool| {
+        StatusItem::with_icon(Some(icon), "Wrap").colored(red).clickable("wrap").switched(on)
+    };
+    assert_eq!(colors(switch(true)), (1, 4, 0, 5), "on: its icon red, its label in the accent");
+    assert_eq!(colors(switch(false)), (1, 0, 4, 5), "off: its icon red, its label muted");
+    let plain = StatusItem::with_icon(Some(icon), "Wrap").clickable("wrap");
+    assert_eq!(colors(plain), (0, 0, 5, 5), "a plain item: all muted");
+}

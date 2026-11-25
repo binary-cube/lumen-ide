@@ -195,6 +195,10 @@ pub fn layout_card(text: &mut TextSystem, ctx: &Ctx<'_>, toast: &Toast, width: f
     }
 }
 
+/// How much of the card's surface covers what's under it: a hint of it shows through, its
+/// text always reads clearly (over a busy page's text too).
+const GLASS_SURFACE: f32 = 0.94;
+
 /// How much what's under a card is blurred (logical pixels).
 const GLASS_BLUR: f32 = 18.0;
 
@@ -445,7 +449,7 @@ fn paint_card(
     // blur seen through), a soft shadow.
     let corner = px(radius::LG);
     layer.backdrop_blur_rounded(rect, px(GLASS_BLUR), ctx.opacity, corner);
-    let glass = p.popup_background.with_alpha(p.popup_background.a * 0.72);
+    let glass = p.popup_background.with_alpha(p.popup_background.a * GLASS_SURFACE);
     ds::surface_with(layer, ctx, rect, Elevation::Medium, radius::LG, glass);
     glow(layer, ctx, rect, color, if dark { 0.16 } else { 0.10 });
     // The icon in its tinted square (a spinner for work in progress).

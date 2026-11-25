@@ -747,11 +747,12 @@ impl Viewer for ChatView {
         changed
     }
 
+    /// A bar's (over it, or held): the bar's; a hand on what's clicked; else its parts'.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.hit_at(p).is_some() {
-            return Some(ViewerCursor::Pointer);
-        }
-        self.controls.cursor_at(p)
+        self.controls.bar_or(p, || match self.hit_at(p) {
+            Some(_) => Some(ViewerCursor::Pointer),
+            None => self.controls.cursor_at(p),
+        })
     }
 
     fn wants_text(&self) -> bool {

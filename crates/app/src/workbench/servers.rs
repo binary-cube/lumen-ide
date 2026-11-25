@@ -837,7 +837,7 @@ impl Workbench {
             return;
         }
         let offset = target.range.start;
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.jump(text, |doc| commands::click(doc, offset.min(doc.buffer().len()), false, false));
     }
 

@@ -121,6 +121,7 @@ impl Control for PageScroll {
     fn hover(&mut self, p: Option<Point>) -> bool {
         PageScroll::hover(self, p.unwrap_or(NOWHERE))
     }
+    ui_components::bar_cursor!();
 }
 
 #[cfg(test)]

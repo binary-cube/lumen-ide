@@ -45,6 +45,11 @@ the log, trees, the grid, the code editor's overview as a lane).
   dragged on). `drag` gives the offset, `release` ends it.
 - Hover: widens (or only the thumb thickens, by the look); an auto-hiding one shown stays
   while hovered.
+- The cursor: over a bar (its thumb, its lane) and while its thumb is dragged anywhere,
+  `scrollbar::CURSOR` (the plain arrow), never what lies under it. As a part it says so
+  (`Control::owns_cursor`; a part of its own that is a bar wherever it's hit writes
+  `ui_components::bar_cursor!()`): a view asks `Controls::bar_or(p, own)` (or
+  `bar_cursor(p)` before its own cursor).
 - Frames: `next_frame` while it fades or its hold ends; none at rest.
 - As a `Control` through `control::Thumb { bar, offset }`, `ScrollThumb { bar, scroll }`,
   `Scrolled { bar, offset, area, max }` (the wheel over the area too) or

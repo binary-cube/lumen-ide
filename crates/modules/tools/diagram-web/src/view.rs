@@ -107,6 +107,8 @@ pub struct DiagramWebView {
     writing_page: bool,
     /// The page's identity (another: the page made anew).
     page_id: u128,
+    /// Where its page stands: opening (a loader turns under it), drawn, or never to be.
+    page: PageState,
     entry: Arc<str>,
     area: Rect,
     theme: Option<(ThemeKey, Theme)>,
@@ -146,6 +148,7 @@ impl Default for DiagramWebView {
             page_dir: None,
             writing_page: false,
             page_id: kernel::id::new_uuid(),
+            page: PageState::Opening,
             entry: Arc::from(""),
             area: Rect::default(),
             theme: None,
@@ -255,6 +258,7 @@ impl DiagramWebView {
     /// The page made anew (another id): it asks for its configuration and the file again.
     fn new_page(&mut self) {
         self.page_id = kernel::id::new_uuid();
+        self.page = PageState::Opening;
         self.session.new_page();
         self.reload_after_save = false;
         if let Some((_, theme)) = &self.theme {
@@ -588,6 +592,17 @@ impl DiagramWebView {
     }
 }
 
+/// Where a view's page stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageState {
+    /// Being made, its content not drawn yet.
+    Opening,
+    /// Its content drawn.
+    Shown,
+    /// It can't be made here (no web engine).
+    Failed,
+}
+
 /// `text` on at most `max` lines, as many words on each as `fits` allows (at least one).
 fn wrap(text: &str, max: usize, mut fits: impl FnMut(&str) -> bool) -> Vec<String> {
     let mut lines: Vec<String> = Vec::new();
@@ -658,18 +673,31 @@ impl Viewer for DiagramWebView {
         if self.page_ready() {
             self.area = ctx.bounds;
             self.buttons.clear();
-            // Seen only while the page isn't over it (loading, something open over it).
+            // Seen only while the page isn't over it: the loader while it opens, why it
+            // never will; once drawn, only the background (what opens over a page later
+            // uncovers no loader stopped mid-turn).
             let ds = Ctx::new(ctx.palette, ctx.scale);
             let layer = ctx.scene.push_layer(Some(ctx.bounds));
             layer.quad(Quad::filled(ctx.bounds, ctx.palette.editor_background));
-            ds::empty_state(
-                layer,
-                ctx.text,
-                &ds,
-                ctx.bounds,
-                &t("diagram_web.opening"),
-                Some(&t("diagram_web.attribution")),
-            );
+            match self.page {
+                PageState::Opening => ds::loading_state(
+                    layer,
+                    ctx.text,
+                    &ds,
+                    ctx.bounds,
+                    &t("diagram_web.opening"),
+                    Some(&t("diagram_web.attribution")),
+                ),
+                PageState::Failed => ds::empty_state(
+                    layer,
+                    ctx.text,
+                    &ds,
+                    ctx.bounds,
+                    &t("diagram_web.no_engine"),
+                    Some(&t("diagram_web.no_engine_detail")),
+                ),
+                PageState::Shown => {}
+            }
         } else {
             self.area = Rect::default();
             self.paint_offer(&mut ctx);
@@ -701,6 +729,8 @@ impl Viewer for DiagramWebView {
                 self.actions.push(ViewerAction::OpenLink(url));
             }
             WebEvent::OpenLink(_) => {}
+            WebEvent::Shown => self.page = PageState::Shown,
+            WebEvent::Failed => self.page = PageState::Failed,
         }
     }
 
@@ -746,8 +776,12 @@ impl Viewer for DiagramWebView {
     }
 
     fn is_loading(&self) -> bool {
-        // Only an unknown amount sweeps (the download wakes it as it goes).
-        !self.page_ready() && matches!(self.status, Status::Unpacking | Status::Looking)
+        // Only an unknown amount sweeps (the download wakes it as it goes); the page loading
+        // turns the loader under it until it's drawn.
+        match self.page_ready() {
+            true => self.page == PageState::Opening && !self.hidden,
+            false => matches!(self.status, Status::Unpacking | Status::Looking),
+        }
     }
 
     /// The Save dialog's answer for an export: written there on the worker.

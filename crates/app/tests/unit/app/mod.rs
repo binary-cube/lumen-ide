@@ -9,6 +9,7 @@ fn key(c: &str, ctrl: bool, alt: bool, text: Option<&str>) -> KeyEvent {
         modifiers: platform_api::Modifiers { shift: false, ctrl, alt, meta: false },
         text: text.map(str::to_owned),
         numpad: false,
+        physical: None,
     }
 }
 
@@ -39,6 +40,33 @@ fn the_keypads_plus_and_minus_are_their_own_keys() {
     minus.numpad = true;
     let parsed = command_model::KeyChord::parse("NumpadSubtract").unwrap();
     assert_eq!(chord(&minus).map(|c| c.key), Some(parsed.key));
+}
+
+/// A window's app without the window (its platform side): its workbench, dialogs included,
+/// as a window has it.
+pub(super) fn app() -> EditorApp {
+    app_with(Vec::new(), None)
+}
+
+/// The same, its modules' reporters followed by `reporters`, sharing `shared` with another
+/// window (or with its own).
+pub(super) fn app_with(
+    reporters: Vec<Arc<dyn workbench_model::ResourceReporter>>,
+    shared: Option<Rc<Shared>>,
+) -> EditorApp {
+    let (mut support, _) = crate::modules::load(&extensions::ModuleSelection::default());
+    support.resource_reporters.extend(reporters);
+    let shared = shared.unwrap_or_else(|| {
+        let themes = Themes::load(&support.themes);
+        let syntax = Arc::clone(&support.syntax);
+        let fonts = std::thread::spawn(|| (TextSystem::new(), FontFamily::Monospace));
+        Rc::new(Shared::new(themes, syntax, fonts, RenderOptions::default(), Instant::now()))
+    });
+    shared.windows.set(shared.windows.get() + 1);
+    let mut wb = Workbench::new(Arc::new(support), crate::workbench::Ports::local());
+    wb.forget_projects();
+    wb.resize(PhysicalSize::new(1200, 800), 1.0);
+    EditorApp::new(wb, shared).unwrap()
 }
 
 /// A renderer that counts what it's asked: frames drawn, idle releases.

@@ -78,8 +78,8 @@ impl EditorApp {
     ///   a double click);
     /// - the focus: given to a text field by a click; anything else isn't pressed for it
     ///   (walking over buttons must not run them);
-    /// - a value: a text field clicked, then, once it has the keyboard, its text chosen and
-    ///   replaced as typed (never anywhere else).
+    /// - a value: a text field clicked, then, once it has the keyboard (the editor's or a
+    ///   page's), its text chosen and replaced as typed (never anywhere else).
     pub(super) fn on_access(&mut self, request: Request) {
         let id = match &request {
             Request::Press(id) | Request::Focus(id) | Request::SetValue(id, _) => *id,
@@ -102,11 +102,13 @@ impl EditorApp {
             return;
         }
         self.click_for_access(at);
-        if let Request::SetValue(_, value) = request
-            && self.workbench.text_field_focused()
-        {
-            self.with_text(|wb, text| wb.select_all(text));
-            self.with_text(|wb, text| wb.type_text(text, &value));
+        if let Request::SetValue(_, value) = request {
+            // A page's field the click gave the keyboard: its text chosen, then typed.
+            let open = !self.workbench.overlay_open();
+            if !self.web_views.set_value(&value, open) && self.workbench.text_field_focused() {
+                self.with_text(|wb, text| wb.select_all(text));
+                self.with_text(|wb, text| wb.type_text(text, &value));
+            }
         }
         self.redraw();
     }

@@ -1,0 +1,21 @@
+[package]
+name = "web-engine-protocol"
+description = "What the app and its web engine process (web-host) say to each other: the messages, the protocol's version, the framing."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+serde.workspace = true
+postcard.workspace = true
+
+[dev-dependencies]
+# The shared files read and written as JSON, as their makers write them.
+serde_json.workspace = true
+
+[lints]
+workspace = true

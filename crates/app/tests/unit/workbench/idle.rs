@@ -17,8 +17,11 @@ fn window() -> Workbench {
 
 #[test]
 fn relax_mode_starts_after_the_minutes_without_input_once() {
-    let relax = relax::settings::config();
     let mut wb = window();
+    // Relax mode's settings are the process's: another test's window, applying its own as it
+    // loads, would set them back meanwhile.
+    let _alone = crate::modules::hold_process();
+    let relax = relax::settings::config();
     // Off by default: nothing is waited for.
     relax::settings::set_config(relax::settings::Config::DEFAULT);
     assert_eq!(wb.idle_deadline(), None);

@@ -673,10 +673,9 @@ impl Net for Curl {
     }
 
     fn sha256(&self, url: &str) -> Result<String, String> {
-        use sha2::Digest;
         println!("lsp-update: hashing {url}");
         let bytes = Self::get(url)?;
-        Ok(sha2::Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+        Ok(pinned_downloads::digest::sha256_hex(&bytes))
     }
 
     fn size(&self, url: &str) -> Result<u64, String> {

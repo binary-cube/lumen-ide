@@ -14,6 +14,8 @@ mod atlas;
 mod blur;
 mod context;
 mod drawer;
+mod gpus;
+mod import;
 mod instances;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -24,6 +26,7 @@ mod prepared;
 mod renderer;
 mod surface;
 
+pub use gpus::gpus;
 #[cfg(any(test, feature = "offscreen"))]
 pub use offscreen::{Measured, Offscreen};
 
@@ -41,8 +44,8 @@ use render_api::{
 use crate::atlas::{AtlasFull, GlyphAtlas};
 use crate::blur::{BlurGpu, BlurPipelines, GpuBlur};
 use crate::instances::{
-    Batch, Globals, GpuImage, IMAGE_IDLE, IMAGE_TTL, ImageGpu, InstanceBuffer, LayerPlan,
-    PRIM_COLOR, PRIM_MASK, PrimGpu, QuadGpu, Step, color_array, rect_array,
+    Batch, Globals, GpuImage, ImageGpu, InstanceBuffer, LayerPlan, PRIM_COLOR, PRIM_MASK, PrimGpu,
+    QuadGpu, Step, color_array, rect_array,
 };
 use crate::pipelines::{Pipelines, atlas_bind_group, create_pipeline};
 use crate::surface::{Acquired, resizes, surface_bytes};
@@ -139,6 +142,8 @@ struct SharedState {
     frame: u64,
     /// The images in each window's last scene (by its drawer's id): on screen, never freed.
     shown: HashMap<u64, Vec<u64>>,
+    /// The frames' textures opened from another process, kept for their next frames.
+    sources: import::Sources,
 }
 
 impl SharedState {
@@ -147,30 +152,40 @@ impl SharedState {
         self.shown.values().any(|ids| ids.contains(&id))
     }
 
-    /// The images on screen nowhere, unused long enough (as a frame frees them), freed:
-    /// for when no frame is drawn (the app in the background).
-    fn release_unshown(&mut self) {
-        let frame = self.frame;
-        let shown: std::collections::HashSet<u64> =
-            self.shown.values().flatten().copied().collect();
-        self.textures.retain(|id, t| {
-            let keep = shown.contains(id)
-                || (frame.saturating_sub(t.last_frame) < IMAGE_TTL
-                    && t.last_used.elapsed() < IMAGE_IDLE
-                    && !t.image.released());
-            if !keep {
-                t.image.evicted();
-            }
-            keep
-        });
+    /// The images in a window's last scene.
+    fn shown_ids(&self) -> std::collections::HashSet<u64> {
+        self.shown.values().flatten().copied().collect()
     }
 
-    /// When the first image on screen nowhere would be freed ([`Self::release_unshown`]).
+    /// The textures no longer [kept](GpuImage::kept) freed (a frame's, and when no frame is
+    /// drawn: the app in the background).
+    fn release_unshown(&mut self) {
+        let frame = self.frame;
+        let shown = self.shown_ids();
+        self.retain_textures(|id, t| t.kept(shown.contains(&id), frame));
+    }
+
+    /// Keeps the textures `keep` says, the others freed (their images told), and the frames'
+    /// sources only for the images still on the GPU.
+    fn retain_textures(&mut self, mut keep: impl FnMut(u64, &GpuImage) -> bool) {
+        self.textures.retain(|id, t| {
+            let kept = keep(*id, t);
+            if !kept {
+                t.image.evicted();
+            }
+            kept
+        });
+        let textures = &self.textures;
+        self.sources.keep_for(|id| textures.contains_key(&id));
+    }
+
+    /// When the first image on screen nowhere would be freed ([`Self::release_unshown`],
+    /// by [`GpuImage::release_at`]: what it frees and when are one rule).
     fn unshown_release_at(&self) -> Option<std::time::Instant> {
         self.textures
             .iter()
             .filter(|(id, _)| !self.is_shown(**id))
-            .map(|(_, t)| t.last_used + IMAGE_IDLE)
+            .map(|(_, t)| t.release_at())
             .min()
     }
 }
@@ -416,15 +431,18 @@ impl WgpuRenderer {
             };
             match instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
-                    // An editor doesn't need the discrete GPU; the integrated one saves battery.
-                    power_preference: wgpu::PowerPreference::LowPower,
+                    power_preference: gpus::power_preference(options.gpu),
                     force_fallback_adapter: false,
                     compatible_surface: Some(&surface),
                     apply_limit_buckets: false,
                 })
                 .await
             {
-                Ok(adapter) => return Ok((instance, surface, adapter)),
+                Ok(adapter) => {
+                    // Listed for the settings on a worker: this is the UI thread.
+                    gpus::remember_later(&instance, backends, &adapter);
+                    return Ok((instance, surface, adapter));
+                }
                 Err(e) => last_error = format!("{backends:?}: {e}"),
             }
         }

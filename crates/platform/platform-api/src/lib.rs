@@ -57,18 +57,179 @@ pub trait WebView: fmt::Debug {
     fn set_corners(&self, radius: f32, corners: u8) {
         let _ = (radius, corners);
     }
+    /// What it gathered elsewhere (an engine's events, read on another thread) handed over
+    /// now, on the window's thread: asked once a frame while it lives. Cheap when there's
+    /// nothing.
+    fn poll(&self) {}
+    /// Whether something the app reads of it changed since it last asked (a menu asked for,
+    /// its caret moved, the pointer it asks, it went), taken: the app looks at it then, even
+    /// with nothing else new. Read after [`Self::poll`].
+    fn take_changed(&self) -> bool {
+        false
+    }
+    /// Its engine went (crashed, ended): its owner lets it go and makes it again.
+    fn is_gone(&self) -> bool {
+        false
+    }
+    /// The window's scale changed (a screen of another density): a page the app draws lays
+    /// itself out again (one the system shows follows the window by itself).
+    fn set_scale(&self, scale: f32) {
+        let _ = scale;
+    }
+    /// It's drawn by the app, so the app hands it the mouse and the keys ([`Self::input`]);
+    /// one the system shows over the window gets them from the system.
+    fn takes_input(&self) -> bool {
+        false
+    }
+    /// The mouse, the wheel, a key, text or the keyboard's focus, for it.
+    fn input(&self, input: PageInput) {
+        let _ = input;
+    }
+    /// The pointer it asks for where the mouse is (`None`: the window's own).
+    fn cursor(&self) -> Option<CursorIcon> {
+        None
+    }
+    /// Where its popup is (an open `<select>`'s list: physical pixels in the page), drawn by
+    /// the app over it; `None`: none open.
+    fn popup(&self) -> Option<Rect> {
+        None
+    }
+    /// Its accessibility tree wanted (a screen reader runs) or not: made by its engine only
+    /// while wanted.
+    fn set_access(&self, _on: bool) {}
+    /// Its accessibility tree as last told (`None`: it tells none: the system's pages are
+    /// read by the system itself).
+    fn access(&self) -> Option<PageAccess> {
+        None
+    }
+    /// It takes files dragged from the system (an app page that takes files).
+    fn takes_files(&self) -> bool {
+        false
+    }
+    /// Where its text being composed is (physical pixels in the page): the input method's
+    /// window goes beside it.
+    fn caret(&self) -> Option<Rect> {
+        None
+    }
+    /// The menu it asked for since (a right click on it that it doesn't answer itself),
+    /// taken: the app shows its own there.
+    fn take_menu(&self) -> Option<PageMenuAsk> {
+        None
+    }
+}
+
+/// What the app hands a page it draws ([`WebView::input`]); positions are physical pixels
+/// in the page.
+#[derive(Debug, Clone, PartialEq)]
+pub enum PageInput {
+    Mouse(PageMouse),
+    Wheel(PageWheel),
+    /// A key pressed or let go (its text, if any, comes with the press).
+    Key(KeyEvent),
+    /// Text typed through the input method.
+    Text(String),
+    /// Text being composed by the input method (empty: given up, or about to be committed).
+    Compose(PageCompose),
+    /// It has the keyboard (`true`) or gave it back.
+    Focus(bool),
+    /// An editing action on what it has selected (the app's Edit menu, its keys).
+    Edit(PageEdit),
+    /// Files dragged from the system over it (positions: physical pixels in the page).
+    Drag(PageDrag),
+}
+
+/// A node of the accessibility tree of a page the app draws (parents before their
+/// children).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PageAccessNode {
+    /// The page's id for it: the same while it stays.
+    pub id: i64,
+    /// The node it's under (`None`: the page itself).
+    pub parent: Option<i64>,
+    pub role: access::Role,
+    pub name: Arc<str>,
+    pub value: Option<Arc<str>>,
+    pub state: access::State,
+    /// A heading's level (from 1).
+    pub level: Option<usize>,
+    /// Where it is (physical pixels in the page).
+    pub bounds: Rect,
+}
+
+/// A page's accessibility tree as last told, with a number that changes with it.
+#[derive(Debug, Clone, Default)]
+pub struct PageAccess {
+    pub generation: u64,
+    pub nodes: Arc<[PageAccessNode]>,
+}
+
+/// Files dragged over a page ([`PageInput::Drag`]).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PageDrag {
+    Enter { files: Vec<PathBuf>, at: Point },
+    Over { at: Point },
+    Leave,
+    Drop { at: Point },
+}
+
+/// A page's menu asked for ([`WebView::take_menu`]): where (physical pixels in the page),
+/// whether text is selected, whether it's in a field one types in.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageMenuAsk {
+    pub at: Point,
+    pub selection: bool,
+    pub editable: bool,
+}
+
+/// An editing action on a page ([`PageInput::Edit`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageEdit {
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+/// The mouse over a page.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageMouse {
+    pub action: PageMouseAction,
+    pub at: Point,
+    /// The press's count (1, 2 for a double click…).
+    pub clicks: u8,
+    pub modifiers: Modifiers,
+}
+
+/// The wheel over a page.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PageWheel {
+    pub at: Point,
+    /// How far (physical pixels: positive `y` scrolls up).
+    pub delta: (f32, f32),
+    pub modifiers: Modifiers,
+}
+
+/// Text being composed by the input method in a page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageCompose {
+    pub text: String,
+    /// The part chosen in it (byte offsets; `None`: the caret at its end).
+    pub cursor: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PageMouseAction {
+    Move,
+    /// The mouse went off it.
+    Leave,
+    Down(MouseButton),
+    Up(MouseButton),
 }
 
 /// A page's corners ([`WebView::set_corners`]), as bits.
-#[derive(Debug, Clone, Copy)]
-pub struct Corners;
-
-impl Corners {
-    pub const TOP_LEFT: u8 = 1;
-    pub const TOP_RIGHT: u8 = 2;
-    pub const BOTTOM_LEFT: u8 = 4;
-    pub const BOTTOM_RIGHT: u8 = 8;
-}
+pub use kernel::Corners;
 
 /// A transparent layer over the window's pages ([`Window::floating_layer`]): what the app
 /// draws there (what floats: a window over the bar, notifications, menus, tooltips) is over
@@ -128,6 +289,9 @@ pub enum WebEvent {
     /// A link it wanted opened in a new window: never opened by the engine, the host
     /// decides.
     OpenLink(String),
+    /// Its content is drawn (loaded): what the host painted under it while it loaded (a
+    /// loader) is covered now.
+    Shown,
 }
 
 /// Where an app page's events go: called on the window's thread as they arrive (the window
@@ -381,6 +545,18 @@ pub enum CursorIcon {
     ResizeHorizontal,
     /// Vertical resize (the separator above the terminal).
     ResizeVertical,
+    /// What a page asks (a diagram's tools).
+    Crosshair,
+    Move,
+    Grab,
+    Grabbing,
+    NotAllowed,
+    Wait,
+    Progress,
+    Help,
+    /// Diagonal resizes: ↖↘ and ↗↙.
+    ResizeDiagonal,
+    ResizeAntiDiagonal,
 }
 
 /// Input method (IME) events: character composition (diacritics via
@@ -607,6 +783,10 @@ pub struct KeyEvent {
     pub text: Option<String>,
     /// The key is on the numeric keypad (its + and − are shortcuts of their own).
     pub numpad: bool,
+    /// Where the key is, as the character its place gives on a US layout (`a` for the
+    /// key left of `s`, whatever the layout writes there): what web pages' key codes are
+    /// named by. `None`: a key with no such place (a named key, the keypad) or unknown.
+    pub physical: Option<char>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

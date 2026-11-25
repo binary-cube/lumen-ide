@@ -234,7 +234,7 @@ impl Workbench {
             if side.panel.text_on_rows(typed) {
                 return true;
             }
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
         }
         // A bottom view taking text (the terminal, a filter field).
         if let Some(used) = self.type_into_view(typed) {

@@ -29,6 +29,8 @@ impl Purge for Workbench {
             group.crumbs.purge();
         }
         self.file_icons.purge();
+        // The settings window's wrapped descriptions.
+        self.settings.purge();
         for window in &mut self.tools.windows {
             window.purge();
         }

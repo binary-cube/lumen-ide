@@ -23,7 +23,7 @@ pub struct Measured {
 
 /// A GPU without a window and a drawer of its own.
 pub struct Offscreen {
-    ctx: GpuContext,
+    ctx: std::sync::Arc<GpuContext>,
     drawer: Drawer,
     size: PhysicalSize,
 }
@@ -37,7 +37,7 @@ impl std::fmt::Debug for Offscreen {
 impl Offscreen {
     /// A GPU found without a window (an error where there's none: a machine without one).
     pub fn new(size: PhysicalSize) -> Result<Self, RenderError> {
-        let ctx = headless()?;
+        let ctx = std::sync::Arc::new(headless()?);
         let drawer = Drawer::new(&ctx, FORMAT, false);
         Ok(Self { ctx, drawer, size })
     }
@@ -78,6 +78,55 @@ impl Offscreen {
             },
             encode,
         }
+    }
+
+    /// What copies frames made elsewhere into live images, as a window's renderer gives it.
+    pub fn frame_importer(&self) -> std::sync::Arc<dyn render_api::FrameImporter> {
+        std::sync::Arc::new(crate::import::Importer::new(std::sync::Arc::clone(&self.ctx)))
+    }
+
+    /// The importer itself, its steps called apart.
+    #[cfg(test)]
+    pub(crate) fn importer(&self) -> crate::import::Importer {
+        crate::import::Importer::new(std::sync::Arc::clone(&self.ctx))
+    }
+
+    /// Every texture made as if last drawn `ago` earlier (what a while unshown frees).
+    #[cfg(test)]
+    pub(crate) fn age_textures(&self, ago: std::time::Duration) {
+        let Some(then) = Instant::now().checked_sub(ago) else { return };
+        for texture in self.ctx.state().textures.values_mut() {
+            texture.last_used = then;
+        }
+    }
+
+    /// Whether image `id`'s texture stays at the next frame ([`GpuImage::kept`]), `shown`
+    /// or not (`None`: it has none).
+    ///
+    /// [`GpuImage::kept`]: crate::instances::GpuImage::kept
+    #[cfg(test)]
+    pub(crate) fn kept(&self, id: u64, shown: bool) -> Option<bool> {
+        let state = self.ctx.state();
+        state.textures.get(&id).map(|t| t.kept(shown, state.frame))
+    }
+
+    /// Whether `image` would be drawn now ([`GpuContext::upload_image`]).
+    #[cfg(test)]
+    pub(crate) fn drawable(&self, image: &render_api::ImageData) -> bool {
+        let mut state = self.ctx.state();
+        self.ctx.upload_image(&mut state, image)
+    }
+
+    /// When the first texture on screen nowhere goes if nothing is drawn.
+    #[cfg(test)]
+    pub(crate) fn unshown_release_at(&self) -> Option<Instant> {
+        self.ctx.state().unshown_release_at()
+    }
+
+    /// How many frames' textures opened from another process are kept.
+    #[cfg(all(test, target_os = "macos"))]
+    pub(crate) fn sources(&self) -> usize {
+        self.ctx.state().sources.len()
     }
 
     /// The last frame's pixels, RGBA8 row after row (`None`: none drawn yet).

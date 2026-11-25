@@ -2,8 +2,6 @@
 //! the user sent), the newest one worth offering chosen ([`app_updates::release::newest`]),
 //! its manifest and signature fetched and checked, this system's file found in it.
 
-use std::io::Read;
-
 use app_updates::{Manifest, ManifestFile, Release, Version};
 use pinned_downloads::fetch::{Fetch, FetchError};
 
@@ -88,7 +86,7 @@ pub fn check_signed_by(
     let manifest_bytes = small(fetch, &asset("latest.json")?.url)?;
     let signature = small(fetch, &asset("latest.json.sig")?.url)?;
     let signature = String::from_utf8_lossy(&signature);
-    if !crate::signature::verify(&manifest_bytes, &signature, public) {
+    if !pinned_downloads::signature::verify(&manifest_bytes, &signature, public) {
         return Err(CheckError::Failed(format!(
             "{}: its manifest isn't signed by the project's key",
             release.tag
@@ -116,19 +114,8 @@ pub fn check_signed_by(
 
 /// A small file (a list, a manifest, a signature), at most [`SMALL`] bytes.
 fn small(fetch: &dyn Fetch, url: &str) -> Result<Vec<u8>, CheckError> {
-    if !pinned_downloads::fetch::allowed(url, crate::HOSTS) {
-        return Err(CheckError::Failed(format!("{url}: not a source updates come from")));
-    }
-    let body = fetch.open(url, 0)?;
-    let mut out = Vec::new();
-    body.reader
-        .take(SMALL + 1)
-        .read_to_end(&mut out)
-        .map_err(|e| CheckError::Offline(format!("{url}: {e}")))?;
-    if out.len() as u64 > SMALL {
-        return Err(CheckError::Failed(format!("{url}: larger than expected")));
-    }
-    Ok(out)
+    let wanted = pinned_downloads::fetch::Bounded { url, hosts: crate::HOSTS, limit: SMALL };
+    Ok(pinned_downloads::fetch::small(fetch, wanted)?)
 }
 
 #[cfg(test)]

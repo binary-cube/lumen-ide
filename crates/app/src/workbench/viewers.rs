@@ -37,7 +37,7 @@ impl Workbench {
                 }
             }
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         MouseResult::Redraw
     }
 
@@ -196,21 +196,7 @@ impl Workbench {
     /// seen, seen with a window over it (the window open over the editor isn't counted
     /// here), or seen.
     pub fn web_pages(&self) -> Vec<(ui_workbench::WebPage, Sight)> {
-        let mut pages: Vec<(ui_workbench::WebPage, bool)> =
-            all_tabs(&self.tabs, &self.editors.groups)
-                .filter_map(|tab| {
-                    let v = tab.viewer.as_ref()?;
-                    Some((v.viewer.web_page()?, v.shown))
-                })
-                .collect();
-        // A side or bottom window's (a Services tab's preview), while it's shown.
-        pages.extend(
-            self.tools
-                .sides
-                .iter()
-                .filter(|s| s.parked_since.is_none())
-                .filter_map(|s| Some((s.panel.web_page()?, true))),
-        );
+        let pages: Vec<(ui_workbench::WebPage, bool)> = self.views_pages().collect();
         if pages.is_empty() {
             return Vec::new();
         }
@@ -229,23 +215,14 @@ impl Workbench {
         } else {
             Vec::new()
         };
-        let mut pinned: Vec<kernel::Rect> = Vec::new();
-        if !self.page_holes_ok && self.status_popover.pinned() {
-            pinned.extend(self.status_popover.bounds());
-        }
-        if !self.page_holes_ok && self.resource_pills.is_open() {
-            pinned.extend(self.resource_pills.bounds());
-        }
-        let gap = ui_workbench::ds::POPOVER_GAP * self.scale;
+        let pinned = self.pinned_over_pages();
         pages
             .into_iter()
             .map(|(mut page, seen)| {
-                for r in &pinned {
-                    page.area = above(page.area, *r, gap);
-                }
+                page.area = self.above_pinned(page.area, &pinned);
                 let under = floating
                     .iter()
-                    .filter(|r| !pinned.contains(r) && !held.contains(r))
+                    .filter(|r| !pinned.contains(&Some(**r)) && !held.contains(r))
                     .any(|r| r.intersect(&page.area).is_some());
                 let sight = match () {
                     _ if !seen || page.area.size.height <= 0.0 => Sight::Away,
@@ -257,11 +234,39 @@ impl Workbench {
             .collect()
     }
 
+    /// The views' pages, each with whether its view is seen: the tabs', then a side or
+    /// bottom window's (a Services tab's preview) while it's shown. Walked, nothing gathered.
+    fn views_pages(&self) -> impl Iterator<Item = (ui_workbench::WebPage, bool)> + '_ {
+        let tabs = all_tabs(&self.tabs, &self.editors.groups).filter_map(|tab| {
+            let v = tab.viewer.as_ref()?;
+            Some((v.viewer.web_page()?, v.shown))
+        });
+        let sides = self.tools.sides.iter().filter(|s| s.parked_since.is_none());
+        tabs.chain(sides.filter_map(|s| Some((s.panel.web_page()?, true))))
+    }
+
+    /// The windows that stay over the pages where they can't have holes (the bar's, pinned;
+    /// the resources' pills): a page ends above them.
+    fn pinned_over_pages(&self) -> [Option<kernel::Rect>; 2] {
+        if self.page_holes_ok {
+            return [None, None];
+        }
+        let popover = self.status_popover.bounds().filter(|_| self.status_popover.pinned());
+        let pills = self.resource_pills.bounds().filter(|_| self.resource_pills.is_open());
+        [popover, pills]
+    }
+
+    /// `area` (a page's) ending above the `pinned` windows over it.
+    fn above_pinned(&self, area: kernel::Rect, pinned: &[Option<kernel::Rect>; 2]) -> kernel::Rect {
+        let gap = ui_workbench::ds::POPOVER_GAP * self.scale;
+        pinned.iter().flatten().fold(area, |area, r| above(area, *r, gap))
+    }
+
     /// The corners of a page at `area` (physical) to round as the card it's in (the
     /// editor's, a side or bottom window's): those on a card's corner (within its border),
     /// and their radius — `(radius, corners)`, the corners as [`platform_api::Corners`]'
     /// bits (none: square).
-    pub fn page_corners(&self, area: kernel::Rect) -> (f32, u8) {
+    pub fn page_corners(&self, area: kernel::Rect) -> render_api::ImageCorners {
         let radius = (CARD_RADIUS * self.scale).round();
         let near = self.scale.round().max(1.0) + 1.0;
         let cards = std::iter::once(self.card).chain(self.tools.sides.iter().map(|s| s.bounds));
@@ -287,27 +292,42 @@ impl Workbench {
                 }
             }
             if corners != 0 {
-                return ((radius - inset).max(0.0), corners);
+                return render_api::ImageCorners {
+                    radius: (radius - inset).max(0.0),
+                    which: corners,
+                };
             }
         }
-        (0.0, 0)
+        render_api::ImageCorners::NONE
     }
 
-    /// What floats over the pages and shows through them (each a rect with its corners'
-    /// radius; physical): the bar's window or the resources' pills, the notifications, the
-    /// tooltip. Nothing where pages can't have holes.
+    /// What floats over the pages (each a rect with its corners' radius; physical): the
+    /// bar's window or the resources' pills, the notifications, the tooltip. The mouse there
+    /// is the app's.
+    pub(super) fn floating_over_pages(&self) -> Vec<(kernel::Rect, f32)> {
+        self.floating_shapes().collect()
+    }
+
+    /// Whether something floats over the pages at `p` ([`Self::floating_over_pages`]):
+    /// nothing gathered (asked at each move of the mouse).
+    pub fn floats_over_pages_at(&self, p: kernel::Point) -> bool {
+        self.floating_shapes().any(|(r, _)| r.contains(p))
+    }
+
+    /// What floats over the pages, walked.
+    fn floating_shapes(&self) -> impl Iterator<Item = (kernel::Rect, f32)> + '_ {
+        let toasts = self.toasts.bounds().map(|r| (r, ui_workbench::ds::radius::LG * self.scale));
+        let shapes = self.status_popover.shapes().iter().chain(self.resource_pills.shapes());
+        shapes.copied().chain(toasts).chain(self.tooltips.areas().iter().copied())
+    }
+
+    /// What floats over the pages, cut out of the system's (shows through them); nothing
+    /// where they can't have holes.
     pub fn page_holes(&self) -> Vec<(kernel::Rect, f32)> {
         if !self.page_holes_ok {
             return Vec::new();
         }
-        let mut holes = Vec::new();
-        holes.extend_from_slice(self.status_popover.shapes());
-        holes.extend_from_slice(self.resource_pills.shapes());
-        if let Some(r) = self.toasts.bounds() {
-            holes.push((r, ui_workbench::ds::radius::LG * self.scale));
-        }
-        holes.extend_from_slice(self.tooltips.areas());
-        holes
+        self.floating_over_pages()
     }
 
     /// Whether the pages can have holes ([`Self::page_holes`]): the window says.
@@ -317,21 +337,85 @@ impl Workbench {
 
     /// The pictures drawn in place of the pages a window is open over (page id, picture),
     /// for the next frames: drawn under the windows, where their pages were.
-    pub fn set_page_pictures(&mut self, pictures: &[(u128, render_api::ImageData)]) {
+    /// …and the popups over the pages the app draws (page id, image, where in the page).
+    pub fn set_page_pictures(
+        &mut self,
+        pictures: &[(u128, render_api::ImageData)],
+        popups: &[PagePopup],
+    ) {
         self.page_pictures.clear();
         self.page_pictures.extend(pictures.iter().cloned());
+        self.page_popups.clear();
+        self.page_popups.extend(popups.iter().cloned());
     }
 
-    /// The pictures of the pages a window is open over, where those pages stand.
+    /// The accessibility trees of the pages the app draws, put under each page as it
+    /// paints (while a screen reader runs).
+    pub fn set_page_access(&mut self, trees: Vec<(u128, platform_api::PageAccess)>) {
+        self.page_access = trees;
+    }
+
+    /// The pages' trees let go (the screen reader stopped): nothing done when none is held
+    /// (asked at every whole frame without one).
+    pub fn clear_page_access(&mut self) {
+        if !self.page_access.is_empty() {
+            self.page_access = Vec::new();
+        }
+    }
+
+    /// Page `id`'s accessibility tree put where it paints (`area`): a group for the page,
+    /// its nodes under it as the page nests them.
+    fn describe_page(&self, id: u128, area: kernel::Rect) {
+        use ui_kit::access::{self, Described, Role};
+        let Some((_, tree)) = self.page_access.iter().find(|(page, _)| *page == id) else {
+            return;
+        };
+        let Some(_page) = access::open(|| Described::new(Role::Group, "", area)) else { return };
+        let nodes = tree.nodes.iter().map(|node| {
+            let bounds = node.bounds.offset(area.origin);
+            let mut described = Described::new(node.role, node.name.clone(), bounds)
+                .state(node.state)
+                .key(node.id as u64);
+            if let Some(value) = &node.value {
+                described = described.value(value.clone());
+            }
+            if let Some(level) = node.level {
+                described = described.level(level.saturating_sub(1));
+            }
+            (node.id, node.parent, described)
+        });
+        access::nested(nodes);
+    }
+
+    /// The pictures of the pages a window is open over, where those pages stand — only of
+    /// the pages seen now (the pictures are from the last frame's sync, before the views
+    /// changed: a page whose tab was just left isn't drawn over the new one). The views'
+    /// pages walked, nothing gathered (their sights are made once a frame, for the sync).
     pub(super) fn paint_page_pictures(&self, scene: &mut Scene) {
-        if self.page_pictures.is_empty() {
+        if self.page_pictures.is_empty() && self.page_popups.is_empty() {
             return;
         }
-        for (page, _) in self.web_pages() {
+        let pinned = self.pinned_over_pages();
+        for (mut page, seen) in self.views_pages() {
+            page.area = self.above_pinned(page.area, &pinned);
+            if !seen || page.area.size.width <= 0.0 || page.area.size.height <= 0.0 {
+                continue;
+            }
+            if ui_kit::access::recording() {
+                self.describe_page(page.id, page.area);
+            }
             if let Some((_, picture)) = self.page_pictures.iter().find(|(id, _)| *id == page.id)
-                && fits(picture, page.area)
+                // A live one (a page the app draws) has its frames' size, the page's.
+                && (picture.is_live() || fits(picture, page.area))
             {
-                scene.push_layer(Some(page.area)).image(picture, page.area);
+                // Rounded as the card it's in (as the system's page is told to be).
+                let corners = self.page_corners(page.area);
+                scene.push_layer(Some(page.area)).image_rounded(picture, page.area, corners);
+            }
+            // Its popup over it, where the page puts it: past its edges too (a list opened
+            // near the bottom of a short view goes below it), within the window.
+            for popup in self.page_popups.iter().filter(|popup| popup.page == page.id) {
+                scene.push_layer(None).image(&popup.image, popup.at.offset(page.area.origin));
             }
         }
     }
@@ -351,7 +435,7 @@ impl Workbench {
         let of = |t: &Tab| is_view_of(t, extension);
         if let Some(i) = self.tabs.iter().position(of) {
             self.activate(i);
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
             return true;
         }
         let current = self.editors.current;
@@ -361,7 +445,7 @@ impl Workbench {
         let Some((g, i)) = found else { return false };
         self.focus_group(g);
         self.activate(i);
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         true
     }
 
@@ -815,7 +899,7 @@ impl Workbench {
         if !v.viewer_visible() || !v.bounds.contains(p) {
             return None;
         }
-        self.focus = Focus::Editor;
+        Self::focus_to(&mut self.focus, &mut self.focus_moves, Focus::Editor);
         let entries = v.viewer.context_menu(p)?;
         Some(view_menu(entries))
     }
@@ -1039,6 +1123,15 @@ mod tests;
 pub(crate) fn fits(picture: &render_api::ImageData, area: kernel::Rect) -> bool {
     (picture.width as f32 - area.size.width).abs() <= 2.0
         && (picture.height as f32 - area.size.height).abs() <= 2.0
+}
+
+/// A page's popup drawn over it (an open `<select>`'s list), for a page the app draws.
+#[derive(Debug, Clone)]
+pub struct PagePopup {
+    pub page: u128,
+    pub image: render_api::ImageData,
+    /// Where (physical pixels in the page).
+    pub at: kernel::Rect,
 }
 
 /// Where a view's page stands ([`Workbench::web_pages`]): its view not seen, seen with a

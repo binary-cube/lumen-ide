@@ -123,6 +123,20 @@ struct Pixels {
     gpu_only: bool,
     /// A texture with these pixels exists on the GPU.
     on_gpu: AtomicBool,
+    /// Its texture is filled from outside, frame after frame ([`ImageData::live`]).
+    live: bool,
+    /// The frames put in a live image's texture (each one is drawn again where it shows).
+    frames: AtomicU64,
+    /// Where a live image's last frames changed it (what a window drawing it must draw
+    /// again).
+    history: crate::live::FrameHistory,
+    /// The bytes a live image's texture takes (set by the importer, 0 once freed).
+    live_bytes: AtomicU64,
+    /// Its owner doesn't show it for now (a page's popup closed): its texture may go at
+    /// the next frame, unshown, not after a while; a frame put in wants it again.
+    unwanted: AtomicBool,
+    /// Its colors are premultiplied by their alpha (a web engine's frames), not straight.
+    premultiplied: bool,
 }
 
 impl ImageData {
@@ -134,6 +148,32 @@ impl ImageData {
     /// A new image whose pixels are dropped from memory once uploaded to the GPU.
     pub fn gpu_only(width: u32, height: u32, pixels: Vec<u8>) -> Self {
         Self::make(width, height, pixels, true)
+    }
+
+    /// An image with no pixels here: its texture is filled on the GPU from outside (a web
+    /// page's frames, through the renderer's [`crate::FrameImporter`]), at whatever size its
+    /// frames have, their colors premultiplied; drawn once the first frame is in. Kept on
+    /// the GPU while it's shown; unshown a while (a page in a tab behind), its texture is
+    /// freed: it then has [no frame](Self::has_frame) and its owner asks its engine for one
+    /// ([`Self::frame_lost`]). Let go with [`Self::release`].
+    pub fn live() -> Self {
+        let mut image = Self::make(0, 0, Vec::new(), true);
+        if let Some(pixels) = Arc::get_mut(&mut image.shared) {
+            pixels.live = true;
+            pixels.premultiplied = true;
+            pixels.data = Mutex::new(None);
+        }
+        image
+    }
+
+    /// Its colors are premultiplied by their alpha (a live image's), else straight.
+    pub fn is_premultiplied(&self) -> bool {
+        self.shared.premultiplied
+    }
+
+    /// Its texture is filled from outside ([`Self::live`]).
+    pub fn is_live(&self) -> bool {
+        self.shared.live
     }
 
     /// A mask: `width * height` bytes of coverage, drawn in `color` (a quarter of an RGBA
@@ -173,6 +213,12 @@ impl ImageData {
                 data: Mutex::new(Some(pixels)),
                 gpu_only,
                 on_gpu: AtomicBool::new(false),
+                live: false,
+                frames: AtomicU64::new(0),
+                history: crate::live::FrameHistory::default(),
+                live_bytes: AtomicU64::new(0),
+                unwanted: AtomicBool::new(false),
+                premultiplied: false,
             }),
         }
     }
@@ -183,7 +229,62 @@ impl ImageData {
         data.as_deref().map(f)
     }
 
-    /// The renderer uploaded the pixels: a `gpu_only` image drops them.
+    /// The frames its texture was given (a live image's: another frame, drawn again).
+    pub fn generation(&self) -> u64 {
+        self.shared.frames.load(Ordering::Acquire)
+    }
+
+    /// Whether a frame is in its texture (a live image's: one came, and its texture wasn't
+    /// freed since).
+    pub fn has_frame(&self) -> bool {
+        self.generation() > 0 && self.shared.on_gpu.load(Ordering::Acquire)
+    }
+
+    /// A live image whose frame was freed (unshown a while): its owner asks its engine to
+    /// draw it again before it can show (the engine sends frames only when something
+    /// changes).
+    pub fn frame_lost(&self) -> bool {
+        self.shared.live
+            && self.generation() > 0
+            && !self.shared.on_gpu.load(Ordering::Acquire)
+            && !self.released()
+    }
+
+    /// Its owner doesn't show it for now (a page's popup closed): the renderer frees its
+    /// texture at its next frame, rather than after a while unshown. A frame put in after
+    /// wants it again.
+    pub fn let_frame_go(&self) {
+        self.shared.unwanted.store(true, Ordering::Release);
+    }
+
+    /// Its owner let its frame go ([`Self::let_frame_go`]) and no frame came since.
+    pub fn frame_unwanted(&self) -> bool {
+        self.shared.unwanted.load(Ordering::Acquire)
+    }
+
+    /// The importer put a frame in a live image's texture: where it changed is kept for
+    /// the windows drawing it, then the frame counted (in that order: a window seeing the
+    /// new count finds where it changed). Sound only from the renderer, under the lock its
+    /// textures are kept with, while the texture written is still the image's: told
+    /// otherwise, a window would draw a frame that isn't there (or one a freed texture
+    /// took with it).
+    pub fn frame_copied(&self, copied: crate::CopiedFrame) {
+        let next = self.generation() + 1;
+        self.shared.history.record(next, &copied);
+        self.shared.live_bytes.store(copied.bytes, Ordering::Release);
+        self.shared.unwanted.store(false, Ordering::Release);
+        self.shared.on_gpu.store(true, Ordering::Release);
+        self.shared.frames.store(next, Ordering::Release);
+    }
+
+    /// Where a live image's frames after `from` up to `to` changed it, in its frames'
+    /// pixels (`None`: all of it, or not known).
+    pub(crate) fn changed_between(&self, from: u64, to: u64) -> Option<crate::live::FrameChange> {
+        self.shared.history.changed_between(from, to)
+    }
+
+    /// The renderer uploaded the pixels: a `gpu_only` image drops them. (A live image's
+    /// frames come through [`Self::frame_copied`].)
     pub fn uploaded(&self) {
         self.shared.on_gpu.store(true, Ordering::Release);
         if self.shared.gpu_only
@@ -202,6 +303,7 @@ impl ImageData {
     /// The renderer freed the texture.
     pub fn evicted(&self) {
         self.shared.on_gpu.store(false, Ordering::Release);
+        self.shared.live_bytes.store(0, Ordering::Release);
     }
 
     /// Neither in memory nor on the GPU any more: it must be decoded again.
@@ -215,8 +317,12 @@ impl ImageData {
         self.shared.data.lock().ok().and_then(|d| d.as_ref().map(Vec::len)).unwrap_or(0)
     }
 
-    /// The bytes its texture takes on the GPU (RGBA8, or R8 for a mask), while it's there.
+    /// The bytes its texture takes on the GPU (RGBA8, or R8 for a mask; a live image's at
+    /// its frames' size), while it's there.
     pub fn gpu_memory(&self) -> u64 {
+        if self.shared.live {
+            return self.shared.live_bytes.load(Ordering::Acquire);
+        }
         if self.shared.on_gpu.load(Ordering::Acquire) {
             u64::from(self.width) * u64::from(self.height) * self.bytes_per_pixel()
         } else {
@@ -237,6 +343,29 @@ pub struct ImageInstance {
     pub image: ImageData,
     pub bounds: Rect,
     pub opacity: f32,
+    /// Its corners rounded (as the card it's in: a page's), or square.
+    pub corners: ImageCorners,
+}
+
+impl ImageInstance {
+    /// `image` in `bounds` at `opacity`, its corners square.
+    pub fn new(image: ImageData, bounds: Rect, opacity: f32) -> Self {
+        Self { image, bounds, opacity, corners: ImageCorners::NONE }
+    }
+}
+
+/// Which corners of an image are rounded, and by how much (physical pixels): what's past
+/// them isn't drawn. By default none (square).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct ImageCorners {
+    pub radius: f32,
+    /// The corners' bits ([`kernel::Corners`]).
+    pub which: u8,
+}
+
+impl ImageCorners {
+    /// Square: every image's but where asked.
+    pub const NONE: Self = Self { radius: 0.0, which: 0 };
 }
 
 impl Layer {
@@ -270,7 +399,7 @@ impl Layer {
     }
 
     pub fn image(&mut self, image: &ImageData, bounds: Rect) -> &mut Self {
-        self.images.push(ImageInstance { image: image.clone(), bounds, opacity: 1.0 });
+        self.images.push(ImageInstance::new(image.clone(), bounds, 1.0));
         self
     }
 
@@ -278,8 +407,20 @@ impl Layer {
     pub fn image_faded(&mut self, image: &ImageData, bounds: Rect, opacity: f32) -> &mut Self {
         if opacity > 0.001 {
             let opacity = opacity.min(1.0);
-            self.images.push(ImageInstance { image: image.clone(), bounds, opacity });
+            self.images.push(ImageInstance::new(image.clone(), bounds, opacity));
         }
+        self
+    }
+
+    /// [`Self::image`] with `corners` rounded (a page in a card).
+    pub fn image_rounded(
+        &mut self,
+        image: &ImageData,
+        bounds: Rect,
+        corners: ImageCorners,
+    ) -> &mut Self {
+        self.images
+            .push(ImageInstance { corners, ..ImageInstance::new(image.clone(), bounds, 1.0) });
         self
     }
 

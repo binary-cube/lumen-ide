@@ -92,10 +92,8 @@ fn tab_keeps_the_row_typed_in_shown() {
     assert_eq!(d.first, 0);
 }
 
-/// Many branches: the app's scrollbar in the margin right of the table; its thumb dragged
-/// moves the rows a row at a time (never past the end), ticking nothing.
-#[test]
-fn the_table_s_thumb_is_dragged_a_row_at_a_time() {
+/// Twenty branches (more than shown, so the table has its scrollbar), painted once.
+fn many_branches() -> PushDialog {
     let mut d = PushDialog::default();
     let branches: Vec<String> = (0..20).map(|i| format!("feature/{i:02}")).collect();
     d.set_data(&PushRequest {
@@ -121,6 +119,14 @@ fn the_table_s_thumb_is_dragged_a_row_at_a_time() {
         focused: true,
         waker: None,
     });
+    d
+}
+
+/// Many branches: the app's scrollbar in the margin right of the table; its thumb dragged
+/// moves the rows a row at a time (never past the end), ticking nothing.
+#[test]
+fn the_table_s_thumb_is_dragged_a_row_at_a_time() {
+    let mut d = many_branches();
     assert_eq!(d.first, 0);
     let ticked = |d: &PushDialog| d.form.as_ref().unwrap().lines.iter().filter(|l| l.push).count();
     let before = ticked(&d);
@@ -138,6 +144,36 @@ fn the_table_s_thumb_is_dragged_a_row_at_a_time() {
     assert_eq!(d.first, 20 - ROWS_SHOWN, "at its end, no further");
     assert!(d.release());
     assert_eq!(ticked(&d), before, "nothing ticked by it");
+}
+
+/// Over the table's thumb the cursor is the scrollbar's own, never a row name's I-beam nor
+/// what was hovered before (a name, a box), and it stays the bar's while the thumb is held.
+#[test]
+fn the_cursor_over_the_table_s_thumb_is_the_scrollbar_s() {
+    let mut d = many_branches();
+    let (lane, _) = d.bar_area.expect("a scrollbar: more branches than shown");
+    let y = lane.min_y() + 6.0;
+    let thumb = (0..16)
+        .map(|dx| Point::new(lane.max_x() - 1.0 - dx as f32, y))
+        .find(|p| d.bar.contains(*p))
+        .expect("the thumb at the table's top");
+    let at = |d: &PushDialog, hit: Hit| {
+        d.hits.iter().find(|(_, h)| *h == hit).map(|(r, _)| r.center()).expect("shown")
+    };
+    let name = at(&d, Hit::Name(0));
+    let tick = at(&d, Hit::Push(0));
+    for before in [name, tick, name] {
+        d.hover(before);
+        assert_ne!(d.cursor_at(before), Some(ui_components::scrollbar::CURSOR));
+        d.hover(thumb);
+        assert_eq!(d.cursor_at(thumb), Some(ui_components::scrollbar::CURSOR), "after {before:?}");
+    }
+    Viewer::press(&mut d, thumb, 1);
+    assert!(d.bar.is_dragging());
+    let below = Point::new(name.x, thumb.y + 40.0);
+    d.drag(below);
+    assert_eq!(d.cursor_at(below), Some(ui_components::scrollbar::CURSOR), "while dragged");
+    d.release();
 }
 
 /// A row's name pressed: the keys and the text go to it (through its parts' focus), an

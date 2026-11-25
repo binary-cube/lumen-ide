@@ -13,7 +13,7 @@ impl Workbench {
         match key {
             EditKey::Escape => {
                 tab.find_open = false;
-                self.focus = Focus::Editor;
+                self.move_focus(Focus::Editor);
                 return true;
             }
             EditKey::Enter { shift } => {
@@ -61,7 +61,7 @@ impl Workbench {
             && (!v.editor_visible() || (self.focus == Focus::Editor && v.has_keys()))
             && v.viewer.command("find")
         {
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
             return true;
         }
         let selection = tab.doc.selections().primary();
@@ -79,7 +79,7 @@ impl Workbench {
             FindField::Query
         });
         tab.find_open = true;
-        self.focus = Focus::Find;
+        Self::focus_to(&mut self.focus, &mut self.focus_moves, Focus::Find);
         tab.update_query(&sink);
         tab.view.reveal_cursor(&tab.doc, &tab.folds, text, &self.palette);
         true
@@ -106,7 +106,7 @@ impl Workbench {
         match hit {
             FindHit::Field(field) => {
                 tab.find_bar.set_focus(field);
-                self.focus = Focus::Find;
+                self.move_focus(Focus::Find);
                 return;
             }
             FindHit::ToggleReplace => {
@@ -118,7 +118,7 @@ impl Workbench {
                 tab.find_bar.query.set_text("");
                 query.pattern.clear();
                 tab.find_bar.set_focus(FindField::Query);
-                self.focus = Focus::Find;
+                Self::focus_to(&mut self.focus, &mut self.focus_moves, Focus::Find);
             }
             FindHit::ToggleCase => query.case_sensitive = !query.case_sensitive,
             FindHit::ToggleWord => query.whole_word = !query.whole_word,
@@ -127,7 +127,7 @@ impl Workbench {
             FindHit::Next => tab.find.find_next(&mut tab.doc),
             FindHit::Close => {
                 tab.find_open = false;
-                self.focus = Focus::Editor;
+                self.move_focus(Focus::Editor);
                 return;
             }
             FindHit::ReplaceOne => {

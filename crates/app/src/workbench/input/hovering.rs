@@ -12,6 +12,22 @@ impl Workbench {
         (redraw || emphasis || left, icon)
     }
 
+    /// The mouse went where the app has nothing (onto a page the app draws): what it lit
+    /// goes out — a tab's or a button's hover, the side panel's, a tooltip — and a bar's
+    /// window not pinned closes (it would stay open, and take the page's mouse where it
+    /// is). `true`: a redraw.
+    pub fn hover_cleared(&mut self) -> bool {
+        let away = Point::new(f32::MIN, f32::MIN);
+        let (mut redraw, _) = self.hover_over(away);
+        redraw |= self.leave_side_panel(away);
+        redraw |= self.tooltips.hide();
+        if self.status_popover.is_open() && !self.status_popover.pinned() {
+            self.status_popover.close();
+            redraw = true;
+        }
+        self.pointer_left() | redraw
+    }
+
     /// The side panel the mouse was over, told it left (it gets the point outside): what
     /// it lit under the mouse goes out, a scrollbar it held shown fades. Only the panel
     /// under the mouse hears it move otherwise. `true`: it changed.

@@ -621,6 +621,28 @@ fn the_list_scrolls_by_its_thumb() {
     assert!(panel.frame_deadline().is_some(), "it fades out after a while");
 }
 
+/// The list's thumb dragged up over the search keeps the bar's cursor, never the field's
+/// I-beam; let go, the field's again.
+#[test]
+fn the_thumb_dragged_over_the_search_keeps_its_cursor() {
+    let many = (0..200).map(|i| session(&format!("s{i}"), 200 - i)).collect();
+    let mut panel = listed(many);
+    let (w, h) = (300.0, 400.0);
+    painted(&mut panel, w, h);
+    assert!(panel.scroll(1.0), "it scrolls");
+    painted(&mut panel, w, h);
+    let lane = Point::new(w - LANE_INSET, panel.list.min_y() + 20.0);
+    panel.hover(lane);
+    assert!(panel.click(lane).is_none(), "the thumb takes the press");
+    let field = panel.field;
+    let search = Point::new(field.min_x() + 30.0, field.min_y() + field.size.height / 2.0);
+    panel.drag(search);
+    assert_eq!(panel.cursor_at(search), Some(ui_components::scrollbar::CURSOR), "held");
+    assert!(panel.release());
+    panel.hover(search);
+    assert_eq!(panel.cursor_at(search), Some(ViewerCursor::Text), "let go: the field's");
+}
+
 /// The agents' list open with its own search (many agents): what's typed goes to its
 /// search, not to the panel's; the wheel is the list's.
 #[test]

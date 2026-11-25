@@ -13,9 +13,9 @@ doctest = false
 # HTTPS from the allowed hosts, checked against their SHA-256 / SHA-512, unpacked by our
 # code (gzip, xz — Rust only, no C library to build for Windows —, zip's deflate).
 ureq = "3"
-ring = "0.17"
+ring.workspace = true
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
-lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz", "optimization"] }
+lzma-rust2 = { workspace = true, features = ["optimization"] }
 
 # Files in memory instead of the network, archives made in memory (other crates' tests,
 # the app's snapshots).
@@ -24,7 +24,7 @@ fake = ["lzma-rust2/encoder"]
 
 [dev-dependencies]
 # Archives made by the tests (an xz tarball).
-lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz", "encoder"] }
+lzma-rust2 = { workspace = true, features = ["encoder"] }
 
 [lints]
 workspace = true

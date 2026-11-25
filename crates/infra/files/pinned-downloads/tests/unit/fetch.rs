@@ -201,3 +201,19 @@ fn a_stopped_download_keeps_what_came() {
     );
     assert!(part.exists());
 }
+
+/// A small file comes whole within its limit; past it, off its hosts or offline: refused
+/// as such.
+#[test]
+fn a_small_file_is_bounded() {
+    let memory = Memory::default();
+    memory.serve(URL, b"list".to_vec());
+    let wanted = Bounded { url: URL, hosts: HOSTS, limit: 4 };
+    assert_eq!(small(&memory, wanted).unwrap(), b"list");
+    let tight = Bounded { limit: 3, ..wanted };
+    assert!(matches!(small(&memory, tight), Err(FetchError::TooLarge(_))));
+    let elsewhere = Bounded { hosts: &["example.com"], ..wanted };
+    assert!(matches!(small(&memory, elsewhere), Err(FetchError::Refused(_))));
+    memory.set_offline(true);
+    assert!(small(&memory, wanted).unwrap_err().offline());
+}

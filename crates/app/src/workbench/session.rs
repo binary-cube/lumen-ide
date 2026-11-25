@@ -154,7 +154,7 @@ impl Workbench {
         // What the panels kept of themselves, given as each one is made.
         self.tools.mementos = session.panels.iter().cloned().collect();
         self.restore_tool_windows(&session.tool_windows, session.bottom.as_deref());
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.layout();
         // What was reopened is exactly the saved session (not rewritten right away).
         self.session.remember(self.current_session());

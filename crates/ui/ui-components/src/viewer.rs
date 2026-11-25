@@ -104,6 +104,12 @@ pub enum WebEvent {
     /// A link it wanted opened in a new window: never opened by the engine; the view
     /// decides (a request to open it in the browser, or nothing).
     OpenLink(String),
+    /// Its content is drawn (loaded): what the view painted under it while it loaded (a
+    /// loader) is covered now, and can stop turning.
+    Shown,
+    /// It can't be made (no web engine here, none started): it never shows, and the view
+    /// says so in its place instead of a loader.
+    Failed,
 }
 
 /// What was requested by a click in the viewer.

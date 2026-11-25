@@ -395,7 +395,7 @@ impl Workbench {
             window.hidden_since = Some(std::time::Instant::now());
         }
         if self.focus == Focus::Panel {
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
         }
         // A panel shown at the bottom (Services) is set aside for what comes in its place.
         if let Some(panel) =
@@ -545,7 +545,7 @@ impl Workbench {
     /// Shows tool window `id` at the bottom (instead of whatever was there).
     fn show_tool_window(&mut self, id: &str) {
         self.set_bottom(Some(id));
-        self.focus = Focus::Panel;
+        self.move_focus(Focus::Panel);
         self.layout();
     }
 
@@ -738,7 +738,7 @@ impl Workbench {
                 window.prune();
             }
         }
-        self.focus = Focus::Panel;
+        self.move_focus(Focus::Panel);
         self.layout();
         true
     }
@@ -956,7 +956,7 @@ impl Workbench {
             self.beside_compare = Some(path);
         }
         // The window keeps the keyboard (↑ ↓ through its list).
-        self.focus = Focus::Panel;
+        self.move_focus(Focus::Panel);
     }
 
     /// The right-click menu of the bottom window's view at `p` (`None`: not over one, or it
@@ -969,7 +969,7 @@ impl Workbench {
         let g = self.tool_group_at(p)?;
         self.focus_tool_group(g);
         let entries = self.tools.panel_viewer()?.context_menu(p)?;
-        self.focus = Focus::Panel;
+        self.move_focus(Focus::Panel);
         Some(super::viewers::prefixed_menu(entries, TOOL_VIEW_MENU))
     }
 

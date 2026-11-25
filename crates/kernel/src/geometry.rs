@@ -14,6 +14,21 @@ impl Point {
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
+
+    /// Moved by `by` (a place inside something, in what holds it).
+    pub fn offset(self, by: Point) -> Point {
+        Point::new(self.x + by.x, self.y + by.y)
+    }
+
+    /// Where it is from `origin` (a place in what holds something, inside it).
+    pub fn relative_to(self, origin: Point) -> Point {
+        Point::new(self.x - origin.x, self.y - origin.y)
+    }
+
+    /// Both coordinates times `factor` (from one unit to another).
+    pub fn scaled(self, factor: f32) -> Point {
+        Point::new(self.x * factor, self.y * factor)
+    }
 }
 
 /// 2D size.
@@ -104,6 +119,17 @@ impl Rect {
         (x1 > x0 && y1 > y0).then(|| Rect::new(x0, y0, x1 - x0, y1 - y0))
     }
 
+    /// Moved by `by` (a rectangle inside something, in what holds it).
+    pub fn offset(self, by: Point) -> Rect {
+        Rect { origin: self.origin.offset(by), size: self.size }
+    }
+
+    /// Its place and size times `factor` (from one unit to another).
+    pub fn scaled(self, factor: f32) -> Rect {
+        let size = Size::new(self.size.width * factor, self.size.height * factor);
+        Rect { origin: self.origin.scaled(factor), size }
+    }
+
     /// The smallest rectangle holding both.
     pub fn union(&self, other: &Rect) -> Rect {
         let x0 = self.min_x().min(other.min_x());
@@ -112,6 +138,18 @@ impl Rect {
         let y1 = self.max_y().max(other.max_y());
         Rect::new(x0, y0, x1 - x0, y1 - y0)
     }
+}
+
+/// A rectangle's corners as bits (a card's rounded ones, a page's): one definition for every
+/// part that says which corners it rounds.
+#[derive(Debug, Clone, Copy)]
+pub struct Corners;
+
+impl Corners {
+    pub const TOP_LEFT: u8 = 1;
+    pub const TOP_RIGHT: u8 = 2;
+    pub const BOTTOM_LEFT: u8 = 4;
+    pub const BOTTOM_RIGHT: u8 = 8;
 }
 
 #[cfg(test)]

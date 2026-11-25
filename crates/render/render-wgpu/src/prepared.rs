@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
 
-use render_api::{GpuApi, RenderOptions};
+use render_api::{GpuApi, GpuPreference, RenderOptions};
 
 use super::{Drawer, GpuContext};
 
@@ -39,10 +39,10 @@ pub fn prepare(options: &RenderOptions) {
     if slot.is_some() {
         return;
     }
-    let transparent = options.transparent;
+    let ahead = Ahead { backends, transparent: options.transparent, gpu: options.gpu };
     let started = std::thread::Builder::new()
         .name(THREAD.into())
-        .spawn(move || pollster::block_on(make(backends, transparent)));
+        .spawn(move || pollster::block_on(make(ahead)));
     match started {
         Ok(handle) => *slot = Some(handle),
         Err(e) => tracing::debug!(error = %e, "the GPU isn't made ahead"),
@@ -55,7 +55,16 @@ pub(super) fn take() -> Option<Prepared> {
     handle.join().ok().flatten()
 }
 
-async fn make(backends: wgpu::Backends, transparent: bool) -> Option<Prepared> {
+/// What the GPU is made ahead with: the graphics API, a transparent surface or not, the
+/// GPU the settings prefer.
+#[derive(Debug, Clone, Copy)]
+struct Ahead {
+    backends: wgpu::Backends,
+    transparent: bool,
+    gpu: GpuPreference,
+}
+
+async fn make(Ahead { backends, transparent, gpu }: Ahead) -> Option<Prepared> {
     let started = std::time::Instant::now();
     // No display handle: Metal and DX12 don't use it.
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
@@ -68,7 +77,7 @@ async fn make(backends: wgpu::Backends, transparent: bool) -> Option<Prepared> {
     let instance = wgpu::Instance::new(desc);
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
+            power_preference: super::gpus::power_preference(gpu),
             force_fallback_adapter: false,
             compatible_surface: None,
             apply_limit_buckets: false,
@@ -76,6 +85,8 @@ async fn make(backends: wgpu::Backends, transparent: bool) -> Option<Prepared> {
         .await
         .inspect_err(|e| tracing::debug!(error = %e, "no GPU made ahead"))
         .ok()?;
+    // Listed for the settings as when a window chooses it.
+    super::gpus::remember(&instance, backends, &adapter).await;
     let ctx = Arc::new(
         GpuContext::new(instance, adapter)
             .await

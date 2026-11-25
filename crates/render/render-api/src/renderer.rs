@@ -15,6 +15,53 @@ pub trait RenderTarget: HasWindowHandle + HasDisplayHandle + Send + Sync + fmt::
 
 impl<T: HasWindowHandle + HasDisplayHandle + Send + Sync + fmt::Debug + ?Sized> RenderTarget for T {}
 
+/// Which GPU draws where a computer has several. By default the system's choice: what the
+/// user set for the app in the system's settings, and its own policy (the battery: macOS
+/// switches to the dedicated GPU only when something asks for it, Windows' "let Windows
+/// decide" saves power); or always the integrated one (saves the battery: an editor rarely
+/// needs more), or always the dedicated one (stronger: large diagrams, many windows). The web
+/// engine draws on the same one (its frames open only there).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GpuPreference {
+    #[default]
+    System,
+    Integrated,
+    Dedicated,
+}
+
+impl GpuPreference {
+    /// As written in the settings (`system`, `integrated`, `dedicated`; `None`: another
+    /// word).
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "system" => Some(Self::System),
+            "integrated" => Some(Self::Integrated),
+            "dedicated" => Some(Self::Dedicated),
+            _ => None,
+        }
+    }
+
+    /// As written in the settings ([`Self::parse`] reads it back).
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Integrated => "integrated",
+            Self::Dedicated => "dedicated",
+        }
+    }
+}
+
+/// A GPU the computer has (the settings list them).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GpuInfo {
+    /// Its name, as its driver gives it.
+    pub name: String,
+    /// A dedicated GPU (else an integrated one).
+    pub dedicated: bool,
+    /// The one drawing now.
+    pub used: bool,
+}
+
 /// Preferred graphics API. `Auto` lets the driver pick what's best on the platform.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum GpuApi {
@@ -43,6 +90,8 @@ impl GpuApi {
 pub struct RenderOptions {
     pub vsync: bool,
     pub preferred_api: GpuApi,
+    /// Which GPU draws where there are several (an integrated one and a dedicated one).
+    pub gpu: GpuPreference,
     /// A surface that can be transparent (where the API allows it: DX12 through
     /// DirectComposition), so the window's corners can be cut ([`Scene::window_corners`]).
     pub transparent: bool,
@@ -50,7 +99,12 @@ pub struct RenderOptions {
 
 impl Default for RenderOptions {
     fn default() -> Self {
-        Self { vsync: true, preferred_api: GpuApi::Auto, transparent: false }
+        Self {
+            vsync: true,
+            preferred_api: GpuApi::Auto,
+            gpu: GpuPreference::default(),
+            transparent: false,
+        }
     }
 }
 
@@ -113,6 +167,12 @@ pub trait Renderer {
     /// from the created resources: what's shared with the other windows apart. `None` if
     /// the driver can't estimate it.
     fn gpu_memory(&self) -> Option<GpuMemory> {
+        None
+    }
+
+    /// What copies frames made elsewhere (a web page's) into live images, from any thread
+    /// (`None`: this renderer can't).
+    fn frame_importer(&self) -> Option<std::sync::Arc<dyn crate::FrameImporter>> {
         None
     }
 

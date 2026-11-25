@@ -41,3 +41,10 @@ fn versions_are_ordered_as_semver_orders_them() {
     }
     assert_eq!(v("1.0.0+a").cmp(&v("1.0.0+b")), std::cmp::Ordering::Equal);
 }
+
+/// The web engine's releases (`web-engine`, `web-engine-v<version>`) are never the app's.
+#[test]
+fn the_web_engines_tags_are_no_version() {
+    assert!(Version::parse("web-engine").is_none());
+    assert!(Version::parse("web-engine-v156.0.8078.100-1").is_none());
+}

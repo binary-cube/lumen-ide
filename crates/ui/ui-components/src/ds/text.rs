@@ -192,7 +192,10 @@ pub fn ellipsize_path(text: &mut TextSystem, path: &str, font: &Font, max: f32) 
 }
 
 /// `value` in lines no wider than `max`, broken between words (a word longer than a line is
-/// cut short); at most `lines` of them, the last ending in `…` when there's more.
+/// cut short); at most `lines` of them, the last ending in `…` when there's more. Its words
+/// (joined by single spaces) are shaped once and broken where their glyphs pass `max`; a
+/// line known to fit as it was filled isn't measured again, only one that may not (a word
+/// alone on its line, the rest after the last) is, and cut when it doesn't.
 pub fn wrap(
     text: &mut TextSystem,
     value: &str,
@@ -200,29 +203,57 @@ pub fn wrap(
     max: f32,
     lines: usize,
 ) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut line = String::new();
-    let mut words = value.split_whitespace().peekable();
-    while let Some(word) = words.next() {
-        let next = if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
-        if line.is_empty() || text.shape_line(&next, font).width <= max {
-            line = next;
+    let lines = lines.max(1);
+    let words = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let shaped = text.shape_line(&words, font);
+    let fits = |text: &mut TextSystem, (from, to): (usize, usize)| {
+        let measured = shaped.x_at(to) - shaped.x_at(from);
+        match (measured - max).abs() <= SNAP_SLACK {
+            // Too close to tell from the snapped positions: the run shaped alone.
+            true => text.shape_line(&words[from..to], font).width <= max,
+            false => measured <= max,
+        }
+    };
+    // Each line: where it starts and ends, and whether it was measured to fit.
+    let mut broken: Vec<(usize, usize, bool)> = Vec::new();
+    // The line being filled: where it starts, where its next word starts, and whether it
+    // was measured to fit as far as it goes (its first word alone isn't).
+    let (mut start, mut word_start, mut fit) = (0, 0, false);
+    for (space, _) in words.match_indices(' ').chain(std::iter::once((words.len(), ""))) {
+        // A word always goes on an empty line; another one while the line still fits.
+        if word_start == start {
+            word_start = space + 1;
             continue;
         }
-        if out.len() + 1 == lines {
-            // The last line: the rest after it, cut short.
-            let rest: Vec<&str> = std::iter::once(word).chain(words).collect();
-            line = format!("{line} {}", rest.join(" "));
+        if fits(text, (start, space)) {
+            (word_start, fit) = (space + 1, true);
+            continue;
+        }
+        if broken.len() + 1 == lines {
+            // The last line: the rest after it, measured again to be cut short.
+            fit = false;
             break;
         }
-        out.push(std::mem::replace(&mut line, word.to_owned()));
+        broken.push((start, word_start - 1, fit));
+        // The word that didn't fit starts the next line.
+        (start, word_start, fit) = (word_start, space + 1, false);
     }
-    if !line.is_empty() {
-        out.push(line);
-    }
-    out.truncate(lines.max(1));
-    out.into_iter().map(|l| ellipsize(text, &l, font, max)).collect()
+    broken.push((start, words.len(), fit));
+    broken
+        .into_iter()
+        .map(|(from, to, fit)| match fit || fits(text, (from, to)) {
+            true => words[from..to].to_owned(),
+            false => ellipsize(text, &words[from..to], font, max),
+        })
+        .collect()
 }
+
+/// How far a run measured inside its line may be from its width alone (physical pixels):
+/// the glyphs' places are snapped to whole pixels.
+const SNAP_SLACK: f32 = 1.0;
 
 /// `value` drawn from `x` on `baseline`, cut with "…" where it passes `max` (its whole
 /// width otherwise): as [`ellipsize`], but nothing allocated — the shaped line's glyphs that
@@ -402,10 +433,52 @@ pub fn section_title_in(
     layer: &mut Layer,
     text: &mut TextSystem,
     ctx: &Ctx<'_>,
-    (x, y, width): (f32, f32, f32),
+    place: (f32, f32, f32),
     title: &str,
     detail: Option<&str>,
 ) -> f32 {
+    section_title_lines(layer, text, ctx, place, SectionTitle { title, detail, lines: &[] })
+}
+
+/// A section's title and its description, as [`section_title_lines`] draws them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SectionTitle<'a> {
+    pub title: &'a str,
+    /// Its description on one line, cut with "…" where it passes the width (`None`: none).
+    pub detail: Option<&'a str>,
+    /// Its description already broken in lines ([`section_detail_lines`], kept by the
+    /// caller while its text and width stay), drawn one under the other: when there are
+    /// some, drawn instead of `detail`.
+    pub lines: &'a [String],
+}
+
+/// A section's description broken in up to `lines` lines within `width`, in its font:
+/// between words, the last cut with "…" when there's more (for [`SectionTitle::lines`]).
+pub fn section_detail_lines(
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    detail: &str,
+    width: f32,
+    lines: usize,
+) -> Vec<String> {
+    wrap(text, detail, &section_detail_font(ctx), width, lines)
+}
+
+/// The font of a section's description.
+fn section_detail_font(ctx: &Ctx<'_>) -> Font {
+    ctx.ui_font(-1.0)
+}
+
+/// [`section_title_in`] with its description over several lines (a settings block's, that
+/// says more than a line holds: [`SectionTitle::lines`]). Returns the y below it.
+pub fn section_title_lines(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    (x, y, width): (f32, f32, f32),
+    section: SectionTitle<'_>,
+) -> f32 {
+    let SectionTitle { title, detail, lines } = section;
     // To a screen reader: a heading named by its title (its detail read under it).
     let heading = Rect::new(x, y, width, ctx.px(SECTION_TITLE_REACH));
     let _told = ui_kit::access::open(|| {
@@ -416,22 +489,29 @@ pub fn section_title_in(
     let baseline = (y + m.ascent).round();
     draw_ellipsized(layer, text, title, &font, (x, baseline), width, ctx.fade(ctx.palette.text));
     let mut bottom = y + m.ascent + m.descent;
-    if let Some(detail) = detail {
-        let small = ctx.ui_font(-1.0);
-        let sm = text.metrics(&small);
-        draw_ellipsized(
-            layer,
-            text,
-            detail,
-            &small,
-            (x, (bottom + ctx.px(3.0) + sm.ascent).round()),
-            width,
-            ctx.fade(ctx.palette.text_muted),
-        );
-        bottom += ctx.px(3.0) + sm.ascent + sm.descent;
+    // The lines given (already fitted), else the one line drawn as it is, cut.
+    let one = detail.filter(|_| lines.is_empty());
+    let mut shown = one.into_iter().chain(lines.iter().map(String::as_str)).peekable();
+    if shown.peek().is_none() {
+        return bottom;
+    }
+    let small = section_detail_font(ctx);
+    let sm = text.metrics(&small);
+    let color = ctx.fade(ctx.palette.text_muted);
+    bottom += ctx.px(3.0);
+    for (i, line) in shown.enumerate() {
+        if i > 0 {
+            bottom += ctx.px(SECTION_DETAIL_LEADING);
+        }
+        let baseline = (bottom + sm.ascent).round();
+        draw_ellipsized(layer, text, line, &small, (x, baseline), width, color);
+        bottom += sm.ascent + sm.descent;
     }
     bottom
 }
+
+/// The space between two lines of a section's description (logical pixels).
+const SECTION_DETAIL_LEADING: f32 = 2.0;
 
 /// How tall a [`section_header`] is (logical pixels).
 pub const SECTION_HEADER: f32 = 22.0;

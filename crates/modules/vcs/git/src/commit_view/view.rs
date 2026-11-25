@@ -212,6 +212,10 @@ impl Viewer for CommitView {
         // only where the mouse hovered).
         let divider = self.dividers.0.iter().find_map(|divider| divider.cursor(p));
         divider.or_else(|| {
+            // A bar (over it, or held) over everything under it.
+            if let Some(bar) = self.controls.bar_cursor(p) {
+                return Some(bar);
+            }
             // A hunk's buttons are over the code: theirs first.
             let hit = self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h);
             if matches!(hit, Some(Hit::StageHunk(_) | Hit::DiscardHunk(_))) {

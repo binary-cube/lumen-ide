@@ -156,6 +156,7 @@ impl GpuContext {
                 textures: HashMap::new(),
                 frame: 0,
                 shown: HashMap::new(),
+                sources: crate::import::Sources::default(),
             }),
         })
     }
@@ -170,7 +171,12 @@ impl GpuContext {
         if let Some(gpu) = state.textures.get_mut(&image.id) {
             gpu.last_frame = state.frame;
             gpu.last_used = std::time::Instant::now();
-            return true;
+            // A live image's texture made but not filled yet: nothing to draw.
+            return gpu.filled != crate::instances::Filled::Empty;
+        }
+        // A live image has no pixels: it's drawn once its first frame is in.
+        if image.is_live() {
+            return false;
         }
         let max = self.device.limits().max_texture_dimension_2d;
         // A mask: one byte of coverage per pixel.
@@ -244,6 +250,8 @@ impl GpuContext {
                 last_frame: state.frame,
                 last_used: std::time::Instant::now(),
                 image: image.clone(),
+                live: None,
+                filled: crate::instances::Filled::Whole,
             },
         );
         image.uploaded();

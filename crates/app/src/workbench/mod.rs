@@ -302,7 +302,7 @@ pub use running::RunningRequest;
 pub use side_panel::PANEL_MENU;
 pub use status::STATUS_MENU;
 pub use tool_windows::TOOL_VIEW_MENU;
-pub use viewers::{Sight, VIEW_MENU};
+pub use viewers::{PagePopup, Sight, VIEW_MENU};
 pub use window_menu::WINDOW_MENU;
 
 mod disk;
@@ -617,7 +617,10 @@ pub struct Workbench {
     status: StatusBar,
     /// The editor area takes the window: what it hid, brought back after.
     editor_full: Option<editor_full::Hidden>,
+    /// Who has the keys: set only through [`Self::move_focus`].
     focus: Focus,
+    /// How many times the focus was moved ([`Self::focus_moves`]).
+    focus_moves: u64,
     code_font: FontFamily,
     next_untitled: u32,
     size: PhysicalSize,
@@ -677,6 +680,10 @@ pub struct Workbench {
     /// The pictures drawn in place of the pages a window is open over (page id, picture):
     /// the app's, given after each frame they change.
     page_pictures: Vec<(u128, render_api::ImageData)>,
+    /// The popups over the pages the app draws.
+    page_popups: Vec<PagePopup>,
+    /// The accessibility trees of the pages the app draws (while a screen reader runs).
+    page_access: Vec<(u128, platform_api::PageAccess)>,
     /// The pages can have holes (what floats over them shows through): the window's say.
     page_holes_ok: bool,
     /// The resources pinned: their pills in the editor's corner (apart from the window a
@@ -918,9 +925,29 @@ impl Workbench {
                 self.active = 0;
             }
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.tab_bar.reveal_active();
         self.layout();
+    }
+
+    /// The keys given to `focus` (a click, a command, a tab opened), counted as a move even
+    /// when it had them: what holds the keyboard outside the workbench (a page the app
+    /// draws) gives it back.
+    fn move_focus(&mut self, focus: Focus) {
+        Self::focus_to(&mut self.focus, &mut self.focus_moves, focus);
+    }
+
+    /// [`Self::move_focus`] on the fields alone, where another part of the workbench is
+    /// borrowed meanwhile (a tab, a side panel).
+    fn focus_to(focus: &mut Focus, moves: &mut u64, to: Focus) {
+        *focus = to;
+        *moves = moves.wrapping_add(1);
+    }
+
+    /// How many times the focus was moved: another count than last seen, and the app's
+    /// focus went elsewhere since.
+    pub fn focus_moves(&self) -> u64 {
+        self.focus_moves
     }
 }
 

@@ -1,0 +1,25 @@
+[package]
+name = "web-engine-install"
+description = "The app's web engine offered once a page wants it, downloaded when the user chooses (its size told first, its progress shown), kept up to date in the background, and shown in Settings."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+i18n.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+settings-model.workspace = true
+web-engine.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+version-control.workspace = true
+
+[lints]
+workspace = true

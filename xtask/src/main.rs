@@ -28,6 +28,7 @@ mod release;
 mod sql_data;
 mod ui_conventions;
 mod web_data;
+mod web_engine;
 use std::path::Path;
 use std::process::{Command, ExitCode};
 
@@ -123,11 +124,8 @@ fn main() -> ExitCode {
         Some("lsp-bundle") => {
             let root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap_or(Path::new("."));
             let args: Vec<String> = std::env::args().collect();
-            let value = |flag: &str| {
-                args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned()
-            };
-            let out = value("--out").map(std::path::PathBuf::from);
-            match lsp_bundle::bundle(root, value("--platform").as_deref(), out.as_deref()) {
+            let out = flag_value(&args, "--out").map(Path::new);
+            match lsp_bundle::bundle(root, flag_value(&args, "--platform"), out) {
                 Ok(done) => {
                     println!("lsp-bundle:\n{done}");
                     ExitCode::SUCCESS
@@ -158,8 +156,7 @@ fn main() -> ExitCode {
             let major = std::env::args().any(|a| a == "--major");
             // `--root <dir>`: another copy of the workspace's packaging (a trial run).
             let args: Vec<String> = std::env::args().collect();
-            let other = args.iter().position(|a| a == "--root").and_then(|i| args.get(i + 1));
-            let root = other.map_or(root, Path::new);
+            let root = flag_value(&args, "--root").map_or(root, Path::new);
             match lsp_update::update(root, check, major) {
                 Ok(done) => {
                     println!("lsp-update:\n{done}");
@@ -194,12 +191,104 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
+        Some("web-engine-trim") => {
+            let args: Vec<String> = std::env::args().collect();
+            let Some(bundle) = flag_value(&args, "--bundle") else {
+                eprintln!("web-engine-trim --bundle <dir>");
+                return ExitCode::FAILURE;
+            };
+            match web_engine::trim(Path::new(bundle)) {
+                Ok(done) => {
+                    println!("web-engine-trim: {done}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("web-engine-trim: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("web-engine-package") => {
+            let args: Vec<String> = std::env::args().collect();
+            let value = |flag: &str| flag_value(&args, flag);
+            let (Some(bundle), Some(platform)) = (value("--bundle"), value("--platform")) else {
+                eprintln!("web-engine-package --bundle <dir> --platform <name> [--out <dir>]");
+                return ExitCode::FAILURE;
+            };
+            let out = value("--out")
+                .map_or_else(|| workspace_root().join("target/web-engine"), Into::into);
+            let made = std::fs::create_dir_all(&out)
+                .map_err(|e| e.to_string())
+                .and_then(|()| web_engine::package(Path::new(bundle), platform, &out));
+            match made {
+                Ok(done) => {
+                    println!("web-engine-package: {done}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("web-engine-package: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("web-engine-manifest") => {
+            let args: Vec<String> = std::env::args().collect();
+            let value = |flag: &str| flag_value(&args, flag);
+            let (Some(dir), Some(base_url)) = (value("--dir"), value("--base-url")) else {
+                eprintln!(
+                    "web-engine-manifest --dir <dir> --base-url <url> [--version <v>] \
+                     [--previous <web-engine.json>] [--minimum <version>] [--relist] [--signed]"
+                );
+                return ExitCode::FAILURE;
+            };
+            let secret = std::env::var("RELEASE_SIGNING_KEY").ok();
+            let ask = web_engine::ManifestAsk {
+                public: pinned_downloads::signature::PUBLIC_KEY,
+                dir: Path::new(dir),
+                base_url,
+                version: value("--version"),
+                previous: value("--previous").map(Path::new),
+                minimum: value("--minimum"),
+                relist: args.iter().any(|a| a == "--relist"),
+                secret: secret.as_deref(),
+                signed: args.iter().any(|a| a == "--signed"),
+            };
+            match web_engine::manifest(&ask) {
+                Ok(done) => {
+                    println!("web-engine-manifest:\n{done}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("web-engine-manifest: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
+        Some("web-engine-verify") => {
+            let args: Vec<String> = std::env::args().collect();
+            let value = |flag: &str| flag_value(&args, flag);
+            let (Some(dir), Some(version)) = (value("--dir"), value("--version")) else {
+                eprintln!("web-engine-verify --dir <dir> --version <version> [--published <file>]");
+                return ExitCode::FAILURE;
+            };
+            let published = value("--published").map(Path::new);
+            let public = pinned_downloads::signature::PUBLIC_KEY;
+            match web_engine::verify(public, Path::new(dir), version, published) {
+                Ok(done) => {
+                    println!("web-engine-verify:\n{done}");
+                    ExitCode::SUCCESS
+                }
+                Err(e) => {
+                    eprintln!("web-engine-verify: {e}");
+                    ExitCode::FAILURE
+                }
+            }
+        }
         Some("release-key") => {
             let root = workspace_root();
             let args: Vec<String> = std::env::args().collect();
-            let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1));
-            let out =
-                out.map_or_else(|| root.join("target/release-signing-key.secret"), Into::into);
+            let out = flag_value(&args, "--out")
+                .map_or_else(|| root.join("target/release-signing-key.secret"), Into::into);
             match release::make_key(&root, &out) {
                 Ok(done) => {
                     println!("release-key:\n{done}");
@@ -214,21 +303,19 @@ fn main() -> ExitCode {
         Some("release-manifest") => {
             let root = workspace_root();
             let args: Vec<String> = std::env::args().collect();
-            let dist = args.iter().position(|a| a == "--dist").and_then(|i| args.get(i + 1));
-            let dist = dist.map_or_else(|| root.join("dist"), Into::into);
-            let signed = args.iter().any(|a| a == "--signed");
+            let dist = flag_value(&args, "--dist").map_or_else(|| root.join("dist"), Into::into);
             let secret = std::env::var("RELEASE_SIGNING_KEY").ok();
             let made = workspace_version(&root).and_then(|version| {
                 let id = brand_id(&root)?;
-                release::write_manifest(
-                    &root,
-                    &dist,
-                    &id,
-                    &version,
-                    &today(),
-                    secret.as_deref(),
-                    signed,
-                )
+                release::write_manifest(&release::ManifestAsk {
+                    public: pinned_downloads::signature::PUBLIC_KEY,
+                    dist: &dist,
+                    id: &id,
+                    version: &version,
+                    date: &today(),
+                    secret: secret.as_deref(),
+                    signed: args.iter().any(|a| a == "--signed"),
+                })
             });
             match made {
                 Ok(done) => {
@@ -243,7 +330,7 @@ fn main() -> ExitCode {
         }
         _ => {
             eprintln!(
-                "usage: cargo xtask check-deps | icon | icon-packs [--check] | lsp-bundle [--platform <p>|all] [--out <dir>] | lsp-manifest [--check] | lsp-update [--check] [--major] [--root <dir>] | php-stubs [--update] [--pull] | emoji-data | sql-data | web-data | release-version | release-key [--out <file>] | release-manifest [--dist <dir>] [--signed]"
+                "usage: cargo xtask check-deps | icon | icon-packs [--check] | lsp-bundle [--platform <p>|all] [--out <dir>] | lsp-manifest [--check] | lsp-update [--check] [--major] [--root <dir>] | php-stubs [--update] [--pull] | emoji-data | sql-data | web-data | release-version | release-key [--out <file>] | release-manifest [--dist <dir>] [--signed] | web-engine-trim --bundle <dir> | web-engine-package --bundle <dir> --platform <p> [--out <dir>] | web-engine-manifest --dir <dir> --base-url <url> [--version <v>] [--previous <file>] [--minimum <v>] [--relist] [--signed] | web-engine-verify --dir <dir> --version <v> [--published <file>]"
             );
             ExitCode::FAILURE
         }
@@ -404,6 +491,13 @@ fn find_violations(packages: &[Package], rules: &Architecture) -> Vec<String> {
 #[cfg(test)]
 #[path = "../tests/unit/bin.rs"]
 mod tests;
+
+/// The value after `flag` among `args`; `None` when the flag or its value is missing, or the
+/// value is empty (a workflow's input left empty reads as not given).
+fn flag_value<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+    let found = args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1));
+    found.map(String::as_str).filter(|value| !value.is_empty())
+}
 
 /// The workspace's folder (the one above `xtask`).
 fn workspace_root() -> std::path::PathBuf {

@@ -64,6 +64,22 @@ fn a_hidden_item_s_window_opens_from_the_more_list() {
     assert!(window.max_y() <= more.min_y(), "above the bar");
 }
 
+/// A window open over the pages is the app's to click, whether or not the window can cut
+/// holes in the system's pages (only those are cut).
+#[test]
+fn what_floats_over_the_pages_is_known_without_holes() {
+    let (mut wb, _dir) = opened(900);
+    let anchor = wb.status.action_rect(FILE_DETAILS).expect("the file's item shown");
+    wb.status_popover.open(FILE_DETAILS, anchor);
+    paint(&mut wb);
+    let window = wb.status_popover.bounds().expect("drawn");
+    wb.set_page_holes(false);
+    assert!(wb.page_holes().is_empty(), "nothing cut");
+    assert!(wb.floating_over_pages().iter().any(|(r, _)| *r == window), "the app's to click");
+    wb.set_page_holes(true);
+    assert!(wb.page_holes().iter().any(|(r, _)| *r == window), "cut where it can be");
+}
+
 /// The resources pinned (their pills in the editor's corner): hovering the file's item
 /// still opens its window, and the pills stay.
 #[test]
@@ -75,6 +91,24 @@ fn pinned_resources_leave_the_other_windows_free() {
     assert!(wb.hover_status_popover(item.center()));
     assert_eq!(wb.status_popover.owner(), Some(FILE_DETAILS));
     assert!(wb.resource_pills.is_open() && wb.resource_pills.pinned());
+}
+
+/// The mouse going onto a page the app draws: the bar's window open by hover closes (it
+/// would stay over the page and take its mouse there), the item's hover goes out, the
+/// tooltip goes; a pinned window stays.
+#[test]
+fn entering_a_page_ends_the_apps_hover() {
+    let (mut wb, _dir) = opened(1400);
+    let item = wb.status.action_rect(FILE_DETAILS).expect("the file's item shown");
+    let _ = wb.hover(item.center());
+    assert_eq!(wb.status_popover.owner(), Some(FILE_DETAILS), "open by hover");
+    assert!(wb.hover_cleared(), "a redraw");
+    assert!(!wb.status_popover.is_open(), "closed");
+    assert!(wb.tooltips.areas().is_empty());
+    let _ = wb.hover(item.center());
+    wb.status_popover.set_pinned(true);
+    let _ = wb.hover_cleared();
+    assert_eq!(wb.status_popover.owner(), Some(FILE_DETAILS), "pinned: it stays");
 }
 
 /// The resources' trail is a minute by time: values told within a second replace each
@@ -237,7 +271,7 @@ fn the_ram_pill_says_the_app_and_the_total() {
 }
 
 /// Word wrap's item: shown beside the file's details, a click runs its command; it says
-/// whether it's on (its tooltip, its label lit only while on).
+/// whether it's on (its tooltip; its label always, drawn on as a switch only while on).
 #[test]
 fn word_wrap_s_item_says_whether_it_is_on_and_turns_it() {
     let (mut wb, _dir) = opened(1600);
@@ -246,7 +280,8 @@ fn word_wrap_s_item_says_whether_it_is_on_and_turns_it() {
         let item = wb.word_wrap_item(on);
         let want = if on { tr!("status.wrap_on_detail") } else { tr!("status.wrap_off_detail") };
         assert_eq!(item.tooltip, Some(want));
-        assert_eq!(item.text.is_empty(), !on, "its label only while on");
+        assert_eq!(item.text, tr!("status.wrap"), "its label always");
+        assert_eq!(item.switch, Some(on), "drawn on as a switch only while on");
         assert_eq!(item.action, Some(command));
     }
     let item = wb.status.action_rect(command).expect("the item shown");

@@ -54,6 +54,8 @@ pub(super) struct Pointer {
     pub cursor: Point,
     pub cursor_icon: CursorIcon,
     pub dragging: bool,
+    /// Over a page the app draws (the mouse its).
+    pub over_page: bool,
     pub last_click: Option<(Instant, Point, u32)>,
     /// The tree node the context menu was opened on.
     pub tree_menu_path: Option<std::path::PathBuf>,
@@ -67,6 +69,7 @@ impl Default for Pointer {
             cursor: Point::default(),
             cursor_icon: CursorIcon::Default,
             dragging: false,
+            over_page: false,
             last_click: None,
             tree_menu_path: None,
             menu_position: None,
@@ -113,6 +116,9 @@ pub(super) struct Frames {
     /// frame is whole. Else, until [`Self::full_due`], a frame may draw only the theme's
     /// decorations again over the kept scene.
     pub dirty: bool,
+    /// Only a page the app draws has a new frame since: the next frame draws the scene
+    /// kept again (see [`Self::dirty`]).
+    pub only_pages: bool,
     /// When the next whole frame is due anyway (the earliest deadline the last one asked
     /// for: the caret, a hover, a notification…; at most a second away).
     pub full_due: Option<Instant>,
@@ -152,6 +158,7 @@ impl Frames {
                 .and_then(|n| n.parse().ok())
                 .map(|steps| ResizeTest { steps, frames: Vec::new(), skipped: 0 }),
             dirty: true,
+            only_pages: false,
             full_due: None,
             asked: Vec::new(),
             other_due: None,

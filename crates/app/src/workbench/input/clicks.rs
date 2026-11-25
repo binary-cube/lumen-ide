@@ -19,7 +19,7 @@ impl Workbench {
         // The empty screen: a click there gives it the keyboard (its search field), taking it
         // from the project panel's file search.
         if self.home_visible() && self.editor_area.contains(p) {
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
             if let Some(action) = self.home.picker.hit(p) {
                 return Some(self.picker_action(action, false));
             }
@@ -139,7 +139,7 @@ impl Workbench {
                 || side.panel.wants_text()
                 || side.panel.takes_keys()
             {
-                self.focus = Focus::Side(dock);
+                self.move_focus(Focus::Side(dock));
             }
             if let Some(action) =
                 self.tools.side_at(p).and_then(|s| s.panel.press_with(p, clicks, mods))
@@ -149,7 +149,7 @@ impl Workbench {
                 // A file opened from its rows: the keyboard stays with it (as it was).
                 let keeps = self.tools.side_at(p).is_some_and(|s| s.panel.keeps_keyboard());
                 if keeps && focus == Focus::Side(dock) {
-                    self.focus = focus;
+                    self.move_focus(focus);
                 }
             }
             return Some(MouseResult::Redraw);
@@ -242,7 +242,7 @@ impl Workbench {
             // Split: the half clicked has the keys.
             v.keys = v.viewer_visible() && v.bounds.contains(p);
             if v.viewer_visible() && v.bounds.contains(p) {
-                self.focus = Focus::Editor;
+                Self::focus_to(&mut self.focus, &mut self.focus_moves, Focus::Editor);
                 let mods = ui_workbench::PressMods { shift, primary, alt };
                 let action = v.viewer.pointer_down(p, clicks, mods);
                 // A menu of a button of its own: opened under it, nothing else done but
@@ -280,7 +280,7 @@ impl Workbench {
             let offset = offset.min(tab.doc.buffer().len());
             commands::click(&mut tab.doc, offset, false, false);
             tab.view.reveal_cursor(&tab.doc, &tab.folds, text, &self.palette);
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
             return MouseResult::Redraw;
         }
         if tab.view.scrollbar_press(p, &tab.doc, &tab.folds) {
@@ -293,7 +293,7 @@ impl Workbench {
         }
         // The bulb: the actions at the cursor.
         if tab.view.bulb_at(p) {
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
             self.show_context_actions(text);
             return MouseResult::Redraw;
         }
@@ -343,7 +343,7 @@ impl Workbench {
             return MouseResult::Redraw;
         }
         if tab.view.bounds().contains(p) {
-            self.focus = Focus::Editor;
+            Self::focus_to(&mut self.focus, &mut self.focus_moves, Focus::Editor);
             let offset = tab.view.offset_at(p, &tab.doc, &tab.folds, text, &self.palette);
             // ⌘+click (Ctrl+click): to the declaration under the mouse.
             if primary {
@@ -472,7 +472,7 @@ impl Workbench {
         if !inside {
             commands::click(&mut tab.doc, offset, false, false);
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         true
     }
 }

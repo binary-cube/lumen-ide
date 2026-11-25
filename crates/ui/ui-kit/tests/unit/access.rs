@@ -95,3 +95,63 @@ fn a_text_cut_short_is_read_whole() {
     assert_eq!(&*label.name, "a rather long name");
     assert!((label.bounds.size.width - 30.0).abs() < 0.5, "where it shows");
 }
+
+/// Nodes naming their parents, walked depth first, nest as they say: a node after a deeper
+/// one goes back up to its parent; one with no parent among them is under the group open.
+#[test]
+fn nested_nodes_follow_their_parents() {
+    let tree = begin();
+    let label = |name: &str| Described::new(Role::Label, name, Rect::default());
+    group(
+        || Described::new(Role::Group, "page", Rect::default()),
+        || {
+            nested([
+                (1, None, label("list")),
+                (2, Some(1), label("item")),
+                (3, Some(2), label("text")),
+                (4, Some(1), label("item 2")),
+                (5, None, label("after")),
+            ]);
+        },
+    );
+    node(|| label("outside"));
+    let frame = tree.take();
+    let nodes = frame.nodes();
+    let id = |name: &str| nodes.iter().find(|n| &*n.name == name).map(|n| n.id).unwrap();
+    let parent = |name: &str| nodes.iter().find(|n| &*n.name == name).map(|n| n.parent).unwrap();
+    assert_eq!(parent("list"), id("page"));
+    assert_eq!(parent("item"), id("list"));
+    assert_eq!(parent("text"), id("item"));
+    assert_eq!(parent("item 2"), id("list"), "back up after the deeper one");
+    assert_eq!(parent("after"), id("page"));
+    assert_eq!(parent("outside"), platform_api::access::ROOT, "every group closed");
+}
+
+/// A node naming a parent not among the nodes open now (one never put, or one already
+/// closed by a node not under it) goes under the group open, as a node with none does.
+#[test]
+fn a_node_whose_parent_is_not_open_goes_under_the_group() {
+    let tree = begin();
+    // Groups, not labels: labels side by side on a line are joined as one text.
+    let part = |name: &str| Described::new(Role::Group, name, Rect::default());
+    group(
+        || Described::new(Role::Group, "page", Rect::default()),
+        || {
+            nested([
+                (1, None, part("list")),
+                (2, Some(1), part("item")),
+                (3, Some(99), part("orphan")),
+                (4, Some(1), part("late")),
+                (5, Some(4), part("inner")),
+            ]);
+        },
+    );
+    let frame = tree.take();
+    let nodes = frame.nodes();
+    let id = |name: &str| nodes.iter().find(|n| &*n.name == name).map(|n| n.id).unwrap();
+    let parent = |name: &str| nodes.iter().find(|n| &*n.name == name).map(|n| n.parent).unwrap();
+    assert_eq!(parent("item"), id("list"));
+    assert_eq!(parent("orphan"), id("page"), "its parent never put: under the group");
+    assert_eq!(parent("late"), id("page"), "its parent closed by the orphan: under the group");
+    assert_eq!(parent("inner"), id("late"), "the nodes after it nest under it again");
+}

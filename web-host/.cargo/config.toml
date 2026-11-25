@@ -1,0 +1,8 @@
+# Built beside the app's builds (the repository's `target/`, ignored by git).
+[build]
+target-dir = "../target/web-host"
+
+# Linux: the program finds `libcef.so` beside itself (`$ORIGIN`, as the bundle lays it out),
+# whoever starts it; no library path is set by the app or the workflow.
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-Wl,-rpath,$ORIGIN"]

@@ -48,6 +48,7 @@ impl Control for EditorBar<'_> {
     fn hover(&mut self, p: Option<Point>) -> bool {
         self.bar.hover(p.unwrap_or(NOWHERE))
     }
+    ui_components::bar_cursor!();
 }
 
 impl EditorView {

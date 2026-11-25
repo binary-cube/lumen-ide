@@ -1,4 +1,5 @@
 use super::*;
+use crate::instances::IMAGE_IDLE;
 
 #[test]
 fn gpu_structs_have_expected_layout() {

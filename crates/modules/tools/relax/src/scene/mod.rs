@@ -191,11 +191,11 @@ pub fn sprite(layer: &mut Layer, image: &ImageData, x: f32, y: f32, w: f32, h: f
     if opacity <= 0.004 {
         return;
     }
-    layer.images.push(ImageInstance {
-        image: image.clone(),
-        bounds: Rect::new(x - w / 2.0, y - h / 2.0, w, h),
-        opacity: opacity.min(1.0),
-    });
+    layer.images.push(ImageInstance::new(
+        image.clone(),
+        Rect::new(x - w / 2.0, y - h / 2.0, w, h),
+        opacity.min(1.0),
+    ));
 }
 
 #[cfg(test)]

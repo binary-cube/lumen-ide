@@ -361,17 +361,14 @@ impl Workbench {
         }
     }
 
-    /// Word wrap's item (`on`: it's on): lit with its label while on, muted while off, its
-    /// tooltip saying which; a click runs the View menu's command.
+    /// Word wrap's item (`on`: it's on): its label always, on as a switch (a soft accent
+    /// pill, label and icon in the accent), muted while off, its tooltip saying which; a
+    /// click runs the View menu's command.
     pub(super) fn word_wrap_item(&self, on: bool) -> StatusItem {
-        let (label, color) = if on {
-            (tr!("status.wrap_on"), self.palette.accent)
-        } else {
-            (String::new(), self.palette.text_muted)
-        };
         let tip = if on { tr!("status.wrap_on_detail") } else { tr!("status.wrap_off_detail") };
-        StatusItem::named(&self.icons, "text-wrap", label)
-            .colored(color)
+        // The switch colors it (the accent on, muted off).
+        StatusItem::named(&self.icons, "text-wrap", tr!("status.wrap"))
+            .switched(on)
             .clickable(crate::commands::WORD_WRAP.0)
             .with_tooltip(tip)
             .menu_label(tr!("command.view_word_wrap"))

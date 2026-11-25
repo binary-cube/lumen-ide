@@ -842,6 +842,44 @@ fn an_app_pages_messages_reach_the_view_that_has_it() {
     assert!(wb.take_web_sends().is_empty(), "taken once");
 }
 
+/// A page's picture is drawn only while its view is seen: the pictures are from the last
+/// frame's sync, so a tab just left never flashes its page over the one shown now.
+#[test]
+fn a_page_left_isnt_drawn_over_the_tab_shown() {
+    let mut wb = workbench();
+    for page in [1, 2] {
+        let view = AppView { page, told: Arc::default(), sends: Vec::new() };
+        let mut doc = Document::new("");
+        doc.mark_saved(PathBuf::from(format!("/virtual/app-{page}")));
+        let mut tab = Tab::new(doc, wb.code_font.clone(), None, LanguageId::PLAIN_TEXT);
+        tab.viewer = Some(TabViewer::new(
+            Box::new(view),
+            "test",
+            ui_workbench::ViewerKind::Replace,
+            ViewMode::Preview,
+        ));
+        wb.push_tab(tab);
+    }
+    let seen = |wb: &mut Workbench, first: bool| {
+        for (i, tab) in wb.tabs.iter_mut().enumerate() {
+            if let Some(v) = tab.viewer.as_mut() {
+                v.shown = (i == 0) == first;
+            }
+        }
+    };
+    let picture = render_api::ImageData::live();
+    let images = |wb: &Workbench| {
+        let mut scene = Scene::default();
+        wb.paint_page_pictures(&mut scene);
+        scene.layers().iter().map(|l| l.images.len()).sum::<usize>()
+    };
+    wb.set_page_pictures(&[(1, picture)], &[]);
+    seen(&mut wb, true);
+    assert_eq!(images(&wb), 1, "its tab seen: drawn");
+    seen(&mut wb, false);
+    assert_eq!(images(&wb), 0, "its tab left: not drawn over the other");
+}
+
 /// A window that stays (pinned) over a page's lower half: the page ends above it, never
 /// hidden; one over its upper half, or beside it, changes nothing.
 #[test]
@@ -882,12 +920,12 @@ fn a_page_s_corners_follow_its_card_s() {
         card.size.width - 2.0 * line,
         card.size.height / 2.0 - line,
     );
-    let (r, corners) = wb.page_corners(area);
+    let render_api::ImageCorners { radius: r, which: corners } = wb.page_corners(area);
     assert_eq!(corners, platform_api::Corners::BOTTOM_LEFT | platform_api::Corners::BOTTOM_RIGHT);
     assert!((r - (radius - line)).abs() < 0.01, "{r}");
     // In its middle: square.
     let inside = Rect::new(card.min_x() + 50.0, card.min_y() + 50.0, 100.0, 100.0);
-    assert_eq!(wb.page_corners(inside), (0.0, 0));
+    assert_eq!(wb.page_corners(inside), render_api::ImageCorners::NONE);
 }
 
 /// A view that asks for a menu under its button when pressed (and on its "more" command),

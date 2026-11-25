@@ -33,6 +33,15 @@ pub(crate) fn drag_thumb(view: &mut dyn Viewer, w: f32, by: f32) {
     assert!(view.release(), "the thumb let go");
 }
 
+/// The page's bar is a bar: its own cursor, which wins over the page's.
+#[test]
+fn the_page_s_bar_has_the_bar_s_cursor() {
+    let page = PageScroll::default();
+    let p = Point::new(1.0, 1.0);
+    assert_eq!(Control::cursor(&page, p), Some(ui_components::scrollbar::CURSOR));
+    assert!(page.owns_cursor(p));
+}
+
 /// A page too short for its form and the list: down, the form goes up first, then the list
 /// would scroll; up, the form comes back. A page that fits doesn't scroll.
 #[test]

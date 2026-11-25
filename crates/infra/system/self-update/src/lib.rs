@@ -11,7 +11,6 @@
 
 pub mod check;
 pub mod install;
-mod signature;
 pub mod stage;
 
 use std::path::PathBuf;
@@ -27,7 +26,7 @@ pub const HOSTS: &[&str] = &[
 
 /// The project's public key (Ed25519, hex): a release's manifest is trusted only when
 /// signed by its secret half (made once by `cargo xtask release-key`).
-pub const PUBLIC_KEY: &str = include_str!("../../../../../packaging/release-key.pub");
+pub use pinned_downloads::signature::PUBLIC_KEY;
 
 /// The folder updates are downloaded and staged in (the data folder's `updates`).
 pub fn folder() -> Option<PathBuf> {

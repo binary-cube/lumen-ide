@@ -164,7 +164,7 @@ impl ProgressRing {
         let bounds =
             Rect::new((center.x - side / 2.0).round(), (center.y - side / 2.0).round(), side, side);
         let image = self.image(spec, start, sweep).clone();
-        layer.images.push(ImageInstance { image, bounds, opacity });
+        layer.images.push(ImageInstance::new(image, bounds, opacity));
     }
 
     /// The bytes its image holds.

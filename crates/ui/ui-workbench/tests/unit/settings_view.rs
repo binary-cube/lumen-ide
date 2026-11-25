@@ -1201,3 +1201,47 @@ fn copy_and_paste_reach_one_field_when_the_keymap_is_left() {
     assert_eq!(view.shortcuts.filter.text(), "save", "the hidden search untouched");
     assert_eq!(view.controls.focused(), Some(FILTER), "the focus not moved");
 }
+
+/// A block's description broken in lines is kept while the window shows it, and let go when
+/// it closes or the caches are cleared.
+#[test]
+fn the_blocks_descriptions_go_with_the_window_and_the_caches() {
+    let mut model = model();
+    model.blocks = vec![ContributedBlock {
+        id: "remote",
+        page: "remote",
+        page_info: Some(REMOTE),
+        order: 100,
+        advanced: false,
+        language: None,
+        keywords: "".into(),
+        block: workbench_model::SettingsBlock {
+            title: "Remote".into(),
+            detail: "What is sent to the servers, and how many at once.".into(),
+            rows: vec![workbench_model::SettingsRow::Slider {
+                key: "uploads",
+                label: "Uploads".into(),
+                detail: String::new(),
+                default: None,
+                stops: [1, 2, 4, 8].iter().map(|&v| (v, v.to_string())).collect(),
+                current: 2,
+            }],
+        },
+    }];
+    let mut view = SettingsView::default();
+    view.set_viewport(Rect::new(0.0, 0.0, 1200.0, 800.0), 1.0);
+    let mut text = TextSystem::new();
+    let mut shown = |view: &mut SettingsView| {
+        view.open();
+        view.set_sections(&model);
+        view.show_page("remote");
+        view.paint(&model, &Icons::builtin(), &mut text, &mut Scene::default(), &Palette::dark());
+        assert!(view.block_details.contains_key("remote"), "kept while shown");
+    };
+    shown(&mut view);
+    kernel::Purge::purge(&mut view);
+    assert!(view.block_details.is_empty(), "cleared with the caches");
+    shown(&mut view);
+    view.close();
+    assert!(view.block_details.is_empty(), "let go with the window");
+}

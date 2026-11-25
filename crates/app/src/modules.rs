@@ -207,6 +207,7 @@ pub fn builtin() -> ModuleRegistry {
     add(&mut registry, Box::new(keep_awake::KeepAwakeModule), "keep_awake");
     add(&mut registry, Box::new(profiler::ProfilerModule), "profiler");
     add(&mut registry, Box::new(updates::UpdatesModule), "updates");
+    add(&mut registry, Box::new(web_engine_install::WebEngineModule), "web_engine_install");
     add(&mut registry, Box::new(log_viewer::LogViewerModule), "log_viewer");
     add(&mut registry, Box::new(project_switcher::SwitcherModule), "project_switcher");
     add(&mut registry, Box::new(focus_mode::FocusModule), "focus_mode");
@@ -461,6 +462,7 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
     // The app's own blocks among them: the caret and code insight (Editor), saving and the
     // final line break (Files), the notifications; each says its page and place.
     settings.push(Arc::new(crate::file_settings::AutosaveSettings));
+    settings.push(Arc::new(crate::gpu_settings::GpuSettings));
     settings.push(Arc::new(crate::file_settings::FinalNewlineSettings));
     settings.push(Arc::new(crate::file_settings::SessionSettings));
     settings.push(Arc::new(crate::caret::CaretSettings));

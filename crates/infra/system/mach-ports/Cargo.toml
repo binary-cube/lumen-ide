@@ -1,0 +1,15 @@
+[package]
+name = "mach-ports"
+description = "macOS: Mach ports between two processes — a service checked in and looked up, a send right passed in a message checked to come from the expected process (the web engine's frames)."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+
+[lints]
+workspace = true

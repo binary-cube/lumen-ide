@@ -62,6 +62,10 @@ pub struct StatusItem {
     /// Drawn as small bars instead of its text (what the app costs): each a height
     /// (0–1) and a color, gliding to a new height when it changes.
     pub meter: Vec<(f32, Rgba)>,
+    /// A switch, and whether it's on (`None`: not a switch): on, its back is tinted in the
+    /// accent and its label (and an icon without a color of its own) are in it; off, it's
+    /// drawn as any item. A screen reader is told a toggle button, pressed or not.
+    pub switch: Option<bool>,
 }
 
 impl StatusItem {
@@ -79,6 +83,7 @@ impl StatusItem {
             menu_label: None,
             menu_icon: None,
             meter: Vec::new(),
+            switch: None,
         }
     }
 
@@ -147,6 +152,12 @@ impl StatusItem {
     /// Starts a group (a separator before it).
     pub fn grouped(mut self) -> Self {
         self.group = true;
+        self
+    }
+
+    /// A switch, drawn on while `on` (see [`Self::switch`]).
+    pub fn switched(mut self, on: bool) -> Self {
+        self.switch = Some(on);
         self
     }
 
@@ -520,10 +531,12 @@ const ITEM_ICON: f32 = 14.0;
 /// A clickable item's corners (logical pixels).
 const ITEM_RADIUS: f32 = 5.0;
 
-/// A clickable item as the shared button in `pill` (a meter: its back alone): its icon (in its own color) and its
-/// text in the bar's font and muted color, lit under the mouse in the tabs' hover; an item
-/// with an icon starts after its padding (its value in a reserved slot doesn't shift it),
-/// a lone value is centered.
+/// A clickable item as the shared button in `pill` (a meter: its back alone): its icon (in
+/// its own color) and its text in the bar's font and muted color, lit under the mouse in the
+/// tabs' hover. A switch that's on has the button's soft accent pill behind it, its text
+/// (and an icon without a color of its own) in the accent; off, it looks as any item. An
+/// item with an icon starts after its padding (its value in a reserved slot doesn't shift
+/// it), a lone value is centered.
 fn item_button(
     layer: &mut render_api::Layer,
     text: &mut TextSystem,
@@ -536,8 +549,10 @@ fn item_button(
     let colors = crate::ds::ButtonColors {
         icon: p.text_muted,
         hover: p.tab_hover,
-        on_back: p.tab_hover,
-        on_icon: p.text_muted,
+        // A switch that's on: the button's own soft accent pill, its label and icon in the
+        // accent.
+        on_back: None,
+        on_icon: p.accent,
     };
     let mut spec = crate::ds::ButtonSpec::new(crate::ds::ButtonKind::Ghost)
         .colors(colors)
@@ -545,6 +560,9 @@ fn item_button(
         .icon_size(ITEM_ICON)
         .font(font)
         .hovered(hovered);
+    if let Some(on) = item.switch {
+        spec = spec.toggle(on);
+    }
     if !item.meter.is_empty() {
         // Its bars are drawn over the back by the bar.
         crate::ds::button(layer, text, icons, ds, pill, spec);

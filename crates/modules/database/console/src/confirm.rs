@@ -25,7 +25,8 @@ use ui_components::code_tokens::{self, CodeLine};
 use ui_components::control::{Control, Controls, Thumb};
 use ui_components::ds::{self, Ctx, radius};
 use ui_components::{
-    EdgeScrollbar, Viewer, ViewerAction, ViewerKey, ViewerKind, ViewerPaint, ViewerProvider,
+    EdgeScrollbar, Viewer, ViewerAction, ViewerCursor, ViewerKey, ViewerKind, ViewerPaint,
+    ViewerProvider,
 };
 use ui_kit::{draw_icon, draw_text};
 use workbench_model::WorkbenchHost;
@@ -522,6 +523,11 @@ impl Viewer for ConfirmView {
 
     fn release(&mut self) -> bool {
         self.with_controls(|c, parts| c.release(parts)).is_some_and(|(_, changed)| changed)
+    }
+
+    /// Its parts' (the statements' scrollbar), else a hand over its buttons.
+    fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
+        self.controls.cursor_or(p, || self.hit(p).map(|_| ViewerCursor::Pointer))
     }
 
     fn hover(&mut self, p: Point) -> bool {

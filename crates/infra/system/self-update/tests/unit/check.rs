@@ -1,6 +1,6 @@
 use super::*;
-use ed25519_dalek::{Signer, SigningKey};
 use pinned_downloads::fetch::Memory;
+use ring::signature::{Ed25519KeyPair, KeyPair};
 
 const BASE: &str = "https://github.com/o/r/releases/download";
 const LIST: &str = "https://api.github.com/repos/o/r/releases?per_page=30";
@@ -9,8 +9,13 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// A key made from `seed` (the same seed, the same key).
+fn key(seed: u8) -> Ed25519KeyPair {
+    Ed25519KeyPair::from_seed_unchecked(&[seed; 32]).unwrap()
+}
+
 /// A GitHub serving release `tag` (`version` in its manifest), signed by `key`.
-pub(crate) fn serve(memory: &Memory, key: &SigningKey, tag: &str, version: &str) -> String {
+pub(crate) fn serve(memory: &Memory, key: &Ed25519KeyPair, tag: &str, version: &str) -> String {
     let manifest = format!(
         r#"{{"version": "{version}", "date": "2026-11-20", "files": [
           {{"platform": "macos-universal", "name": "app-{version}-macos-universal.zip", "size": 3, "sha256": "{0}"}},
@@ -36,11 +41,8 @@ pub(crate) fn serve(memory: &Memory, key: &SigningKey, tag: &str, version: &str)
     ]);
     memory.serve(LIST, list.to_string().into_bytes());
     memory.serve(&url("latest.json"), manifest.clone().into_bytes());
-    memory.serve(
-        &url("latest.json.sig"),
-        hex(&key.sign(manifest.as_bytes()).to_bytes()).into_bytes(),
-    );
-    hex(key.verifying_key().as_bytes())
+    memory.serve(&url("latest.json.sig"), hex(key.sign(manifest.as_bytes()).as_ref()).into_bytes());
+    hex(key.public_key().as_ref())
 }
 
 fn ask<'a>(current: &'a Version, platforms: &'a [&'a str]) -> Ask<'a> {
@@ -52,7 +54,7 @@ fn ask<'a>(current: &'a Version, platforms: &'a [&'a str]) -> Ask<'a> {
 #[test]
 fn a_signed_newer_release_is_offered_with_this_system_s_file() {
     let memory = Memory::default();
-    let key = SigningKey::from_bytes(&[3u8; 32]);
+    let key = key(3);
     let public = serve(&memory, &key, "v1.0.0-beta.2", "1.0.0-beta.2");
     let current = Version::parse("1.0.0-beta.1").unwrap();
     let found =
@@ -78,11 +80,11 @@ fn what_doesnt_check_out_is_refused() {
     let memory = Memory::default();
     let current = Version::parse("1.0.0-beta.1").unwrap();
     let platforms = ["windows-x64"];
-    serve(&memory, &SigningKey::from_bytes(&[3u8; 32]), "v1.0.0", "1.0.0");
-    let ours = hex(SigningKey::from_bytes(&[4u8; 32]).verifying_key().as_bytes());
+    serve(&memory, &key(3), "v1.0.0", "1.0.0");
+    let ours = hex(key(4).public_key().as_ref());
     let refused = check_signed_by(&memory, ask(&current, &platforms), &ours).unwrap_err();
     assert!(refused.to_string().contains("isn't signed"), "{refused}");
-    let key = SigningKey::from_bytes(&[5u8; 32]);
+    let key = key(5);
     let public = serve(&memory, &key, "v1.0.0", "1.0.1");
     let other = check_signed_by(&memory, ask(&current, &platforms), &public).unwrap_err();
     assert!(other.to_string().contains("is for 1.0.1"), "{other}");
@@ -144,4 +146,10 @@ fn the_real_release_downloads_and_unpacks() {
     println!("staged {} at {}", staged.version, staged.app.display());
     assert!(staged.app.exists());
     std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// The project's key built in is a key.
+#[test]
+fn the_project_s_key_is_one() {
+    assert!(pinned_downloads::signature::unhex::<32>(crate::PUBLIC_KEY).is_some());
 }

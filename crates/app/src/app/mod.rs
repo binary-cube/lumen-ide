@@ -43,12 +43,15 @@ mod input;
 mod leftovers;
 mod menu_states;
 mod menus;
+mod page_input;
 mod projects;
 mod splash;
 mod state;
 mod system_sign;
 mod theme;
 mod unseen_motion;
+mod web_engine;
+mod web_keys;
 mod web_views;
 
 #[cfg(feature = "snapshot")]
@@ -256,6 +259,8 @@ pub struct EditorApp {
     startup: state::Startup,
     /// The pages the system's web engine shows over the views (a response's preview).
     web_views: web_views::WebViews,
+    /// What routing keys to those pages keeps between events.
+    page_routing: page_input::PageRouting,
 }
 
 impl EditorApp {
@@ -289,6 +294,7 @@ impl EditorApp {
             frames: state::Frames::new(),
             startup: state::Startup::new(),
             web_views: web_views::WebViews::default(),
+            page_routing: page_input::PageRouting::default(),
             pointer: state::Pointer::default(),
         })
     }

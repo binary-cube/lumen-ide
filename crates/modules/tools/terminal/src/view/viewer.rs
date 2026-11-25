@@ -415,11 +415,13 @@ impl Viewer for TerminalView {
         })
     }
 
+    /// The history's bar (over it, or held): the bar's; a hand on a link; the text's on the
+    /// grid.
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.link.is_some() {
-            return Some(ViewerCursor::Pointer);
-        }
-        self.grid_area.contains(p).then_some(ViewerCursor::Text)
+        self.controls.bar_or(p, || match self.link {
+            Some(_) => Some(ViewerCursor::Pointer),
+            None => self.grid_area.contains(p).then_some(ViewerCursor::Text),
+        })
     }
 
     fn takes_keyboard(&self) -> bool {

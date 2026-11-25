@@ -5,7 +5,8 @@ Part of the project's rules: [index](project-conventions.md). Related: [writing 
 - Plans in `docs/plan/NN-*.md` (Romanian): each step gets **Făcut** (what was done, how)
   and **Lăsat** (what wasn't, why) once done.
 - **Gate before every commit**: `./scripts/check.sh` (fmt, clippy host + Windows, tests,
-  check-deps) must give four `ok`; run it in the background. One commit per step, a
+  check-deps, and web-host's fmt and clippy where a CEF is there) must give only `ok`
+  lines (a `skipped` web-host clippy is fine without a CEF); run it in the background. One commit per step, a
   descriptive message (title, then what changed and why), ending with the
   `Co-Authored-By` line. Never commit `.lumen/`, `.codegraph/` or `.claude/` — except
   `.claude/rules/` (these rules: committed, kept current).

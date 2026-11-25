@@ -246,15 +246,30 @@ pub fn loader(
     mid: f32,
     loader: &Loader<'_>,
 ) -> Rect {
-    let p = ctx.palette;
     let size = ctx.px(loader.size);
     // To a screen reader: something under way (a progress without a known end), named by
-    // what it says.
-    ui_kit::access::node(|| {
-        use ui_kit::access::{Described, Role};
-        let at = Rect::new(x, mid - size / 2.0, size, size);
-        Described::new(Role::ProgressBar, loader.text.unwrap_or_default(), at)
-    });
+    // what it says; its text, painted under it, isn't read again. Its width is measured
+    // only while a tree is made.
+    let width = if ui_kit::access::recording() { loader.width(text, ctx) } else { size };
+    ui_kit::access::group(
+        || {
+            use ui_kit::access::{Described, Role};
+            let at = Rect::new(x, mid - size / 2.0, width, size);
+            Described::new(Role::ProgressBar, loader.text.unwrap_or_default(), at)
+        },
+        || loader_parts(layer, text, ctx, (x, mid), loader),
+    )
+}
+
+/// A [`loader`]'s spinner and text, painted: their area.
+fn loader_parts(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    (x, mid): (f32, f32),
+    loader: &Loader<'_>,
+) -> Rect {
+    let size = ctx.px(loader.size);
     let mut right = x;
     if loader.spinner {
         loader_spinner(layer, ctx, (x, mid), loader);
@@ -266,7 +281,7 @@ pub fn loader(
         }
         let font = ctx.ui_font(-0.5);
         let shaped = text.shape_line(label, &font);
-        let color = loader.text_color.unwrap_or(p.text_muted);
+        let color = loader.text_color.unwrap_or(ctx.palette.text_muted);
         draw_text(
             layer,
             &shaped,
@@ -299,6 +314,76 @@ pub fn loader_spinner(layer: &mut Layer, ctx: &Ctx<'_>, (x, mid): (f32, f32), lo
     }
 }
 
+/// The room between an empty state's title and its explanation (logical pixels).
+const EMPTY_DETAIL_GAP: f32 = 6.0;
+
+/// One line of an empty state's text block: its font, and its ascent and height (physical
+/// pixels).
+struct BlockLine {
+    font: Font,
+    ascent: f32,
+    height: f32,
+}
+
+impl BlockLine {
+    fn measure(text: &mut TextSystem, font: Font) -> Self {
+        let m = text.metrics(&font);
+        Self { ascent: m.ascent, height: m.ascent + m.descent, font }
+    }
+}
+
+/// An empty state's text block, measured once: its title's line, its explanation's (when
+/// it has one), and the room between them (physical pixels).
+struct EmptyBlock {
+    title: BlockLine,
+    detail: Option<BlockLine>,
+    gap: f32,
+}
+
+impl EmptyBlock {
+    fn measure(text: &mut TextSystem, ctx: &Ctx<'_>, detail: bool) -> Self {
+        Self {
+            title: BlockLine::measure(text, ctx.ui_font(0.5)),
+            detail: detail.then(|| BlockLine::measure(text, ctx.ui_font(-1.0))),
+            gap: ctx.px(EMPTY_DETAIL_GAP),
+        }
+    }
+
+    /// The height it takes: the title, and the explanation under it.
+    fn height(&self) -> f32 {
+        self.title.height + self.detail.as_ref().map_or(0.0, |d| d.height + self.gap)
+    }
+
+    /// Its texts drawn centered across `rect`, from `top`.
+    fn draw(
+        &self,
+        layer: &mut Layer,
+        text: &mut TextSystem,
+        ctx: &Ctx<'_>,
+        (rect, top): (Rect, f32),
+        (title, detail): (&str, Option<&str>),
+    ) {
+        let shaped = text.shape_line(title, &self.title.font);
+        draw_text(
+            layer,
+            &shaped,
+            (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round(),
+            (top + self.title.ascent).round(),
+            ctx.fade(ctx.palette.text_muted),
+        );
+        let (Some(detail), Some(line)) = (detail, &self.detail) else { return };
+        let shaped = text.shape_line(detail, &line.font);
+        let y = top + self.title.height + self.gap + line.ascent;
+        draw_text(
+            layer,
+            &shaped,
+            (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round(),
+            y.round(),
+            ctx.fade(ctx.palette.text_muted.with_alpha(0.75)),
+        );
+    }
+}
+
 /// An empty state: a title (and optionally an explanation), centered in `rect`.
 pub fn empty_state(
     layer: &mut Layer,
@@ -308,33 +393,44 @@ pub fn empty_state(
     title: &str,
     detail: Option<&str>,
 ) {
-    let title_font = ctx.ui_font(0.5);
-    let tm = text.metrics(&title_font);
-    let detail_font = ctx.ui_font(-1.0);
-    let dm = text.metrics(&detail_font);
-    let gap = ctx.px(6.0);
-    let th = tm.ascent + tm.descent;
-    let dh = detail.map_or(0.0, |_| dm.ascent + dm.descent + gap);
-    let top = rect.min_y() + (rect.size.height - th - dh) / 2.0;
-    let shaped = text.shape_line(title, &title_font);
-    draw_text(
-        layer,
-        &shaped,
-        (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round(),
-        (top + tm.ascent).round(),
-        ctx.fade(ctx.palette.text_muted),
+    let block = EmptyBlock::measure(text, ctx, detail.is_some());
+    let top = rect.min_y() + (rect.size.height - block.height()) / 2.0;
+    block.draw(layer, text, ctx, (rect, top), (title, detail));
+}
+
+/// The spinner of a [`loading_state`]: its diameter (logical pixels).
+const LOADING_SPINNER: f32 = 22.0;
+/// The room between a [`loading_state`]'s spinner and its title (logical pixels).
+const LOADING_GAP: f32 = 14.0;
+
+/// Something on its way (a page loading, an engine starting): a turning spinner above a
+/// title (and optionally an explanation), centered in `rect`. While it's shown its view
+/// says it's loading (`Viewer::is_loading`: frames at a loader's pace).
+pub fn loading_state(
+    layer: &mut Layer,
+    text: &mut TextSystem,
+    ctx: &Ctx<'_>,
+    rect: Rect,
+    title: &str,
+    detail: Option<&str>,
+) {
+    let size = ctx.px(LOADING_SPINNER);
+    let gap = ctx.px(LOADING_GAP);
+    let block = EmptyBlock::measure(text, ctx, detail.is_some());
+    // The title block moved down by half the spinner's room: the whole stays centered.
+    let top = rect.min_y() + (size + gap + rect.size.height - block.height()) / 2.0;
+    let spinner = Loader { size: LOADING_SPINNER, ..Loader::default() };
+    let x = rect.min_x() + (rect.size.width - size) / 2.0;
+    let mid = top - gap - size / 2.0;
+    // To a screen reader: something under way, named by its title (as a loader is); the
+    // title painted under it isn't read again, the explanation is.
+    ui_kit::access::group(
+        || ui_kit::access::Described::new(ui_kit::access::Role::ProgressBar, title, rect),
+        || {
+            loader_spinner(layer, ctx, (x, mid), &spinner);
+            block.draw(layer, text, ctx, (rect, top), (title, detail));
+        },
     );
-    if let Some(detail) = detail {
-        let shaped = text.shape_line(detail, &detail_font);
-        let y = top + th + gap + dm.ascent;
-        draw_text(
-            layer,
-            &shaped,
-            (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round(),
-            y.round(),
-            ctx.fade(ctx.palette.text_muted.with_alpha(0.75)),
-        );
-    }
 }
 
 /// The widest a tooltip's line gets (logical px) before it wraps between words.

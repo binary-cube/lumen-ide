@@ -18,8 +18,8 @@ accesskit_winit.workspace = true
 raw-window-handle.workspace = true
 tracing.workspace = true
 rfd.workspace = true
-# A message for an app's page written as a script's string literal (`web_app`).
-serde_json.workspace = true
+# An app's page: its files, its content policy, its messages (shared with `web-host`).
+web-pages.workspace = true
 # `image-data`: a diagram copied as a picture.
 arboard = { workspace = true, features = ["image-data"] }
 

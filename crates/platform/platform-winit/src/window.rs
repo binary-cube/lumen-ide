@@ -420,6 +420,16 @@ impl Window for WinitWindow {
             CursorIcon::Pointer => winit::window::CursorIcon::Pointer,
             CursorIcon::ResizeHorizontal => winit::window::CursorIcon::ColResize,
             CursorIcon::ResizeVertical => winit::window::CursorIcon::RowResize,
+            CursorIcon::Crosshair => winit::window::CursorIcon::Crosshair,
+            CursorIcon::Move => winit::window::CursorIcon::Move,
+            CursorIcon::Grab => winit::window::CursorIcon::Grab,
+            CursorIcon::Grabbing => winit::window::CursorIcon::Grabbing,
+            CursorIcon::NotAllowed => winit::window::CursorIcon::NotAllowed,
+            CursorIcon::Wait => winit::window::CursorIcon::Wait,
+            CursorIcon::Progress => winit::window::CursorIcon::Progress,
+            CursorIcon::Help => winit::window::CursorIcon::Help,
+            CursorIcon::ResizeDiagonal => winit::window::CursorIcon::NwseResize,
+            CursorIcon::ResizeAntiDiagonal => winit::window::CursorIcon::NeswResize,
         });
     }
 }

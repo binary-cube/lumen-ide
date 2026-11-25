@@ -182,6 +182,11 @@ pub struct Damage {
     full_beyond: i64,
     /// Past [`COARSE_AFTER`] changes: the one rectangle holding them all.
     coarse: Option<PixelRect>,
+    /// Every live image of the scene, with the frame each had when the damage was found
+    /// (its id, its generation; noted on every path, a full frame's too): what the frame
+    /// drawn is recorded with ([`DamageTracker::commit_drawn`]), so a frame that came after
+    /// is drawn by the next one (and what blurs it made again then).
+    seen: Vec<(u64, u64)>,
 }
 
 impl Damage {
@@ -193,6 +198,7 @@ impl Damage {
             changes: 0,
             full_beyond: 0,
             coarse: None,
+            seen: Vec::new(),
         }
     }
 
@@ -228,9 +234,37 @@ impl Damage {
         self.first_layer = None;
         self.changes = 0;
         self.coarse = None;
+        self.seen.clear();
     }
 
-    /// Everything is drawn again, as new (what was under a blur too).
+    /// The frame live image `id` had when this damage was found (`None`: not compared).
+    fn seen_generation(&self, id: u64) -> Option<u64> {
+        let at = self.seen.binary_search_by_key(&id, |(seen, _)| *seen).ok()?;
+        self.seen.get(at).map(|(_, generation)| *generation)
+    }
+
+    /// Everything of `scene` drawn again, as new: the damage of a frame not compared with
+    /// the last one (none kept, or assumed whole), its live images' frames noted as they are
+    /// now.
+    pub fn set_full_of(&mut self, scene: &Scene) {
+        self.clear();
+        self.set_full();
+        self.note_live(scene);
+    }
+
+    /// Notes the frame each live image of `scene` has now (what it was compared with), once
+    /// per image: by id, for [`Self::seen_generation`]'s search (an image drawn twice keeps
+    /// the frame read first). Called on a damage just cleared.
+    fn note_live(&mut self, scene: &Scene) {
+        let live = scene.layers().iter().flat_map(|l| &l.images).filter(|i| i.image.is_live());
+        self.seen.extend(live.map(|i| (i.image.id, i.image.generation())));
+        // Stable: of an image's entries, the first read stays first.
+        self.seen.sort_by_key(|(id, _)| *id);
+        self.seen.dedup_by_key(|(id, _)| *id);
+    }
+
+    /// Everything is drawn again, as new (what was under a blur too). The live images'
+    /// frames noted stay: they're the ones drawn.
     pub fn set_full(&mut self) {
         self.full = true;
         self.rects.clear();
@@ -335,18 +369,37 @@ fn cheap_union(a: &PixelRect, b: &PixelRect) -> bool {
     a.union(b).area() * 4 <= parts * 5
 }
 
-/// An image as the damage sees it: which one, where, how opaque (its pixels never change
-/// for an id).
+/// An image as the damage sees it: which one, where, how opaque, and which of its frames
+/// (its pixels never change for an id, but a live one's frame does).
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct ImageRecord {
     id: u64,
+    generation: u64,
     bounds: Rect,
     opacity: f32,
+    corners: crate::ImageCorners,
+}
+
+impl ImageRecord {
+    /// The same image drawn the same, only another of its frames in it.
+    fn only_frame_differs(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.generation != other.generation
+            && self.bounds == other.bounds
+            && self.opacity == other.opacity
+            && self.corners == other.corners
+    }
 }
 
 impl From<&ImageInstance> for ImageRecord {
     fn from(i: &ImageInstance) -> Self {
-        Self { id: i.image.id, bounds: i.bounds, opacity: i.opacity }
+        Self {
+            id: i.image.id,
+            generation: i.image.generation(),
+            bounds: i.bounds,
+            opacity: i.opacity,
+            corners: i.corners,
+        }
     }
 }
 
@@ -408,6 +461,9 @@ impl DamageTracker {
         out: &mut Damage,
     ) {
         out.clear();
+        // Before anything is compared: the frames drawn are at least these, whichever way
+        // this returns.
+        out.note_live(scene);
         if !self.valid
             || self.size != size
             || self.epoch != glyph_epoch()
@@ -461,6 +517,13 @@ impl DamageTracker {
 
     /// `scene` was drawn on a surface of `size`: the next frame is compared with it.
     pub fn commit(&mut self, scene: &Scene, size: PhysicalSize) {
+        self.commit_drawn(scene, size, &Damage::full());
+    }
+
+    /// [`Self::commit`] of a frame drawn where `damage` said: a live image is recorded with
+    /// the frame it had when `damage` was found (one put in since — outside the areas drawn,
+    /// or under a blur not made again — is drawn by the next frame).
+    pub fn commit_drawn(&mut self, scene: &Scene, size: PhysicalSize, damage: &Damage) {
         self.valid = true;
         self.size = size;
         self.epoch = glyph_epoch();
@@ -477,7 +540,17 @@ impl DamageTracker {
             record.quads.clone_from(&layer.quads);
             record.glyphs.clone_from(&layer.glyphs);
             record.images.clear();
-            record.images.extend(layer.images.iter().map(ImageRecord::from));
+            record.images.extend(layer.images.iter().map(|i| {
+                let mut image = ImageRecord::from(i);
+                // A whole frame too: a blur over a page whose layer didn't change isn't made
+                // again, so the frame put in since must still count as new.
+                if i.image.is_live()
+                    && let Some(generation) = damage.seen_generation(image.id)
+                {
+                    image.generation = generation;
+                }
+                image
+            }));
         }
         self.active = layers.len();
     }
@@ -523,6 +596,29 @@ fn add_rect(bounds: &Rect, clip: PixelRect, out: &mut Damage) {
     if let Some(r) = PixelRect::covering(bounds).intersect(&clip) {
         out.add(r);
     }
+}
+
+/// Where `change` (in an image's frames' pixels) lies once the image is drawn in `bounds`,
+/// with a texel more around it: the filtering mixes a pixel with the texels beside it.
+fn frame_area(bounds: &Rect, change: crate::live::FrameChange) -> Rect {
+    let (width, height) = change.size;
+    let (Ok(w), Ok(h)) = (i32::try_from(width), i32::try_from(height)) else { return *bounds };
+    if w == 0 || h == 0 {
+        return *bounds;
+    }
+    let area = change.area;
+    let x0 = area.x0.saturating_sub(1).clamp(0, w);
+    let y0 = area.y0.saturating_sub(1).clamp(0, h);
+    let x1 = area.x1.saturating_add(1).clamp(0, w);
+    let y1 = area.y1.saturating_add(1).clamp(0, h);
+    let sx = bounds.size.width / width as f32;
+    let sy = bounds.size.height / height as f32;
+    Rect::new(
+        bounds.origin.x + x0 as f32 * sx,
+        bounds.origin.y + y0 as f32 * sy,
+        (x1 - x0) as f32 * sx,
+        (y1 - y0) as f32 * sy,
+    )
 }
 
 /// Everything a layer draws (a layer appearing, going or clipped elsewhere).
@@ -575,12 +671,31 @@ fn diff_layer(
         }
     }
     for k in 0..old.images.len().max(new.images.len()) {
-        let (o, n) = (old.images.get(k).copied(), new.images.get(k).map(ImageRecord::from));
+        let instance = new.images.get(k);
+        let n = instance.map(|i| {
+            let mut n = ImageRecord::from(i);
+            // As noted before comparing: what the frame drawn is recorded with.
+            if i.image.is_live()
+                && let Some(generation) = out.seen_generation(n.id)
+            {
+                n.generation = generation;
+            }
+            n
+        });
+        let o = old.images.get(k).copied();
         if o == n {
             continue;
         }
         if out.is_full() {
             return;
+        }
+        // Another frame of a live image, drawn the same: only where its frames changed it.
+        if let (Some(o), Some(n), Some(i)) = (o, n, instance)
+            && o.only_frame_differs(&n)
+            && let Some(change) = i.image.changed_between(o.generation, n.generation)
+        {
+            add_rect(&frame_area(&n.bounds, change), clip, out);
+            continue;
         }
         for i in [o, n].into_iter().flatten() {
             add_rect(&i.bounds, clip, out);

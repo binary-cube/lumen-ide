@@ -1,0 +1,21 @@
+[package]
+name = "web-pages"
+description = "An app's web page apart from the engine showing it: the scheme its files come from (only its folder's), their types, the content policy keeping it off the network, the script handing it a message."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+tracing.workspace = true
+# A message for an app's page written as a script's string literal.
+serde_json.workspace = true
+
+[dev-dependencies]
+kernel.workspace = true
+
+[lints]
+workspace = true

@@ -98,7 +98,30 @@ pub(crate) struct ImageGpu {
     /// A mask's color (straight alpha); alpha below 0: an RGBA image.
     pub(crate) tint: [f32; 4],
     pub(crate) opacity: f32,
-    pub(crate) _pad: [f32; 3],
+    /// Its corners' radius (physical pixels).
+    pub(crate) radius: f32,
+    /// Which corners are rounded (`kernel::Corners`' bits).
+    pub(crate) corners: u32,
+    /// [`IMAGE_PREMULTIPLIED`] or none.
+    pub(crate) flags: u32,
+}
+
+/// [`ImageGpu::flags`]: its colors are premultiplied (a live image's), not straight.
+pub(crate) const IMAGE_PREMULTIPLIED: u32 = 1;
+
+impl ImageGpu {
+    /// `instance` as the image pipeline draws it.
+    pub(crate) fn of(instance: &render_api::ImageInstance) -> Self {
+        let image = &instance.image;
+        Self {
+            rect: rect_array(&instance.bounds),
+            tint: image.tint.map_or([0.0, 0.0, 0.0, -1.0], |c| [c.r, c.g, c.b, c.a]),
+            opacity: instance.opacity,
+            radius: instance.corners.radius,
+            corners: u32::from(instance.corners.which),
+            flags: if image.is_premultiplied() { IMAGE_PREMULTIPLIED } else { 0 },
+        }
+    }
 }
 
 /// An image uploaded to the GPU.
@@ -113,6 +136,59 @@ pub(crate) struct GpuImage {
     pub(crate) last_used: std::time::Instant,
     /// Told when the texture is freed (a `gpu_only` image must then be decoded again).
     pub(crate) image: render_api::ImageData,
+    /// A live image's texture (filled from outside: `import.rs`); `None`: uploaded pixels.
+    pub(crate) live: Option<wgpu::Texture>,
+    /// What its texture holds (an uploaded image's: always [`Filled::Whole`]).
+    pub(crate) filled: Filled,
+}
+
+/// What a live image's texture holds: what's drawn of it, and how its next frame is copied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Filled {
+    /// Made, nothing copied in yet (or the first copy failed): not drawn, its next frame
+    /// copied whole.
+    Empty,
+    /// A frame: the next one copied only where it changed.
+    Whole,
+    /// A copy into it failed part way: drawn as it is (the frame before, some of the next
+    /// maybe), the next frame copied whole (what changed since the one before isn't all
+    /// that's missing).
+    Torn,
+}
+
+impl GpuImage {
+    /// Whether its texture stays (at frame `frame`, `shown` in a window's last scene): never
+    /// once its owner released it; always while it's shown; a live image unshown until
+    /// [`IMAGE_IDLE`] (or at once, its frame let go: a popup closed), when a fresh frame is
+    /// asked of its engine to show it again; another until [`IMAGE_TTL`] frames or
+    /// [`IMAGE_IDLE`] went by without it drawn (decoded again if it comes back).
+    ///
+    /// A live image's time counts from when it was last drawn, not from its last frame: a
+    /// page hidden whose engine still sends frames has its texture freed each
+    /// [`IMAGE_IDLE`] and made again, whole, by its next frame. Its memory goes while it
+    /// can't be seen, for a whole copy (well under a millisecond) every [`IMAGE_IDLE`].
+    pub(crate) fn kept(&self, shown: bool, frame: u64) -> bool {
+        if self.image.released() {
+            return false;
+        }
+        if shown {
+            return true;
+        }
+        let recent = self.last_used.elapsed() < IMAGE_IDLE;
+        if self.image.is_live() {
+            return recent && !self.image.frame_unwanted();
+        }
+        recent && frame.saturating_sub(self.last_frame) < IMAGE_TTL
+    }
+
+    /// When it goes if it stays unshown and nothing is drawn ([`Self::kept`] by the clock
+    /// alone): at once, released or let go; after [`IMAGE_IDLE`] otherwise.
+    pub(crate) fn release_at(&self) -> std::time::Instant {
+        if self.image.released() || (self.image.is_live() && self.image.frame_unwanted()) {
+            return self.last_used;
+        }
+        self.last_used + IMAGE_IDLE
+    }
 }
 
 /// How many frames an image stays on the GPU without being drawn.

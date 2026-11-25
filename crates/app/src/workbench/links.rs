@@ -50,7 +50,7 @@ impl Workbench {
         if self.tabs.get(self.active).is_none_or(|t| !t.editor_visible()) {
             return false;
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.edit(text, |doc| {
             let len = doc.buffer().len();
             let (start, end) = (range.start.min(len), range.end.min(len));

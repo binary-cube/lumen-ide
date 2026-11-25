@@ -134,7 +134,7 @@ impl Splash {
         // The illustration, over the whole card.
         if let Some(art) = art {
             let images = scene.push_layer(Some(card));
-            images.images.push(ImageInstance { image: art.clone(), bounds: card, opacity });
+            images.images.push(ImageInstance::new(art.clone(), card, opacity));
         }
 
         let layer = scene.push_layer(Some(bounds));

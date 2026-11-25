@@ -1,0 +1,70 @@
+# The web engine's process (plan 99): Chromium (CEF) drawing the app's web pages off
+# screen, shared by every app of the user. A project of its own, apart from the app's
+# workspace: CEF is downloaded at build time and exists only for MSVC on Windows (the app's
+# checks build windows-gnu). Built and published by its own workflow, with its own version.
+[package]
+name = "web-host"
+# The crate's own, not the engine's: that is Chromium's, then `engine::BUILD` (`--version`).
+version = "1.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "web-host"
+path = "src/main.rs"
+
+# macOS: CEF's subprocesses (renderer, GPU…) run as helper apps of their own.
+[[bin]]
+name = "web-host-helper"
+path = "src/helper.rs"
+
+[dependencies]
+cef = { version = "=156.7.0", default-features = false }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "std"] }
+# An HTML page's address: a random token no other page finds.
+uuid = { version = "1", features = ["v4"] }
+web-engine-protocol = { path = "../crates/infra/system/web-engine-protocol" }
+web-host-core = { path = "../crates/infra/system/web-host-core" }
+web-pages = { path = "../crates/infra/system/web-pages" }
+
+# The consumption test (`tests/consumption.rs`): the app's side, and what a process tree uses.
+[dev-dependencies]
+process-stats = { path = "../crates/infra/system/process-stats" }
+web-engine = { path = "../crates/infra/system/web-engine" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Chromium's sandbox library, entered by each helper (`helper.rs`).
+libloading = "0.8"
+mach-ports = { path = "../crates/infra/system/mach-ports" }
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[package.metadata.cef.bundle]
+helper_name = "web-host-helper"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Not a member of the app's workspace.
+[workspace]
+
+# The app's workspace lints, the same here (this is a workspace of its own).
+[lints.rust]
+unsafe_code = "deny"            # allowed locally, each use with a // SAFETY: comment
+missing_debug_implementations = "warn"
+
+[lints.clippy]
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+todo = "warn"
+# A clone whose original isn't used after it: an allocation and a copy for nothing.
+redundant_clone = "warn"

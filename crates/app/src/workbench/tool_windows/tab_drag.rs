@@ -194,7 +194,7 @@ impl Workbench {
             }
         }
         window.prune();
-        self.focus = Focus::Panel;
+        self.move_focus(Focus::Panel);
         self.layout();
     }
 

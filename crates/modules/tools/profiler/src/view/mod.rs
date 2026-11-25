@@ -389,12 +389,13 @@ impl Viewer for ProfileView {
         }) | changed
     }
 
-    /// A hand on what's clicked (a button, a part's own: a bar of the flame graph).
+    /// A scrollbar's (over it, or held): the bar's; a hand on what's clicked (a button, a
+    /// part's own: a bar of the flame graph).
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        if self.hit(p).is_some() {
-            return Some(ViewerCursor::Pointer);
-        }
-        Some(self.controls.cursor_at(p).unwrap_or(ViewerCursor::Arrow))
+        self.controls.bar_or(p, || match self.hit(p) {
+            Some(_) => Some(ViewerCursor::Pointer),
+            None => Some(self.controls.cursor_at(p).unwrap_or(ViewerCursor::Arrow)),
+        })
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::Tip> {

@@ -34,8 +34,6 @@ mod system_sign;
 mod system_sign_windows;
 #[cfg(target_os = "macos")]
 mod titlebar;
-#[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
-mod web_app;
 #[cfg(target_os = "macos")]
 mod web_holes;
 #[cfg(target_os = "windows")]

@@ -125,11 +125,11 @@ impl WidgetView for Mark {
         );
         // Not decoded: the logo's place left empty, the words still there.
         if let Some(image) = &logo {
-            p.layer.images.push(render_api::ImageInstance {
-                image: image.clone(),
-                bounds: at,
-                opacity: p.look.opacity.clamp(0.0, 1.0),
-            });
+            p.layer.images.push(render_api::ImageInstance::new(
+                image.clone(),
+                at,
+                p.look.opacity.clamp(0.0, 1.0),
+            ));
         }
         // The name and the version's pill under it, together in the middle of its height.
         let block = ds.px(NAME) + ds.px(UNDER) + ds.px(PILL);

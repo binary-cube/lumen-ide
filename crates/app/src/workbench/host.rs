@@ -260,7 +260,7 @@ impl ViewHost for Workbench {
             return false;
         }
         self.set_viewer_data(data);
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         true
     }
 
@@ -330,7 +330,7 @@ impl ViewHost for Workbench {
             return false;
         }
         self.set_viewer_data(&input);
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         true
     }
 
@@ -349,7 +349,7 @@ impl ViewHost for Workbench {
         let Some(side) = self.tools.sides.iter_mut().find(|s| s.id == tool) else { return false };
         side.panel.set_data(data);
         if focus {
-            self.focus = Focus::Side(side.dock);
+            Self::focus_to(&mut self.focus, &mut self.focus_moves, Focus::Side(side.dock));
         }
         true
     }
@@ -427,14 +427,14 @@ impl EditorHost for Workbench {
         }
         commands::click(&mut tab.doc, range.start, false, false);
         commands::click(&mut tab.doc, range.end, true, false);
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         true
     }
 
     fn open_file(&mut self, path: &Path) -> bool {
         match Workbench::open_file(self, path) {
             Ok(()) => {
-                self.focus = Focus::Editor;
+                self.move_focus(Focus::Editor);
                 true
             }
             Err(e) => {

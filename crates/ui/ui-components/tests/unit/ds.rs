@@ -19,6 +19,123 @@ fn long_text_wraps_between_words_on_two_lines_at_most() {
     assert_eq!(two, vec!["Previews (images,".to_owned(), "documents)".to_owned()]);
 }
 
+/// Wrapped as it was broken word by word: runs of spaces and new lines one space, a word
+/// longer than a line alone on its line and cut, nothing for an empty text; one line asked:
+/// all of it on it, cut.
+#[test]
+fn a_wrap_breaks_between_words_whatever_the_spaces() {
+    let mut text = TextSystem::new();
+    let font = Font::new(Palette::dark().ui_font, 13.0);
+    let max = text.shape_line("alpha beta", &font).width;
+    let max = max.max(text.shape_line("gamma delta", &font).width);
+    let lines = wrap(&mut text, "  alpha \n beta\tgamma  delta ", &font, max, 9);
+    assert_eq!(lines, ["alpha beta", "gamma delta"]);
+    let long = "a".repeat(80);
+    let lines = wrap(&mut text, &format!("{long} beta"), &font, max, 9);
+    assert_eq!(lines.len(), 2, "{lines:?}");
+    assert!(lines[0].ends_with('…') && lines[1] == "beta", "{lines:?}");
+    assert!(wrap(&mut text, " \n ", &font, max, 3).is_empty());
+    let one = wrap(&mut text, "alpha beta gamma", &font, max, 1);
+    assert_eq!(one.len(), 1);
+    assert!(one[0].starts_with("alpha") && one[0].ends_with('…'), "{one:?}");
+}
+
+/// The reference [`wrap`] is held to: every line shaped anew as each word is added, every
+/// line then cut to fit (as it was first written, before its words were shaped once).
+fn wrap_word_by_word(
+    text: &mut TextSystem,
+    value: &str,
+    font: &Font,
+    max: f32,
+    lines: usize,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut line = String::new();
+    let mut words = value.split_whitespace().peekable();
+    while let Some(word) = words.next() {
+        let next = if line.is_empty() { word.to_owned() } else { format!("{line} {word}") };
+        if line.is_empty() || text.shape_line(&next, font).width <= max {
+            line = next;
+            continue;
+        }
+        if out.len() + 1 == lines {
+            let rest: Vec<&str> = std::iter::once(word).chain(words).collect();
+            line = format!("{line} {}", rest.join(" "));
+            break;
+        }
+        out.push(std::mem::replace(&mut line, word.to_owned()));
+    }
+    if !line.is_empty() {
+        out.push(line);
+    }
+    out.truncate(lines.max(1));
+    out.into_iter().map(|l| ellipsize(text, &l, font, max)).collect()
+}
+
+/// Broken as word by word, over texts of short and long words, narrow and wide lines, few
+/// and many of them: the same lines, the same cuts.
+#[test]
+fn a_wrap_breaks_as_word_by_word_does() {
+    let mut text = TextSystem::new();
+    let font = Font::new(Palette::dark().ui_font, 13.0);
+    let texts = [
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu",
+        "com.apple.NSEventThread · notify-rs fsevents loop · index-watch · git-status",
+        "Previews (images, documents) are made only while they're shown, then let go.",
+        "a b c d e f g h i j k l m n o p q r s t u v w x y z",
+        "Supercalifragilisticexpialidocious is a word longer than most lines here",
+        "  spaces   and\ttabs\n and new lines   between   words  ",
+        "WWWW iiii WWWW iiii WWWW iiii mmmm llll",
+        "Înțelege diacriticele: ăâîșț și ĂÂÎȘȚ, la fel de bine ca restul textului",
+        "one",
+    ];
+    let mut compared = 0;
+    for value in texts {
+        for max in [20.0, 45.0, 60.0, 80.0, 111.0, 150.0, 200.0, 333.0, 600.0] {
+            for lines in [1, 2, 3, 5, 40] {
+                let wanted = wrap_word_by_word(&mut text, value, &font, max, lines);
+                let got = wrap(&mut text, value, &font, max, lines);
+                assert_eq!(got, wanted, "{value:?} in {max} on {lines} lines");
+                compared += 1;
+            }
+        }
+    }
+    assert_eq!(compared, 9 * 9 * 5);
+}
+
+/// A section's description over several lines: broken between words in its width, the last
+/// cut with "…" when there's more, each on a line of its own below the title; the y it
+/// returns below the last.
+#[test]
+fn a_section_s_description_goes_over_its_lines() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let layer = scene.push_layer(None);
+    let width = 220.0;
+    let detail = "What the editor shows while it works on a project, and how much of it, \
+                  told once in a description long enough to need more than three lines.";
+    let lines = section_detail_lines(&mut text, &ctx, detail, width, 3);
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[2].ends_with('…'), "the rest cut: {lines:?}");
+    assert!(!lines[0].ends_with('…') && !lines[1].ends_with('…'), "{lines:?}");
+    let section = SectionTitle { title: "Display", detail: None, lines: &lines };
+    let bottom = section_title_lines(layer, &mut text, &ctx, (10.0, 0.0, width), section);
+    assert_eq!(baselines(layer).len(), 4, "the title and three lines");
+    assert!(layer.glyphs.iter().all(|g| g.origin.x <= 10.0 + width), "drawn past its width");
+    // Taller than one line by two lines and their leading; one line as section_title_in.
+    layer.glyphs.clear();
+    let one = section_title_in(layer, &mut text, &ctx, (10.0, 0.0, width), "Display", Some(detail));
+    assert_eq!(baselines(layer).len(), 2);
+    let small = text.metrics(&ctx.ui_font(-1.0));
+    let line = small.ascent + small.descent + ctx.px(2.0);
+    assert!((bottom - one - 2.0 * line).abs() < 0.5, "{bottom} {one}");
+    layer.glyphs.clear();
+    let none = section_title_in(layer, &mut text, &ctx, (10.0, 0.0, width), "Display", None);
+    assert!(none < one);
+}
+
 /// A long text cut with "…" as it's drawn (nothing allocated), inside its room; a short
 /// one whole.
 #[test]
@@ -682,7 +799,7 @@ fn a_button_takes_a_theme_s_colors() {
     let colors = ButtonColors {
         icon: kernel::Rgba::rgb(0x112233),
         hover: kernel::Rgba::rgb(0x445566).with_alpha(0.5),
-        on_back: kernel::Rgba::rgb(0x778899),
+        on_back: Some(kernel::Rgba::rgb(0x778899)),
         on_icon: kernel::Rgba::WHITE,
     };
     let spec = ButtonSpec::new(ButtonKind::Ghost).icon("search").colors(colors).icon_size(18.0);
@@ -691,7 +808,10 @@ fn a_button_takes_a_theme_s_colors() {
     assert_eq!(rest.glyphs[0].color, colors.icon);
     assert_eq!(drawn(spec.hovered(true), r, &ctx, &mut text).quads[0].color, colors.hover);
     let on = drawn(spec.on(true), r, &ctx, &mut text);
-    assert_eq!((on.quads[0].color, on.glyphs[0].color), (colors.on_back, colors.on_icon));
+    assert_eq!(
+        (on.quads[0].color, on.glyphs[0].color),
+        (kernel::Rgba::rgb(0x778899), colors.on_icon)
+    );
 }
 
 /// On a fixed surface its content reads on it, whatever the theme.
@@ -1764,4 +1884,62 @@ fn the_rest_of_the_controls_tell_what_they_are() {
     assert_eq!((steps[0].state.checked, steps[1].state.selected), (Some(true), true));
     let t = n.iter().find(|n| n.role == Role::ToggleButton).expect("a toggle");
     assert_eq!((&*t.name, t.state.checked), ("Aa", Some(true)));
+}
+
+/// A loading state: the spinner's eight dots above its title, centered.
+#[test]
+fn a_loading_state_turns_above_its_title() {
+    let area = Rect::new(0.0, 0.0, 400.0, 300.0);
+    let quads = quads_of(|l, t, c| loading_state(l, t, c, area, "Opening", Some("why")));
+    assert_eq!(quads.len(), 8, "eight dots");
+    let middle = quads.iter().map(|q| q.bounds.center().x).sum::<f32>() / 8.0;
+    assert!((middle - 200.0).abs() < 1.0, "centered: {middle}");
+    assert!(quads.iter().all(|q| q.bounds.max_y() < 150.0), "above the middle");
+}
+
+/// A loading state tells a screen reader something is under way, named by its title.
+#[test]
+fn a_loading_state_is_told_as_progress() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    let recording = ui_kit::access::begin();
+    let area = Rect::new(0.0, 0.0, 400.0, 300.0);
+    loading_state(&mut layer, &mut text, &ctx, area, "Opening", Some("why"));
+    let frame = recording.take();
+    let progress = frame.nodes().iter().find(|n| n.role == Role::ProgressBar).expect("told");
+    assert_eq!(&*progress.name, "Opening");
+}
+
+/// Something loading is told once, named by its title: the title painted under it isn't
+/// read again, its explanation is (under it); a loader with a text is named by it, over the
+/// spinner and the text, the text not read again.
+#[test]
+fn a_loading_state_is_told_once_by_its_title() {
+    use ui_kit::access::Role;
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut layer = Layer::default();
+    let rect = Rect::new(0.0, 0.0, 400.0, 300.0);
+    let recording = ui_kit::access::begin();
+    loading_state(&mut layer, &mut text, &ctx, rect, "Starting the engine", Some("Once only"));
+    let frame = recording.take();
+    let nodes = frame.nodes();
+    let said = |name: &str| nodes.iter().filter(|n| &*n.name == name).count();
+    let bar = nodes.iter().find(|n| n.role == Role::ProgressBar).expect("told as under way");
+    assert_eq!((&*bar.name, bar.bounds), ("Starting the engine", rect));
+    assert_eq!(said("Starting the engine"), 1, "its title read once: {nodes:?}");
+    let detail = nodes.iter().find(|n| &*n.name == "Once only").expect("its explanation");
+    assert_eq!(detail.parent, bar.id, "read under it");
+
+    let recording = ui_kit::access::begin();
+    let drawn = loader(&mut layer, &mut text, &ctx, 10.0, 50.0, &Loader::with_text("Loading"));
+    let frame = recording.take();
+    let nodes = frame.nodes();
+    assert_eq!(nodes.len(), 1, "one node, its text not read again: {nodes:?}");
+    assert_eq!((nodes[0].role, &*nodes[0].name), (Role::ProgressBar, "Loading"));
+    assert!((nodes[0].bounds.size.width - drawn.size.width).abs() < 0.5, "over all of it");
 }

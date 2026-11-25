@@ -19,10 +19,9 @@ toml.workspace = true
 tracing.workspace = true
 # Whether the app before an update still runs (a new start waits for it).
 sysinfo.workspace = true
-# The manifest's signature (the release workflow's Ed25519 key).
-ed25519-dalek = "3"
-# An archive downloaded before checked again, read in pieces.
-ring = "0.17"
+# An archive downloaded before checked again, read in pieces; the tests sign their
+# manifests with it too.
+ring.workspace = true
 
 [dev-dependencies]
 pinned-downloads = { workspace = true, features = ["fake"] }

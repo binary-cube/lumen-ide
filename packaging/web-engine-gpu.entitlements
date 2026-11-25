@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The web engine's GPU helper (plan 99): Chromium's software rasterizer (SwiftShader,
+     used when the GPU can't draw a page's WebGL) compiles its shaders, in memory mapped for
+     JIT, as Chromium's own GPU helper is entitled to. Ad hoc signing: see
+     web-engine.entitlements. -->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>

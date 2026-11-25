@@ -203,7 +203,7 @@ impl Workbench {
                 }
             }
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.layout();
         true
     }
@@ -255,7 +255,7 @@ impl Workbench {
             self.beside_compare = Some(path);
         }
         self.focus_group(view);
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.layout();
     }
 
@@ -303,7 +303,7 @@ impl Workbench {
             viewer.below = true;
         }
         self.set_viewer_data(data);
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.layout();
         true
     }
@@ -429,7 +429,7 @@ impl Workbench {
                 self.active = index;
             }
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         if self.editors.groups[source].tabs.is_empty() {
             self.editors.groups.remove(source);
             self.editors.tree.remove(source);

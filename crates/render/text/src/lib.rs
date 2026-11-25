@@ -85,9 +85,11 @@ pub struct ShapedGlyph {
 }
 
 impl ShapedLine {
-    /// X position of the character at offset `byte` (end of line if past the last glyph).
+    /// X position of the character at offset `byte` (end of line if past the last glyph):
+    /// its glyphs, in the text's order, searched by halves.
     pub fn x_at(&self, byte: usize) -> f32 {
-        self.glyphs.iter().find(|g| g.start >= byte).map_or(self.width, |g| g.x)
+        let next = self.glyphs.partition_point(|g| g.start < byte);
+        self.glyphs.get(next).map_or(self.width, |g| g.x)
     }
 
     /// Offset of the character closest to `x` (the glyph's midpoint decides the side).

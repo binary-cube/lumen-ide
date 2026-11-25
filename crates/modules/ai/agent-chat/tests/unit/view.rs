@@ -130,6 +130,10 @@ fn the_conversation_scrolls_by_its_thumb() {
     assert!(v.drag(Point::new(thumb.x, thumb.y + 40.0)));
     assert!(v.scroll > 0.0, "scrolled down");
     assert!(!v.following);
+    // Held over something clicked: the bar's cursor, never the hand.
+    let over = v.hits.first().map(|(r, _)| r.center()).expect("something clicked");
+    v.hover(over);
+    assert_eq!(v.cursor_at(over), Some(ui_components::scrollbar::CURSOR), "held: the bar's");
     assert!(v.release());
 }
 

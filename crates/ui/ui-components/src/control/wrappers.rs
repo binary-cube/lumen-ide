@@ -50,6 +50,9 @@ impl<C: Control> Control for Option<C> {
     fn cursor(&self, p: Point) -> Option<ViewerCursor> {
         self.as_ref()?.cursor(p)
     }
+    fn owns_cursor(&self, p: Point) -> bool {
+        self.as_ref().is_some_and(|c| c.owns_cursor(p))
+    }
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
         self.as_mut().is_some_and(|c| c.scroll(dx, dy))
     }
@@ -136,6 +139,9 @@ impl Control for OneClick<'_> {
     }
     fn cursor(&self, p: Point) -> Option<ViewerCursor> {
         self.0.cursor(p)
+    }
+    fn owns_cursor(&self, p: Point) -> bool {
+        self.0.owns_cursor(p)
     }
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
         self.0.scroll(dx, dy)
@@ -237,6 +243,9 @@ impl Control for Shown<'_> {
     }
     fn cursor(&self, p: Point) -> Option<ViewerCursor> {
         self.part.cursor(p).filter(|_| self.shown)
+    }
+    fn owns_cursor(&self, p: Point) -> bool {
+        self.shown && self.part.owns_cursor(p)
     }
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {
         self.shown && self.part.scroll(dx, dy)

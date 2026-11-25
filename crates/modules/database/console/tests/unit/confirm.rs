@@ -179,10 +179,46 @@ fn the_statements_thumb_is_dragged() {
         .find(|p| view.bar.contains(*p))
         .expect("a scrollbar along the statements");
     let at = Point::new(on.x + 1.0, on.y + 2.0);
+    view.hover(at);
+    assert_eq!(view.cursor_at(at), Some(ui_components::scrollbar::CURSOR), "the bar's");
     assert_eq!(view.click(at), None);
     assert!(view.bar.is_dragging(), "the thumb is held");
     assert!(view.drag(Point::new(at.x, at.y + 40.0)));
     assert!(view.scroll > 0.0, "the statements moved");
+    // Dragged over a button: the bar's cursor still, not the button's hand.
+    let button = view.hits.first().map(|(r, _)| r.center()).expect("a button");
+    view.drag(button);
+    view.hover(button);
+    assert_eq!(view.cursor_at(button), Some(ui_components::scrollbar::CURSOR), "held");
     assert!(view.release());
+    assert_eq!(view.cursor_at(button), Some(ViewerCursor::Pointer), "let go: the button's");
     assert!(!view.closed() && answers.lock().unwrap().is_empty(), "nothing answered");
+}
+
+/// Its own buttons show the hand; beside them, the modal's cursor.
+#[test]
+fn its_buttons_show_the_hand() {
+    let project = Project::new("confirm-cursor");
+    let mut host = FakeHost::new(kernel::ProjectId::new(), &project.root);
+    let (mut view, _) = asked(&mut host, request(ConfirmKind::Run, true));
+    let palette = ui_components::Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1000.0, 800.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    let button = view.hits.first().map(|(r, _)| r.center()).expect("a button");
+    view.hover(button);
+    assert_eq!(view.cursor_at(button), Some(ViewerCursor::Pointer));
+    let beside = Point::new(1.0, 1.0);
+    view.hover(beside);
+    assert_eq!(view.cursor_at(beside), None, "the modal's own");
 }

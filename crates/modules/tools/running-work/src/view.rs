@@ -478,6 +478,11 @@ impl Viewer for RunningView {
         self.with_controls(|c, parts| c.hover(parts, Some(p)))
     }
 
+    /// Its parts' (the list's scrollbar); elsewhere the modal's own.
+    fn cursor_at(&self, p: kernel::Point) -> Option<ui_components::ViewerCursor> {
+        self.controls.cursor_at(p)
+    }
+
     fn command(&mut self, id: &str) -> bool {
         let Some(button) = self.buttons().iter().find(|b| b.id() == id).copied() else {
             return false;

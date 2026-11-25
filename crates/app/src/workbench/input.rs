@@ -280,7 +280,7 @@ impl Workbench {
             let offset = offset.min(tab.doc.buffer().len());
             commands::click(&mut tab.doc, offset, false, false);
             tab.view.reveal_cursor(&tab.doc, &tab.folds, text, &self.palette);
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
         }
         self.release_divider() | scrollbar
     }

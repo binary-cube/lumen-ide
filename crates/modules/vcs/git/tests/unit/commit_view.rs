@@ -116,6 +116,15 @@ fn the_files_thumb_and_a_divider_are_dragged() {
     let at = held.expect("the thumb found");
     assert!(view.drag(Point::new(at.x, at.y + 80.0)));
     assert!(view.scrolls[STAGED] > 0.0, "the files scrolled");
+    // Held over the message: the bar's cursor, never the text's.
+    let over = view
+        .hits
+        .iter()
+        .find(|(_, h)| matches!(h, Hit::Message))
+        .map(|(r, _)| r.center())
+        .expect("the message");
+    view.hover(over);
+    assert_eq!(view.cursor_at(over), Some(ui_components::scrollbar::CURSOR), "held: the bar's");
     assert!(view.release());
     assert!(!view.bars[STAGED].is_dragging());
     // The divider between the lists and the changes: dragged to the right.

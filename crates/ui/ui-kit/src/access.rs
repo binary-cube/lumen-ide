@@ -170,6 +170,27 @@ pub fn group<R>(describe: impl FnOnce() -> Described, paint: impl FnOnce() -> R)
     painted
 }
 
+/// Nodes that name their parent, walked depth first (each after its parent; a parent not
+/// among them is the group open now): each put under its parent, as a group closed once a
+/// node not under it comes. Nothing while no tree is made.
+pub fn nested<K: PartialEq>(nodes: impl IntoIterator<Item = (K, Option<K>, Described)>) {
+    if !recording() {
+        return;
+    }
+    // The nodes open now, innermost last.
+    let mut open: Vec<(K, Opened)> = Vec::new();
+    for (key, parent, described) in nodes {
+        while open.last().is_some_and(|(k, _)| Some(k) != parent.as_ref()) {
+            open.pop();
+        }
+        if let Some(opened) = self::open(|| described) {
+            open.push((key, opened));
+        }
+    }
+    // Closed innermost first.
+    while open.pop().is_some() {}
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/access.rs"]
 mod tests;

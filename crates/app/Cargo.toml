@@ -43,6 +43,7 @@ text-layout.workspace = true
 render-wgpu.workspace = true
 render-software.workspace = true
 platform-api.workspace = true
+web-engine.workspace = true
 platform-winit.workspace = true
 ui-kit.workspace = true
 ui-workbench.workspace = true
@@ -115,6 +116,7 @@ profiler.workspace = true
 # The modules' figures for a profile recording, registered for the recorder.
 contracts.workspace = true
 updates.workspace = true
+web-engine-install.workspace = true
 log-viewer.workspace = true
 agent-claude.workspace = true
 agent-cline.workspace = true
@@ -166,6 +168,8 @@ embed-resource = "3"
 lsp-client = { workspace = true, features = ["fake"] }
 # The engines' comparison's probes and answers (`tools/lsp-compare`).
 serde_json.workspace = true
+# A GPU without a window: a page of the app's engine drawn in a test.
+render-wgpu = { workspace = true, features = ["offscreen"] }
 
 [features]
 # `--snapshot`: the screens rendered into PNGs (visual checks, `scripts/ui-snapshots.sh`);

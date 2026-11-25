@@ -48,6 +48,12 @@ return `Notification`s, never draw them.
 Each card is an `Alert` named by its title, its detail as its value; its buttons are
 `ds::button`s.
 
+## Look
+
+- The glass card is nearly opaque (`GLASS_SURFACE` 0.94) over a light blur: a hint of
+  what's under it shows through, but its text reads clearly over a busy page's text too
+  (on purpose).
+
 ## Cost
 
 - Nothing at all while the stack is empty (the rings let go too).

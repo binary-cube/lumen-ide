@@ -441,7 +441,7 @@ impl Workbench {
             tracing::warn!(path = %path.display(), error = %e, "can't open");
             return false;
         }
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.jump(text, |doc| commands::click(doc, offset.min(doc.buffer().len()), false, false))
     }
 
@@ -479,7 +479,7 @@ impl Workbench {
         let Some(tab) = self.tabs.get(self.active) else { return false };
         let Some(start) = tab.doc.buffer().text().find(needle) else { return false };
         let at = start + needle.len();
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.edit(text, |doc| commands::click(doc, at, false, false))
     }
 }

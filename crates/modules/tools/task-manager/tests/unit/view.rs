@@ -839,6 +839,36 @@ fn the_list_s_thumb_dragged_scrolls_it() {
     assert!(!view.drag(Point::new(x, rows.max_y())), "let go: the moves don't reach it");
 }
 
+/// The list's thumb held and dragged over the rows keeps the bar's cursor (the rows' hand
+/// only once it's let go).
+#[test]
+fn dragging_the_list_s_thumb_over_rows_keeps_the_bar_s_cursor() {
+    let mut view = demo("split");
+    let mut pen = Pen::new();
+    pen.paint(&mut view, 900.0, 320.0, 1.0);
+    let rows = view.page().unwrap().rows;
+    let x = (0..24)
+        .map(|dx| rows.max_x() - 1.0 - dx as f32)
+        .find(|&x| view.bar.contains(Point::new(x, rows.min_y() + 6.0)))
+        .expect("the list's bar along its right edge");
+    let on_bar = Point::new(x, rows.min_y() + 6.0);
+    let over_row = Point::new(rows.min_x() + 40.0, rows.min_y() + 60.0);
+    view.hover(over_row);
+    assert_eq!(view.cursor_at(over_row), Some(ui_components::ViewerCursor::Pointer), "a row's");
+    view.hover(on_bar);
+    assert_eq!(view.cursor_at(on_bar), Some(ui_components::scrollbar::CURSOR));
+    view.click(on_bar);
+    view.drag(over_row);
+    assert_eq!(
+        view.cursor_at(over_row),
+        Some(ui_components::scrollbar::CURSOR),
+        "held: the bar's over the rows"
+    );
+    view.release();
+    view.hover(over_row);
+    assert_eq!(view.cursor_at(over_row), Some(ui_components::ViewerCursor::Pointer), "let go");
+}
+
 /// The wheel goes to the part under the mouse: over the detail it scrolls the detail,
 /// elsewhere the list (also with no mouse yet).
 #[test]

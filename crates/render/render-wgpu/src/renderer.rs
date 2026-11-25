@@ -16,12 +16,18 @@ impl Renderer for WgpuRenderer {
         state.atlas.grow(&self.ctx.device, ATLAS_START);
         state.atlas_bind_group =
             atlas_bind_group(&self.ctx.device, &self.ctx.atlas_layout, &state.atlas);
-        for t in state.textures.values() {
-            t.image.evicted();
-        }
-        state.textures.clear();
+        // A live image (a page's) keeps its texture as it would unpurged: it has no pixels
+        // to upload again, only the frames its engine sends when something changes.
+        let frame = state.frame;
+        let shown = state.shown_ids();
+        state.retain_textures(|id, t| t.image.is_live() && t.kept(shown.contains(&id), frame));
         // The text system reissues glyph keys with it: every window's next frame is whole.
         render_api::glyph_keys_reset();
+    }
+
+    fn frame_importer(&self) -> Option<std::sync::Arc<dyn render_api::FrameImporter>> {
+        // Every GPU: frames as textures where they can be opened, as pixels elsewhere.
+        Some(std::sync::Arc::new(crate::import::Importer::new(std::sync::Arc::clone(&self.ctx))))
     }
 
     fn gpu_memory(&self) -> Option<render_api::GpuMemory> {

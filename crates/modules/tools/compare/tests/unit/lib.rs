@@ -466,6 +466,29 @@ fn each_column_scrolls_across_on_its_own() {
     assert!(c.across[0].offset < c.across[0].max * 0.1, "{}", c.across[0].offset);
 }
 
+/// A column's bar across lies over the code: over it, and while its thumb is held over the
+/// code, the bar's cursor; on the code otherwise, the text's.
+#[test]
+fn a_bar_across_the_code_keeps_its_cursor() {
+    let long = format!("<?php echo '{}';\n", "x".repeat(400));
+    let mut c = compare(&format!("a\n{long}"), "b\nshort\n");
+    paint(&mut c);
+    let track = c.across[0].bar.as_ref().unwrap().track_rect();
+    let on_bar = kernel::Point::new(track.min_x() + 2.0, track.min_y() + track.size.height / 2.0);
+    let left = c.across[0].area;
+    let code = kernel::Point::new(left.min_x() + left.size.width / 2.0, left.min_y() + 30.0);
+    c.hover(code);
+    assert_eq!(c.cursor_at(code), Some(ViewerCursor::Text), "the code's");
+    c.hover(on_bar);
+    assert_eq!(c.cursor_at(on_bar), Some(ui_components::scrollbar::CURSOR), "the bar's");
+    c.click(on_bar);
+    c.drag(code);
+    assert_eq!(c.cursor_at(code), Some(ui_components::scrollbar::CURSOR), "held: the bar's");
+    c.release();
+    c.hover(code);
+    assert_eq!(c.cursor_at(code), Some(ViewerCursor::Text), "let go: the code's again");
+}
+
 /// The overview's thumb dragged: taken where it's pressed, the rows following the mouse;
 /// pressed elsewhere: centred there and dragged on; let go: the drag ends.
 #[test]

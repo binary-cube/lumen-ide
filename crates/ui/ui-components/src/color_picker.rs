@@ -380,11 +380,7 @@ impl ColorPicker {
         self.sv = Rect::new(card.min_x() + geo.pad, y, geo.inner_w, ctx.px(150.0));
         let sv_image = self.sv_texture();
         let images = scene.push_layer(Some(card));
-        images.images.push(render_api::ImageInstance {
-            image: sv_image,
-            bounds: self.sv,
-            opacity: geo.opacity,
-        });
+        images.images.push(render_api::ImageInstance::new(sv_image, self.sv, geo.opacity));
         self.sv.max_y() + ctx.px(14.0)
     }
 
@@ -414,11 +410,7 @@ impl ColorPicker {
         checkerboard(squares, ctx, preview, cell);
         let bars = scene.push_layer(Some(card));
         for (r, image) in [(self.hue, &hue_image), (self.alpha, &alpha_image)] {
-            bars.images.push(render_api::ImageInstance {
-                image: image.clone(),
-                bounds: r,
-                opacity: geo.opacity,
-            });
+            bars.images.push(render_api::ImageInstance::new(image.clone(), r, geo.opacity));
         }
         let half = Rect::new(
             preview.min_x(),

@@ -8,11 +8,26 @@ făcute se șterg.
 - **Un singur motor web peste tot, desenat de noi** (cerut 2026-11-24: „prefer să avem o
   soluție generală peste tot […] parte din ce desenăm”). Planul:
   `docs/plan/99-motor-web-chromium.md` (Chromium prin CEF, desenat în afara ecranului ca
-  textură, într-un proces `web-host` al nostru, descărcat o dată la prima nevoie). Primul pas:
-  99a, încercarea pe macOS, cu măsurători. Planul 98 (WebView2 visual hosting) rămâne scris
-  ca variantă fără descărcare. Până atunci, pe Windows stratul plutitor e o fereastră popup.
+  textură, într-un proces `web-host` al nostru, descărcat o dată la prima nevoie). Pașii
+  99a–99h sunt scriși și probați pe macOS. Rămân:
+  - **prima rulare a workflow-ului `web-engine.yml`** (a utilizatorului: release-urile sunt
+    ale lui): nerulat încă, deci neprobate construcția pe Linux și Windows, `CEF_PATH` comun,
+    rpath-ul `$ORIGIN` de pe Linux, curățarea arhivelor vechi și ștergerea ciornei după
+    publicare, modul `relist`;
+  - **încercările pe Windows și Linux** (texturile D3D11, dmabuf-ul pe Linux, sandbox-ul);
+  - **notarizarea pe macOS** a pachetului motorului (semnat, dar nenotarizat; descărcat de
+    aplicație nu poartă marca web-ului);
+  - **semnarea pachetului de Windows** (ca la aplicație);
+  - **construcția de depanare pe macOS**: unealta CEF construiește și programele de
+    depanare (nu are `--release`), minute în plus pe rulare; un program mic al nostru care
+    cheamă `cef::build_util::mac::bundle` cu dosarul release ar scuti-o.
+
+  Planul 98 (WebView2 visual hosting) rămâne scris ca variantă fără descărcare. Fără motor,
+  pe Windows stratul plutitor rămâne o fereastră popup.
 
 - **Windows: decupajele urâte peste pagina motorului web** (raportat 2026-11-23, cu captură).
+  Privește doar motorul sistemului (rezerva fără motorul nostru): paginile motorului nostru
+  sunt desenate de aplicație, fără decupaje.
   Peste editorul de diagrame (o pagină a motorului web al sistemului), pastilele de resurse
   fixate în colț (CPU, RAM, GPU și pinul) apar înconjurate de pete albastre mari, rotunjite
   și deplasate. Forma lor trebuie să fie scoasă exact din pagină, ca să se vadă pastilele

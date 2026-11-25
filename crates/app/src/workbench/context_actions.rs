@@ -281,7 +281,7 @@ impl Workbench {
             ContextAction::Edits(edits) => {
                 let edits: Vec<document::Edit> =
                     edits.into_iter().map(|(r, t)| document::Edit::new(r, t)).collect();
-                self.focus = Focus::Editor;
+                self.move_focus(Focus::Editor);
                 self.edit(text, |doc| {
                     doc.apply(document::Transaction::new(edits), None, document::EditKind::Command);
                 });

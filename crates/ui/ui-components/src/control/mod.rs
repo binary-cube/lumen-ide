@@ -27,6 +27,10 @@ pub use bars::{BarThumb, Divider, ScrollThumb, Scrolled, Thumb};
 pub use views::{AskedMenu, Embedded, TabView};
 pub use wrappers::{Absent, OneClick, Shown};
 
+/// The point a part's [`crate::bar_cursor!`] methods are asked at, named for the macro.
+#[doc(hidden)]
+pub use kernel::Point as BarPoint;
+
 /// A point no part is at: what a part told the mouse left it hovers (`hover(None)` as a
 /// point for the components that take one).
 pub const NOWHERE: Point = Point::new(f32::MIN, f32::MIN);
@@ -121,6 +125,13 @@ pub trait Control {
         None
     }
 
+    /// Its cursor at `p` is a bar's (a scrollbar's thumb or lane, one held): it wins over
+    /// whatever the view shows there (its rows' hand, its code's I-beam). A view knows a
+    /// bar by this ([`Controls::bar_cursor`]), never by the cursor's value.
+    fn owns_cursor(&self, _p: Point) -> bool {
+        false
+    }
+
     /// The wheel over it: `true` if it scrolled (else it goes on to what's under it).
     fn scroll(&mut self, _dx: f32, _dy: f32) -> bool {
         false
@@ -192,6 +203,8 @@ pub struct Controls {
     /// Where the mouse last was, the cursor and the tooltip of the part under it there.
     mouse: Option<Point>,
     cursor: Option<ViewerCursor>,
+    /// The cursor kept is a bar's ([`Control::owns_cursor`]).
+    on_bar: bool,
     tip: Option<Tip>,
     /// From the last [`Self::settle`]: a part moving, the soonest frame one wants.
     moving: bool,
@@ -292,14 +305,34 @@ impl Controls {
         let moved = parts.get_mut(i)?.drag(p);
         // The cursor while dragging is the held part's (a separator's, a selection's).
         self.mouse = Some(p);
-        self.cursor = parts.get(i).and_then(|c| c.cursor(p));
+        self.note_cursor(parts, Some(p));
         Some((i, moved))
     }
 
-    /// The pointer let go: the part that held it, and whether it changed.
+    /// The pointer let go: the part that held it, and whether it changed. The cursor kept
+    /// is the one under the mouse again (a bar let go over the rows gives them theirs back:
+    /// the app asks for it at once, before the mouse moves).
     pub fn release(&mut self, parts: Parts<'_, '_>) -> Option<(usize, bool)> {
         let i = self.held.take()?;
-        Some((i, parts.get_mut(i)?.release()))
+        let released = parts.get_mut(i)?.release();
+        self.note_cursor(parts, self.mouse);
+        Some((i, released))
+    }
+
+    /// The cursor at `p` kept for the read-only questions: the held part's while one is
+    /// held (a bar dragged over the rows keeps the bar's, whatever is under the mouse),
+    /// else the topmost part's there that says one; and whether it's a bar's.
+    fn note_cursor(&mut self, parts: &[&mut dyn Control], p: Option<Point>) {
+        let Some(p) = p else {
+            (self.cursor, self.on_bar) = (None, false);
+            return;
+        };
+        let shown = match self.held {
+            Some(i) => parts.get(i).and_then(|c| Some((i, c.cursor(p)?))),
+            None => Self::cursor_part(parts, p),
+        };
+        self.cursor = shown.map(|(_, cursor)| cursor);
+        self.on_bar = shown.is_some_and(|(i, _)| parts[i].owns_cursor(p));
     }
 
     /// The mouse at `p` (`None`: it left the view): the part it left and the one it's over
@@ -318,7 +351,7 @@ impl Controls {
         }
         // Kept for the read-only questions about where the mouse is.
         self.mouse = p;
-        self.cursor = p.and_then(|p| self.cursor(parts, p));
+        self.note_cursor(parts, p);
         self.tip = p.and_then(|p| self.tooltip(parts, p));
         changed
     }
@@ -326,6 +359,33 @@ impl Controls {
     /// The cursor where the mouse last was ([`Self::hover`]), when `p` is there.
     pub fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
         self.cursor.filter(|_| self.mouse == Some(p))
+    }
+
+    /// The cursor where the mouse last was when it's a bar's (over a bar, or while one is
+    /// held: [`Control::owns_cursor`]); `None` elsewhere, where the view says its own.
+    pub fn bar_cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.cursor_at(p).filter(|_| self.on_bar)
+    }
+
+    /// A view's cursor at `p` when its own wins over its parts' but not over a bar's (a hand
+    /// over its rows, an I-beam over its text): the bar's where the mouse last was (over a
+    /// bar, or while one is held), else the view's `own`.
+    pub fn bar_or(
+        &self,
+        p: Point,
+        own: impl FnOnce() -> Option<ViewerCursor>,
+    ) -> Option<ViewerCursor> {
+        self.bar_cursor(p).or_else(own)
+    }
+
+    /// A view's cursor at `p`: its parts' where the mouse last was (a bar's over everything
+    /// under it, a field's I-beam), else the view's `own` (a hand over what it presses).
+    pub fn cursor_or(
+        &self,
+        p: Point,
+        own: impl FnOnce() -> Option<ViewerCursor>,
+    ) -> Option<ViewerCursor> {
+        self.cursor_at(p).or_else(own)
     }
 
     /// The tooltip where the mouse last was ([`Self::hover`]), when `p` is there.
@@ -359,7 +419,12 @@ impl Controls {
 
     /// The cursor at `p`: the topmost part's there that says one.
     pub fn cursor(&self, parts: &[&mut dyn Control], p: Point) -> Option<ViewerCursor> {
-        parts.iter().filter(|c| c.hit(p)).find_map(|c| c.cursor(p))
+        Self::cursor_part(parts, p).map(|(_, cursor)| cursor)
+    }
+
+    /// The topmost part at `p` that says a cursor, and its cursor.
+    fn cursor_part(parts: &[&mut dyn Control], p: Point) -> Option<(usize, ViewerCursor)> {
+        (0..parts.len()).filter(|&i| parts[i].hit(p)).find_map(|i| Some((i, parts[i].cursor(p)?)))
     }
 
     /// The wheel at `p`: the topmost part there that scrolls (or keeps the wheel,

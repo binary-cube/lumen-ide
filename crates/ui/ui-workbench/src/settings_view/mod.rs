@@ -259,7 +259,14 @@ pub struct SettingsView {
     searched: Option<(String, u64)>,
     /// The cards' pictures (the modules' previews).
     pictures: cards::CardPictures,
+    /// Each block's description broken in lines, kept while its text, width and scale stay
+    /// (the window repaints on every hover: not broken again each time); let go when the
+    /// window closes and by "Clear and Rebuild Caches" ([`kernel::Purge`]).
+    block_details: std::collections::HashMap<&'static str, BlockDetail>,
 }
+
+/// A block's description broken in lines, for its text, the width and the scale.
+type BlockDetail = kernel::cache::Memo<(String, u32, u32), Vec<String>>;
 
 /// The embeddings model (without its own `Debug`).
 #[derive(Clone)]
@@ -349,6 +356,14 @@ fn group_labels() -> [String; 4] {
     SettingsGroup::ALL.map(|g| i18n::t(g.label()))
 }
 
+/// "Clear and Rebuild Caches": what it keeps only to avoid recomputing (the blocks'
+/// descriptions broken in lines) goes, made again at the next paint.
+impl kernel::Purge for SettingsView {
+    fn purge(&mut self) {
+        self.block_details = std::collections::HashMap::new();
+    }
+}
+
 impl SettingsView {
     pub fn is_open(&self) -> bool {
         self.modal.is_open()
@@ -372,6 +387,8 @@ impl SettingsView {
         // The semantic model and the entries' vectors: given again at the next opening, not
         // held meanwhile (the model is let go when nothing else uses it).
         self.set_embedder(None);
+        // The blocks' descriptions: broken again at the next opening.
+        self.block_details = std::collections::HashMap::new();
     }
 
     pub fn set_viewport(&mut self, viewport: Rect, scale: f32) {

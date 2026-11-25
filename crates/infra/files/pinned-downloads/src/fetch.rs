@@ -260,6 +260,39 @@ impl std::fmt::Debug for Going<'_> {
     }
 }
 
+/// A small file asked for whole, unpinned (a list, its signature: checked by whoever reads
+/// it): at `url`, on one of `hosts`, at most `limit` bytes.
+#[derive(Debug, Clone, Copy)]
+pub struct Bounded<'a> {
+    /// Where it is.
+    pub url: &'a str,
+    /// The hosts it may come from (any other refused before anything is asked).
+    pub hosts: &'a [&'a str],
+    /// The most it may weigh (bytes).
+    pub limit: u64,
+}
+
+/// The small file a [`Bounded`] names, read whole into memory: refused off its hosts, stopped
+/// past its limit (a server sending on forever), a break said as the network's.
+pub fn small(
+    fetch: &dyn Fetch,
+    Bounded { url, hosts, limit }: Bounded<'_>,
+) -> Result<Vec<u8>, FetchError> {
+    if !allowed(url, hosts) {
+        return Err(FetchError::Refused(url.to_owned()));
+    }
+    let body = fetch.open(url, 0)?;
+    if body.total.is_some_and(|t| t > limit) {
+        return Err(FetchError::TooLarge(url.to_owned()));
+    }
+    let mut out = Vec::new();
+    body.reader.take(limit.saturating_add(1)).read_to_end(&mut out).map_err(|e| broken(url, &e))?;
+    if out.len() as u64 > limit {
+        return Err(FetchError::TooLarge(url.to_owned()));
+    }
+    Ok(out)
+}
+
 /// The file at `url` (on one of `hosts`) into memory, at most `limit` bytes, checked against
 /// `pin`; `progress(received, total)` as it comes (the total when the source says it); `stop`
 /// ends it.

@@ -1,0 +1,15 @@
+[package]
+name = "web-engine-versions"
+description = "The app's web engine's packages, as rules: versions compared part by part, the newest package for this system and protocol chosen (never one older than the one installed, none below the list's safe minimum, none that failed here), a package's fields and archive name checked."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+# No doctests (none written); `rustdoc` per crate made `cargo test` 3× slower.
+[lib]
+doctest = false
+
+[dependencies]
+
+[lints]
+workspace = true

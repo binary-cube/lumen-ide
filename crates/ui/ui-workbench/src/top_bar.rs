@@ -264,7 +264,7 @@ impl TopBar {
             .colors(ds::ButtonColors {
                 icon: palette.text,
                 hover: palette.tab_hover,
-                on_back: palette.tab_hover,
+                on_back: Some(palette.tab_hover),
                 on_icon: palette.text,
             })
             .hovered(menu_open || self.hover == Some(TopBarHit::Projects));

@@ -136,7 +136,7 @@ impl Workbench {
         let Some(i) = self.tools.sides.iter().position(|s| s.id == id) else { return };
         let mut side = self.tools.sides.remove(i);
         if self.focus == Focus::Side(side.dock) {
-            self.focus = Focus::Editor;
+            self.move_focus(Focus::Editor);
         }
         side.dragging = false;
         side.panel.parked();
@@ -355,7 +355,7 @@ impl Workbench {
 
     /// Moves the cursor to `offset` in the active document (and scrolls it into view).
     pub(super) fn reveal_offset(&mut self, text: &mut TextSystem, offset: usize) -> bool {
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.edit(text, |doc| commands::click(doc, offset.min(doc.buffer().len()), false, false))
     }
 
@@ -372,7 +372,7 @@ impl Workbench {
 
     /// Moves the cursor to `line`, `column` (0-based, clamped) and shows it ("Go to Line").
     pub fn goto_position(&mut self, text: &mut TextSystem, line: usize, column: usize) -> bool {
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.jump(text, |doc| {
             let buffer = doc.buffer();
             let line = line.min(buffer.line_count().saturating_sub(1));
@@ -384,7 +384,7 @@ impl Workbench {
     }
 
     pub(super) fn reveal_line(&mut self, text: &mut TextSystem, line: usize) -> bool {
-        self.focus = Focus::Editor;
+        self.move_focus(Focus::Editor);
         self.jump(text, |doc| {
             let buffer = doc.buffer();
             let line = line.min(buffer.line_count().saturating_sub(1));
@@ -482,7 +482,7 @@ impl Workbench {
         let entries = side.panel.menu_at(p)?;
         let (tool, dock, takes) = (side.id, side.dock, side.panel.takes_keys());
         if takes {
-            self.focus = Focus::Side(dock);
+            self.move_focus(Focus::Side(dock));
         }
         self.tools.menu_panel = Some(tool);
         Some(panel_menu(entries))
@@ -496,7 +496,7 @@ impl Workbench {
         // It asks for text now (a name to type in place): the keyboard is its, at once,
         // whichever menu it came from (its header's `+` too, not only a right click).
         if side.panel.wants_text() {
-            self.focus = Focus::Side(side.dock);
+            Self::focus_to(&mut self.focus, &mut self.focus_moves, Focus::Side(side.dock));
         }
         if let Some(action) = side.panel.take_action() {
             self.side_action(text, action);

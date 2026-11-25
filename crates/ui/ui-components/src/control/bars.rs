@@ -9,6 +9,27 @@ use crate::ViewerCursor;
 
 use super::{Control, NOWHERE, Press};
 
+/// A bar's cursor, in a [`Control`] impl of a part that is a bar wherever it's hit (a
+/// scrollbar's thumb and lane): the bar's own ([`crate::scrollbar::CURSOR`]), never the
+/// part's under it, and it wins over the view's own ([`Control::owns_cursor`]).
+#[macro_export]
+macro_rules! bar_cursor {
+    () => {
+        /// The bar's own cursor, never the part's under it.
+        fn cursor(
+            &self,
+            _p: $crate::control::BarPoint,
+        ) -> ::core::option::Option<$crate::ViewerCursor> {
+            ::core::option::Option::Some($crate::scrollbar::CURSOR)
+        }
+
+        /// A bar: its cursor wins over the view's own.
+        fn owns_cursor(&self, _p: $crate::control::BarPoint) -> bool {
+            true
+        }
+    };
+}
+
 /// A press on an edge scrollbar: its thumb held, the offset it gives handed to `set` (the
 /// parts below differ only in where the offset goes).
 fn bar_press(bar: &mut crate::scrollbar::EdgeScrollbar, p: Point, set: impl FnOnce(f32)) -> Press {
@@ -57,6 +78,8 @@ impl Control for Thumb<'_> {
         self.bar.hover(p.unwrap_or(NOWHERE))
     }
 
+    crate::bar_cursor!();
+
     fn frame_deadline(&self) -> Option<Instant> {
         self.bar.next_frame()
     }
@@ -92,6 +115,8 @@ impl Control for ScrollThumb<'_> {
     fn hover(&mut self, p: Option<Point>) -> bool {
         self.bar.hover(p.unwrap_or(NOWHERE))
     }
+
+    crate::bar_cursor!();
 
     fn frame_deadline(&self) -> Option<Instant> {
         self.bar.next_frame()
@@ -129,6 +154,18 @@ impl Control for Scrolled<'_> {
 
     fn hover(&mut self, p: Option<Point>) -> bool {
         self.bar.hover(p.unwrap_or(NOWHERE))
+    }
+
+    /// The bar's own cursor over it or while its thumb is held
+    /// ([`crate::scrollbar::CURSOR`], wherever the pointer goes); over the area, the view's
+    /// (its rows, its text).
+    fn cursor(&self, p: Point) -> Option<ViewerCursor> {
+        self.owns_cursor(p).then_some(crate::scrollbar::CURSOR)
+    }
+
+    /// Its bar under the pointer or held: the bar's cursor wins over the view's own.
+    fn owns_cursor(&self, p: Point) -> bool {
+        self.bar.is_dragging() || self.bar.contains(p)
     }
 
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
@@ -186,6 +223,8 @@ impl Control for BarThumb<'_> {
     fn hover(&mut self, p: Option<Point>) -> bool {
         self.bar.hover(p.unwrap_or(NOWHERE))
     }
+
+    crate::bar_cursor!();
 }
 
 /// A separator between panels as a control: pressed on it, it's held and the pointer moves

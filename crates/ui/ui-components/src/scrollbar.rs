@@ -15,8 +15,14 @@ use std::time::{Duration, Instant};
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad, Scene};
 
+use crate::ViewerCursor;
 use crate::palette::Palette;
 use crate::splitter::Orientation;
+
+/// The cursor over a bar (its thumb, its lane) and while its thumb is dragged: the plain
+/// arrow, as over the editor's bars. Never what lies under the bar (a field's I-beam, a
+/// row's hand), whatever the view around it shows elsewhere.
+pub const CURSOR: ViewerCursor = ViewerCursor::Arrow;
 
 /// How a bar answers the pointer over it (or a drag).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

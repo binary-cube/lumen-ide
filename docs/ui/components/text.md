@@ -36,6 +36,8 @@ forms.
 | `draw_ellipsized(layer, text, value, font, (x, baseline), max, color)` | `(width, cut)` | drawn cut at the end with nothing allocated: the glyphs that fit, then `…` |
 | `section_title(layer, text, ctx, x, y, title, detail)` | y below | a semibold title and an optional muted line |
 | `section_title_in(…, (x, y, width), …)` | y below | the same, both cut to `width` |
+| `section_title_lines(layer, text, ctx, (x, y, width), SectionTitle { title, detail, lines })` | y below | its description over several lines (`lines`, already broken: drawn one under the other), else `detail` on one line, cut |
+| `section_detail_lines(text, ctx, detail, width, lines)` | `Vec<String>` | a description broken for `SectionTitle::lines` in its font; kept by the caller (a `Memo` keyed by text, width, scale), never broken each paint |
 | `section_title_font(ctx)` | `Font` | the title's font, to measure it |
 | `section_header(pen, (x, y, width), icon, title)` | y below | icon, title in capitals, a line to the end; `SECTION_HEADER` (22) high, `SECTION_SPACE` (14) between sections |
 | `initials(name)` | `String` | the first letters of two words (an avatar's) |
@@ -58,6 +60,14 @@ capitals.
   glyphs; it is shaped again only when kerning makes the cut text a little wider.
 - The `ellipsize*` functions and `wrap` return owned text: one allocation per call. In a
   paint that runs every frame, `draw_ellipsized` draws the same cut with none.
+- `wrap` shapes the text's words once and breaks them where their glyphs pass the room;
+  a line is shaped again only when it's within a pixel of the room (the glyphs' places
+  are snapped). A line measured to fit as it was filled isn't measured again; only one
+  that may not (a word alone on its line, the rest on the last line) is, and cut when it
+  doesn't. It breaks exactly as adding one word at a time and shaping each line would (a
+  test holds it to that).
+- `section_title` / `section_title_in` draw their one-line description directly (nothing
+  allocated); `section_title_lines` draws lines the caller keeps.
 - `section_header` upper-cases its title (an allocation) each paint.
 
 ## Example

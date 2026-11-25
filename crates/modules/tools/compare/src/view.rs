@@ -385,8 +385,8 @@ impl Viewer for Compare {
         None
     }
 
-    /// A separator held or under the mouse: its resize cursor; on the code, the text's;
-    /// else its parts' (a button's hand).
+    /// A separator held or under the mouse: its resize cursor; a bar's (over it, or held):
+    /// the bar's; on the code, the text's; else its parts' (a button's hand).
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
         let part = self.controls.cursor_at(p);
         let selectable = matches!(
@@ -395,6 +395,9 @@ impl Viewer for Compare {
         );
         if self.resizing || part == Some(ViewerCursor::ResizeHorizontal) {
             Some(ViewerCursor::ResizeHorizontal)
+        } else if let Some(bar) = self.controls.bar_cursor(p) {
+            // A bar across lies over the code: its own cursor, never the text's.
+            Some(bar)
         } else if selectable && self.code_at(p).is_some() {
             Some(ViewerCursor::Text)
         } else {

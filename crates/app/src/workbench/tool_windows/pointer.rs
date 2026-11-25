@@ -15,7 +15,7 @@ impl Workbench {
         if !self.tool_window_shown() || !self.tools.bottom_bounds.contains(p) {
             return None;
         }
-        self.focus = Focus::Panel;
+        self.move_focus(Focus::Panel);
         // A separator between groups: dragged; a double click shares the space equally.
         if let Some(window) = self.tools.window_mut()
             && let Some(i) = window.split.begin_drag(p)

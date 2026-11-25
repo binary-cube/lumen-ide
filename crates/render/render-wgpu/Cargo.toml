@@ -19,9 +19,19 @@ pollster.workspace = true
 etagere.workspace = true
 tracing.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# A web page's frame (a D3D11 shared texture's handle) opened on wgpu's DX12 device
+# (`import.rs`), its description checked: the same `windows` as wgpu's, so its types are
+# wgpu's.
+windows = { version = "0.62", default-features = false, features = ["Win32_Foundation", "Win32_Graphics_Direct3D12", "Win32_Graphics_Dxgi_Common"] }
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "CALayer", "CAMetalLayer"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+# A web page's frame (an `IOSurface`) opened as a Metal texture (`import.rs`), its size,
+# format and id read.
+objc2-io-surface = { version = "0.3", default-features = false, features = ["std", "objc2", "objc2-core-foundation", "IOSurfaceRef", "IOSurfaceTypes"] }
+objc2-metal = { version = "0.3", default-features = false, features = ["std", "objc2-io-surface", "MTLDevice", "MTLTexture", "MTLTypes", "MTLPixelFormat", "MTLResource", "MTLAllocation"] }
 
 [lints]
 workspace = true

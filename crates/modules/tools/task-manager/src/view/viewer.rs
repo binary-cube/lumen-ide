@@ -344,11 +344,15 @@ impl Viewer for TaskManager {
     }
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
-        // Only a part's resize across (the separator beside the detail): the one above a
-        // detail below keeps the view's own cursor.
-        let part = self.controls.cursor_at(p).filter(|c| *c == ViewerCursor::ResizeHorizontal);
-        if self.resizing.is_some() || part.is_some() {
+        // A part's resize across (the separator beside the detail) wins; a resize up and
+        // down (the one above a detail below) keeps the view's own cursor.
+        let part = self.controls.cursor_at(p);
+        if self.resizing.is_some() || part == Some(ViewerCursor::ResizeHorizontal) {
             return Some(ViewerCursor::ResizeHorizontal);
+        }
+        // A list's bar: its own cursor, never the rows' under it.
+        if let Some(bar) = self.controls.bar_cursor(p) {
+            return Some(bar);
         }
         match self.hit(p) {
             Some(Hit::Edge(_)) => Some(ViewerCursor::ResizeHorizontal),

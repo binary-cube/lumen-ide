@@ -25,7 +25,7 @@ pub use cache::{GenerationalCache, Interner, Memo, Packed, Purge, SharedMemo, ca
 pub use color::Rgba;
 pub use event::{DomainEvent, EventBus, Subscription};
 pub use fuzzy::{FuzzyStyle, fuzzy_match, fuzzy_score};
-pub use geometry::{PhysicalSize, Point, Rect, Size};
+pub use geometry::{Corners, PhysicalSize, Point, Rect, Size};
 pub use id::{DocumentId, LanguageId, ModuleId, ProjectId};
 pub use paths::{DependencyFinder, ProjectDirs, in_dependencies, in_dependencies_or_git};
 pub use queue::{Batch, Coalescing, Latest, QueueStats, SharedQueue};

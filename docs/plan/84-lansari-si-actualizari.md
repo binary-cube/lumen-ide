@@ -97,6 +97,18 @@ Codul stă pe GitHub (`binary-cube/lumen-ide`). Două lucruri urmează de aici:
 - Teste: numele fișierelor → platforma, hex, semnătura (bună, alt text, altă cheie, nu e
   semnătură), manifestul dintr-un dosar (doar versiunea lui, semnătură cerută / lipsă / a altei
   chei), datele calendaristice.
+- **Mai târziu (cu planul 99, motorul web):**
+  - cheia e folosită prin `ring`: `xtask` semnează cu el (sămânța Ed25519 e aceeași, același
+    hex; testat cu primul vector din RFC 8032), iar aplicația (`self-update`) verifică prin
+    `pinned_downloads::signature`, singurul loc al verificării, folosit și de lista
+    motorului web;
+  - `release-manifest` verifică semnătura cu cheia construită în aplicație
+    (`pinned_downloads::signature::PUBLIC_KEY`), nu cu `packaging/release-key.pub` citit de pe
+    disc: ce trece aici e exact ce acceptă aplicația;
+  - `sha2` a ieșit din `xtask` (sumele vin din `pinned_downloads::digest`); `ring` și
+    `lzma-rust2` sunt dependențe ale workspace-ului, cu o singură versiune;
+  - certificatul macOS pus într-un keychain al rulării de un singur script,
+    `scripts/ci/macos-keychain.sh`, folosit și de `release.yml`, și de `web-engine.yml`.
 
 **Lăsat:**
 

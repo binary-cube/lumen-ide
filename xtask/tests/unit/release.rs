@@ -42,7 +42,7 @@ fn a_signed_manifest_is_checked_as_written() {
         platform: "windows-x64".into(),
         name: "app-1.0.0-windows-x64.zip".into(),
         size: 3,
-        sha256: hex(&Sha256::digest(b"abc")),
+        sha256: pinned_downloads::digest::sha256_hex(b"abc"),
     }];
     let text = manifest("1.0.0", "2026-11-18", &assets);
     let doc: Value = serde_json::from_str(&text).unwrap();
@@ -59,6 +59,25 @@ fn a_signed_manifest_is_checked_as_written() {
     assert!(!verify(&text, "00", &public), "not a signature");
     assert!(sign(&text, "nope").is_err());
     assert_eq!(sums(&assets), format!("{}  app-1.0.0-windows-x64.zip\n", assets[0].sha256));
+}
+
+/// A key's secret is its Ed25519 seed (RFC 8032), as `release-key` has always written it: the
+/// RFC's first test vector signs and derives as published, and the app's check accepts it.
+#[test]
+fn a_seed_signs_as_rfc_8032_says() {
+    let seed = "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60";
+    let public = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+    let signature = sign("", seed).unwrap();
+    assert_eq!(
+        signature,
+        "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065\
+         224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"
+    );
+    assert!(pinned_downloads::signature::verify(b"", &signature, public));
+    let (secret, made) = new_key().unwrap();
+    assert_eq!(secret.len(), 64);
+    let signed = sign("text", &secret).unwrap();
+    assert!(pinned_downloads::signature::verify(b"text", &signed, &made));
 }
 
 /// The manifest from a folder: the version's files only, sums and a signature checked against
@@ -81,8 +100,19 @@ fn the_manifest_is_written_from_the_release_files() {
     assert!(make_key(&root, &root.join("again")).is_err(), "a key once");
     let secret = std::fs::read_to_string(&secret_file).unwrap();
 
-    let done =
-        write_manifest(&root, &dist, "app", "1.0.0", "2026-11-18", Some(&secret), true).unwrap();
+    let public = std::fs::read_to_string(root.join(PUBLIC_KEY)).unwrap();
+    let ask = |version, secret: Option<&str>, signed| {
+        write_manifest(&ManifestAsk {
+            public: &public,
+            dist: &dist,
+            id: "app",
+            version,
+            date: "2026-11-18",
+            secret,
+            signed,
+        })
+    };
+    let done = ask("1.0.0", Some(&secret), true).unwrap();
     assert!(done.contains("signed"), "{done}");
     let text = std::fs::read_to_string(dist.join("latest.json")).unwrap();
     let doc: Value = serde_json::from_str(&text).unwrap();
@@ -90,7 +120,6 @@ fn the_manifest_is_written_from_the_release_files() {
         doc["files"].as_array().unwrap().iter().map(|f| f["platform"].as_str().unwrap()).collect();
     assert_eq!(platforms, ["macos-universal", "windows-x64", "windows-x64-setup"]);
     let signature = std::fs::read_to_string(dist.join("latest.json.sig")).unwrap();
-    let public = std::fs::read_to_string(root.join(PUBLIC_KEY)).unwrap();
     assert!(verify(&text, &signature, &public));
     let sums = std::fs::read_to_string(dist.join("SHA256SUMS")).unwrap();
     assert_eq!(sums.lines().count(), 3, "{sums}");
@@ -100,12 +129,9 @@ fn the_manifest_is_written_from_the_release_files() {
     assert!(!is_installer("app-1.0.0-windows-x64.zip", "app", "1.0.0"));
     assert!(!is_installer("app-0.9.0-windows-x64-setup.exe", "app", "1.0.0"), "another version's");
 
-    assert!(write_manifest(&root, &dist, "app", "1.0.0", "d", None, true).is_err(), "required");
+    assert!(ask("1.0.0", None, true).is_err(), "required");
     let (other, _) = new_key().unwrap();
-    assert!(
-        write_manifest(&root, &dist, "app", "1.0.0", "d", Some(&other), true).is_err(),
-        "not ours"
-    );
-    assert!(write_manifest(&root, &dist, "app", "2.0.0", "d", None, false).is_err(), "no files");
+    assert!(ask("1.0.0", Some(&other), true).is_err(), "not ours");
+    assert!(ask("2.0.0", None, false).is_err(), "no files");
     std::fs::remove_dir_all(&root).unwrap();
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The web engine's host and the helpers that run no code of the web (plan 99): nothing
+     beyond the hardened runtime. The renderer and the GPU helper have files of their own
+     (web-engine-renderer.entitlements, web-engine-gpu.entitlements).
+
+     Signed ad hoc (no certificate, identity "-"), the workflow adds
+     com.apple.security.cs.disable-library-validation to every executable's entitlements:
+     without a team, the hardened runtime refuses to load the framework into the host and
+     its helpers. Signed with the project's certificate, everything has the same team and
+     library validation stays on. -->
+<plist version="1.0">
+<dict/>
+</plist>

@@ -56,3 +56,52 @@ fn words_lines_and_columns_are_selected() {
     assert!(ui_components::Viewer::edit_key(&mut c, ViewerKey::Escape));
     assert_eq!(ui_components::Viewer::selected_text(&c), None);
 }
+
+/// Two clicks inside a word, then the mouse moved a little while held (as a real double
+/// click does): the whole word stays selected, never cut where the mouse is; dragged on, it
+/// takes whole words (the first kept whole). The line as reported: `TURNSTILE_ENABLED`
+/// double-clicked between its `A` and `B` was cut to `TURNSTILE_ENA`.
+#[test]
+fn a_double_click_keeps_its_word_whole_while_the_mouse_moves() {
+    let line = "#   TURNSTILE_ENABLED       1 = Turnstile on …";
+    let mut c = compared();
+    c.right[1] = line.into();
+    // Between `ENA` and `BLED`: column 4 + 13.
+    let at = Point::new(550.0 + 170.0, 125.0);
+    c.begin_select(2, at, 1);
+    c.release();
+    c.begin_select(2, at, 2);
+    c.drag_select(at);
+    c.drag_select(Point::new(550.0 + 171.0, 125.0));
+    assert_eq!(c.selection_text().as_deref(), Some("TURNSTILE_ENABLED"));
+    // Dragged onto `1`: whole words from the first one to it.
+    c.drag_select(Point::new(550.0 + 285.0, 125.0));
+    assert_eq!(c.selection_text().as_deref(), Some("TURNSTILE_ENABLED       1"));
+    // Back before it: the first word kept whole, from its end.
+    c.drag_select(Point::new(550.0, 125.0));
+    assert_eq!(c.selection_text().as_deref(), Some("#   TURNSTILE_ENABLED"));
+    c.release();
+}
+
+/// Three clicks, then dragged to the next row: whole lines.
+#[test]
+fn a_triple_click_drags_by_whole_lines() {
+    let mut c = compared();
+    c.begin_select(2, Point::new(550.0 + 25.0, 125.0), 3);
+    c.drag_select(Point::new(550.0 + 5.0, 145.0));
+    assert_eq!(c.selection_text().as_deref(), Some("added\nb"));
+}
+
+/// The word around a column, in drawn columns (a tab as four): from its first character to
+/// past its last; a column on no word, or past the line, is that column alone.
+#[test]
+fn the_word_around_a_column_counts_tabs_as_drawn() {
+    assert_eq!(word_at("let a_b = $x;", 5), (4, 7), "a_b");
+    assert_eq!(word_at("let a_b = $x;", 4), (4, 7), "its first column");
+    assert_eq!(word_at("let a_b = $x;", 11), (10, 12), "$x");
+    assert_eq!(word_at("let a_b = $x;", 7), (7, 7), "a space: no word");
+    assert_eq!(word_at("\tab", 5), (4, 6), "after a tab: four columns in");
+    assert_eq!(word_at("\tab", 2), (2, 2), "inside the tab");
+    assert_eq!(word_at("ab", 9), (9, 9), "past the line");
+    assert_eq!(word_at("ăb c", 1), (0, 2), "a letter of two bytes, one column");
+}

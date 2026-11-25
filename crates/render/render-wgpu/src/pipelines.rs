@@ -68,7 +68,7 @@ impl Pipelines {
             &[Some(&ctx.globals_layout), Some(&ctx.image_layout)],
             ("vs_image", "fs_image"),
             (
-                &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32],
+                &wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x2, 3 => Uint32x2],
                 std::mem::size_of::<ImageGpu>() as u64,
             ),
             wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING,

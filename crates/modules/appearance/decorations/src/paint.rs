@@ -44,7 +44,7 @@ fn image(canvas: art::Canvas) -> ImageData {
 
 fn push(layer: &mut Layer, image: &ImageData, bounds: Rect, opacity: f32) {
     if opacity > 0.0 {
-        layer.images.push(ImageInstance { image: image.clone(), bounds, opacity });
+        layer.images.push(ImageInstance::new(image.clone(), bounds, opacity));
     }
 }
 

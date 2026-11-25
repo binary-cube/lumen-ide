@@ -8,6 +8,9 @@ use ui_components::form;
 
 use super::*;
 
+/// The most lines a block's description takes (more is cut with "…").
+const BLOCK_DETAIL_LINES: usize = 4;
+
 impl SettingsView {
     /// The blocks of `page`, one under the other from `area.top`, in their places (those
     /// under "Advanced" last, under its foldable header).
@@ -118,6 +121,29 @@ impl SettingsView {
         rows.y + px(28.0)
     }
 
+    /// A block's description broken in lines within `width`: broken again only when its
+    /// text, the width or the scale changed.
+    fn block_detail(
+        &mut self,
+        text: &mut TextSystem,
+        ctx: &ds::Ctx<'_>,
+        contributed: &ContributedBlock,
+        width: f32,
+    ) -> &[String] {
+        let detail = contributed.block.detail.as_str();
+        let (w, scale) = (width.to_bits(), ctx.scale.to_bits());
+        let memo = self.block_details.entry(contributed.id).or_default();
+        let kept = |(t, kw, ks): &(String, u32, u32)| t == detail && *kw == w && *ks == scale;
+        if memo.get_if(kept).is_none() {
+            let lines = match detail.is_empty() {
+                true => Vec::new(),
+                false => ds::section_detail_lines(text, ctx, detail, width, BLOCK_DETAIL_LINES),
+            };
+            memo.set((detail.to_owned(), w, scale), lines);
+        }
+        memo.value().map_or(&[], Vec::as_slice)
+    }
+
     /// A block: its title (and description), its rows in a card, the notes ending it under
     /// the card. Returns where it ends.
     pub(super) fn paint_block(
@@ -129,15 +155,10 @@ impl SettingsView {
         let SectionArea { layer, text, ctx, x0, top, width } = area;
         let px = |v: f32| ctx.px(v);
         let block = &contributed.block;
-        let y = ds::section_title(
-            layer,
-            text,
-            ctx,
-            x0,
-            top,
-            &block.title,
-            Some(block.detail.as_str()).filter(|d| !d.is_empty()),
-        ) + px(10.0);
+        // Its description as long as it is, within the page's width.
+        let lines = self.block_detail(text, ctx, contributed, width);
+        let section = ds::SectionTitle { title: &block.title, detail: None, lines };
+        let y = ds::section_title_lines(layer, text, ctx, (x0, top, width), section) + px(10.0);
         // The notes that end the block go under its card.
         let trailing = block.rows.iter().rev().take_while(|r| matches!(r, SettingsRow::Notes(_)));
         let (body, notes) = block.rows.split_at(block.rows.len() - trailing.count());

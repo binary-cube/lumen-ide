@@ -98,6 +98,10 @@ fn a_recording_is_read_and_shown() {
     assert!(view.click(thumb).is_none(), "the scrollbar takes the press");
     assert!(view.drag(Point::new(1200.0 - 4.0, 120.0)));
     assert!(view.scroll > 0.0, "dragged down");
+    // Held over a button: the bar's cursor, never the hand.
+    let over = view.hits.first().map(|(r, _)| r.center()).expect("a button");
+    view.hover(over);
+    assert_eq!(view.cursor_at(over), Some(ui_components::scrollbar::CURSOR), "held: the bar's");
     view.release();
     // The keys scroll it: End to the bottom, Home back.
     assert!(view.edit_key(ViewerKey::End));

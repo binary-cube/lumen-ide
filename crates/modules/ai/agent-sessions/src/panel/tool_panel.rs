@@ -265,13 +265,18 @@ impl ToolPanel for SessionsPanel {
         if self.filter_list.is_open() {
             return Some(self.filter_list.cursor_at(p).unwrap_or(ViewerCursor::Arrow));
         }
+        // The list's bar, under the mouse or held: its own cursor, never the rows' or the
+        // fields' it's dragged over.
+        if let Some(bar) = self.controls.bar_cursor(p) {
+            return Some(bar);
+        }
         if self.field.contains(p) {
             return Control::cursor(&self.query, p);
         }
         if self.renaming.as_ref().is_some_and(|n| n.field.contains(p)) {
             return Some(ViewerCursor::Text);
         }
-        self.clickable(p).then_some(ViewerCursor::Pointer)
+        self.controls.cursor_or(p, || self.clickable(p).then_some(ViewerCursor::Pointer))
     }
 
     fn tooltip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {

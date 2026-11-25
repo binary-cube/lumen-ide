@@ -148,6 +148,153 @@ fn an_image_changing_damages_its_bounds() {
     assert!(!damage_of(&tracker, &replaced).is_empty(), "another image, same place");
 }
 
+/// A live image's new frame (its texture filled again) damages where it's drawn.
+#[test]
+fn a_live_images_new_frame_damages_its_bounds() {
+    let page = ImageData::live();
+    assert!(!page.has_frame());
+    let mut first = scene(false);
+    first.push_layer(None).image(&page, Rect::new(150.0, 70.0, 8.0, 8.0));
+    let tracker = committed(&first);
+    assert!(damage_of(&tracker, &first).is_empty(), "nothing new");
+    page.frame_copied(crate::CopiedFrame { size: (8, 8), changed: None, bytes: 0 });
+    assert!(page.has_frame());
+    assert_eq!(damage_of(&tracker, &first).rects(), &[PixelRect::new(150, 70, 158, 78)]);
+}
+
+/// A frame of a live image (40 × 20 pixels, drawn twice as large) changed in one place:
+/// only that is drawn again, where it shows, with a texel more around it (the filtering).
+#[test]
+fn a_live_images_frame_damages_only_where_it_changed() {
+    let page = ImageData::live();
+    let copied = |changed| crate::CopiedFrame { size: (40, 20), changed, bytes: 0 };
+    page.frame_copied(copied(None));
+    let mut drawn = scene(false);
+    drawn.push_layer(None).image(&page, Rect::new(100.0, 50.0, 80.0, 40.0));
+    let tracker = committed(&drawn);
+    page.frame_copied(copied(Some(PixelRect::new(10, 5, 12, 6))));
+    // Texels 9..13 × 4..7, two pixels each, from (100, 50).
+    assert_eq!(damage_of(&tracker, &drawn).rects(), &[PixelRect::new(118, 58, 126, 64)]);
+    // Two frames since: both their areas.
+    page.frame_copied(copied(Some(PixelRect::new(0, 0, 1, 1))));
+    assert_eq!(damage_of(&tracker, &drawn).bounds(), Some(PixelRect::new(100, 50, 126, 64)));
+    // A frame changed all over: all of it.
+    page.frame_copied(copied(None));
+    assert_eq!(damage_of(&tracker, &drawn).rects(), &[PixelRect::new(100, 50, 180, 90)]);
+}
+
+/// More frames than are remembered since the last drawn: all of the image.
+#[test]
+fn a_live_image_many_frames_behind_is_drawn_whole() {
+    let page = ImageData::live();
+    let copied =
+        crate::CopiedFrame { size: (40, 20), changed: Some(PixelRect::new(0, 0, 1, 1)), bytes: 0 };
+    page.frame_copied(copied);
+    let mut drawn = scene(false);
+    drawn.push_layer(None).image(&page, Rect::new(100.0, 50.0, 40.0, 20.0));
+    let tracker = committed(&drawn);
+    for _ in 0..20 {
+        page.frame_copied(copied);
+    }
+    assert_eq!(damage_of(&tracker, &drawn).rects(), &[PixelRect::new(100, 50, 140, 70)]);
+}
+
+/// A frame that comes after the damage was found but before it's recorded isn't taken as
+/// drawn: the frame drawn is recorded with the frame compared, and the next one draws it.
+#[test]
+fn a_frame_put_in_while_drawing_is_drawn_by_the_next() {
+    let page = ImageData::live();
+    let copied = |changed| crate::CopiedFrame { size: (40, 20), changed, bytes: 0 };
+    page.frame_copied(copied(None));
+    let mut drawn = scene(false);
+    drawn.push_layer(None).image(&page, Rect::new(100.0, 50.0, 40.0, 20.0));
+    let mut tracker = committed(&drawn);
+    // Nothing changed when compared…
+    let damage = damage_of(&tracker, &drawn);
+    assert!(damage.is_empty());
+    // …a frame comes, then the frame drawn is recorded.
+    page.frame_copied(copied(Some(PixelRect::new(5, 5, 6, 6))));
+    tracker.commit_drawn(&drawn, SIZE, &damage);
+    assert!(!damage_of(&tracker, &drawn).is_empty(), "the new frame drawn next");
+}
+
+/// A frame that comes while a whole frame is drawn — widened to full by a change elsewhere,
+/// or never compared — is drawn by the next one too: a blur over the page whose layer
+/// didn't change isn't made again by the whole frame, the next one finds the page's layer
+/// changed and makes it again.
+#[test]
+fn a_frame_put_in_while_drawing_a_whole_frame_is_drawn_by_the_next() {
+    let page = ImageData::live();
+    let copied = |changed| crate::CopiedFrame { size: (40, 20), changed, bytes: 0 };
+    page.frame_copied(copied(None));
+    let mut drawn = scene(false);
+    drawn.push_layer(None).image(&page, Rect::new(100.0, 50.0, 40.0, 20.0));
+    drawn.push_layer(None).backdrop_blur(Rect::new(100.0, 50.0, 40.0, 20.0), 8.0, 1.0);
+    let veil = Rect::new(0.0, 0.0, 200.0, 100.0);
+    drawn.push_layer(None).quad(Quad::filled(veil, Rgba::TRANSPARENT));
+    let mut tracker = committed(&drawn);
+    // A veil over all of it changes (a full frame, above the blur), the page's layer doesn't…
+    let mut changed = drawn.clone();
+    changed.layer_mut(4).unwrap().quads[0].color = Rgba::WHITE;
+    let damage = damage_of(&tracker, &changed);
+    assert!(damage.is_full());
+    assert_eq!(damage.first_layer(), Some(4), "the blur under it holds");
+    // …a frame comes, then the frame drawn is recorded.
+    page.frame_copied(copied(Some(PixelRect::new(5, 5, 6, 6))));
+    tracker.commit_drawn(&changed, SIZE, &damage);
+    let next = damage_of(&tracker, &changed);
+    assert!(!next.is_empty(), "the new frame drawn next");
+    assert_eq!(next.first_layer(), Some(2), "from the page's layer: the blur over it remade");
+
+    // Not compared at all (no frame kept): the same.
+    let mut whole = Damage::default();
+    whole.set_full_of(&changed);
+    page.frame_copied(copied(Some(PixelRect::new(5, 5, 6, 6))));
+    tracker.commit_drawn(&changed, SIZE, &whole);
+    assert!(!damage_of(&tracker, &changed).is_empty(), "the frame come since, drawn next");
+}
+
+/// What a damage notes of the live images is this frame's only: one used again for a frame
+/// not compared forgets the last one's (an image gone, an older frame).
+#[test]
+fn a_whole_frame_notes_only_its_own_live_images() {
+    let page = ImageData::live();
+    let other = ImageData::live();
+    let copied = crate::CopiedFrame { size: (40, 20), changed: None, bytes: 0 };
+    page.frame_copied(copied);
+    other.frame_copied(copied);
+    let mut first = scene(false);
+    first.push_layer(None).image(&page, Rect::new(100.0, 50.0, 40.0, 20.0));
+    let tracker = committed(&first);
+    let mut damage = damage_of(&tracker, &first);
+    assert_eq!(damage.seen_generation(page.id), Some(page.generation()));
+    page.frame_copied(copied);
+    let mut second = scene(false);
+    second.push_layer(None).image(&other, Rect::new(100.0, 50.0, 40.0, 20.0));
+    damage.set_full_of(&second);
+    assert_eq!(damage.seen_generation(page.id), None, "not in this scene");
+    assert_eq!(damage.seen_generation(other.id), Some(other.generation()));
+}
+
+/// Live images are noted once each, however often a scene draws them, and each is found.
+#[test]
+fn live_images_drawn_twice_are_noted_once() {
+    let pages: Vec<ImageData> = (0..5).map(|_| ImageData::live()).collect();
+    let copied = crate::CopiedFrame { size: (40, 20), changed: None, bytes: 0 };
+    let mut drawn = scene(false);
+    // Backwards, then again: not in the order of their ids.
+    for page in pages.iter().rev().chain(pages.iter()) {
+        page.frame_copied(copied);
+        drawn.push_layer(None).image(page, Rect::new(100.0, 50.0, 40.0, 20.0));
+    }
+    let mut damage = Damage::full();
+    damage.set_full_of(&drawn);
+    assert_eq!(damage.seen.len(), pages.len(), "once each");
+    for page in &pages {
+        assert_eq!(damage.seen_generation(page.id), Some(page.generation()));
+    }
+}
+
 #[test]
 fn most_of_the_surface_changing_is_a_full_frame() {
     let tracker = committed(&scene(false));

@@ -11,6 +11,7 @@ members = [
     "crates/domain/appearance/theming",
     "crates/domain/tools/terminal",
     "crates/domain/tools/app-updates",
+    "crates/domain/tools/web-engine-versions",
     "crates/infra/system/self-update",
     "crates/infra/system/logging",
     "crates/modules/tools/log-viewer",
@@ -46,6 +47,11 @@ members = [
     "crates/infra/code/syntax-treesitter",
     "crates/infra/code/lsp-client",
     "crates/infra/code/lsp-protocol",
+    "crates/infra/system/web-engine-protocol",
+    "crates/infra/system/web-host-core",
+    "crates/infra/system/web-engine",
+    "crates/infra/system/web-pages",
+    "crates/infra/system/mach-ports",
     "crates/language-server",
     "crates/infra/system/pty",
     "crates/infra/ai/acp-client",
@@ -155,6 +161,7 @@ members = [
     "crates/modules/tools/keep-awake",
     "crates/modules/tools/profiler",
     "crates/modules/tools/updates",
+    "crates/modules/tools/web-engine-install",
     "crates/modules/ai/agents/claude",
     "crates/modules/ai/agents/cline",
     "crates/modules/ai/agents/planned",
@@ -189,6 +196,7 @@ date = "2026-11-21"
 # Internal crates
 kernel = { path = "crates/kernel" }
 app-updates = { path = "crates/domain/tools/app-updates" }
+web-engine-versions = { path = "crates/domain/tools/web-engine-versions" }
 self-update = { path = "crates/infra/system/self-update" }
 code-quality = { path = "crates/domain/code/quality" }
 workspace = { path = "crates/domain/core/workspace" }
@@ -233,6 +241,11 @@ http-scripts = { path = "crates/infra/http/http-scripts" }
 syntax-ts = { path = "crates/infra/code/syntax-treesitter" }
 lsp-client = { path = "crates/infra/code/lsp-client" }
 lsp-protocol = { path = "crates/infra/code/lsp-protocol" }
+web-engine-protocol = { path = "crates/infra/system/web-engine-protocol" }
+web-host-core = { path = "crates/infra/system/web-host-core" }
+web-engine = { path = "crates/infra/system/web-engine" }
+web-pages = { path = "crates/infra/system/web-pages" }
+mach-ports = { path = "crates/infra/system/mach-ports" }
 pty = { path = "crates/infra/system/pty" }
 storage = { path = "crates/infra/files/storage" }
 lang-php = { path = "crates/modules/languages/php" }
@@ -325,6 +338,7 @@ focus-mode = { path = "crates/modules/tools/focus" }
 keep-awake = { path = "crates/modules/tools/keep-awake" }
 profiler = { path = "crates/modules/tools/profiler" }
 updates = { path = "crates/modules/tools/updates" }
+web-engine-install = { path = "crates/modules/tools/web-engine-install" }
 agent-claude = { path = "crates/modules/ai/agents/claude" }
 agent-cline = { path = "crates/modules/ai/agents/cline" }
 agent-planned = { path = "crates/modules/ai/agents/planned" }
@@ -353,6 +367,13 @@ themes-builtin = { path = "crates/modules/appearance/themes" }
 
 # External dependencies (versions pinned here, used with `.workspace = true`)
 serde_json = "1"
+# Ed25519 (the release's signatures) and SHA-256 / SHA-512 (the downloads' sums): the app's
+# checks and the release tools' signing, from one library.
+ring = "0.17"
+# xz, in Rust only (no C library to build for Windows): the app unpacks the downloads with
+# it, the release tools pack the web engine's packages; each user adds the features it needs
+# (`encoder`, `optimization`).
+lzma-rust2 = { version = "0.25", default-features = false, features = ["std", "xz"] }
 # A file's symbols kept compressed (the index's blocks, plan 74): deflate, pure Rust.
 miniz_oxide = "0.8"
 thiserror = "2"
@@ -360,6 +381,7 @@ tracing = "0.1"
 # Identities that never repeat (a bottom window's views).
 # Local sockets (named pipes on Windows, Unix sockets elsewhere): one running instance.
 interprocess = "2.4"
+postcard = { version = "1", default-features = false, features = ["use-std"] }
 uuid = { version = "1", features = ["v4"] }
 # The local time of day (a query console's Output stamps its lines with it); already in the
 # tree through other crates, only its clock asked for.

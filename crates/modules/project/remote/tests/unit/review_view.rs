@@ -370,8 +370,18 @@ fn the_list_scrolls_by_its_thumb() {
     view.max_scroll = 800.0;
     view.bar.paint(&mut render_api::Scene::default(), &palette, 1.0, area, 1000.0, 0.0);
     let edge = area.max_x() - 4.0;
+    let bar = Some(ui_components::scrollbar::CURSOR);
+    view.hover(Point::new(edge, 6.0));
+    assert_eq!(view.cursor_at(Point::new(edge, 6.0)), bar, "over the thumb: the bar's");
     assert!(view.click(Point::new(edge, 6.0)).is_none());
     assert!(view.drag(Point::new(edge, 80.0)), "the thumb followed");
     assert!(view.scroll > 0.0, "the list scrolled");
+    // Dragged over a button: the bar's cursor still, not the button's hand.
+    let apply = Rect::new(20.0, 120.0, 80.0, 24.0);
+    view.hits.push((apply, Hit::Apply));
+    view.drag(apply.center());
+    view.hover(apply.center());
+    assert_eq!(view.cursor_at(apply.center()), bar, "held: the bar's");
     assert!(view.release());
+    assert_eq!(view.cursor_at(apply.center()), Some(ViewerCursor::Pointer), "let go");
 }

@@ -41,6 +41,12 @@ footer (`Viewer::draws_footer`: the profiler's consent, the remote wizard).
 **Empty state** — `empty_state(layer, text, ctx, rect, title, detail)`: a muted title and
 an optional fainter line, centered.
 
+**Loading state** — `loading_state(layer, text, ctx, rect, title, detail)`: the empty state
+with a spinner (22 px, the accent) above it, the whole centered. It's for something on its
+way that fills the area (a web page loading under its view, an engine starting). Its view
+says `is_loading` while it shows and stops when what it waits for comes (a page's
+`WebEvent::Shown`), or when its tab is hidden.
+
 **Tooltip** — `tooltip(layer, text, ctx, anchor, label, shortcut, bounds)`: lines split by
 `\n`, each wrapped past `TOOLTIP_MAX_W` (440), at most 12; the shortcut in a key cap on
 the first line; an arrow pointing at the anchor. `tooltip_lines` gives the lines alone.
@@ -75,9 +81,11 @@ the first line; an arrow pointing at the anchor. `tooltip_lines` gives the lines
 
 ## Accessibility
 
-- Every text drawn (the loader's, the empty state's, the tooltip's lines, the footer's keys)
-  is read as a label.
-- The loader's spinner and busy state say nothing.
+- Every text drawn (the empty state's, the tooltip's lines, the footer's keys) is read as a
+  label.
+- A loader is a progress bar (no known end) over its spinner and its text, named by its
+  text: the text isn't read again. A loading state is one too, over its whole area, named
+  by its title (not read again); its explanation is read under it.
 - `footer_buttons` draws through the older dialog-button functions: its buttons are read as
   their labels, not as buttons.
 

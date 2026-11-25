@@ -928,11 +928,11 @@ pub fn glass_badge(
     crate::screen_widgets::glass_pane(layer, ctx, pane, look);
     let tile_at = Rect::new(x + pad, y + pad, tile, tile);
     if let Some(image) = badge.image {
-        layer.images.push(render_api::ImageInstance {
-            image: image.clone(),
-            bounds: tile_at,
-            opacity: badge.opacity.clamp(0.0, 1.0),
-        });
+        layer.images.push(render_api::ImageInstance::new(
+            image.clone(),
+            tile_at,
+            badge.opacity.clamp(0.0, 1.0),
+        ));
     } else {
         layer.quad(Quad::filled(tile_at, shown(0.1)).rounded(px(radius::LG)));
     }

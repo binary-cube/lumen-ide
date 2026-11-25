@@ -52,7 +52,7 @@ the Git log's filter pills (`chip`), the top bar's project (`avatar`).
 | `.icon_size(f32)` | half the height | the icon's side (logical) |
 | `.corner(f32)` | the kind's | its corners (logical) |
 | `.tinted()` | off | a faint back in its tone (accent without one), stronger under the mouse |
-| `.colors(ButtonColors)` | none | a theme's own icon / hover / on colors (the tool strip) |
+| `.colors(ButtonColors)` | none | a theme's own icon / hover / on colors (the tool strip); `on_back: None` keeps the shared accent tint while on, eased under the mouse (the status bar's switches) |
 | `.on_surface(Rgba)` | none | it stands on a fixed surface: content and light in what reads on it |
 | `.strong()` | off | the label in the dialogs' font (`button_font`) |
 | `.clearable(hovered)` | off | a × of its own at the end (its hit: `clear_rect`) |

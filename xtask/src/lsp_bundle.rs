@@ -24,8 +24,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use sha2::{Digest, Sha256};
-
 #[cfg(test)]
 pub use crate::assemble::resolve_url;
 pub use crate::assemble::{MachArch, inline_schema, safe_relative, thin};
@@ -587,7 +585,7 @@ fn which(program: &str) -> bool {
 
 fn sha256_of(path: &Path) -> Result<String, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok(Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect())
+    Ok(pinned_downloads::digest::sha256_hex(&bytes))
 }
 
 fn copy_file(from: &Path, to: &Path) -> Result<(), String> {
