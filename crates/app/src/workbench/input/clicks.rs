@@ -439,15 +439,43 @@ impl Workbench {
             }
             // A registered button (search, settings): its command.
             TopBarHit::Action(id) => self.tool_button(id),
+            // The window's own buttons act on their release over them (as the system's):
+            // gone at the press, the window would let the release fall on what's under it.
+            hit @ (TopBarHit::Minimize | TopBarHit::Maximize | TopBarHit::Close) => {
+                self.chrome.top_bar.arm(Some(hit));
+                MouseResult::Redraw
+            }
+            TopBarHit::Empty if full_screen => MouseResult::None,
+            TopBarHit::Empty if clicks == 2 => MouseResult::ToggleMaximize,
+            TopBarHit::Empty => MouseResult::DragWindow,
+        })
+    }
+
+    /// The window's button pressed is let go without acting (the focus went, another press
+    /// came). `true` if one was pressed.
+    pub fn cancel_window_button(&mut self) -> bool {
+        let pressed = self.chrome.top_bar.armed().is_some();
+        self.chrome.top_bar.arm(None);
+        pressed
+    }
+
+    /// The mouse let go at `p`: the window's button pressed acts if it's let go over it
+    /// (full screen, the middle one leaves it); elsewhere nothing happens. `None`: none was
+    /// pressed.
+    pub fn release_window_button(&mut self, p: Point) -> Option<MouseResult> {
+        let pressed = self.chrome.top_bar.armed()?;
+        self.chrome.top_bar.arm(None);
+        if self.chrome.top_bar.hit(p) != Some(pressed) {
+            return Some(MouseResult::Redraw);
+        }
+        Some(match pressed {
             TopBarHit::Minimize => MouseResult::MinimizeWindow,
-            TopBarHit::Maximize if full_screen => {
+            TopBarHit::Maximize if self.chrome.full_screen => {
                 MouseResult::Command(crate::commands::FULL_SCREEN.0)
             }
             TopBarHit::Maximize => MouseResult::ToggleMaximize,
             TopBarHit::Close => MouseResult::CloseWindow,
-            TopBarHit::Empty if full_screen => MouseResult::None,
-            TopBarHit::Empty if clicks == 2 => MouseResult::ToggleMaximize,
-            TopBarHit::Empty => MouseResult::DragWindow,
+            _ => MouseResult::Redraw,
         })
     }
 

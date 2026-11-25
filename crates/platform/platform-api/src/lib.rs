@@ -393,6 +393,18 @@ pub trait Window: fmt::Debug {
     /// Full screen (the whole screen, no system bars) or back to the window as it was.
     fn toggle_fullscreen(&self) {}
 
+    /// Kept above every other window, other programs' too (`true`), or back among them.
+    /// Where the system can't ([`Self::can_keep_on_top`]), nothing happens.
+    fn set_always_on_top(&self, on: bool) {
+        let _ = on;
+    }
+
+    /// The system can keep this window above the others (not Wayland's, which lets no
+    /// program choose): what offers it asks this first.
+    fn can_keep_on_top(&self) -> bool {
+        false
+    }
+
     /// The mouse is over the app's maximize button while the system has it there (Windows'
     /// snap layouts): the app draws its hover from this.
     fn maximize_hovered(&self) -> bool {

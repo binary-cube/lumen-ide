@@ -282,7 +282,7 @@ fn the_drawer_shows_the_native_menus_each_with_an_existing_icon() {
     let _ = crate::modules::load(&extensions::ModuleSelection::default());
     let icons = icons::Icons::builtin();
     let native = menus();
-    let drawer = drawer_menus(&|_| false);
+    let drawer = drawer_menus(&|_| false, &|_| None);
     // The same menus, in the same order, with the same commands.
     let titles = |m: &[Menu]| m.iter().map(|m| m.title.clone()).collect::<Vec<_>>();
     assert_eq!(drawer.iter().map(|m| m.title.clone()).collect::<Vec<_>>(), titles(&native));
@@ -301,16 +301,16 @@ fn the_drawer_shows_the_native_menus_each_with_an_existing_icon() {
 #[test]
 fn the_drawer_leaves_out_what_makes_sense_only_elsewhere() {
     let _ = crate::modules::load(&extensions::ModuleSelection::default());
-    let all = drawer_menus(&|_| false);
+    let all = drawer_menus(&|_| false, &|_| None);
     let every: Vec<String> = all.iter().flat_map(|m| ids(&m.entries)).collect();
     let (gone, kept) = (every[0].clone(), every[1].clone());
-    let shown = drawer_menus(&|id| id == gone);
+    let shown = drawer_menus(&|id| id == gone, &|_| None);
     let left: Vec<String> = shown.iter().flat_map(|m| ids(&m.entries)).collect();
     assert!(!left.contains(&gone) && left.contains(&kept));
     assert_eq!(left.len(), every.len() - 1);
     let first = &all[0];
     let mine: Vec<String> = ids(&first.entries);
-    let none = drawer_menus(&|id| mine.iter().any(|m| m == id));
+    let none = drawer_menus(&|id| mine.iter().any(|m| m == id), &|_| None);
     assert!(none.iter().all(|m| m.title != first.title), "a menu left empty goes");
 }
 
@@ -423,4 +423,23 @@ fn flatten(entries: &[ui_workbench::MenuEntry]) -> Vec<String> {
             ui_workbench::MenuEntry::Separator => Vec::new(),
         })
         .collect()
+}
+
+/// A row that turns something on or off shows how it stands in the drawer (the window kept
+/// on top, in the Window menu); the others stay plain actions.
+#[test]
+fn the_drawer_shows_how_a_switch_stands() {
+    fn found(entries: &[ui_workbench::MenuEntry], wanted: &str) -> Option<Option<bool>> {
+        entries.iter().find_map(|e| match e {
+            ui_workbench::MenuEntry::Item { id, on, .. } if id == wanted => Some(*on),
+            ui_workbench::MenuEntry::Submenu { entries, .. } => found(entries, wanted),
+            _ => None,
+        })
+    }
+    let on_top = KEEP_ON_TOP.0;
+    let drawer = drawer_menus(&|_| false, &|id| (id == on_top).then_some(true));
+    let rows: Vec<Option<bool>> = drawer.iter().filter_map(|m| found(&m.entries, on_top)).collect();
+    assert_eq!(rows, [Some(true)], "once, switched on");
+    let save: Vec<Option<bool>> = drawer.iter().filter_map(|m| found(&m.entries, SAVE.0)).collect();
+    assert_eq!(save, [None], "a plain action");
 }

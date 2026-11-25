@@ -207,6 +207,8 @@
   [Minimize] Minimize
   [Zoom] Zoom
   ---
+  window.keep_on_top | Keep Window on Top | 
+  ---
   tab.next | Next Tab | CmdOrCtrl+Shift+]
   tab.prev | Previous Tab | CmdOrCtrl+Shift+[
   view.next_group | Next Group | CmdOrCtrl+Alt+Shift+PageDown
@@ -422,6 +424,8 @@
     ---
     remote.connection | Connection Settings… | 
 # Window | app-window | windows
+  window.keep_on_top | Keep Window on Top | 
+  ---
   tab.next | Next Tab | CmdOrCtrl+Shift+]
   tab.prev | Previous Tab | CmdOrCtrl+Shift+[
   view.next_group | Next Group | CmdOrCtrl+Alt+Shift+PageDown
@@ -638,6 +642,8 @@
     ---
     remote.connection | Connection Settings… | 
 # Window | app-window | windows
+  window.keep_on_top | Keep Window on Top | 
+  ---
   tab.next | Next Tab | CmdOrCtrl+Shift+]
   tab.prev | Previous Tab | CmdOrCtrl+Shift+[
   view.next_group | Next Group | CmdOrCtrl+Alt+Shift+PageDown

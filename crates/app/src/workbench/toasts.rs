@@ -105,15 +105,29 @@ impl Workbench {
         self.data.notifications.dismiss_all()
     }
 
-    /// What the project's modules told from their threads, shown. `true`: a redraw.
+    /// This window shows notification `id` (not leaving).
+    pub fn notification_shown(&self, id: NotificationId) -> bool {
+        self.data.notifications.get(id).is_some_and(|t| !t.is_leaving())
+    }
+
+    /// What was told the whole app, handed to this window (the one the user is in, or the
+    /// one showing it): shown, updated or closed here.
+    pub fn take_app_told(&mut self, told: workbench_model::app_wide::Told) {
+        use workbench_model::app_wide::Told as App;
+        match told {
+            App::Show(n) => self.show_notification(n),
+            App::Update(n) | App::Bring(n) => self.update_notification(n),
+            App::Dismiss(id) => {
+                self.dismiss_notification(id);
+            }
+        }
+    }
+
+    /// What the project's modules told from their threads, shown (what's told the whole
+    /// app is handed to one window by the app: `take_app_told`). `true`: a redraw.
     pub(super) fn poll_notifications(&mut self) -> bool {
         let told = self.data.notifier.take();
-        // What a module's background work told the whole app: this window shows it.
-        let posted = workbench_model::app_wide::take_posted();
-        let any = !told.is_empty() || !posted.is_empty();
-        for n in posted {
-            self.show_notification(n);
-        }
+        let any = !told.is_empty();
         for told in told {
             match told {
                 Told::Show(n) => self.show_notification(n),

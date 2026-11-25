@@ -393,3 +393,31 @@ fn its_filter_is_the_shared_field_with_its_clear_button() {
     paint(&mut drawer);
     assert_eq!(drawer.menu_rows.len(), 3, "every menu back");
 }
+
+/// A row that turns something on or off shows its switch at its end and still its keys
+/// before it: the switch never takes the shortcut's place.
+#[test]
+fn a_switch_row_keeps_its_shortcut() {
+    let glyphs = |shortcut: Option<&str>| {
+        let row = MenuEntry::Item {
+            id: "m0.a".into(),
+            label: "A".into(),
+            shortcut: shortcut.map(Into::into),
+            icon: Some("pin"),
+            on: Some(true),
+            look: Default::default(),
+        };
+        let menu = DrawerMenu { title: "Window".into(), icon: Some("folder"), entries: vec![row] };
+        let mut drawer = MenuDrawer::new(vec![menu]);
+        drawer.set_area(Rect::new(0.0, 40.0, 1000.0, 600.0), 1.0);
+        drawer.key(NavKey::Down);
+        drawer.settle();
+        let mut scene = Scene::default();
+        let mut text = TextSystem::new();
+        drawer.paint(&Icons::builtin(), &mut text, &mut scene, &Palette::dark());
+        assert!(drawer.item_rect(0).is_some(), "its row drawn");
+        scene.glyph_count()
+    };
+    let keys = "Ctrl+Shift+K";
+    assert_eq!(glyphs(Some(keys)) - glyphs(None), keys.len(), "its keys drawn beside it");
+}

@@ -1,7 +1,9 @@
 //! The window's top bar: the menu button (☰, where the app
 //! draws its menus), the project badge and name (with the recent projects list), the git
 //! branch, and on the right the buttons registered there
-//! (search, settings — `Dock::Top`), then the window's own.
+//! (search, settings, the window kept on top — `Dock::Top`; a short line between two of
+//! different groups), then the window's own. The window's own act on their release over
+//! the button pressed (the app arms them on the press).
 //! On macOS it sits in the title bar, next to the window buttons (`left_inset`).
 
 use icons::{IconId, Icons};
@@ -38,11 +40,23 @@ pub struct TopBarModel<'a> {
     /// The mouse over the maximize button, as the system tells (it has it there: Windows'
     /// snap layouts), the bar not getting the mouse there.
     pub maximize_hovered: bool,
-    /// The buttons registered on the right (their id and icon), left to right.
-    pub actions: &'a [(&'static str, IconId)],
+    /// The buttons registered on the right, left to right.
+    pub actions: &'a [TopBarAction],
     /// The menu button first on the left (☰: the app's menus in a drawer), and whether its
     /// drawer is open. `None`: none (macOS' own menu bar).
     pub menu: Option<bool>,
+}
+
+/// A button registered on the bar's right side, as drawn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TopBarAction {
+    pub id: &'static str,
+    pub icon: IconId,
+    /// Its group (what it's about): between neighbors of different groups a short line.
+    pub group: &'static str,
+    /// A switch (its state: lit while on, told to a screen reader as a toggle); `None`: a
+    /// plain button.
+    pub on: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +106,10 @@ pub struct TopBar {
     maximize: Rect,
     close: Rect,
     hover: Option<TopBarHit>,
+    /// The window's button pressed and not yet let go (drawn lit while the mouse is on it).
+    armed: Option<TopBarHit>,
+    /// The lines between the registered buttons' groups (from the last paint).
+    separators: Vec<Rect>,
     /// What it showed (the project, the branch, the buttons), from the last paint: the
     /// theme's decorations hang clear of it.
     occupied: Vec<Rect>,
@@ -194,6 +212,22 @@ impl TopBar {
         } else {
             TopBarHit::Empty
         })
+    }
+
+    /// The window's button `hit` pressed (`Some`), or let go (`None`): it acts on its
+    /// release over it, and looks pressed meanwhile.
+    pub fn arm(&mut self, hit: Option<TopBarHit>) {
+        self.armed = hit;
+    }
+
+    /// The window's button pressed and not let go yet.
+    pub fn armed(&self) -> Option<TopBarHit> {
+        self.armed
+    }
+
+    /// The lines drawn between the registered buttons' groups, as last painted.
+    pub fn separators(&self) -> &[Rect] {
+        &self.separators
     }
 
     pub fn hover(&mut self, p: Point) -> bool {
@@ -363,7 +397,8 @@ impl TopBar {
                 (self.maximize, middle, TopBarHit::Maximize),
                 (self.close, "x", TopBarHit::Close),
             ] {
-                let hovered = self.hover == Some(hit)
+                // Pressed: lit while the mouse stays on it (its release acts).
+                let hovered = (self.hover == Some(hit) && self.armed.is_none_or(|a| a == hit))
                     || (hit == TopBarHit::Maximize && model.maximize_hovered);
                 let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
                     .icon(name)
@@ -377,24 +412,54 @@ impl TopBar {
             }
         }
 
-        // Right: the registered buttons (search, settings), left of the window's.
+        // Right: the registered buttons (search, settings, on top), left of the window's;
+        // a short line between two of different groups.
         let button = px(ds::button_size::LARGE);
+        let (gap, room) = (px(ACTION_GAP), px(GROUP_ROOM));
+        let (line_h, line_w) = (px(SEPARATOR_H), ctx.line());
         self.actions.clear();
+        self.separators.clear();
         let mut x = right - px(10.0) - button;
-        for (id, icon_id) in model.actions.iter().rev() {
+        let mut after: Option<&str> = None;
+        for action in model.actions.iter().rev() {
+            if after.is_some_and(|g| g != action.group) {
+                // Centered in the room between this one and the one after it.
+                let next = x + button + gap;
+                let line = Rect::new(
+                    (next - (room + line_w) / 2.0).round(),
+                    (b.min_y() + (b.size.height - line_h) / 2.0).round(),
+                    line_w,
+                    line_h,
+                );
+                ds::divider_vertical(layer, &ctx, line.min_x(), line.min_y(), line.max_y());
+                self.separators.push(line);
+                x -= room - gap;
+            }
+            after = Some(action.group);
             let rect = Rect::new(x, pill_top, button, button);
             let spec = ds::ButtonSpec::new(ds::ButtonKind::Ghost)
-                .icon(icons.name(*icon_id).unwrap_or_default())
+                .icon_id(action.icon)
                 .rest_tone(ds::Tone::Neutral)
-                .hovered(self.hover == Some(TopBarHit::Action(id)));
+                .hovered(self.hover == Some(TopBarHit::Action(action.id)));
+            let spec = match action.on {
+                Some(on) => spec.toggle(on),
+                None => spec,
+            };
             ds::button(layer, text, icons, &ctx, rect, spec);
             let r = icon_room(rect, px(ICON));
-            self.actions.push((rect, id));
+            self.actions.push((rect, action.id));
             self.occupied.push(r);
-            x -= button + px(4.0);
+            x -= button + gap;
         }
     }
 }
+
+/// The room between two registered buttons, and between two of different groups (where
+/// their line goes), logical pixels.
+const ACTION_GAP: f32 = 4.0;
+const GROUP_ROOM: f32 = 13.0;
+/// The line between two groups: as tall as an icon.
+const SEPARATOR_H: f32 = 16.0;
 
 /// The room a bar button's icon takes (what the theme's decorations keep clear), logical
 /// pixels.

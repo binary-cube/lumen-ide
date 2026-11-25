@@ -11,7 +11,7 @@ the Database window, the Task Manager's button, Focus mode's button, the canvas.
 ## Anatomy
 
 ```
- top bar ……………………………………… [🔍][⚙]        Dock::Top: a command, no window
+ top bar …………………………… [🔍][⚙] | [📌]    Dock::Top: a command, no window; a line between groups
  ┌──┬──────────────────────────────┬──┐
  │▣ │ ┌ Header: icon Title  [+][⟳]┐│ ▤│  Dock::Left (top group) / Dock::Right
  │▣ │ │ the panel (ToolPanel)      ││ ▤│  buttons by `order`, a short line between groups
@@ -52,6 +52,10 @@ symbols, cursor, problems), `paint(ViewerPaint)`, `press` / `press_with`, `hover
 - Nothing exists before it's first shown; its button is drawn from the description.
 - A press on its button shows or hides it (or runs its command); it's lit while its
   window shows, or while `active()`.
+- In the top bar (`Dock::Top`), a button whose `toggle_command()` turns something on or
+  off (the app's `switched` state of that command, a module's `CommandHandler::switched`)
+  is a toggle: lit while on, its tooltip saying `name: on` / `name: off`, told to a screen
+  reader as a toggle (the window kept on top).
 - A panel asks for things with `ToolPanelAction`: `Reveal`, `Open`, `View(ViewerAction)`,
   `Move`, `Rename`, `Menu` (under its header's button), `MenuUnder { anchor }`.
 - `KeyReach::edit(input, key)`: the line-editing keys of a field in a panel, by word (⌥ /

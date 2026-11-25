@@ -100,6 +100,8 @@ pub enum Requires {
     OtherTabs,
     /// The active tab can be locked (read-only): a text's, or a view that says so.
     Lockable,
+    /// The system can keep the window above the others (not on Wayland).
+    KeepOnTop,
 }
 
 impl Requires {
@@ -116,6 +118,7 @@ impl Requires {
             Self::ClosedTab => "menu.needs_closed_tab",
             Self::BackHistory | Self::ForwardHistory => "menu.needs_history",
             Self::Lockable => "menu.needs_lockable",
+            Self::KeepOnTop => "menu.needs_keep_on_top",
         }
     }
 }
@@ -140,6 +143,8 @@ pub struct MenuContext {
     pub forward: bool,
     /// The active tab can be locked (read-only).
     pub lockable: bool,
+    /// The system can keep the window above the others.
+    pub keeps_on_top: bool,
 }
 
 impl MenuContext {
@@ -157,6 +162,7 @@ impl MenuContext {
             Requires::ForwardHistory => self.forward,
             Requires::OtherTabs => self.tabs > 1,
             Requires::Lockable => self.lockable,
+            Requires::KeepOnTop => self.keeps_on_top,
         }
     }
 

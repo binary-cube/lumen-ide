@@ -61,6 +61,11 @@ pub(super) struct Pointer {
     pub tree_menu_path: Option<std::path::PathBuf>,
     /// Where the last context menu was shown (the "Copy" popover opens there).
     pub menu_position: Option<Point>,
+    /// The left button is down in the window (pressed here, not let go yet).
+    pub held: bool,
+    /// The window's closing (or the app's quitting) asked while the button was down: it
+    /// waits for the release, so the release doesn't fall on what's under the window.
+    pub closing: Option<Control>,
 }
 
 impl Default for Pointer {
@@ -73,6 +78,8 @@ impl Default for Pointer {
             last_click: None,
             tree_menu_path: None,
             menu_position: None,
+            held: false,
+            closing: None,
         }
     }
 }

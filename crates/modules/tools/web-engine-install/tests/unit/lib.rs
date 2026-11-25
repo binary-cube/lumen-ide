@@ -127,13 +127,22 @@ impl settings_model::SettingsStore for Store {
     }
 }
 
-/// A host keeping what it's told, with the user's settings it's given.
+/// A host with the user's settings it's given (what's told goes to the whole app).
 #[derive(Default)]
 struct Host {
     settings: Option<&'static settings_model::SettingsService>,
-    told: Vec<Notification>,
-    dismissed: Vec<NotificationId>,
     events: kernel::EventBus,
+}
+
+/// What's told the whole app is the process's: the tests looking at it take turns.
+static APP_WIDE: Mutex<()> = Mutex::new(());
+
+/// The app's queue to themselves while `f` runs, and what `f` told it.
+fn told_app(f: impl FnOnce()) -> Vec<app_wide::Told> {
+    let _turn = APP_WIDE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    app_wide::take_told();
+    f();
+    app_wide::take_told()
 }
 
 impl WorkbenchHost for Host {
@@ -159,11 +168,9 @@ impl WorkbenchHost for Host {
         false
     }
     fn spawn(&mut self, _: workbench_model::Job) {}
-    fn notify(&mut self, notification: Notification) {
-        self.told.push(notification);
-    }
-    fn dismiss_notification(&mut self, id: NotificationId) {
-        self.dismissed.push(id);
+    /// Never asked: what the module tells is the app's.
+    fn notify(&mut self, _: Notification) {
+        unreachable!("told the whole app, not this window");
     }
 }
 
@@ -178,7 +185,8 @@ impl workbench_model::ServicesHost for Host {}
 impl workbench_model::SystemHost for Host {}
 
 /// Not Now dismisses the offer and says "not offered again" only once that's saved: never
-/// with no settings to keep it in, nor when the write failed; a shown result is shown.
+/// with no settings to keep it in, nor when the write failed; what's told is told the whole
+/// app (the offer may show on another window than the one the user answers in).
 #[test]
 fn not_now_says_so_only_once_saved() {
     let store = |fails| -> &'static settings_model::SettingsService {
@@ -192,15 +200,17 @@ fn not_now_says_so_only_once_saved() {
     {
         let id = told(|t| *t.notification.get_or_insert_with(NotificationId::new));
         let mut host = Host { settings, ..Host::default() };
-        assert!(NotNow.run(&mut host));
-        assert_eq!(host.dismissed, [id], "the offer goes");
-        assert_eq!(host.told.iter().any(|n| n.title == declined), says, "{settings:?}");
+        let app = told_app(|| assert!(NotNow.run(&mut host)));
+        assert_eq!(app.first(), Some(&app_wide::Told::Dismiss(id)), "the offer goes");
+        let said = app.iter().any(|t| matches!(t, app_wide::Told::Show(n) if n.title == declined));
+        assert_eq!(said, says, "{settings:?}");
     }
-    let mut host = Host::default();
     let id = NotificationId::new();
-    assert!(!show(&mut host, Telling::Nothing));
-    assert!(show(&mut host, Telling::Dismiss(id)));
-    assert_eq!(host.dismissed, [id]);
+    assert!(told_app(|| assert!(!show(Telling::Nothing))).is_empty());
+    assert_eq!(told_app(|| assert!(show(Telling::Dismiss(id)))), [app_wide::Told::Dismiss(id)]);
+    let offer = offer();
+    let shown = told_app(|| assert!(show(Telling::Show(offer.clone()))));
+    assert_eq!(shown, [app_wide::Told::Update(offer)], "updated in place where it shows");
 }
 
 /// Every kind of failure is told in words of its own, in both languages: never a path, an
@@ -259,6 +269,6 @@ fn a_check_says_how_it_ended() {
 #[test]
 fn remove_says_so_only_when_it_acts() {
     let mut host = Host::default();
-    assert!(Remove.run(&mut host));
-    assert!(host.told.is_empty(), "nothing removed, nothing said");
+    let app = told_app(|| assert!(Remove.run(&mut host)));
+    assert!(app.is_empty(), "nothing removed, nothing said");
 }

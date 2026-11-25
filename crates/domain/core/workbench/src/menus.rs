@@ -340,6 +340,8 @@ pub mod sections {
     pub const TOOLS_LANGUAGES: &str = "tools.languages";
     pub const TOOLS_MAINTENANCE: &str = "tools.maintenance";
     pub const WINDOW_ARRANGE: &str = "window.arrange";
+    /// The window's place among the others (kept on top).
+    pub const WINDOW_LEVEL: &str = "window.level";
     pub const WINDOW_TABS: &str = "window.tabs";
     pub const WINDOW_CLOSE: &str = "window.close";
     pub const WINDOW_FRONT: &str = "window.front";

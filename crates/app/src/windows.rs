@@ -266,6 +266,7 @@ impl Application for AppWindows {
         for (_, app) in &mut self.windows {
             app.sync_shared();
         }
+        self.hand_app_notifications();
         self.sync_projects();
         let changed = std::mem::take(&mut self.windows_changed);
         self.record_session(changed);
@@ -305,6 +306,27 @@ fn leaving() -> Option<process::descendants::Descendants> {
 }
 
 impl AppWindows {
+    /// What was told the whole app since the last event, each handed to one window
+    /// (`crate::app_notifications`); with no window, it waits for one.
+    fn hand_app_notifications(&mut self) {
+        if self.windows.is_empty() {
+            return;
+        }
+        let told = workbench_model::app_wide::take_told();
+        if told.is_empty() {
+            return;
+        }
+        use crate::app_notifications::{Candidate, Handing, hand};
+        let handing = Handing {
+            look: |(_, app): &(WindowId, EditorApp), id| Candidate {
+                focus_turn: app.focus_turn(),
+                shows: app.shows_notification(id),
+            },
+            take: |(_, app): &mut (WindowId, EditorApp), told| app.take_app_told(told),
+        };
+        hand(told, &mut self.windows, handing);
+    }
+
     /// The window `i` closing while others stay: what its project's programs started (an
     /// agent's helper detached into its own group would outlive it), taken while it still
     /// hangs together under them (macOS, as [`leaving`]). Nothing when the same project is

@@ -443,6 +443,11 @@ impl EditorApp {
                 window.toggle_fullscreen();
                 true
             }
+            // This window only: each has its own.
+            cmd::KEEP_ON_TOP => {
+                window.set_always_on_top(self.workbench.toggle_on_top());
+                true
+            }
             cmd::ABOUT => {
                 self.workbench.open_about();
                 true

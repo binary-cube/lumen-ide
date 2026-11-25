@@ -75,19 +75,47 @@ pub fn keymap_bindings() -> std::sync::Arc<Vec<ui_workbench::BindingRow>> {
 /// The menus as the menu drawer shows them (the native menu bar's, in its order): each
 /// with its icon, its rows with theirs and their shortcuts as the system shows them.
 /// `hidden`: the rows left out (what makes sense only elsewhere — another language's file);
-/// the separators and submenus left empty go with them.
-pub fn drawer_menus(hidden: &dyn Fn(&str) -> bool) -> Vec<ui_workbench::DrawerMenu> {
+/// the separators and submenus left empty go with them. `switched`: how a row that turns
+/// something on or off stands (`None`: a plain action).
+pub fn drawer_menus(
+    hidden: &dyn Fn(&str) -> bool,
+    switched: &dyn Fn(&str) -> Option<bool>,
+) -> Vec<ui_workbench::DrawerMenu> {
     menus()
         .into_iter()
         .map(|menu| ui_workbench::DrawerMenu {
             title: menu.title,
             icon: menu.icon,
-            entries: ui_workbench::tidy_menu(without(
-                one_level_of_submenus(menu_entries(menu.items)),
-                hidden,
-            )),
+            entries: with_switches(
+                ui_workbench::tidy_menu(without(
+                    one_level_of_submenus(menu_entries(menu.items)),
+                    hidden,
+                )),
+                switched,
+            ),
         })
         .filter(|menu| !menu.entries.is_empty())
+        .collect()
+}
+
+/// `entries` with how their switches stand (in submenus too).
+fn with_switches(
+    entries: Vec<ui_workbench::MenuEntry>,
+    switched: &dyn Fn(&str) -> Option<bool>,
+) -> Vec<ui_workbench::MenuEntry> {
+    use ui_workbench::MenuEntry;
+    entries
+        .into_iter()
+        .map(|entry| match entry {
+            MenuEntry::Item { id, label, shortcut, icon, on, look } => {
+                let on = switched(&id).or(on);
+                MenuEntry::Item { id, label, shortcut, icon, on, look }
+            }
+            MenuEntry::Submenu { label, icon, entries } => {
+                MenuEntry::Submenu { label, icon, entries: with_switches(entries, switched) }
+            }
+            entry => entry,
+        })
         .collect()
 }
 

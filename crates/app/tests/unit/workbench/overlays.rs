@@ -316,10 +316,11 @@ fn full_screen_keeps_the_top_bar() {
     paint(&mut wb, &mut text);
     assert_eq!(wb.tools.strip.bounds().min_y(), below_bar, "the content stays below the bar");
     let maximize = Point::new(1200.0 - 36.0 - 18.0, 10.0);
+    assert_eq!(wb.mouse_down(&mut text, maximize, false, false, true, 1), MouseResult::Redraw);
     assert_eq!(
-        wb.mouse_down(&mut text, maximize, false, false, true, 1),
-        MouseResult::Command(crate::commands::FULL_SCREEN.0),
-        "its middle button leaves full screen"
+        wb.release_window_button(maximize),
+        Some(MouseResult::Command(crate::commands::FULL_SCREEN.0)),
+        "its middle button leaves full screen, let go over it"
     );
     wb.set_full_screen(false);
     assert_eq!(wb.tools.strip.bounds().min_y(), below_bar, "still below the bar");
@@ -439,4 +440,85 @@ fn a_waiting_hover_card_goes_at_a_press_and_the_wheel() {
     wb.scroll(Point::new(310.0, 220.0), 0.0, 10.0);
     assert!(wb.code_hover.deadline().is_none(), "the wheel: gone");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Where the top bar's `hit` is (a point on it), as last painted.
+fn on_bar(wb: &Workbench, hit: TopBarHit) -> Point {
+    (0..1200)
+        .map(|x| Point::new(x as f32, 20.0))
+        .find(|p| wb.chrome.top_bar.hit(*p) == Some(hit))
+        .expect("on the bar")
+}
+
+/// The window's own buttons act on their release over the button pressed, as the system's
+/// do: the press only arms one (it looks pressed), the window stays until the release; let
+/// go elsewhere, nothing happens; a later release does nothing either.
+#[test]
+fn the_window_s_buttons_act_on_their_release_over_them() {
+    let (mut wb, dir, mut text) = opened("window-buttons");
+    wb.set_window_controls(Some(false));
+    paint(&mut wb, &mut text);
+    for (hit, acted) in [
+        (TopBarHit::Close, MouseResult::CloseWindow),
+        (TopBarHit::Minimize, MouseResult::MinimizeWindow),
+        (TopBarHit::Maximize, MouseResult::ToggleMaximize),
+    ] {
+        let p = on_bar(&wb, hit);
+        assert_eq!(wb.mouse_down(&mut text, p, false, false, false, 1), MouseResult::Redraw);
+        assert_eq!(wb.chrome.top_bar.armed(), Some(hit), "pressed, not acted on");
+        assert_eq!(wb.release_window_button(p), Some(acted), "{hit:?} let go over it");
+        assert_eq!(wb.chrome.top_bar.armed(), None);
+        assert_eq!(wb.release_window_button(p), None, "once");
+    }
+    // Pressed on close, let go over the editor: nothing closes, the editor's text isn't
+    // touched by the release (no selection, no drag), and nothing waits for a next one.
+    let close = on_bar(&wb, TopBarHit::Close);
+    let before = wb.tabs[wb.active].doc.selections().clone();
+    wb.mouse_down(&mut text, close, false, false, false, 1);
+    let editor = Point::new(600.0, 400.0);
+    assert_eq!(wb.release_window_button(editor), Some(MouseResult::Redraw), "cancelled");
+    wb.mouse_up(&mut text);
+    assert_eq!(wb.tabs[wb.active].doc.selections(), &before, "the release reached nothing");
+    assert_eq!(wb.tab_count(), 1);
+    assert_eq!(wb.take_request(), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// What closes at a press over the editor (a notification's ×) leaves nothing for the
+/// release: let go over the text under it, the text isn't touched.
+#[test]
+fn a_release_after_a_press_that_closed_something_reaches_nothing() {
+    let (mut wb, dir, mut text) = opened("release-after-close");
+    wb.show_notification(workbench_model::Notification::info("saved"));
+    paint(&mut wb, &mut text);
+    let close = (0..1200)
+        .flat_map(|x| (0..160).map(move |y| Point::new(x as f32, y as f32 * 5.0)))
+        .find(|p| matches!(wb.toasts.hit(*p), Some(ui_workbench::toast::ToastHit::Close(_))))
+        .expect("the notification's ×");
+    let before = wb.tabs[wb.active].doc.selections().clone();
+    assert_eq!(wb.mouse_down(&mut text, close, false, false, false, 1), MouseResult::Redraw);
+    wb.mouse_up(&mut text);
+    assert_eq!(wb.tabs[wb.active].doc.selections(), &before, "the text under it untouched");
+    assert_eq!(wb.take_request(), None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// A window's button pressed whose release never came here (the focus went, a page took
+/// it) is forgotten at the next press: a later release over it doesn't fire it.
+#[test]
+fn a_window_s_button_pressed_and_never_let_go_is_forgotten() {
+    let (mut wb, dir, mut text) = opened("stale-arm");
+    wb.set_window_controls(Some(false));
+    paint(&mut wb, &mut text);
+    let close = on_bar(&wb, TopBarHit::Close);
+    wb.mouse_down(&mut text, close, false, false, false, 1);
+    // Its release lost; another press, in the editor, then a release over the button.
+    wb.mouse_down(&mut text, Point::new(600.0, 400.0), false, false, false, 1);
+    assert_eq!(wb.chrome.top_bar.armed(), None);
+    assert_eq!(wb.release_window_button(close), None, "nothing fires");
+    // Or let go by the app (the focus gone).
+    wb.mouse_down(&mut text, close, false, false, false, 1);
+    assert!(wb.cancel_window_button());
+    assert_eq!(wb.release_window_button(close), None);
+    let _ = std::fs::remove_dir_all(dir);
 }

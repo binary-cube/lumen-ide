@@ -429,10 +429,12 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
     }
     let mut tools = contributions.take::<Arc<dyn ui_workbench::ToolWindowProvider>>();
     // The app's own windows, registered like the modules' (one layout for all): the
-    // project panel, and the top bar's search and settings.
-    for (id, icon, title_key, order, command) in [
-        ("search", "search", "tooltip.search", 10, crate::commands::SEARCH_PROJECT.0),
-        ("settings", "settings", "tooltip.settings", 20, crate::commands::OPEN_SETTINGS.0),
+    // project panel, and the top bar's search and settings, then — a group of its own —
+    // the window kept on top.
+    for (id, icon, title_key, order, group, command) in [
+        ("search", "search", "tooltip.search", 10, "", crate::commands::SEARCH_PROJECT.0),
+        ("settings", "settings", "tooltip.settings", 20, "", crate::commands::OPEN_SETTINGS.0),
+        ("keep-on-top", "pin", "tooltip.keep_on_top", 30, "window", crate::commands::KEEP_ON_TOP.0),
     ] {
         tools.push(Arc::new(ui_workbench::ToolWindow {
             id,
@@ -441,7 +443,7 @@ pub fn load(selection: &ModuleSelection) -> (LanguageSupport, Vec<ModuleReport>)
             dock: ui_workbench::Dock::Top,
             order,
             strip_end: false,
-            group: "",
+            group,
             toggle: Some(command),
             content: ui_workbench::ToolContent::Command { command, tab: None },
         }));

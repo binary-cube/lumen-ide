@@ -138,6 +138,9 @@ impl EditorApp {
             PlatformEvent::Focused(false) => {
                 // Its buttons' releases go to the program that took the focus.
                 self.web_views.window_left(self.pointer.cursor);
+                // Its release won't come here: a window's button pressed is let go.
+                self.button_released();
+                self.workbench.cancel_window_button();
                 self.workbench.project_left();
                 self.capture_window(false);
                 for renderer in self.frames.renderers() {
@@ -167,6 +170,9 @@ impl EditorApp {
             self.page_took_keyboard();
             return;
         }
+        if button == MouseButton::Left {
+            self.pointer.held = true;
+        }
         match button {
             MouseButton::Left => {
                 self.mouse_down(position, modifiers.shift, modifiers.alt, modifiers.primary())
@@ -180,11 +186,24 @@ impl EditorApp {
     /// drag, and the pointer is asked again where the mouse is (a bar let go: the arrow
     /// back without waiting for the mouse to move).
     pub(super) fn on_mouse_up(&mut self, button: MouseButton, position: Point) {
+        if button == MouseButton::Left {
+            self.button_released();
+        }
         if self.web_views.pointer_up(button, position) || button != MouseButton::Left {
+            // Not the window's release: a window's button pressed doesn't act on it.
+            if button == MouseButton::Left && self.workbench.cancel_window_button() {
+                self.redraw();
+            }
             return;
         }
         self.pointer.dragging = false;
+        // The window's own button pressed acts now, let go over it.
+        let pressed = self.workbench.release_window_button(position);
         let mut redraw = self.with_text(Workbench::mouse_up).unwrap_or(false);
+        if let Some(result) = pressed {
+            self.mouse_result(result);
+            redraw = true;
+        }
         if !self.pointer.over_page {
             let (hovered, icon) = self.workbench.hover(position);
             redraw |= hovered;

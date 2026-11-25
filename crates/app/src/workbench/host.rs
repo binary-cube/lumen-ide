@@ -215,7 +215,7 @@ impl WorkbenchHost for Workbench {
     }
 
     fn shows_notification(&self, id: workbench_model::NotificationId) -> bool {
-        self.data.notifications.get(id).is_some_and(|t| !t.is_leaving())
+        self.notification_shown(id)
     }
 
     fn answers(&self) -> Option<Arc<workbench_model::AnswerBook>> {

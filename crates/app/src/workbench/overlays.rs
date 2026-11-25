@@ -415,7 +415,12 @@ impl Workbench {
                     Tip::new(rect, self.chrome.badge.as_ref().map(|b| b.tooltip.clone())?)
                 }
                 TopBarHit::Action(id) => match self.tool(id) {
-                    Some(tool) => Tip::new(rect, tool.title()).with_shortcut(
+                    // A switch says how it stands.
+                    Some(tool) => Tip::new(
+                        rect,
+                        switch_title(tool.title(), self.tool_switched(tool.as_ref())),
+                    )
+                    .with_shortcut(
                         tool.toggle_command()
                             .map(command_model::CommandId)
                             .and_then(crate::commands::shortcut_label),
@@ -638,6 +643,16 @@ pub(super) enum Overlay {
     /// The resources pinned, as pills in the editor's corner: under everything (see
     /// `status`).
     ResourcePills,
+}
+
+/// A button's tooltip that turns something on or off: its name and how it stands
+/// (`None`: a plain button, its name alone).
+pub(super) fn switch_title(name: String, on: Option<bool>) -> String {
+    match on {
+        Some(true) => i18n::tr!("tooltip.switched_on", name = name),
+        Some(false) => i18n::tr!("tooltip.switched_off", name = name),
+        None => name,
+    }
 }
 
 impl Overlay {

@@ -753,19 +753,28 @@ fn paint_entry(
             draw_icon(layer, icons, id, at, ctx.fade(color));
             right = at.min_x() - px(10.0);
         }
-    } else if let Some(key) = why.as_deref().or(shortcut) {
-        let room = (row.size.width * 0.55).max(0.0);
-        let key = ds::ellipsize(text, key, &key_font, room);
-        let shaped = text.shape_line(&key, &key_font);
-        let x = (right - shaped.width).round();
-        draw_text(
-            layer,
-            &shaped,
-            x,
-            ds::optical_baseline(top, row_h, &key_font),
-            ctx.fade(p.text_muted),
-        );
-        right = x - px(14.0);
+    } else {
+        // A setting it turns on or off: how it stands at the end (as the context menus
+        // show it), its keys before it.
+        if let (MenuEntry::Item { on: Some(on), .. }, None) = (entry, &why) {
+            let x = (right - px(ds::SMALL_SWITCH_W)).round();
+            ds::small_switch(layer, ctx, x, top + row_h / 2.0, *on);
+            right = x - px(14.0);
+        }
+        if let Some(key) = why.as_deref().or(shortcut) {
+            let room = (row.size.width * 0.55).max(0.0);
+            let key = ds::ellipsize(text, key, &key_font, room);
+            let shaped = text.shape_line(&key, &key_font);
+            let x = (right - shaped.width).round();
+            draw_text(
+                layer,
+                &shaped,
+                x,
+                ds::optical_baseline(top, row_h, &key_font),
+                ctx.fade(p.text_muted),
+            );
+            right = x - px(14.0);
+        }
     }
     let x = row.min_x() + px(LABEL_AT);
     let label = ds::ellipsize(text, label, &font, (right - x).max(0.0));

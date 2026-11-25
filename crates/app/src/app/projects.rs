@@ -193,6 +193,18 @@ impl EditorApp {
         self.window_state.focus_turn
     }
 
+    /// This window shows notification `id` (not leaving).
+    pub fn shows_notification(&self, id: workbench_model::NotificationId) -> bool {
+        self.workbench.notification_shown(id)
+    }
+
+    /// What was told the whole app, handed to this window (`crate::app_notifications`):
+    /// shown, updated or closed here.
+    pub fn take_app_told(&mut self, told: workbench_model::app_wide::Told) {
+        self.workbench.take_app_told(told);
+        self.redraw();
+    }
+
     /// A recent project chosen from the icon's menu: its window to the front if it's open,
     /// else a new window with it.
     pub(super) fn open_recent(&mut self, path: &Path) {

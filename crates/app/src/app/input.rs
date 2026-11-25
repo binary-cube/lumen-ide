@@ -279,7 +279,9 @@ impl EditorApp {
                 self.relayout();
             }
             MouseResult::MenuCommand(id) => {
-                let _ = self.event(PlatformEvent::Command(id));
+                // Quit or Close from the drawer: the window goes after this event.
+                let control = self.event(PlatformEvent::Command(id));
+                self.exit_after(control);
                 // A tree file's menu acted on that file for this one command.
                 self.workbench.clear_menu_target();
                 self.relayout();
@@ -320,6 +322,8 @@ impl EditorApp {
                 }
             }
             MouseResult::DragWindow => {
+                // The system has the mouse now: its release may never reach the window.
+                self.pointer.held = false;
                 if let Some(window) = &self.window {
                     window.drag_window();
                 }
@@ -334,18 +338,28 @@ impl EditorApp {
                     window.minimize();
                 }
             }
-            // As the system's close button: unsaved files asked about, then the window goes
-            // (the request reaches the event loop after this event).
+            // As the system's close button: the work still running, then the unsaved files
+            // asked about, then the window goes (after this event).
             MouseResult::CloseWindow => {
-                self.close_all_tabs(Final::CloseWindow);
+                let control = self.close_window();
+                self.exit_after(control);
             }
             MouseResult::ViewerRequest(request) => self.viewer_request(request),
             MouseResult::Command(id) => match cmd::by_id(id) {
                 Some(id) => {
-                    self.command(id);
+                    let control = self.command(id);
+                    self.exit_after(control);
                 }
                 None => tracing::warn!(%id, "unknown command"),
             },
+        }
+    }
+
+    /// A window's closing or the app's quitting that `control` asks for, done after this
+    /// event (as the event loop is answered); anything else changes nothing.
+    pub(super) fn exit_after(&mut self, control: Control) {
+        if matches!(control, Control::Close | Control::Exit) {
+            self.pending.exit_request.get_or_insert(control);
         }
     }
 }

@@ -29,6 +29,12 @@ pub(super) struct Chrome {
     /// Whether the bar has the menu drawer's button, told to this window (the tests: no
     /// other test's setting shows it); `None`: as the setting says.
     pub menu_button: Option<bool>,
+    /// This window is kept above every other one (its own: each window has its state, for
+    /// the run — the windows' size and place aren't kept between runs either).
+    pub on_top: bool,
+    /// The system can keep this window on top (not on Wayland): the pin and its command
+    /// are offered only then.
+    pub can_keep_on_top: bool,
 }
 
 impl Default for Chrome {
@@ -45,6 +51,8 @@ impl Default for Chrome {
             top_bar_reveal: ui_workbench::Tween::new(0.0, TOP_BAR_REVEAL),
             decorations: Default::default(),
             menu_button: cfg!(test).then_some(false),
+            on_top: false,
+            can_keep_on_top: cfg!(test),
         }
     }
 }
@@ -59,6 +67,33 @@ impl Chrome {
 }
 
 impl Workbench {
+    /// Whether the system can keep this window on top (told once, as it opens).
+    pub fn set_keeps_on_top(&mut self, can: bool) {
+        self.chrome.can_keep_on_top = can;
+    }
+
+    /// What the window itself can do for app command `id` (read from memory, cheap: asked
+    /// as the top bar is drawn); the rest of what it needs is the menus' (`requires`).
+    pub(super) fn window_allows(&self, id: command_model::CommandId) -> bool {
+        crate::commands::requires(id).iter().all(|r| match r {
+            command_model::Requires::KeepOnTop => self.chrome.can_keep_on_top,
+            _ => true,
+        })
+    }
+
+    /// This window kept above the others, or back among them: how it stands now (the app
+    /// tells the system).
+    pub fn toggle_on_top(&mut self) -> bool {
+        self.chrome.on_top = !self.chrome.on_top;
+        self.chrome.on_top
+    }
+
+    /// How the app's own command `id` that turns something on or off stands (`None`: a
+    /// plain action, or a module's).
+    pub(super) fn app_switched(&self, id: command_model::CommandId) -> Option<bool> {
+        (id == crate::commands::KEEP_ON_TOP).then_some(self.chrome.on_top)
+    }
+
     /// What a click on the top bar's branch runs, when a module gave it one (and there's a
     /// branch shown).
     pub(super) fn branch_action(&self) -> Option<workbench_model::TopBarLabelAction> {
@@ -66,3 +101,7 @@ impl Workbench {
         self.support.top_bar_label_actions.first().copied()
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/unit/workbench/chrome.rs"]
+mod tests;

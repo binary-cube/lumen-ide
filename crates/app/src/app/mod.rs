@@ -463,6 +463,7 @@ impl EditorApp {
             }),
         });
         self.workbench.set_titlebar_inset(window.titlebar_inset());
+        self.workbench.set_keeps_on_top(window.can_keep_on_top());
         match SyntaxWorker::spawn(Arc::clone(&self.shared.syntax), window.waker()) {
             Ok(worker) => self.workbench.set_worker(worker),
             Err(e) => tracing::error!(error = %e, "the parsing thread didn't start"),
@@ -603,9 +604,27 @@ impl EditorApp {
         self.sync_recent_menu();
         self.sync_menu_states();
         self.sync_system_sign();
-        match self.pending.exit_request.take() {
-            Some(request) => request,
-            None => control,
+        let control = self.pending.exit_request.take().unwrap_or(control);
+        self.after_release(control)
+    }
+
+    /// The window closing (or the app quitting) while the mouse's button is still down
+    /// waits for its release: gone at the press, the window would let the release fall on
+    /// whatever is under it (another window, another program), which takes it as a click.
+    fn after_release(&mut self, control: Control) -> Control {
+        if self.pointer.held && matches!(control, Control::Close | Control::Exit) {
+            self.pointer.closing = Some(control);
+            return Control::Continue;
+        }
+        control
+    }
+
+    /// The button let go (or the mouse taken by the system, the focus gone): a closing
+    /// that waited for it goes on, after this event.
+    fn button_released(&mut self) {
+        self.pointer.held = false;
+        if let Some(closing) = self.pointer.closing.take() {
+            self.pending.exit_request.get_or_insert(closing);
         }
     }
 }

@@ -27,6 +27,7 @@ fn requirements_hold_only_in_their_context() {
         Requires::ForwardHistory,
         Requires::OtherTabs,
         Requires::Lockable,
+        Requires::KeepOnTop,
     ];
     assert!(all.iter().all(|r| !none.satisfies(*r)), "nothing open: none");
     // A repository counts only with its project.
@@ -49,6 +50,7 @@ fn requirements_hold_only_in_their_context() {
         forward: true,
         modified: false,
         lockable: true,
+        keeps_on_top: true,
     };
     assert!(all.iter().all(|r| sql.satisfies(*r)));
     let php = MenuContext { language: Some("php".into()), tabs: 1, ..sql };
@@ -56,4 +58,8 @@ fn requirements_hold_only_in_their_context() {
     assert_eq!(Requires::Repository.hint_key(), "menu.needs_repository");
     let image = MenuContext { lockable: false, ..php };
     assert_eq!(image.missing(&[Requires::Tab, Requires::Lockable]), Some(Requires::Lockable));
+    // A system that can't keep a window on top (Wayland): its command, with why.
+    let wayland = MenuContext { keeps_on_top: false, ..image };
+    assert_eq!(wayland.missing(&[Requires::KeepOnTop]), Some(Requires::KeepOnTop));
+    assert_eq!(Requires::KeepOnTop.hint_key(), "menu.needs_keep_on_top");
 }

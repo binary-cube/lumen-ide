@@ -232,6 +232,8 @@ pub trait WorkbenchHost:
     fn spawn(&mut self, job: Job);
     /// Tells the user something: a toast over the workbench (this project's; merged with
     /// an identical one shown). Its id (`notification.id`) updates or closes it later.
+    /// What's the whole app's (an update, the web engine) goes through
+    /// [`crate::app_wide::post`] instead: shown on the window the user is in.
     fn notify(&mut self, notification: crate::Notification);
     /// Replaces notification `notification.id` (work in progress that ended); shown if
     /// it's gone.

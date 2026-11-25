@@ -1,20 +1,57 @@
 //! What a module's background work tells the whole app, from any thread, without a window
 //! at hand: that what the windows show changed ([`wake`]: they look again at their next
-//! turn), something the user must hear ([`post`]: a notification, shown by the window that
-//! looks first), and whether work runs that closing the app would stop ([`busy`]: asked of
-//! every module's reporter, as the closing does). The app sets the waker and the probe once
-//! its first window opens; until then (and in tests) they do nothing.
+//! turn), something the user must hear ([`post`]: a notification of the app's, not of a
+//! project's — an update, the web engine, a setting kept for every window), and whether
+//! work runs that closing the app would stop ([`busy`]: asked of every module's reporter,
+//! as the closing does). The app sets the waker and the probe once its first window opens;
+//! until then (and in tests) they do nothing.
+//!
+//! What's told the app waits here until the app hands it to a window ([`take_told`]): a new
+//! notification to the window the user is in (focused, or the one focused last), one
+//! updated in place ([`post_update`]) or closed ([`post_dismiss`]) to the window showing
+//! it — it stays where it shows until it's done — else to the one the user is in; one the
+//! user asked for ([`post_brought`]: a look for a newer version) is brought to the window
+//! the user is in, gone from any other. Each is handed to one window, once; a project's own notifications never come here (they stay on
+//! its window: `host.notify`).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, RwLock};
 
-use crate::Notification;
+use crate::{Notification, NotificationId};
 
 type Waker = Arc<dyn Fn() + Send + Sync>;
 type Probe = Arc<dyn Fn() -> bool + Send + Sync>;
 
 static WAKER: RwLock<Option<Waker>> = RwLock::new(None);
 static PROBE: RwLock<Option<Probe>> = RwLock::new(None);
-static POSTED: Mutex<Vec<Notification>> = Mutex::new(Vec::new());
+static TOLD: Mutex<Vec<Told>> = Mutex::new(Vec::new());
+/// Something waits in [`TOLD`] (looked at after every event without locking).
+static PENDING: AtomicBool = AtomicBool::new(false);
+
+/// What's told the whole app about one of its notifications.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Told {
+    /// A notification shown (merged with an identical one shown).
+    Show(Notification),
+    /// The one with the same id replaced (work in progress that went on or ended); shown
+    /// if it's gone.
+    Update(Notification),
+    /// Notification `id` closed.
+    Dismiss(NotificationId),
+    /// The one with the same id replaced and brought to the window the user is in (where
+    /// they asked for it), closed in any other showing it.
+    Bring(Notification),
+}
+
+impl Told {
+    /// The notification it's about.
+    pub fn id(&self) -> NotificationId {
+        match self {
+            Self::Show(n) | Self::Update(n) | Self::Bring(n) => n.id,
+            Self::Dismiss(id) => *id,
+        }
+    }
+}
 
 /// The app's waker (its event loop's).
 pub fn set_waker(waker: Waker) {
@@ -29,15 +66,42 @@ pub fn wake() {
     }
 }
 
-/// A notification for the user, from any thread: shown by the window that looks first.
-pub fn post(notification: Notification) {
-    POSTED.lock().unwrap_or_else(PoisonError::into_inner).push(notification);
+/// `told` kept for the app to hand to a window, which it wakes.
+fn tell(told: Told) {
+    TOLD.lock().unwrap_or_else(PoisonError::into_inner).push(told);
+    PENDING.store(true, Ordering::Release);
     wake();
 }
 
-/// The notifications posted since the last call (a window shows them).
-pub fn take_posted() -> Vec<Notification> {
-    std::mem::take(&mut *POSTED.lock().unwrap_or_else(PoisonError::into_inner))
+/// A notification for the user, from any thread: shown on the window the user is in.
+pub fn post(notification: Notification) {
+    tell(Told::Show(notification));
+}
+
+/// Notification `notification.id` replaced (shown if it's gone), from any thread: where it
+/// shows, else on the window the user is in.
+pub fn post_update(notification: Notification) {
+    tell(Told::Update(notification));
+}
+
+/// Notification `notification.id` replaced and shown on the window the user is in (it asked
+/// for it there: the answer must come there), closed in any other window showing it.
+pub fn post_brought(notification: Notification) {
+    tell(Told::Bring(notification));
+}
+
+/// Notification `id` closed, from any thread, wherever it shows.
+pub fn post_dismiss(id: NotificationId) {
+    tell(Told::Dismiss(id));
+}
+
+/// What was told since the last call, in order (the app hands each to a window). A plain
+/// load while nothing waits.
+pub fn take_told() -> Vec<Told> {
+    if !PENDING.swap(false, Ordering::Acquire) {
+        return Vec::new();
+    }
+    std::mem::take(&mut *TOLD.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
 /// How the app says whether work runs (its modules' reporters).

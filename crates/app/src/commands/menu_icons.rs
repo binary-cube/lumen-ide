@@ -56,6 +56,7 @@ pub fn menu_icon(id: &str) -> Option<&'static str> {
         EDITOR_FULL_WIDTH => "column",
         EDITOR_FULL_HEIGHT => "rows",
         WORD_WRAP => "text-wrap",
+        KEEP_ON_TOP => "pin",
         REOPEN_CLOSED_TAB => "rotate-ccw",
         REVEAL_IN_FILE_MANAGER => "folder-open",
         REVEAL_IN_PROJECT => "crosshair",

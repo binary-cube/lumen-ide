@@ -174,3 +174,38 @@ fn a_frames_cost_is_recorded_only_while_recording() {
     kernel::probe::stop();
     assert!(after.counts.iter().all(|c| c.0 != "render"), "nothing kept while stopped");
 }
+
+/// The window closing (or the app quitting) asked while the mouse's button is down waits
+/// for its release (gone at the press, the release would fall on what's under the window);
+/// let go, it goes on; with the button up, it goes at once; anything else isn't held.
+#[test]
+fn a_closing_asked_with_the_button_down_waits_for_its_release() {
+    let mut app = app();
+    assert_eq!(app.after_release(Control::Close), Control::Close, "the button up: at once");
+    app.pointer.held = true;
+    assert_eq!(app.after_release(Control::Continue), Control::Continue);
+    assert_eq!(app.after_release(Control::Close), Control::Continue, "held until let go");
+    assert_eq!(app.pending.exit_request, None);
+    app.button_released();
+    assert!(!app.pointer.held);
+    assert_eq!(app.pending.exit_request.take(), Some(Control::Close), "then it closes");
+    app.pointer.held = true;
+    assert_eq!(app.after_release(Control::Exit), Control::Continue);
+    app.button_released();
+    assert_eq!(app.pending.exit_request.take(), Some(Control::Exit));
+    app.button_released();
+    assert_eq!(app.pending.exit_request, None, "once");
+}
+
+/// What a command chosen in the drawer asks of the event loop (a window closed, the app
+/// quitting) isn't lost: it's answered after the event. (A window without its renderer
+/// answers every event with Close: the drawer's row stands for a Quit here.)
+#[test]
+fn a_drawer_command_s_closing_reaches_the_event_loop() {
+    let mut app = app();
+    assert!(app.frames.renderer.is_none());
+    app.mouse_result(MouseResult::MenuCommand(cmd::QUIT.0.to_owned()));
+    assert_eq!(app.pending.exit_request.take(), Some(Control::Close));
+    app.exit_after(Control::Continue);
+    assert_eq!(app.pending.exit_request, None, "anything else asks nothing");
+}

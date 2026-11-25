@@ -87,27 +87,12 @@ fn what_s_new_open_holds_the_download_s_notifications() {
     assert_eq!(take_tell(), None);
 }
 
-/// A look the user asked for: its answer is told in the window showing the spinner, not
-/// the first window to ask; another one takes it only once the spinner has waited long.
+/// What's to tell is taken once, by the first window that looks (the app then shows it
+/// where the user is, or where the update's notification shows).
 #[test]
-fn the_answer_goes_to_the_window_showing_the_spinner() {
-    let _serial = serial();
-    let (spinner, _) = notification();
-    spinning(spinner);
-    tell(Tell::UpToDate);
-    assert_eq!(take_tell_for(|_| false, true), None, "another window: not its answer");
-    assert_eq!(take_tell_for(|id| id == spinner, false), Some(Tell::UpToDate), "the asking one");
-    // Taken: the next tell goes to any window.
-    tell(Tell::Progress);
-    assert_eq!(take_tell_for(|_| false, true), Some(Tell::Progress));
-}
-
-/// Nothing asked for: the focused window tells it; an unfocused one only once it waited
-/// (the app in the background).
-#[test]
-fn what_s_found_is_told_in_the_focused_window() {
+fn what_s_to_tell_is_taken_once() {
     let _serial = serial();
     tell(Tell::Available);
-    assert_eq!(take_tell_for(|_| false, false), None, "not the window the user is in");
-    assert_eq!(take_tell_for(|_| false, true), Some(Tell::Available), "the focused one");
+    assert_eq!(take_tell(), Some(Tell::Available));
+    assert_eq!(take_tell(), None, "the other windows: told already");
 }

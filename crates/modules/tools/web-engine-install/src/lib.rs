@@ -9,7 +9,9 @@
 //! the user lets it.
 //!
 //! The install's state is the engine's (`web_engine::install::service`, one for every
-//! window); what's told is told by the first window that looks.
+//! window); a change is seen by the first window that looks, and told the whole app
+//! (`workbench_model::app_wide`): it shows on the window the user is in, a notification
+//! updated in place staying on the window showing it.
 
 pub mod settings;
 
@@ -23,7 +25,7 @@ use i18n::{t, tr};
 use web_engine::install::service::{self, Failure, Status, Updated};
 use workbench_model::{
     CommandContribution, CommandHandler, ModuleThreads, Notification, NotificationId,
-    ProjectContext, ProjectService, SettingsContribution, WorkbenchHost,
+    ProjectContext, ProjectService, SettingsContribution, WorkbenchHost, app_wide,
 };
 
 static MANIFEST: ModuleManifest = ModuleManifest {
@@ -128,7 +130,7 @@ fn first_to_see(seen: &AtomicU64, generation: u64) -> bool {
         && seen.swap(generation, Ordering::AcqRel) != generation
 }
 
-/// The windows, woken at each change of the install (the first one to look tells it).
+/// The windows, woken at each change of the install (the first one to look tells the app).
 #[derive(Debug)]
 struct Announcer;
 
@@ -143,7 +145,8 @@ impl ProjectService for Announcer {
         Vec::new()
     }
 
-    fn poll(&self, host: &mut dyn WorkbenchHost) -> bool {
+    /// Nothing changes in this window by itself: what's told is the app's to show.
+    fn poll(&self, _host: &mut dyn WorkbenchHost) -> bool {
         if !first_to_see(&SEEN, service::generation()) {
             return false;
         }
@@ -153,16 +156,18 @@ impl ProjectService for Announcer {
             declined: settings::config().declined,
             updated: service::updated(),
         };
-        show(host, told(|t| t.tell(look)))
+        show(told(|t| t.tell(look)));
+        false
     }
 }
 
-/// What's told shown by `host`: `true` when something was.
-fn show(host: &mut dyn WorkbenchHost, telling: Telling) -> bool {
+/// What's told, told the whole app (the window the user is in shows it, or the one showing
+/// its notification already): `true` when something was.
+fn show(telling: Telling) -> bool {
     match telling {
         Telling::Nothing => return false,
-        Telling::Show(notification) => host.update_notification(notification),
-        Telling::Dismiss(id) => host.dismiss_notification(id),
+        Telling::Show(notification) => app_wide::post_update(notification),
+        Telling::Dismiss(id) => app_wide::post_dismiss(id),
     }
     true
 }
@@ -353,11 +358,11 @@ impl CommandHandler for NotNow {
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
         let saved = host.user_settings().is_some_and(settings::decline);
         if let Some(id) = told(|t| t.notification.take()) {
-            host.dismiss_notification(id);
+            app_wide::post_dismiss(id);
         }
         // "Not offered again" only once it's kept (this run doesn't offer it again anyway).
         if saved {
-            host.notify(Notification::info(t("web_engine.declined")));
+            app_wide::post(Notification::info(t("web_engine.declined")));
         }
         true
     }
@@ -387,7 +392,7 @@ impl CommandHandler for Check {
 
     /// The look said in a notification only once it started, that notification then telling
     /// how it ended.
-    fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
+    fn run(&self, _host: &mut dyn WorkbenchHost) -> bool {
         if !service::start() {
             return true;
         }
@@ -395,7 +400,9 @@ impl CommandHandler for Check {
             t.checking = true;
             *t.notification.get_or_insert_with(NotificationId::new)
         });
-        host.update_notification(Notification::info(t("web_engine.checking")).with_id(id));
+        // Shown where the user asked (brought from another window showing it): how the
+        // look ended replaces it there.
+        app_wide::post_brought(Notification::info(t("web_engine.checking")).with_id(id));
         true
     }
 }
@@ -411,9 +418,9 @@ impl CommandHandler for Remove {
     }
 
     /// Said only when it's done (never while a download or an update is under way).
-    fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
+    fn run(&self, _host: &mut dyn WorkbenchHost) -> bool {
         if service::remove() {
-            host.notify(Notification::info(t("web_engine.removed")));
+            app_wide::post(Notification::info(t("web_engine.removed")));
         }
         true
     }

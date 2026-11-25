@@ -98,7 +98,7 @@ pub use tool_panel::{
 };
 pub use tool_strip::{ToolButton, ToolStrip, ToolStripStyle};
 pub use tooltip::{Tip, Tooltips};
-pub use top_bar::{ProjectTint, TopBar, TopBarHit, TopBarModel, project_initials};
+pub use top_bar::{ProjectTint, TopBar, TopBarAction, TopBarHit, TopBarModel, project_initials};
 pub use ui_components::scrollbar::{
     self as scrollbar, ScrollMetrics, Scrollbar, ScrollbarHover, ScrollbarLook, ScrollbarStyle,
     ScrollbarVisibility,

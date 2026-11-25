@@ -1,5 +1,8 @@
 use super::*;
 
+/// How long a lock let go may still read as held (another test's process starting).
+const LOCK_LET_GO: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// The app's version judging the starts.
 const APP: &str = "1.0.0";
 
@@ -72,7 +75,17 @@ fn cleaning_lets_go_only_what_isnt_needed() {
     assert_eq!(cleaned.versions, vec!["1.0.0.0-1".to_owned()]);
     assert!(cleaned.staging);
     drop(lock);
-    let cleaned = clean(&root);
+    // A process another test starts meanwhile holds a copy of the lock's file between its
+    // fork and its exec (a lock taken so stays while any copy is open): -2 then still reads
+    // as in use, as it should, for that moment.
+    let started = std::time::Instant::now();
+    let cleaned = loop {
+        let cleaned = clean(&root);
+        if !cleaned.versions.is_empty() || started.elapsed() > LOCK_LET_GO {
+            break cleaned;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
     assert_eq!(cleaned.versions, vec!["1.0.0.0-2".to_owned()]);
     for kept in ["1.0.0.0-3", "1.0.0.0-4", "1.0.0.0-5", PROFILE, STATE] {
         assert!(root.join(kept).exists(), "{kept} kept");

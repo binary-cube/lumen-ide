@@ -35,6 +35,7 @@ impl Workbench {
             back: self.back.iter().any(open),
             forward: self.forward.iter().any(open),
             lockable: tab.is_some_and(Tab::lockable),
+            keeps_on_top: self.chrome.can_keep_on_top,
         }
     }
 

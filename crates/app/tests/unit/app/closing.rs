@@ -412,3 +412,23 @@ fn an_update_quits_as_quit_does() {
     assert_eq!(app.workbench.tab_count(), 1);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The window's own close button (drawn by the app) closes as the system's does: the work
+/// still running asked about first, nothing closed meanwhile; with nothing running, the
+/// window goes after the event.
+#[test]
+fn the_bar_s_close_button_asks_about_the_work_still_running() {
+    let dir = project("running-button");
+    let busy = Busy::shared();
+    let mut app = busy_app(&busy, None);
+    assert!(app.open_project(&dir));
+    busy.runs("upload", Some(project_id(&app)));
+    app.mouse_result(crate::workbench::MouseResult::CloseWindow);
+    assert!(app.workbench.running_prompt_open(), "asked first");
+    assert!(app.pending.exit_request.is_none(), "the window stays meanwhile");
+    app.on_running_answer(workbench_model::CloseAnswer::Cancel);
+    busy.ends("upload");
+    app.mouse_result(crate::workbench::MouseResult::CloseWindow);
+    assert_eq!(app.pending.exit_request.take(), Some(Control::Close), "nothing runs: it goes");
+    let _ = std::fs::remove_dir_all(&dir);
+}

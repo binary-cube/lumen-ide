@@ -373,8 +373,15 @@ impl OverlaySlot for ContextMenuSlot {
 
     fn paint(&self, wb: &mut Workbench, text: &mut TextSystem, scene: &mut Scene) {
         let support = Arc::clone(&wb.support);
+        // The modules' switches and the app's own (the window kept on top).
         let states: Vec<(&'static str, Option<bool>)> = if wb.context_menu.is_open() {
-            support.commands.iter().map(|c| (c.spec.id.0, c.handler.switched(&*wb))).collect()
+            let app = crate::commands::SPECS.iter().map(|s| (s.id.0, wb.app_switched(s.id)));
+            support
+                .commands
+                .iter()
+                .map(|c| (c.spec.id.0, c.handler.switched(&*wb)))
+                .chain(app.filter(|(_, on)| on.is_some()))
+                .collect()
         } else {
             Vec::new()
         };

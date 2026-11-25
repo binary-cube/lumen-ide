@@ -100,6 +100,7 @@ const SECTIONS: &[MenuSectionSpec] = &[
     section(s::TOOLS_LANGUAGES, bar::TOOLS, 20),
     section(s::TOOLS_MAINTENANCE, bar::TOOLS, 30),
     section(s::WINDOW_ARRANGE, bar::WINDOW, 10).on(Platforms::MacOs),
+    section(s::WINDOW_LEVEL, bar::WINDOW, 15),
     section(s::WINDOW_TABS, bar::WINDOW, 20),
     section(s::WINDOW_CLOSE, bar::WINDOW, 30),
     section(s::WINDOW_FRONT, bar::WINDOW, 40).on(Platforms::MacOs),

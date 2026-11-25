@@ -15,6 +15,7 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
+mod app_notifications;
 mod autosave;
 mod backdrop;
 mod caret;

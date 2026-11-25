@@ -45,7 +45,9 @@ fn state(wb: &Workbench, id: &str) -> RowState {
 fn with_nothing_open_the_project_and_file_rows_are_greyed_out_with_why() {
     let wb = workbench();
     let context = wb.menu_context();
-    assert_eq!(context, command_model::MenuContext::default());
+    // Nothing open; the window itself can be kept on top (a test's window says so).
+    let bare = command_model::MenuContext { keeps_on_top: true, ..Default::default() };
+    assert_eq!(context, bare);
     // Git: every row, its window's too, for want of a project.
     for id in ["git.commit", "git.pull", "git.annotate", "git.compare_head", "git.rollback"] {
         assert_eq!(state(&wb, id), RowState::Disabled(Some(Requires::Project)), "{id}");

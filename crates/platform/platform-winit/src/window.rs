@@ -127,19 +127,19 @@ impl Window for WinitWindow {
     }
 
     fn pick_file(&self, start_dir: Option<&Path>) -> Option<PathBuf> {
-        let picked = dialog(start_dir).pick_file();
+        let picked = dialog(&self.window, start_dir).pick_file();
         self.after_native_dialog();
         picked
     }
 
     fn pick_folder(&self, start_dir: Option<&Path>) -> Option<PathBuf> {
-        let picked = dialog(start_dir).pick_folder();
+        let picked = dialog(&self.window, start_dir).pick_folder();
         self.after_native_dialog();
         picked
     }
 
     fn pick_save_path(&self, start_dir: Option<&Path>, file_name: &str) -> Option<PathBuf> {
-        let picked = dialog(start_dir).set_file_name(file_name).save_file();
+        let picked = dialog(&self.window, start_dir).set_file_name(file_name).save_file();
         self.after_native_dialog();
         picked
     }
@@ -274,6 +274,21 @@ impl Window for WinitWindow {
 
     fn is_maximized(&self) -> bool {
         self.window.is_maximized()
+    }
+
+    /// The window's level: over every other one, or among them (Windows: the layer it
+    /// owns goes with it, an owned window following its owner's).
+    fn set_always_on_top(&self, on: bool) {
+        use winit::window::WindowLevel;
+        let level = if on { WindowLevel::AlwaysOnTop } else { WindowLevel::Normal };
+        self.window.set_window_level(level);
+    }
+
+    /// Everywhere but Wayland (its compositor keeps the windows' order to itself).
+    fn can_keep_on_top(&self) -> bool {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        let raw = self.window.window_handle().map(|h| h.as_raw());
+        !matches!(raw, Ok(RawWindowHandle::Wayland(_)))
     }
 
     fn toggle_fullscreen(&self) {
@@ -434,8 +449,16 @@ impl Window for WinitWindow {
     }
 }
 
-fn dialog(start_dir: Option<&Path>) -> rfd::FileDialog {
+/// A file dialog for `window`. Outside macOS it's the window's child: in front of it even
+/// while it's kept on top (a dialog without one would open behind it, the app waiting on
+/// it). On macOS it stays a window of its own, as before: its open panel's level is over a
+/// window kept on top anyway.
+fn dialog(window: &winit::window::Window, start_dir: Option<&Path>) -> rfd::FileDialog {
     let dialog = rfd::FileDialog::new();
+    #[cfg(not(target_os = "macos"))]
+    let dialog = dialog.set_parent(window);
+    #[cfg(target_os = "macos")]
+    let _ = window;
     match start_dir {
         Some(dir) => dialog.set_directory(dir),
         None => dialog,

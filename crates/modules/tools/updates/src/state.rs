@@ -1,6 +1,7 @@
 //! The updates' state, one for the whole app: where it is (nothing yet, a version found,
-//! downloading it, ready to be put in place), whether it's looking, and what a window should
-//! tell next — taken by the first window that looks ([`take_tell`]), so the app says it once.
+//! downloading it, ready to be put in place), whether it's looking, and what's to tell next
+//! — taken by the first window that looks ([`take_tell`]), so the app says it once (on the
+//! window the user is in, or the one showing the update's notification: the app's).
 //! Every change is made under one lock from what's there then (a look's result never
 //! overwrites a download begun meanwhile, a download's end only its own); the windows are
 //! woken after the lock is let go.
@@ -84,13 +85,6 @@ struct State {
     failed: Option<String>,
     /// What's New is open: it shows the download itself (its notifications wait).
     notes_open: bool,
-    /// A look the user asked for, its spinner shown (the notification, since when): the
-    /// answer is told in the window showing it.
-    spinner: Option<(NotificationId, std::time::Instant)>,
-    /// When what's to tell was given (an unfocused window takes it only after a while).
-    told_at: Option<std::time::Instant>,
-    /// A wake asked for later (the app in the background: no window took it then).
-    rewake: Option<kernel::work::Later>,
     /// The staged update already put in the app's place (its folder): only a restart left.
     placed: Option<std::path::PathBuf>,
 }
@@ -120,10 +114,9 @@ pub fn tell(tell: Tell) {
     wake_all();
 }
 
-/// `tell` the next to tell, from now.
+/// `tell` the next to tell.
 fn set_tell(s: &mut State, tell: Tell) {
     s.tell = Some(tell);
-    s.told_at = Some(std::time::Instant::now());
 }
 
 /// A look begins (`manual`: the user asked): `false` if none should — one is going already
@@ -299,53 +292,10 @@ pub fn is_notes_open() -> bool {
     with(|s| s.notes_open)
 }
 
-/// How long the answer waits for the window showing the spinner (closed, or that window
-/// gone: then any window tells it).
-const SPINNER_HOLD: std::time::Duration = std::time::Duration::from_secs(10);
-/// How long what's to tell waits for the focused window (the app in the background: then
-/// any window tells it).
-const FOCUS_HOLD: std::time::Duration = std::time::Duration::from_millis(1500);
-
-/// The user asked for a look in a window showing notification `id` (its spinner).
-pub fn spinning(id: NotificationId) {
-    with(|s| s.spinner = Some((id, std::time::Instant::now())));
-}
-
-/// What to tell, taken by a window: the one showing the spinner if one was asked for (by
-/// `shows`: that window shows that notification), else the `focused` one — any once it
-/// waited ([`FOCUS_HOLD`]: the app in the background; a wake asked for then).
-pub fn take_tell_for(shows: impl Fn(NotificationId) -> bool, focused: bool) -> Option<Tell> {
-    let (spinner, told_at) = with(|s| (s.spinner, s.told_at));
-    if let Some((id, since)) = spinner
-        && since.elapsed() < SPINNER_HOLD
-    {
-        if !shows(id) {
-            return None;
-        }
-    } else if !focused && told_at.is_some_and(|at| at.elapsed() < FOCUS_HOLD) {
-        let waiting = with(|s| s.tell.is_some() && s.rewake.is_none());
-        if waiting {
-            let later = kernel::work::Later::run(crate::checker::WAITING, FOCUS_HOLD, || {
-                with(|s| s.rewake = None);
-                wake_all();
-            });
-            with(|s| s.rewake = later);
-        }
-        return None;
-    }
-    with(|s| {
-        let tell = s.tell.take();
-        if tell.is_some() {
-            s.spinner = None;
-        }
-        tell
-    })
-}
-
-/// What to tell, any window taking it (the tests').
-#[cfg(test)]
+/// What to tell, taken by the window that looks first (the app hands what it tells to
+/// the window the user is in, or the one showing the update's notification).
 pub fn take_tell() -> Option<Tell> {
-    take_tell_for(|_| true, true)
+    with(|s| s.tell.take())
 }
 
 /// The notification standing for the update: the one shown, or a new one (kept).

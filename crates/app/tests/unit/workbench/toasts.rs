@@ -176,3 +176,93 @@ fn the_stack_goes_to_the_edge_chosen() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Two windows as the app hands them what's told the whole app: each with when it last
+/// took the focus.
+fn hand_to(told: Vec<workbench_model::app_wide::Told>, windows: &mut [(&mut Workbench, u64)]) {
+    use crate::app_notifications::{Candidate, Handing, hand};
+    let handing = Handing {
+        look: |(wb, turn): &(&mut Workbench, u64), id| Candidate {
+            focus_turn: *turn,
+            shows: wb.notification_shown(id),
+        },
+        take: |(wb, _): &mut (&mut Workbench, u64), told| wb.take_app_told(told),
+    };
+    hand(told, windows, handing);
+}
+
+/// What's told the whole app shows once, on the window the user is in (focused, or focused
+/// last); its updates and its closing stay on the window showing it when the focus moves;
+/// a new one follows the focus; a project's own stays on its window; and a window looking
+/// at its own notifications never takes the app's.
+#[test]
+fn the_app_s_notifications_show_where_the_user_is() {
+    use workbench_model::app_wide::Told;
+    let (mut a, dir_a, mut text) = opened("app-wide-a");
+    let (mut b, dir_b, _) = opened("app-wide-b");
+    let offer = Notification::info("an update").with_id(workbench_model::NotificationId::new());
+    // `a` focused last (the app in the background: still the one the user left).
+    hand_to(vec![Told::Show(offer.clone())], &mut [(&mut a, 2), (&mut b, 1)]);
+    assert!(a.notification_shown(offer.id) && !b.notification_shown(offer.id), "once, on a");
+    // The focus moves to `b`: its progress stays on `a`, where it shows.
+    let progress = Notification::progress("downloading").with_id(offer.id);
+    hand_to(vec![Told::Update(progress)], &mut [(&mut a, 2), (&mut b, 3)]);
+    assert_eq!(
+        a.data.notifications.get(offer.id).map(|t| t.notification.kind),
+        Some(workbench_model::NotificationKind::Progress),
+        "updated in place on a"
+    );
+    assert!(!b.notification_shown(offer.id));
+    // A new one goes where the user is now.
+    let other = Notification::info("the engine is ready");
+    hand_to(vec![Told::Show(other.clone())], &mut [(&mut a, 2), (&mut b, 3)]);
+    assert!(b.notification_shown(other.id) && !a.notification_shown(other.id));
+    // Closed: where it shows.
+    hand_to(vec![Told::Dismiss(offer.id)], &mut [(&mut a, 2), (&mut b, 3)]);
+    assert!(!a.notification_shown(offer.id));
+    // A project's own (its module's thread): on its window only, whichever has the focus.
+    let own = Notification::info("pushed");
+    a.data.notifier.show(own.clone());
+    paint(&mut a, &mut text);
+    paint(&mut b, &mut text);
+    assert!(a.notification_shown(own.id) && !b.notification_shown(own.id));
+    // What's told the app waits for the app to hand it: a window painting never takes it.
+    let stray = Notification::info("kept awake");
+    workbench_model::app_wide::post(stray.clone());
+    paint(&mut b, &mut text);
+    assert!(!b.notification_shown(stray.id));
+    let waiting = workbench_model::app_wide::take_told();
+    assert!(waiting.iter().any(|t| t.id() == stray.id), "still the app's to hand");
+    let _ = (std::fs::remove_dir_all(dir_a), std::fs::remove_dir_all(dir_b));
+}
+
+/// A look the user asks for in one window while the app's notification shows in another:
+/// it comes to the window they asked in (gone from the other), and its answer follows it
+/// there.
+#[test]
+fn what_the_user_asks_for_answers_in_their_window() {
+    use workbench_model::app_wide::Told;
+    let (mut a, dir_a, _) = opened("asked-a");
+    let (mut b, dir_b, _) = opened("asked-b");
+    let id = workbench_model::NotificationId::new();
+    // Shown in `b` (the user was there).
+    hand_to(
+        vec![Told::Show(Notification::info("a newer version").with_id(id))],
+        &mut [(&mut a, 1), (&mut b, 2)],
+    );
+    assert!(b.notification_shown(id));
+    // The user checks from `a`.
+    let checking = Notification::progress("looking").with_id(id);
+    hand_to(vec![Told::Bring(checking)], &mut [(&mut a, 3), (&mut b, 2)]);
+    assert!(a.notification_shown(id), "where they asked");
+    assert!(!b.notification_shown(id), "gone from the other");
+    // The answer: in `a`, even with the focus back on `b`.
+    let answer = Notification::success("up to date").with_id(id);
+    hand_to(vec![Told::Update(answer)], &mut [(&mut a, 3), (&mut b, 4)]);
+    assert_eq!(
+        a.data.notifications.get(id).map(|t| t.notification.title.clone()).as_deref(),
+        Some("up to date")
+    );
+    assert!(!b.notification_shown(id));
+    let _ = (std::fs::remove_dir_all(dir_a), std::fs::remove_dir_all(dir_b));
+}

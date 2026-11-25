@@ -9,6 +9,11 @@
 - The cursor comes from the part under the mouse (`Pointer` on what's pressed, `Text` on
   text, `ResizeVertical` / `ResizeHorizontal` on a separator).
 - A double click is a press with `clicks == 2` (a chart's: all of X again).
+- What makes the window go (its close button, its minimize and maximize) acts on the
+  release over the button pressed, as the system's own buttons: the press only arms it,
+  let go elsewhere it does nothing. A closing asked while the button is still down (a menu
+  row run at its press) waits for the release: gone at the press, the window would let the
+  release fall on what's under it, another window or program, as a click.
 
 ## Keys and focus
 

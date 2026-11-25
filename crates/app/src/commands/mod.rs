@@ -52,6 +52,8 @@ pub const EDITOR_FULL_WIDTH: CommandId = CommandId("view.editor_full_width");
 pub const EDITOR_FULL_HEIGHT: CommandId = CommandId("view.editor_full_height");
 /// Lines longer than a view go on in rows under them, in every view showing text.
 pub const WORD_WRAP: CommandId = CommandId("view.word_wrap");
+/// This window kept above every other one (other programs' too), or back among them.
+pub const KEEP_ON_TOP: CommandId = CommandId("window.keep_on_top");
 /// The app's menus in the drawer from the window's bar (where it has the button: Windows,
 /// Linux; macOS when asked for).
 pub const MENU: CommandId = CommandId("view.menu");
@@ -326,6 +328,9 @@ pub const SPECS: &[CommandSpec] = &[
     spec(EDITOR_FULL_WIDTH, "Editor Area: All the Width", at(s::VIEW_SCREEN, 30), &[]),
     spec(EDITOR_FULL_HEIGHT, "Editor Area: All the Height", at(s::VIEW_SCREEN, 40), &[]),
     spec(WORD_WRAP, "Word Wrap", at(s::VIEW_ZOOM, 40), &["Alt+Z"]),
+    // No chord of its own (none is free in every preset): the top bar's pin, the menus,
+    // the palette.
+    spec(KEEP_ON_TOP, "Keep Window on Top", at(s::WINDOW_LEVEL, 10), &[]),
     // ⌘⇧T is "Reopen Closed Tab"; with the terminal focused, it opens a terminal tab.
     spec(SWITCH_THEME, "Switch Theme", at(s::APPEARANCE_THEME, 10), &["CmdOrCtrl+Alt+T"]),
     spec(CLOSE_NOTIFICATIONS, "Close Notifications", at(s::VIEW_NOTIFICATIONS, 20), &[]),
@@ -395,6 +400,7 @@ const REQUIRES: &[(CommandId, &[Requires])] = {
         (TAB_CLOSE_OTHERS, &[R::OtherTabs]),
         (TAB_CLOSE_SAVED, &[R::Tab]),
         (TAB_CLOSE_ALL, &[R::Tab]),
+        (KEEP_ON_TOP, &[R::KeepOnTop]),
     ]
 };
 

@@ -48,7 +48,10 @@ impl Workbench {
             self.disabled_rows(&context).into_iter().partition(|(_, missing)| {
                 matches!(missing, Some(command_model::Requires::Language(_)))
             });
-        let menus = crate::commands::drawer_menus(&|id| elsewhere.iter().any(|(e, _)| e == id));
+        // A row that turns something on or off shows how it stands (the window on top).
+        let switched = |id: &str| crate::commands::by_id(id).and_then(|c| self.command_switched(c));
+        let menus =
+            crate::commands::drawer_menus(&|id| elsewhere.iter().any(|(e, _)| e == id), &switched);
         let disabled = disabled
             .into_iter()
             .map(|(id, missing)| (id, crate::commands::disabled_hint(missing)))

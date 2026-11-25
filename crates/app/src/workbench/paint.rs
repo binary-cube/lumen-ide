@@ -373,11 +373,17 @@ impl Workbench {
     fn paint_top_bar(&mut self, text: &mut TextSystem, scene: &mut Scene) {
         let current = self.current_project();
         let menu_open = self.home.projects_menu.is_open();
-        // Its buttons on the right, as registered (search, settings).
-        let actions: Vec<(&'static str, icons::IconId)> = self
+        // Its buttons on the right, as registered (search, settings, on top): a switch's
+        // state is its command's.
+        let actions: Vec<ui_workbench::TopBarAction> = self
             .docked(ui_workbench::Dock::Top)
             .iter()
-            .map(|t| (t.id(), self.icons.id_or_file(t.icon())))
+            .map(|t| ui_workbench::TopBarAction {
+                id: t.id(),
+                icon: self.icons.id_or_file(t.icon()),
+                group: t.group(),
+                on: self.tool_switched(t.as_ref()),
+            })
             .collect();
         // What the modules say of this window's project (its shortcut).
         let badge = self

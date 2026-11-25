@@ -179,8 +179,12 @@ impl Workbench {
             .is_some_and(|c| c.handler.enabled(self))
     }
 
-    /// How the setting command `id` turns on or off stands (`None`: a plain action).
-    fn command_switched(&self, id: command_model::CommandId) -> Option<bool> {
+    /// How the setting command `id` turns on or off stands (`None`: a plain action): the
+    /// app's own, or a module's.
+    pub(super) fn command_switched(&self, id: command_model::CommandId) -> Option<bool> {
+        if let Some(on) = self.app_switched(id) {
+            return Some(on);
+        }
         let command = self.support.commands.iter().find(|c| c.spec.id == id)?;
         command.handler.switched(self)
     }
@@ -265,6 +269,15 @@ impl Workbench {
         ToolButton { id, icon, active, bottom, badge, group, tone: tool.active_tone() }
     }
 
+    /// How the button of a tool window that turns something on or off stands: its toggle
+    /// command's state (`None`: a plain button).
+    pub(super) fn tool_switched(
+        &self,
+        tool: &dyn ui_workbench::ToolWindowProvider,
+    ) -> Option<bool> {
+        tool.toggle_command().and_then(|c| self.command_switched(command_model::CommandId(c)))
+    }
+
     /// The count a module put on tool window `id`'s button.
     pub(super) fn tool_badge(&self, id: &str) -> Option<&workbench_model::ToolBadge> {
         self.data.tool_badges.iter().find(|(t, _)| *t == id).map(|(_, b)| b)
@@ -281,6 +294,10 @@ impl Workbench {
     /// Command `id` can run now: a module's, as it says; the app's own, always.
     fn ready(&self, id: &'static str) -> bool {
         let id = command_model::CommandId(id);
+        // What the window itself can't do (kept on top on Wayland): no button for it.
+        if !self.window_allows(id) {
+            return false;
+        }
         // A workbench command a module implements: only with that module.
         if workbench_model::IMPLEMENTED.contains(&id) {
             return self.support.implementations.iter().any(|c| c.id == id);

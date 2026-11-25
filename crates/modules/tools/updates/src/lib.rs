@@ -8,8 +8,11 @@
 //! app puts it in its place and starts again with the windows it had. Help › Check for
 //! Updates… asks at any time; Skip This Version stops it being offered (a newer one is).
 //!
-//! The state is the app's, one for every window ([`state`]); what's told is told by the
-//! first window that looks. Its settings are on their own page ([`settings`]).
+//! The state is the app's, one for every window ([`state`]); what's told is seen by the
+//! first window that looks and told the whole app (`workbench_model::app_wide`): on the
+//! window the user is in, its notification updated in place where it shows (a look the
+//! user asked for answered where its spinner is). Its settings are on their own page
+//! ([`settings`]).
 
 mod checker;
 pub mod settings;
@@ -102,18 +105,18 @@ impl ProjectService for Announcer {
         vec![kernel::Subscription::on_end(move || state::remove_wake(id))]
     }
 
-    fn poll(&self, host: &mut dyn WorkbenchHost) -> bool {
-        let focused = host.window_focused();
-        let Some(tell) = state::take_tell_for(|id| host.shows_notification(id), focused) else {
-            return false;
-        };
-        show(host, tell);
-        true
+    /// Nothing changes in this window by itself: what's told is the app's to show.
+    fn poll(&self, _host: &mut dyn WorkbenchHost) -> bool {
+        if let Some(tell) = state::take_tell() {
+            show(tell);
+        }
+        false
     }
 }
 
-/// `tell` shown: the update's own notification (one, updated as it goes), or a word.
-fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
+/// `tell` told the whole app: the update's own notification (one, updated as it goes,
+/// where it shows), or a word.
+fn show(tell: Tell) {
     // What's New open shows the download itself: no notification over it (told once it
     // closes, if the download still goes on or is ready).
     if state::is_notes_open() && matches!(tell, Tell::Progress | Tell::Ready) {
@@ -184,7 +187,7 @@ fn show(host: &mut dyn WorkbenchHost, tell: Tell) {
             )),
         },
     };
-    host.update_notification(notification);
+    workbench_model::app_wide::post_update(notification);
 }
 
 /// The version found: downloaded (Update), or — ready — put in the app's place, the app
@@ -250,10 +253,10 @@ pub(crate) fn skip(host: &mut dyn WorkbenchHost) {
     // A download running stops: the skipped version is never made ready.
     state::let_go();
     if let Some(id) = state::forget_notification() {
-        host.dismiss_notification(id);
+        workbench_model::app_wide::post_dismiss(id);
     }
     let text = i18n::tr!("updates.skipped", version = version.to_string());
-    host.notify(Notification::info(text));
+    workbench_model::app_wide::post(Notification::info(text));
 }
 
 /// [`CHECK`]: GitHub asked now (up to date, a failure: said too).
@@ -262,12 +265,13 @@ struct Check;
 impl CommandHandler for Check {
     /// Looked for at once, a spinner meanwhile: the update's notification, replaced by the
     /// answer (found, up to date, or what went wrong).
-    fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
+    fn run(&self, _host: &mut dyn WorkbenchHost) -> bool {
         if !matches!(state::phase(), Phase::Downloading { .. } | Phase::Ready { .. }) {
+            // Shown where the user asked (brought from another window showing it): its
+            // answer replaces it there.
             let (id, _) = state::notification();
-            host.update_notification(Notification::progress(t("updates.checking")).with_id(id));
-            // The answer told here, where the spinner is (not in another window).
-            state::spinning(id);
+            let checking = Notification::progress(t("updates.checking")).with_id(id);
+            workbench_model::app_wide::post_brought(checking);
         }
         checker::check(true);
         true

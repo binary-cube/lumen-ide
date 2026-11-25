@@ -48,6 +48,9 @@ impl Workbench {
     ) -> MouseResult {
         self.drag_unit = None;
         self.tooltips.hide();
+        // A window's button pressed before and never let go here (the focus went, a page
+        // took the release): forgotten, so no later release fires it.
+        self.cancel_window_button();
         // What goes when the mouse presses elsewhere goes (the editor's cards); a floating
         // window under the mouse (the hover card, a notification, the completion list)
         // takes the click on it, over everything (modals too).
