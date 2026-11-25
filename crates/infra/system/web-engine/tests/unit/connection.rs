@@ -33,6 +33,9 @@ impl Engine for Fake {
     }
 }
 
+/// How long a test host waits for its channel to be free.
+const CLAIM_WAIT: Duration = Duration::from_secs(5);
+
 /// A host on its own thread until `stop`.
 fn host(
     channel: &Channel,
@@ -48,7 +51,16 @@ fn host_on(
     (closed, stop): (Arc<AtomicU64>, Arc<AtomicBool>),
     adapter: Option<Adapter>,
 ) -> std::thread::JoinHandle<()> {
-    let claim = channel.claim().unwrap().expect("free");
+    // Free soon: whoever tried to claim it at the same moment (a client checking whether a
+    // host runs) lets it go at once, slower under load.
+    let started = std::time::Instant::now();
+    let claim = loop {
+        if let Some(claim) = channel.claim().unwrap() {
+            break claim;
+        }
+        assert!(started.elapsed() < CLAIM_WAIT, "free");
+        std::thread::sleep(Duration::from_millis(5));
+    };
     let mut server = Server::start(claim, Lifetime { idle: Duration::from_secs(60) }).unwrap();
     std::thread::spawn(move || {
         let mut engine = Fake { closed, adapter };
