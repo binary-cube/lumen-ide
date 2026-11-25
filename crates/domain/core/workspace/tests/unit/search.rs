@@ -181,3 +181,15 @@ fn a_folder_s_marks_are_what_was_typed() {
     assert!(folder_marks("src/Controller", "src/").is_empty());
     assert!(folder_marks("src", "").is_empty());
 }
+
+/// A file typed with its folder (`docs/guide.md`): found, its whole name marked (the
+/// project search lists it by name), ahead of files where the letters are only scattered.
+#[test]
+fn a_file_typed_with_its_folder_is_found_with_its_whole_name() {
+    let files: Vec<String> =
+        ["docs/build.sh", "docs/guide.md", "docs/README.md"].map(String::from).to_vec();
+    let found = search_files(&files, "docs/guide.md", 10);
+    let first = found.first().expect("found");
+    assert_eq!(first.path, "docs/guide.md");
+    assert_eq!(first.name_positions.len(), "guide.md".len());
+}

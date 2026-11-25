@@ -19,7 +19,7 @@ use crate::transfer::Transfer;
 /// Our build of the engine for one Chromium: raised for every package made again with the
 /// same Chromium (a fix of ours, another configuration), back to 1 with a new Chromium. The
 /// engine's version is Chromium's, then this (`156.0.8078.100-2`).
-pub const BUILD: u32 = 1;
+pub const BUILD: u32 = 2;
 
 /// The engine's version told to the apps and written in its package: Chromium's, then ours.
 pub fn version() -> String {
@@ -358,7 +358,11 @@ fn send_ime(host: &BrowserHost, ime: Ime) {
 
 /// One of CEF's event flags, as its events carry them.
 fn flag(flag: sys::cef_event_flags_t) -> u32 {
-    flag.0
+    // The enum's value is an `i32` on Windows (C's enums there), a `u32` elsewhere; a flag is
+    // never negative, its bits are kept as they are.
+    #[allow(clippy::unnecessary_cast, clippy::cast_sign_loss)]
+    let bits = flag.0 as u32;
+    bits
 }
 
 /// CEF's event flags for the keys held (`cef_event_flags_t`).

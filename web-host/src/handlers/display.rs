@@ -17,7 +17,7 @@ wrap_display_handler! {
         fn on_cursor_change(
             &self,
             _browser: Option<&mut Browser>,
-            _cursor: *mut u8,
+            _cursor: SystemCursor,
             type_: CursorType,
             _custom_cursor_info: Option<&CursorInfo>,
         ) -> ::std::os::raw::c_int {
@@ -110,3 +110,12 @@ wrap_accessibility_handler! {
         }
     }
 }
+
+/// The system's own cursor CEF would set (never used: the app draws the pointer it asks), of
+/// the type each system's bindings give it.
+#[cfg(target_os = "macos")]
+type SystemCursor = *mut u8;
+#[cfg(windows)]
+type SystemCursor = cef::sys::HCURSOR;
+#[cfg(not(any(target_os = "macos", windows)))]
+type SystemCursor = std::os::raw::c_ulong;

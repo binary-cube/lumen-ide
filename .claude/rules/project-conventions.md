@@ -16,7 +16,7 @@ you're about to do; when two differ, the more specific wins, and `CLAUDE.md` ove
 | The log (`tracing`, fields, levels, secrets) | [logging.md](logging.md) |
 | Privacy: no telemetry, anonymous recordings, consent | [privacy.md](privacy.md) |
 | Working on a step (plans, gate, commits, review, snapshots, replies) | [workflow.md](workflow.md) |
-| Features with rules of their own (HTTP client, diagrams) | [features.md](features.md) |
+| Features with rules of their own (HTTP client, diagrams, the two releases: app and web engine) | [features.md](features.md) |
 
 When the user asks for the same thing a second time, it becomes a rule in the file of its
 topic (a new file, linked from here, when no topic fits).

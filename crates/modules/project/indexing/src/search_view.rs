@@ -227,7 +227,8 @@ fn search(queries: &dyn ProjectQueries, asked: &Asked) -> Searched {
         hits
     };
     // By name (not at a line): the files whose own name has every letter typed, in order
-    // (`api.doc.json`, `apidoc`), and the folders; at most FOLDERS rows of both.
+    // (`api.doc.json`, `apidoc`) — or, typed as a path, its last part — and the folders; at
+    // most FOLDERS rows of both.
     let (named, folders) = if name.is_empty() || place.is_some() {
         (Vec::new(), Vec::new())
     } else {
@@ -235,11 +236,14 @@ fn search(queries: &dyn ProjectQueries, asked: &Asked) -> Searched {
         let more = if scope.is_some() { 8 } else { 1 };
         let query = PathQuery { text: name, folders: FOLDERS * more, files: NAMED * 4 * more };
         let found = queries.paths(&query);
-        let letters = name.chars().filter(|c| !c.is_whitespace()).count();
+        // A path typed (`docs/guide.md`): its folders are matched in the file's path (the
+        // search finds only files whose path has every letter), its last part in the name.
+        let own = name.rsplit('/').next().unwrap_or(name);
+        let letters = own.chars().filter(|c| !c.is_whitespace()).count();
         let named: Vec<_> = found
             .files
             .into_iter()
-            .filter(|m| m.name_positions.len() == letters && taken(&m.path))
+            .filter(|m| letters > 0 && m.name_positions.len() == letters && taken(&m.path))
             .take(NAMED)
             .collect();
         let room = FOLDERS.saturating_sub(named.len()).max(2);

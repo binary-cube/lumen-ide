@@ -60,5 +60,8 @@ Part of the project's rules: [index](project-conventions.md). Related: [modules]
   the crate's `format`, `ds`, `kernel`); found in two places, it moves to one.
 - **Reuse before writing**: a view is built from what [ui-components](ui-components.md)
   has; what a component lacks is added to the component, for everyone.
+- **Agnostic examples (asked 2026-11-25):** a comment, a doc or a test never names the
+  user's own files, folders, projects or identifiers (what they reported a bug with): a
+  neutral example of the same shape (`docs/guide.md`, `FEATURE_ENABLED`) says the same.
 - **What a user reads is never in the code**: every label, tooltip, error shown goes
   through `i18n` (`ro` and `en` together).

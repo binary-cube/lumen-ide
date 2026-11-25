@@ -15,11 +15,15 @@ impl ProjectQueries for Fake {
         } else {
             Vec::new()
         };
-        // The letters typed, found in the file's own name (as the real search marks them).
-        let files = match "a.php".find(query.text) {
+        // The letters typed, found in the file's path; those in its own name marked (as the
+        // real search marks them: a path typed matches its folders too).
+        const PATH: &str = "src/a.php";
+        const NAME_AT: usize = 4;
+        let files = match PATH.find(query.text) {
             Some(at) if query.files > 0 => {
-                let name_positions = (at..at + query.text.len()).collect();
-                vec![FileMatch { path: "src/a.php".into(), score: 1, name_positions }]
+                let marked = (at..at + query.text.len()).filter(|i| *i >= NAME_AT);
+                let name_positions = marked.map(|i| i - NAME_AT).collect();
+                vec![FileMatch { path: PATH.into(), score: 1, name_positions }]
             }
             _ => Vec::new(),
         };
@@ -192,6 +196,14 @@ fn a_file_by_its_name_comes_first_and_opens() {
             column: None
         })
     );
+    // Typed as a path (its folder, then its name): by name too.
+    let mut view = opened(kernel::ProjectId::new(), "/named", None);
+    view.text_input("src/a.php");
+    assert_eq!(view.panel.named(0).map(|m| m.path.as_str()), Some("src/a.php"));
+    // A folder alone (`src/`): no file by name.
+    let mut view = opened(kernel::ProjectId::new(), "/named", None);
+    view.text_input("src/");
+    assert_eq!(view.panel.named(0), None);
     // Only some of its letters in its name (the rest in its folders): not by name.
     let mut view = opened(kernel::ProjectId::new(), "/named", None);
     view.text_input("needle");
