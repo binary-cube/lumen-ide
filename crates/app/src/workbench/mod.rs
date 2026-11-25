@@ -680,6 +680,9 @@ pub struct Workbench {
     /// The pictures drawn in place of the pages a window is open over (page id, picture):
     /// the app's, given after each frame they change.
     page_pictures: Vec<(u128, render_api::ImageData)>,
+    /// The windows over the editor were drawn last on the layer over the system's web pages
+    /// (nothing of the window under them there: a toast can't blur it).
+    overlays_floating: bool,
     /// The popups over the pages the app draws.
     page_popups: Vec<PagePopup>,
     /// The accessibility trees of the pages the app draws (while a screen reader runs).

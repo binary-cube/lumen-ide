@@ -50,9 +50,11 @@ Each card is an `Alert` named by its title, its detail as its value; its buttons
 
 ## Look
 
-- The glass card is nearly opaque (`GLASS_SURFACE` 0.94) over a light blur: a hint of
-  what's under it shows through, but its text reads clearly over a busy page's text too
-  (on purpose).
+- The card is frosted glass: what's under it blurred strongly (`GLASS_BLUR` 28 logical
+  pixels: colors, never text that reads), a surface over it (`GLASS_SURFACE` 0.88) through
+  which the blur shows; its text reads clearly over a busy page too.
+- Where nothing can be blurred under it (`StackPlace::backdrop` false: drawn on the layer
+  over the system's web pages, which aren't the window's pixels), the card is opaque.
 
 ## Cost
 

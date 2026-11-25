@@ -147,7 +147,9 @@ impl Workbench {
         let bottom = self.size.height as f32 - StatusBar::height(s) - gap;
         let area = Rect::new(self.card.min_x(), top, self.card.size.width, (bottom - top).max(0.0));
         let position = self.toast_position.unwrap_or_else(crate::toasts::position);
-        ui_workbench::toast::StackPlace { area, position, scale: s }
+        // On the layer over the system's pages there's nothing under the cards to blur.
+        let backdrop = !self.overlays_floating;
+        ui_workbench::toast::StackPlace { area, position, scale: s, backdrop }
     }
 
     /// What the views told the user (the active tab's, the modal's), shown.

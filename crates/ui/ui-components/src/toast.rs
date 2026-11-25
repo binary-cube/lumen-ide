@@ -195,12 +195,21 @@ pub fn layout_card(text: &mut TextSystem, ctx: &Ctx<'_>, toast: &Toast, width: f
     }
 }
 
-/// How much of the card's surface covers what's under it: a hint of it shows through, its
-/// text always reads clearly (over a busy page's text too).
-const GLASS_SURFACE: f32 = 0.94;
+/// How much of the card's surface covers what's under it, blurred ([`GLASS_BLUR`]): the
+/// frosted glass shows, the card's text always reads clearly (over a busy page's too).
+const GLASS_SURFACE: f32 = 0.88;
 
-/// How much what's under a card is blurred (logical pixels).
-const GLASS_BLUR: f32 = 18.0;
+/// How much what's under a card is blurred (logical pixels): enough that no text under it
+/// reads through, only its colors.
+const GLASS_BLUR: f32 = 28.0;
+
+/// Where a card is drawn and how: its rectangle, what's under the mouse, whether what's
+/// under it can be blurred ([`StackPlace::backdrop`]).
+struct CardAt {
+    rect: Rect,
+    hover: Option<ToastHit>,
+    backdrop: bool,
+}
 
 /// The progress bar's thickness and the space over it (logical pixels).
 const PROGRESS: f32 = 3.0;
@@ -231,6 +240,10 @@ pub struct StackPlace {
     pub area: Rect,
     pub position: ToastPosition,
     pub scale: f32,
+    /// What's under the stack can be blurred through its cards (frosted glass); `false`:
+    /// drawn on a layer of its own over the system's web pages, nothing under it to blur —
+    /// the cards are then opaque, never a clear pane over a page's text.
+    pub backdrop: bool,
 }
 
 /// The stack as drawn: its layout (kept until the content or the width change), where
@@ -336,7 +349,8 @@ impl ToastStack {
                 }
             };
             let placed = ui_kit::access::group(alert, || {
-                paint_card((layer, text, icons), &ctx, (card, toast), (rect, self.hover), ring)
+                let at = CardAt { rect, hover: self.hover, backdrop: place.backdrop };
+                paint_card((layer, text, icons), &ctx, (card, toast), at, ring)
             });
             self.placed.push(placed);
         }
@@ -438,7 +452,7 @@ fn paint_card(
     (layer, text, icons): (&mut Layer, &mut TextSystem, &icons::Icons),
     ctx: &Ctx<'_>,
     (card, toast): (&CardLayout, &Toast),
-    (rect, hover): (Rect, Option<ToastHit>),
+    CardAt { rect, hover, backdrop }: CardAt,
     ring: Option<(&mut ProgressRing, u16)>,
 ) -> Placed {
     let p = ctx.palette;
@@ -446,10 +460,15 @@ fn paint_card(
     let color = kind_color(card.kind, p);
     let dark = crate::tag_colors::is_dark(p);
     // Frosted glass: what's under the card blurred, a translucent surface over it (the
-    // blur seen through), a soft shadow.
+    // blur seen through), a soft shadow. Nothing under it to blur: an opaque card.
     let corner = px(radius::LG);
-    layer.backdrop_blur_rounded(rect, px(GLASS_BLUR), ctx.opacity, corner);
-    let glass = p.popup_background.with_alpha(p.popup_background.a * GLASS_SURFACE);
+    let surface = if backdrop {
+        layer.backdrop_blur_rounded(rect, px(GLASS_BLUR), ctx.opacity, corner);
+        GLASS_SURFACE
+    } else {
+        1.0
+    };
+    let glass = p.popup_background.with_alpha(surface);
     ds::surface_with(layer, ctx, rect, Elevation::Medium, radius::LG, glass);
     glow(layer, ctx, rect, color, if dark { 0.16 } else { 0.10 });
     // The icon in its tinted square (a spinner for work in progress).

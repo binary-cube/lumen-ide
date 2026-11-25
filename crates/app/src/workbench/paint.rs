@@ -85,6 +85,7 @@ impl Workbench {
         self.emphasize(scene, emphasis);
         // The overlays, bottom up: the stack's order, the one input follows — on the layer
         // over the pages when there's one.
+        self.overlays_floating = floating.is_some();
         let top = match floating {
             Some(floating) => floating,
             None => scene,

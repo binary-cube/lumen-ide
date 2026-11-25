@@ -86,6 +86,7 @@ impl Workbench {
             status_popover: Default::default(),
             page_pictures: Vec::new(),
             page_popups: Vec::new(),
+            overlays_floating: false,
             page_access: Vec::new(),
             page_holes_ok: false,
             resource_pills: Default::default(),

@@ -13,7 +13,12 @@ use super::*;
 const SCALE: f32 = 2.0;
 
 fn place(position: ToastPosition, width: f32) -> StackPlace {
-    StackPlace { area: Rect::new(0.0, 100.0, width, 1200.0), position, scale: SCALE }
+    StackPlace {
+        area: Rect::new(0.0, 100.0, width, 1200.0),
+        position,
+        scale: SCALE,
+        backdrop: true,
+    }
 }
 
 /// A stack with `notifications`, their transitions over.
@@ -280,4 +285,38 @@ fn a_notification_is_told_as_an_alert() {
     assert_eq!(alerts.len(), 1);
     assert_eq!(&*alerts[0].name, "Saved.");
     assert!(!frame.nodes().iter().any(|n| n.role == Role::Label && &*n.name == "Saved."));
+}
+
+/// Over something it can blur, a card is frosted glass (a blur under a translucent
+/// surface); on the layer over the system's pages, with nothing under it, it's opaque and
+/// blurs nothing (never a clear pane over a page's text).
+#[test]
+fn a_card_is_frosted_where_it_can_blur_else_opaque() {
+    let mut text = TextSystem::new();
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let shown = stack(vec![Notification::warning("Deleted 3 files")]);
+    for backdrop in [true, false] {
+        let mut stack = ToastStack::default();
+        let mut scene = Scene::default();
+        let painter =
+            Painter { text: &mut text, scene: &mut scene, palette: &palette, icons: &icons };
+        let place = StackPlace { backdrop, ..place(ToastPosition::BottomRight, 1600.0) };
+        stack.paint(painter, &shown, place);
+        let blurs = scene.layers().iter().map(|l| l.blurs.len()).sum::<usize>();
+        assert_eq!(blurs > 0, backdrop, "blurred only where something is under it");
+        let card = stack.bounds().unwrap();
+        let surface = scene
+            .layers()
+            .iter()
+            .flat_map(|l| l.quads.iter())
+            .filter(|q| q.bounds == card)
+            .map(|q| q.color.a)
+            .fold(0.0_f32, f32::max);
+        if backdrop {
+            assert!(surface < 1.0, "translucent over its blur: {surface}");
+        } else {
+            assert!(surface >= 0.999, "opaque with nothing to blur: {surface}");
+        }
+    }
 }
