@@ -65,7 +65,8 @@ every caller has today: a new option never moves a pixel where it isn't asked fo
 | A bar whose items may not fit (an "…" menu) | `overflow` |
 | A slider over stops, a color picker, a date range, a multi-line field | `slider`, `color_picker`, `date_range`, `multiline` |
 | Work prepared off the UI thread for a click | `deferred::Deferred` |
-| Smooth transitions | `anim` |
+| Smooth transitions (`Tween`, `Appear`); drawing the eye a moment (`Attention`: fades in, pulses, holds still with no frames, fades out when let go) | `anim` |
+| A tab tinted to draw the eye (a theme's tone, animated) | `WorkbenchHost::tint_tab` (the app's tabs: never drawn over by a module) |
 | A settings form inside a panel | `form` |
 | Side panels and their buttons | `tool_window`, `tool_panel` (registered, never hard-coded) |
 

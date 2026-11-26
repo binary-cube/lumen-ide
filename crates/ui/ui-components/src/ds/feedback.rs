@@ -465,20 +465,47 @@ pub fn tooltip_lines(
     out
 }
 
+/// What a tooltip shows and where: the element it's about, its label and shortcut, the
+/// area it stays in, and where the mouse is (its cursor never covers the arrow).
+#[derive(Debug, Clone, Copy)]
+pub struct TooltipSpec<'a> {
+    pub anchor: Rect,
+    pub label: &'a str,
+    pub shortcut: Option<&'a str>,
+    pub bounds: Rect,
+    /// The mouse's point (physical), when the mouse is what shows it.
+    pub pointer: Option<Point>,
+}
+
+/// Where a tooltip was drawn: its pill, and its arrow's box between the pill and the
+/// element (`None`: no room for one) — what must show over a page of the web engine.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TooltipShape {
+    pub pill: Rect,
+    pub arrow: Option<Rect>,
+}
+
+/// The mouse's cursor as drawn by the system from its point (logical pixels): it reaches
+/// this far right and down. A tooltip's arrow and pill keep clear of it.
+const CURSOR_W: f32 = 14.0;
+const CURSOR_H: f32 = 22.0;
+/// The room kept between the cursor and a tooltip's arrow (logical pixels).
+const CURSOR_CLEAR: f32 = 3.0;
+
 /// A tooltip: the label (and optionally the shortcut, in a key) in a floating pill,
 /// below the `anchor` element (above if it doesn't fit), with an arrow pointing at it; stays
-/// within `bounds`. A label of several lines (`\n`) shows them one under the other, the
-/// pill as wide as the widest and as tall as all of them; a line too wide wraps. Returns
-/// the pill's rect.
+/// within `bounds`. The mouse's cursor never hides the arrow: under it, the arrow moves to
+/// the cursor's left (on the element still), and a pill below goes down past the cursor's
+/// body (above the element when that wouldn't fit). A label of several lines (`\n`)
+/// shows them one under the other, the pill as wide as the widest and as tall as all of
+/// them; a line too wide wraps. Returns the pill's rect.
 pub fn tooltip(
     layer: &mut Layer,
     text: &mut TextSystem,
     ctx: &Ctx<'_>,
-    anchor: Rect,
-    label: &str,
-    shortcut: Option<&str>,
-    bounds: Rect,
-) -> Rect {
+    spec: &TooltipSpec<'_>,
+) -> TooltipShape {
+    let TooltipSpec { anchor, label, shortcut, bounds, pointer } = *spec;
     let font = ctx.ui_font(-1.0);
     let key_font = ctx.ui_font(-2.5);
     let key = shortcut.map(|k| text.shape_line(k, &key_font));
@@ -490,8 +517,19 @@ pub fn tooltip(
     let h = row_h + line_h * lines.len().saturating_sub(1) as f32;
     let w = (text_w + key_w + 2.0 * pad).round();
     let gap = ctx.px(7.0);
-    let below = anchor.max_y() + gap + h <= bounds.max_y();
-    let y = if below { anchor.max_y() + gap } else { anchor.min_y() - gap - h };
+    // The cursor over the element: a pill below starts past its body (the cursor hangs
+    // down from its point).
+    let cursor = pointer.filter(|p| {
+        p.x >= anchor.min_x() - ctx.px(CURSOR_W)
+            && p.x <= anchor.max_x()
+            && p.y >= anchor.min_y()
+            && p.y <= anchor.max_y()
+    });
+    let under = cursor.map_or(anchor.max_y() + gap, |p| {
+        (anchor.max_y() + gap).max(p.y + ctx.px(CURSOR_H) + ctx.px(CURSOR_CLEAR))
+    });
+    let below = under + h <= bounds.max_y();
+    let y = if below { under } else { anchor.min_y() - gap - h };
     let y = y.max(bounds.min_y());
     let x = (anchor.min_x() + anchor.size.width / 2.0 - w / 2.0).clamp(
         bounds.min_x() + ctx.px(4.0),
@@ -503,9 +541,22 @@ pub fn tooltip(
     // border color (continuing the card outline) and no card border under it, so the
     // arrow and the body form a single shape.
     let arrow = ctx.px(6.0);
-    let ax = (anchor.min_x() + anchor.size.width / 2.0)
-        .clamp(rect.min_x() + ctx.px(radius::MD), rect.max_x() - ctx.px(radius::MD))
-        .round();
+    let mut ax = anchor.min_x() + anchor.size.width / 2.0;
+    // Below, the cursor's body over the arrow: the arrow left of it, on the element still.
+    if below
+        && let Some(p) = cursor
+        && ax + arrow >= p.x - ctx.px(CURSOR_CLEAR)
+        && ax - arrow <= p.x + ctx.px(CURSOR_W)
+    {
+        let left_of_cursor = p.x - ctx.px(CURSOR_CLEAR) - arrow;
+        // On the element still, unless it's only a sliver at the mouse (a wide item's).
+        ax = if anchor.size.width > 2.0 * arrow {
+            left_of_cursor.max(anchor.min_x() + arrow)
+        } else {
+            left_of_cursor
+        };
+    }
+    let ax = ax.clamp(rect.min_x() + ctx.px(radius::MD), rect.max_x() - ctx.px(radius::MD)).round();
     let line = ctx.line();
     let fill = ctx.fade(ctx.palette.popup_background);
     let border = ctx.fade(ctx.palette.popup_border);
@@ -547,5 +598,9 @@ pub fn tooltip(
         let at = (kr.min_x() + ctx.px(5.0), optical_baseline(kr.min_y(), kh, &key_font));
         ui_kit::paint_keycap(layer, kr, &key, at, &look);
     }
-    rect
+    // The arrow's box: between the pill and the element, where it was drawn.
+    let (top, bottom) =
+        if below { (anchor.max_y(), rect.min_y()) } else { (rect.max_y(), anchor.min_y()) };
+    let arrow_box = (bottom > top).then(|| Rect::new(ax - arrow, top, 2.0 * arrow, bottom - top));
+    TooltipShape { pill: rect, arrow: arrow_box }
 }

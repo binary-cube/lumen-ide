@@ -28,6 +28,7 @@ pub mod session;
 pub mod settings_page;
 pub mod sizes;
 pub mod status;
+pub mod tab_tint;
 pub mod windows;
 
 pub use answers::{AnswerBook, Answers};
@@ -91,4 +92,5 @@ pub use settings_page::{
 };
 pub use sizes::LayoutSizes;
 pub use status::{Indicator, StatusIndicator, SystemIndicator, SystemSign};
+pub use tab_tint::{TabTone, ViewTab};
 pub use windows::{Anchor, ProjectWindow, TopBadge, TopBarBadge, TopBarLabelAction};

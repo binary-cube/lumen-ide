@@ -19,6 +19,10 @@ pub(super) const ASLEEP_ICON: &str = "moon";
 /// (logical pixels).
 const HELD_ICON: f32 = 13.0;
 const HELD_GAP: f32 = 6.0;
+/// An open, awake session's dot (its tab open, its program running) and the room between it
+/// and its memory (logical pixels).
+const OPEN_DOT: f32 = 6.0;
+const OPEN_GAP: f32 = 6.0;
 /// The room between a row's memory (or moon) and its star's button (logical pixels): the
 /// star's hover fill reaches right up to where the memory would otherwise end.
 const BESIDE_STAR: f32 = 6.0;
@@ -215,8 +219,9 @@ impl SessionsPanel {
         shaped
     }
 
-    /// What a session's terminal holds, ending at `right` on the row at `top`: its memory
-    /// (muted), or a moon while it sleeps. Where it starts.
+    /// What a session's terminal holds, ending at `right` on the row at `top` (its tab is
+    /// open, as its terminal said last): a moon while it sleeps; awake, a green dot and its
+    /// memory (muted) once measured. Where it starts.
     fn paint_held(
         &mut self,
         pen: &mut Pen<'_, '_>,
@@ -233,11 +238,29 @@ impl SessionsPanel {
             }
             at
         } else {
-            let Some(memory) = state.memory else { return right };
-            let label = self.held_label(pen, memory);
-            let base = ds::optical_baseline(top, self.row_h, &pen.small);
-            draw_text(pen.layer, &label, right - label.width, base, p.text_muted);
-            Rect::new(right - label.width, top, label.width, self.row_h)
+            // Its program running (as its terminal says): a small dot in the theme's "all
+            // good" color before its memory. Ended, not started yet: no dot, no room for one.
+            let running = state.running;
+            if !running && state.memory.is_none() {
+                return right;
+            }
+            let mut x = right;
+            if let Some(memory) = state.memory {
+                let label = self.held_label(pen, memory);
+                let base = ds::optical_baseline(top, self.row_h, &pen.small);
+                x -= label.width;
+                draw_text(pen.layer, &label, x, base, p.text_muted);
+            }
+            if running {
+                if state.memory.is_some() {
+                    x -= px(OPEN_GAP);
+                }
+                let d = px(OPEN_DOT);
+                let center = kernel::Point::new(x - d / 2.0, top + self.row_h / 2.0);
+                ds::dot(pen.layer, ds, center, OPEN_DOT, ds::Tone::Success.color(p));
+                x -= d;
+            }
+            Rect::new(x, top, right - x, self.row_h)
         };
         self.holds.push((rect, state));
         rect.min_x()

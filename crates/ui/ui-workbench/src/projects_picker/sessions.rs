@@ -12,7 +12,10 @@ impl ProjectsPicker {
         if sessions.is_empty() {
             return;
         }
-        items.push(Item::Header(i18n::t("home.sessions")));
+        items.push(Item::FoldHeader(i18n::t("home.sessions"), Section::Sessions));
+        if self.folded.contains(&Section::Sessions) {
+            return;
+        }
         for session in sessions {
             let files: usize = session.windows.iter().map(|w| w.files.len()).sum();
             let expanded = self.sessions_open.contains(&session.id);
@@ -50,9 +53,9 @@ impl ProjectsPicker {
         }
     }
 
-    /// A past session's row or one of its windows' expanded or collapsed (`false`: `action`
-    /// isn't one of these).
-    pub fn toggle_session(&mut self, action: &PickerAction) -> bool {
+    /// A past session's row or one of its windows expanded or collapsed, or a section
+    /// folded or opened (`false`: `action` isn't one of these).
+    pub fn toggle_fold(&mut self, action: &PickerAction) -> bool {
         match *action {
             PickerAction::ToggleSession(id) => {
                 if !self.sessions_open.remove(&id) {
@@ -62,6 +65,11 @@ impl ProjectsPicker {
             PickerAction::ToggleSessionWindow(id, index) => {
                 if !self.session_windows_open.remove(&(id, index)) {
                     self.session_windows_open.insert((id, index));
+                }
+            }
+            PickerAction::ToggleSection(section) => {
+                if !self.folded.remove(&section) {
+                    self.folded.insert(section);
                 }
             }
             _ => return false,
@@ -82,7 +90,7 @@ impl ProjectsPicker {
             _ => return false,
         };
         if open == collapse {
-            self.toggle_session(&toggle);
+            self.toggle_fold(&toggle);
         }
         true
     }

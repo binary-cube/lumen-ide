@@ -50,6 +50,22 @@ fn report_name(name: Name, rect: Rect) {
     });
 }
 
+/// One of the parts of kind `id` (a tab), known by its identity (a UUID), is at `rect` this
+/// frame. Nothing is allocated.
+pub fn report_identified(id: &'static str, identity: u128, rect: Rect) {
+    report_name((id, folded(identity)), rect);
+}
+
+/// Where the part of kind `id` known by `identity` was drawn in this frame, if it was.
+pub fn find_identified(id: &str, identity: u128) -> Option<Rect> {
+    find_name(id, folded(identity))
+}
+
+/// An identity folded to a part's key (never 0: the only one's).
+fn folded(identity: u128) -> u64 {
+    ((identity as u64) ^ ((identity >> 64) as u64)) | 1
+}
+
 /// Where part `id` was drawn in this frame, if it was.
 pub fn find(id: &str) -> Option<Rect> {
     find_name(id, 0)

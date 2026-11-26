@@ -52,9 +52,11 @@ const BUTTON_H: f32 = button_size::LARGE;
 const BUTTON_GAP: f32 = ds::space::SM;
 /// The ×'s size (logical).
 const CLOSE: f32 = button_size::SMALL;
-/// The spotlight's ring: its distance from the anchor and its thickness (logical).
-const RING_OUT: f32 = 3.0;
-const RING: f32 = 2.0;
+/// The spotlight's ring: inside the anchor by this much (never over what's around it: a
+/// tab strip's edge), its thickness (logical), its strength (the accent's alpha).
+const RING_IN: f32 = 1.0;
+const RING: f32 = 1.5;
+const RING_ALPHA: f32 = 0.7;
 
 /// A button of the card: its label, whether it's the main one (accent, ↵) or set aside on
 /// the left (a quiet link: "Don't show again").
@@ -89,6 +91,9 @@ pub struct HintPlace {
     pub anchor: Option<Rect>,
     pub area: Rect,
     pub scale: f32,
+    /// A thin ring drawn just inside the anchor; off when the anchor shows itself otherwise
+    /// (a tab tinted).
+    pub spotlight: bool,
 }
 
 /// The notch's side and place: on the card's top edge (the card under its anchor) or its
@@ -217,9 +222,10 @@ impl HintCard {
         let px = |v: f32| ctx.px(v);
         let width = px(WIDTH).min((place.area.size.width - 2.0 * px(MARGIN)).max(px(MIN_WIDTH)));
         let inner = width - 2.0 * px(PAD);
-        // The texts start right of the icon's circle, under the title.
+        // The title starts right of the icon's circle; the text under the divider takes the
+        // card's whole width.
         let lead = if spec.icon.is_some() { px(ICON_BOX) + px(GAP_PART) } else { 0.0 };
-        self.wrap(text, spec.body, &ctx, inner - lead);
+        self.wrap(text, spec.body, &ctx, inner);
         // Lent out while it's drawn (put back after): never copied.
         let wrapped = self.wrapped.take();
         let lines: &[String] = wrapped.as_ref().map_or(&[], |(_, lines)| lines.as_slice());
@@ -247,9 +253,10 @@ impl HintCard {
             0.0
         });
         let place_line = if spec.place.is_some() { px(GAP_SMALL) + px(BODY_LINE) } else { 0.0 };
+        // Header, divider, text, divider, footer: a part's room on each side of a divider.
         let height = (2.0 * px(PAD)
             + head
-            + px(GAP_SMALL)
+            + 2.0 * px(GAP_PART)
             + lines.len() as f32 * px(BODY_LINE)
             + place_line
             + 2.0 * px(GAP_PART)
@@ -261,19 +268,19 @@ impl HintCard {
         self.bounds = Some(rect);
         self.notch = notch;
         let layer = scene.push_layer(None);
-        // The spotlight: a ring in the accent around what it points at.
-        if let Some(anchor) = place.anchor {
+        // The spotlight: a thin ring in the accent just inside what it points at.
+        if let Some(anchor) = place.anchor.filter(|_| place.spotlight) {
             let ring = Rect::new(
-                anchor.min_x() - px(RING_OUT),
-                anchor.min_y() - px(RING_OUT),
-                anchor.size.width + 2.0 * px(RING_OUT),
-                anchor.size.height + 2.0 * px(RING_OUT),
+                anchor.min_x() + px(RING_IN),
+                anchor.min_y() + px(RING_IN),
+                (anchor.size.width - 2.0 * px(RING_IN)).max(0.0),
+                (anchor.size.height - 2.0 * px(RING_IN)).max(0.0),
             );
             let clear = palette.accent.with_alpha(0.0);
             layer.quad(
                 Quad::filled(ring, clear)
                     .rounded(px(radius::MD))
-                    .bordered(px(RING), palette.accent),
+                    .bordered(px(RING), ctx.fade(palette.accent.with_alpha(RING_ALPHA))),
             );
         }
         let describe = || {
@@ -339,13 +346,16 @@ impl HintCard {
             let title_top = top + px(EYEBROW_LINE);
             let base = ds::optical_baseline(title_top, px(TITLE_LINE), &title_font);
             draw_text(layer, &shaped, tx, base, palette.text);
-            // The text, then where it lives in the settings.
-            let mut y = top + head + px(GAP_SMALL);
+            // The divider under the header, the whole card wide; then the text, from the
+            // card's edge, and where it lives in the settings.
+            let under = (top + head + px(GAP_PART)).round();
+            ds::divider(layer, &ctx, rect.min_x(), rect.max_x(), under);
+            let mut y = under + px(GAP_PART);
             let body_font = ctx.ui_font(0.0);
             for line in lines {
                 let shaped = text.shape_line(line, &body_font);
                 let base = ds::optical_baseline(y, px(BODY_LINE), &body_font);
-                draw_text(layer, &shaped, tx, base, palette.text_muted);
+                draw_text(layer, &shaped, x, base, palette.text_muted);
                 y += px(BODY_LINE);
             }
             if let Some(where_) = spec.place {
@@ -353,14 +363,14 @@ impl HintCard {
                 let small = ctx.ui_font(-1.0);
                 if let Some(id) = icons.id(PLACE_ICON_NAME) {
                     let at = Rect::new(
-                        tx,
+                        x,
                         y + (px(BODY_LINE) - px(PLACE_ICON)) / 2.0,
                         px(PLACE_ICON),
                         px(PLACE_ICON),
                     );
                     ui_kit::draw_icon(layer, icons, id, at, palette.text_muted);
                 }
-                let px_text = tx + px(PLACE_ICON) + px(GAP_SMALL) + px(GAP_SMALL) / 2.0;
+                let px_text = x + px(PLACE_ICON) + px(GAP_SMALL) + px(GAP_SMALL) / 2.0;
                 let room = (rect.max_x() - px(PAD) - px_text).max(0.0);
                 let line = ds::ellipsize(text, where_, &small, room);
                 let shaped = text.shape_line(&line, &small);

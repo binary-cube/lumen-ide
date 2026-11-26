@@ -94,10 +94,12 @@ impl Workbench {
                 self.ask_group_name(RecentAsk::NewGroup { parent: None, project: None });
                 MouseResult::Redraw
             }
-            ProjectsAction::ToggleSession(_) | ProjectsAction::ToggleSessionWindow(..) => {
+            ProjectsAction::ToggleSession(_)
+            | ProjectsAction::ToggleSessionWindow(..)
+            | ProjectsAction::ToggleSection(_) => {
                 let picker =
                     if modal { &mut self.home.projects_menu } else { &mut self.home.picker };
-                picker.toggle_session(&action);
+                picker.toggle_fold(&action);
                 MouseResult::Redraw
             }
             other => {

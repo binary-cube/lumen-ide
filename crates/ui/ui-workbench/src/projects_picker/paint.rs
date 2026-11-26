@@ -4,6 +4,14 @@
 use super::*;
 
 impl ProjectsPicker {
+    /// How section `section`'s title shows its fold now.
+    fn fold_look(&self, section: Section) -> FoldLook {
+        FoldLook {
+            open: !self.folded.contains(&section),
+            hovered: self.fold_hover == Some(section),
+        }
+    }
+
     /// The modal opened from the top bar (the `Modal` frame, like settings).
     pub fn paint_modal(
         &mut self,
@@ -150,6 +158,7 @@ impl ProjectsPicker {
         self.scale = ctx.scale;
         self.history = None;
         self.new_group = None;
+        self.folds.clear();
         self.restore_buttons.clear();
         self.scroll_at_edge();
         let mark = self.drag.as_ref().and_then(|d| d.drop.as_ref()).map(|d| d.mark);
@@ -184,6 +193,15 @@ impl ProjectsPicker {
                     y = paint_section_title(&mut list, title, &header_font, y);
                     continue;
                 }
+                Item::FoldHeader(title, section) => {
+                    let top = y;
+                    y = paint_section_title(&mut list, title, &header_font, y);
+                    let header = Rect::new(list.x0, top + px(4.0), w, y - top - px(2.0));
+                    let fold = self.fold_look(*section);
+                    paint_fold_chevron(&mut list, header, fold);
+                    self.folds.push((header, *section));
+                    continue;
+                }
                 Item::HistoryHeader(title) => {
                     let top = y;
                     y = paint_section_title(&mut list, title, &header_font, y);
@@ -191,7 +209,12 @@ impl ProjectsPicker {
                     if mark == Some(Mark::Header) {
                         paint_drop_target(list.layer, ctx, header);
                     }
-                    self.new_group = Some(paint_new_group(&mut list, header, self.new_group_hover));
+                    let fold = self.fold_look(Section::Projects);
+                    let chevron = paint_fold_chevron(&mut list, header, fold);
+                    let right = chevron.min_x() - px(FOLD_GAP);
+                    let hovered = self.new_group_hover;
+                    self.new_group = Some(paint_new_group(&mut list, header, right, hovered));
+                    self.folds.push((header, Section::Projects));
                     self.history = Some(header);
                     continue;
                 }
@@ -242,7 +265,7 @@ impl ProjectsPicker {
                     sessions::paint_window(&mut list, r, &row);
                 }
                 Item::SessionFile(file) => paint_file(&mut list, r, file),
-                Item::Header(_) | Item::HistoryHeader(_) => {}
+                Item::Header(_) | Item::FoldHeader(..) | Item::HistoryHeader(_) => {}
             }
             self.rows.push((r, i));
             y += r.size.height + px(2.0);
@@ -491,18 +514,40 @@ fn paint_group(list: &mut ListArea<'_, '_>, r: Rect, name: &str, collapsed: bool
     draw_text(list.layer, &count, r.max_x() - px(14.0) - count.width, base, ctx.fade(p.text_muted));
 }
 
-/// The "New group" button at the right of the history's title `header`; returns it.
-fn paint_new_group(list: &mut ListArea<'_, '_>, header: Rect, hovered: bool) -> Rect {
+/// The "New group" button on the history's title `header`, ending at `right`; returns it.
+fn paint_new_group(list: &mut ListArea<'_, '_>, header: Rect, right: f32, hovered: bool) -> Rect {
     let px = |v: f32| list.ctx.px(v);
     let label = i18n::t("home.new_group");
-    paint_text_button(
-        list,
-        &label,
-        "plus",
-        header.max_x() - px(6.0),
-        header.min_y() + px(2.0),
-        hovered,
-    )
+    paint_text_button(list, &label, "plus", right, header.min_y() + px(2.0), hovered)
+}
+
+/// A section title's chevron (logical pixels): its size, its room from the title's end,
+/// and the room kept between it and a button before it.
+const FOLD_CHEVRON: f32 = 12.0;
+const FOLD_INSET: f32 = 12.0;
+const FOLD_GAP: f32 = 6.0;
+
+/// How a section's title shows its fold: open or folded, under the mouse or not.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct FoldLook {
+    pub open: bool,
+    pub hovered: bool,
+}
+
+/// The chevron at the end of a section's title `header`: down while its section shows,
+/// right while it's folded; muted, the text's color under the mouse. Returns where it is.
+fn paint_fold_chevron(list: &mut ListArea<'_, '_>, header: Rect, look: FoldLook) -> Rect {
+    let ctx = list.ctx;
+    let s = ctx.px(FOLD_CHEVRON);
+    let at = Rect::new(
+        header.max_x() - ctx.px(FOLD_INSET) - s,
+        header.min_y() + (header.size.height - s) / 2.0,
+        s,
+        s,
+    );
+    let color = if look.hovered { ctx.palette.text } else { ctx.palette.text_muted };
+    ui_components::tree::chevron(list.layer, list.icons, at, look.open, ctx.fade(color));
+    at
 }
 
 /// A small text button with an icon ending at `right`, from `top` (the history's "New

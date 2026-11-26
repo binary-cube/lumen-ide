@@ -124,6 +124,8 @@ pub enum PickerAction {
     /// A past session's row (its windows shown or hidden), a window's row in it (its files).
     ToggleSession(u128),
     ToggleSessionWindow(u128, usize),
+    /// A section's title (past sessions, all projects): the section folded or opened.
+    ToggleSection(Section),
     /// A past session's "Reopen": its windows, one after the other.
     RestoreSession(u128),
 }
@@ -139,6 +141,7 @@ impl PickerAction {
                 | Self::NewGroup
                 | Self::ToggleSession(_)
                 | Self::ToggleSessionWindow(..)
+                | Self::ToggleSection(_)
         )
     }
 }
@@ -165,6 +168,15 @@ pub enum HomeContent<'a> {
     },
 }
 
+/// A section of the list that folds under its title (a click on it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Section {
+    /// The past sessions.
+    Sessions,
+    /// The projects' history (its groups).
+    Projects,
+}
+
 /// A list row (after filtering).
 #[derive(Debug, Clone, PartialEq)]
 enum Item {
@@ -175,7 +187,10 @@ enum Item {
         action: PickerAction,
     },
     Header(String),
-    /// The history's title: where a drop goes to the top, with the "New group" button.
+    /// A section's title that folds it (a chevron at its end).
+    FoldHeader(String, Section),
+    /// The history's title: where a drop goes to the top, with the "New group" button; it
+    /// folds the history too.
     HistoryHeader(String),
     Group {
         id: GroupId,
@@ -239,7 +254,7 @@ impl Item {
             Self::SessionWindow { session, index, count, path: None, .. } => {
                 (*count > 0).then_some(PickerAction::ToggleSessionWindow(*session, *index))
             }
-            Self::Header(_) | Self::HistoryHeader(_) => None,
+            Self::Header(_) | Self::FoldHeader(..) | Self::HistoryHeader(_) => None,
         }
     }
 
@@ -323,6 +338,11 @@ pub struct ProjectsPicker {
     /// The past sessions expanded, their windows expanded.
     sessions_open: HashSet<u128>,
     session_windows_open: HashSet<(u128, usize)>,
+    /// The sections folded (under their titles), the titles that fold them as drawn, and
+    /// the one under the mouse.
+    folded: HashSet<Section>,
+    folds: Vec<(Rect, Section)>,
+    fold_hover: Option<Section>,
     /// Each past session's "Reopen" button, and the one under the mouse.
     restore_buttons: Vec<(Rect, u128)>,
     restore_hover: Option<u128>,
@@ -476,7 +496,9 @@ impl ProjectsPicker {
             // The groups' tree (the recent projects in their own).
             if !others.is_empty() || model.groups.len() > 1 {
                 items.push(Item::HistoryHeader(i18n::t("home.all_projects")));
-                push_tree(&mut items, model, &others, None, 0);
+                if !self.folded.contains(&Section::Projects) {
+                    push_tree(&mut items, model, &others, None, 0);
+                }
             }
         } else {
             let found: Vec<Item> = recent
@@ -514,7 +536,9 @@ impl ProjectsPicker {
         self.items
             .iter()
             .enumerate()
-            .filter(|(_, i)| !matches!(i, Item::Header(_) | Item::HistoryHeader(_)))
+            .filter(|(_, i)| {
+                !matches!(i, Item::Header(_) | Item::FoldHeader(..) | Item::HistoryHeader(_))
+            })
             .map(|(i, _)| i)
             .collect()
     }
@@ -588,6 +612,9 @@ impl ProjectsPicker {
         if self.new_group.is_some_and(|r| r.contains(p) && self.list.contains(p)) {
             return Some(PickerAction::NewGroup);
         }
+        if let Some(section) = self.fold_at(p) {
+            return Some(PickerAction::ToggleSection(section));
+        }
         if let Some(id) = self.restore_at(p) {
             return Some(PickerAction::RestoreSession(id));
         }
@@ -623,11 +650,14 @@ impl ProjectsPicker {
         let new_group = self.new_group.is_some_and(|r| r.contains(p) && self.list.contains(p));
         let frame = self.modal.is_open() && self.modal.hover(p);
         let restore = self.restore_at(p);
+        let fold = self.fold_at(p);
         let changed = hover != self.hover
             || clear
             || new_group != self.new_group_hover
-            || restore != self.restore_hover;
+            || restore != self.restore_hover
+            || fold != self.fold_hover;
         self.restore_hover = restore;
+        self.fold_hover = fold;
         self.hover = hover;
         self.new_group_hover = new_group;
         changed || frame
@@ -637,7 +667,16 @@ impl ProjectsPicker {
         self.query.cursor(p) == Some(ui_components::ViewerCursor::Pointer)
             || self.new_group.is_some_and(|r| r.contains(p) && self.list.contains(p))
             || self.restore_at(p).is_some()
+            || self.fold_at(p).is_some()
             || self.rows.iter().any(|(r, _)| r.contains(p) && self.list.contains(p))
+    }
+
+    /// The section whose title is at `p` (the "New group" button on it aside).
+    fn fold_at(&self, p: Point) -> Option<Section> {
+        if !self.list.contains(p) || self.new_group.is_some_and(|r| r.contains(p)) {
+            return None;
+        }
+        self.folds.iter().find(|(r, _)| r.contains(p)).map(|(_, s)| *s)
     }
 
     /// The wheel over the list: never past its end (momentum scrolling doesn't draw a frame

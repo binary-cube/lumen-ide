@@ -230,6 +230,7 @@ pub(super) fn sleep_row(agent: &str, id: &str) -> Option<ViewMenuEntry> {
         CanSleep::Yes => t("agents.sleep"),
         CanSleep::Typed => t("agents.sleep_typed"),
         CanSleep::Sleeping => t("agents.going_to_sleep"),
+        CanSleep::Starting => t("agents.sleep_starting"),
     };
     Some(
         ViewMenuEntry::item(SLEEP, label)

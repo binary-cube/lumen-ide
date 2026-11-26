@@ -57,6 +57,8 @@ impl Workbench {
         id: &str,
         anchor: Option<workbench_model::HintAnchor>,
     ) -> bool {
+        // One whose tab was closed is let go first: it never holds the place of a new one.
+        self.let_go_of_orphan_hint();
         if self.hint.is_some() {
             return false;
         }
@@ -66,10 +68,24 @@ impl Workbench {
         if hint.hint.steps.is_empty() || !with_book(|book| book.may_show(id)) {
             return false;
         }
+        // The tab it's about, found now by what opened it (its identity kept from here):
+        // not open here, the hint isn't shown.
+        let tab = match &anchor {
+            Some(workbench_model::HintAnchor::Tab(view)) => match self.view_tab_id(view) {
+                Some(tab) => Some(tab),
+                None => return false,
+            },
+            None => None,
+        };
         tracing::debug!(hint = id, "a hint shown");
         let mut tour = HintTour::new(hint.hint.clone());
+        // The tab it's about tinted in the accent while it shows (fading in, a pulse or two).
+        if let Some(tab) = tab {
+            self.tint_tab_id(tab, Some(workbench_model::TabTone::Accent));
+        }
         tour.anchor = anchor;
         self.hint = Some(tour);
+        self.hint_tab = tab;
         self.hint_focused = false;
         true
     }
@@ -105,11 +121,43 @@ impl Workbench {
         }
     }
 
+    /// The hint shown about a tab that's no longer open (closed, its project gone): let go
+    /// whole — its card hidden, its tab's tint let go — and never counted as closed by the
+    /// user (the next session that asks may show it). Cheap: a look at the open tabs.
+    pub(crate) fn let_go_of_orphan_hint(&mut self) {
+        let Some(tab) = self.hint_tab else { return };
+        if self.tab_open(tab) {
+            return;
+        }
+        // Its tab gone but its view open still (a copy dropped where it was open already):
+        // the hint and its tint follow the one kept.
+        let view = self
+            .hint
+            .as_ref()
+            .and_then(|h| h.anchor.as_ref())
+            .map(|workbench_model::HintAnchor::Tab(view)| view.clone());
+        if let Some(kept) = view.and_then(|view| self.view_tab_id(&view)) {
+            self.tint_tab_id(tab, None);
+            self.tint_tab_id(kept, Some(workbench_model::TabTone::Accent));
+            self.hint_tab = Some(kept);
+            return;
+        }
+        self.hint = None;
+        self.hint_tab = None;
+        self.hint_focused = false;
+        self.hint_card.hide();
+        self.tint_tab_id(tab, None);
+        tracing::debug!("a hint let go: its tab closed");
+    }
+
     /// The hint closed: for this run, or (`seen`) for good, saved in the settings.
     pub(crate) fn close_hint(&mut self, seen: bool) {
         let Some(tour) = self.hint.take() else { return };
         self.hint_focused = false;
         self.hint_card.hide();
+        if let Some(tab) = self.hint_tab.take() {
+            self.tint_tab_id(tab, None);
+        }
         let id = tour.hint.id;
         let saved = with_book(|book| book.close(id, seen).then(|| book.seen.clone()));
         if let Some(seen) = saved
@@ -129,11 +177,13 @@ impl Workbench {
 
     /// Draws the hint shown (nothing while none is).
     fn paint_hint(&mut self, text: &mut TextSystem, scene: &mut Scene) {
+        self.let_go_of_orphan_hint();
         // Under a modal: not drawn (it comes back once that closes).
         if self.hint.is_some() && open_above(self, true) {
             self.hint_card.hide();
             return;
         }
+        let now = std::time::Instant::now();
         let Some(tour) = &self.hint else { return };
         let Some(step) = tour.current() else { return };
         let title = i18n::t(step.title);
@@ -175,16 +225,29 @@ impl Workbench {
             focus: if self.hint_focused { tour.focus } else { None },
         };
         // Its own tab (wherever it is, active or not), else its step's anchor.
-        let anchor = match &tour.anchor {
-            Some(workbench_model::HintAnchor::Tab(name)) => {
-                ui_workbench::anchors::find_keyed(workbench_model::hints::ANCHOR_TAB, name)
+        let anchor = match self.hint_tab {
+            Some(tab) => {
+                let found =
+                    ui_workbench::anchors::find_identified(workbench_model::hints::ANCHOR_TAB, tab);
+                // Its tab out of sight (scrolled away in its bar): the card waits, hidden,
+                // and comes back with it — never pointing at nothing.
+                if found.is_none() {
+                    self.hint_card.hide();
+                    // Unseen, it doesn't keep the keys (they go back to what's in sight).
+                    self.hint_focused = false;
+                    return;
+                }
+                found
             }
             None => step.anchor.and_then(ui_workbench::anchors::find),
         };
+        // A tab it's about is tinted instead (`tint_tab`): no ring drawn over it.
+        let tinted = self.hint_tab.is_some_and(|tab| self.tab_tints.of(tab, now).is_some());
         let place = ui_workbench::hint_card::HintPlace {
             anchor,
             area: self.hint_area(),
             scale: self.scale,
+            spotlight: !tinted,
         };
         let painter =
             ui_workbench::Painter { text, scene, palette: &self.palette, icons: &self.icons };

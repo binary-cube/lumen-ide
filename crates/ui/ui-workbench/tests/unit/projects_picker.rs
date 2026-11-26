@@ -340,7 +340,7 @@ fn past_sessions_show_as_a_collapsed_tree_that_expands_and_reopens() {
         .unwrap();
     let action = picker.hit(center(row)).expect("a session's row");
     assert_eq!(action, PickerAction::ToggleSession(1));
-    assert!(action.keeps_open() && picker.toggle_session(&action));
+    assert!(action.keeps_open() && picker.toggle_fold(&action));
     paint(&mut picker, &recent);
     let windows: Vec<&Item> =
         picker.items.iter().filter(|i| matches!(i, Item::SessionWindow { .. })).collect();
@@ -359,7 +359,7 @@ fn past_sessions_show_as_a_collapsed_tree_that_expands_and_reopens() {
     let chevron = Point::new(shop.min_x() + 18.0, center(shop).y);
     let action = picker.hit(chevron).expect("its chevron");
     assert_eq!(action, PickerAction::ToggleSessionWindow(1, 0));
-    assert!(picker.toggle_session(&action));
+    assert!(picker.toggle_fold(&action));
     paint(&mut picker, &recent);
     let file = picker.items.iter().find(|i| matches!(i, Item::SessionFile(_))).unwrap();
     assert_eq!(file.action(), Some(PickerAction::OpenPath(PathBuf::from("/w/shop/a.php"))));
@@ -438,4 +438,43 @@ fn its_filter_is_the_shared_field_with_its_clear_button() {
     paint(&mut picker, &recent);
     assert!(!picker.query.shows_caret(), "another field has the keys: no caret here");
     assert!(picker.items.iter().any(|i| matches!(i, Item::Group { .. })), "the whole list back");
+}
+
+/// A section's title folds it (a click anywhere on it), its title staying; the history's
+/// "New group" still answers on its title.
+#[test]
+fn a_section_title_folds_and_opens_its_section() {
+    let (mut recent, ..) = sample();
+    recent.sessions = sample_sessions();
+    let mut picker = ProjectsPicker::default();
+    paint(&mut picker, &recent);
+    let title = |picker: &ProjectsPicker, section: Section| {
+        picker.folds.iter().find(|(_, s)| *s == section).map(|(r, _)| *r).unwrap()
+    };
+    let count = |picker: &ProjectsPicker, f: fn(&Item) -> bool| {
+        picker.items.iter().filter(|i| f(i)).count()
+    };
+    let is_session = |i: &Item| matches!(i, Item::Session { .. });
+    let is_project = |i: &Item| matches!(i, Item::Project { .. } | Item::Group { .. });
+    assert_eq!(count(&picker, is_session), 2);
+    let sessions = title(&picker, Section::Sessions);
+    let action = picker.hit(Point::new(sessions.min_x() + 40.0, sessions.min_y() + 4.0));
+    assert_eq!(action, Some(PickerAction::ToggleSection(Section::Sessions)));
+    let action = action.unwrap();
+    assert!(action.keeps_open() && picker.toggle_fold(&action));
+    paint(&mut picker, &recent);
+    assert_eq!(count(&picker, is_session), 0, "folded");
+    assert!(picker.items.iter().any(|i| matches!(i, Item::FoldHeader(_, Section::Sessions))));
+    // The projects' history: folded by its title, "New group" still its own.
+    let new_group = picker.new_group.unwrap();
+    let at = Point::new(new_group.min_x() + 4.0, new_group.min_y() + 4.0);
+    assert_eq!(picker.hit(at), Some(PickerAction::NewGroup));
+    let history = title(&picker, Section::Projects);
+    let action = picker.hit(Point::new(history.min_x() + 40.0, history.min_y() + 4.0)).unwrap();
+    assert!(picker.toggle_fold(&action));
+    paint(&mut picker, &recent);
+    assert_eq!(count(&picker, is_project), 0, "folded");
+    assert!(picker.toggle_fold(&action));
+    paint(&mut picker, &recent);
+    assert!(count(&picker, is_project) > 0, "open again");
 }

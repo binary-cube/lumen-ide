@@ -77,11 +77,13 @@ pub struct TerminalUse {
 }
 
 /// A terminal's program as last measured: its memory with everything it started (`None`:
-/// not measured yet, or asleep), whether it sleeps (stopped, resumed when shown), and
-/// whether it can be put to sleep by hand now.
+/// not measured yet, or asleep), whether it runs now (started, not ended, not asleep),
+/// whether it sleeps (stopped, resumed when woken), and whether it can be put to sleep by
+/// hand now.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TerminalState {
     pub memory: Option<u64>,
+    pub running: bool,
     pub asleep: bool,
     pub can_sleep: CanSleep,
 }
@@ -107,6 +109,9 @@ pub enum CanSleep {
     /// Not now: something typed in it isn't sent yet (it would be lost). Its program writing
     /// (a spinner, a status line) doesn't stop the user: they chose.
     Typed,
+    /// Not yet: its session just started, how it resumes isn't known yet (its owner learns
+    /// it within a second or two).
+    Starting,
     /// Not now: it's being put to sleep (the order given, not yet taken).
     Sleeping,
     /// Not now: it's waking up (asked to, or its program starting again).

@@ -210,7 +210,8 @@ impl Module for TerminalModule {
                     let opened = host.open_view(&key, EXTENSION, &start);
                     // A session beside the code, sleeping off: told it could (once).
                     if opened && crate::config::current().sleep_after.is_none() {
-                        let tab = workbench_model::HintAnchor::Tab(key.clone());
+                        let tab = workbench_model::ViewTab::new(key.clone(), EXTENSION);
+                        let tab = workbench_model::HintAnchor::Tab(tab);
                         host.show_hint_by(SLEEP_HINT, tab);
                     }
                     opened

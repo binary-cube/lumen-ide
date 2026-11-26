@@ -103,6 +103,7 @@ impl Tab {
     ) -> Self {
         let version = doc.version();
         Self {
+            id: kernel::id::new_uuid(),
             pinned: false,
             disk_read_only: false,
             text_told: 0,

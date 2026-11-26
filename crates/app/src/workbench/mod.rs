@@ -137,6 +137,7 @@ mod smart_select;
 mod splits;
 mod status;
 mod syntax;
+mod tab_tints;
 mod task_data;
 mod text_fields;
 mod theme_decorations;
@@ -541,6 +542,9 @@ struct Mark {
 /// An open file: the document, its view and the search state.
 #[derive(Debug)]
 struct Tab {
+    /// Its identity (UUID v4), for as long as it's open: what's kept about it (a tint, a
+    /// hint about it) knows it by this, never by a name two tabs could share.
+    id: u128,
     /// Pinned: stays first and isn't closed as part of the group.
     pinned: bool,
     /// The text options' generation its editor was last told (0: never).
@@ -683,6 +687,10 @@ pub struct Workbench {
     /// The hint shown (a module's, see `hints`), its card as last drawn, and whether it has
     /// the keyboard (clicked).
     hint: Option<workbench_model::HintTour>,
+    /// Tabs tinted to draw the eye (a hint is about one).
+    tab_tints: tab_tints::TabTints,
+    /// The tab the shown hint is about (its identity), found as it showed.
+    hint_tab: Option<u128>,
     hint_card: ui_workbench::hint_card::HintCard,
     hint_focused: bool,
     /// A status bar item's window (the file's details, the resources).

@@ -2,18 +2,25 @@ use super::*;
 use text_layout::TextSystem;
 
 fn paint(bar: &mut TabBar, count: usize, active: usize) {
+    paint_pinned(bar, count, active, 0);
+}
+
+/// `count` tabs, the first `pinned` of them pinned.
+fn paint_pinned(bar: &mut TabBar, count: usize, active: usize, pinned: usize) {
     let titles: Vec<String> = (0..count).map(|i| format!("fisier_{i}.php")).collect();
     let tabs: Vec<TabTitle<'_>> = titles
         .iter()
-        .map(|t| TabTitle {
+        .enumerate()
+        .map(|(i, t)| TabTitle {
             title: t,
             dirty: false,
-            pinned: false,
+            pinned: i < pinned,
             icon: None,
             accent: None,
             badge: None,
             locked: false,
             outside: false,
+            tint: None,
         })
         .collect();
     let mut text = TextSystem::new();
@@ -90,6 +97,7 @@ fn a_tab_with_a_color_carries_it_as_a_dot_on_its_icon() {
             badge: None,
             locked: false,
             outside: false,
+            tint: None,
         }];
         let mut text = TextSystem::new();
         let mut scene = Scene::default();
@@ -125,6 +133,7 @@ fn a_tab_s_badge_follows_its_title_and_widens_it() {
             badge,
             locked: false,
             outside: false,
+            tint: None,
         }];
         let mut text = TextSystem::new();
         let mut scene = Scene::default();
@@ -148,4 +157,47 @@ fn a_tab_s_badge_follows_its_title_and_widens_it() {
     assert_eq!((pills, none), (1, 0));
     assert!(marked.size.width > plain.size.width, "room for it");
     assert_eq!(marked.min_x(), plain.min_x());
+}
+
+/// A tab is "in sight" only while it's whole in the strip: scrolled away (or under the
+/// hidden tabs' fade), it has a place but none to point at.
+#[test]
+fn a_tab_scrolled_away_is_out_of_sight() {
+    let mut bar = TabBar::default();
+    bar.set_bounds(Rect::new(0.0, 0.0, 500.0, 42.0), 1.0);
+    paint(&mut bar, 12, 0);
+    assert!(bar.visible_tab_rect(0).is_some(), "the first tab shows");
+    assert!(bar.visible_tab_rect(11).is_none(), "the last one is past the right edge");
+    assert!(bar.tab_rect(11).is_some(), "though it has a place");
+    bar.reveal_active();
+    paint(&mut bar, 12, 11);
+    assert!(bar.visible_tab_rect(11).is_some(), "revealed");
+    assert!(bar.visible_tab_rect(0).is_none(), "the first one scrolled away");
+    // One in the middle revealed (tabs past it on both sides): in sight, by the buttons.
+    bar.reveal_active();
+    paint(&mut bar, 12, 6);
+    assert!(bar.visible_tab_rect(6).is_some(), "revealed mid-strip");
+}
+
+/// A tab scrolled left lies under the pinned tabs: out of sight, though its place overlaps
+/// their area; the pinned ones are in sight.
+#[test]
+fn a_tab_under_the_pinned_ones_is_out_of_sight() {
+    let mut bar = TabBar::default();
+    bar.set_bounds(Rect::new(0.0, 0.0, 600.0, 42.0), 1.0);
+    paint_pinned(&mut bar, 14, 0, 2);
+    assert!(bar.visible_tab_rect(0).is_some() && bar.visible_tab_rect(1).is_some());
+    assert!(bar.scroll_by(400.0));
+    paint_pinned(&mut bar, 14, 0, 2);
+    let under = (2..14).find(|i| {
+        bar.tab_rect(*i).is_some_and(|r| r.min_x() < bar.pinned_area.max_x() && r.max_x() > 0.0)
+    });
+    if let Some(i) = under {
+        let r = bar.tab_rect(i).unwrap();
+        let past = (r.max_x() - bar.strip.min_x().max(bar.more_left.max_x())).max(0.0);
+        if past < r.size.width * IN_SIGHT {
+            assert!(bar.visible_tab_rect(i).is_none(), "under the pinned tabs: out of sight");
+        }
+    }
+    assert!(bar.visible_tab_rect(0).is_some(), "a pinned one stays in sight");
 }

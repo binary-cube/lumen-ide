@@ -65,7 +65,8 @@ pub(super) fn picker_result(action: ProjectsAction) -> MouseResult {
         | ProjectsAction::MoveGroup { .. }
         | ProjectsAction::NewGroup
         | ProjectsAction::ToggleSession(_)
-        | ProjectsAction::ToggleSessionWindow(..) => MouseResult::Redraw,
+        | ProjectsAction::ToggleSessionWindow(..)
+        | ProjectsAction::ToggleSection(_) => MouseResult::Redraw,
     }
 }
 

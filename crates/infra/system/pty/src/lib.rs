@@ -608,6 +608,66 @@ fn resize_thread(sender: EventLoopSender) -> std::sync::mpsc::Sender<WindowSize>
     tx
 }
 
+/// How many times a copy tries the emulator while its reader parses, and the pause between
+/// (at most ~20 ms on the UI thread, once per copy).
+const COPY_TRIES: u32 = 20;
+const COPY_RETRY: Duration = Duration::from_millis(1);
+
+/// The text `selection` covers in `term`, its history included (see
+/// `TerminalSession::selection_text`): a cell after a wide character skipped, a row wrapped
+/// by the program joined to the next as it was written.
+pub(crate) fn selection_text_of<L>(
+    term: &Term<L>,
+    selection: &terminal_session::text::TermSelection,
+    history: usize,
+) -> String {
+    use alacritty_terminal::index::{Column, Line};
+    let grid = term.grid();
+    // Rows pushed into the history since the selection's snapshot: its lines are that many
+    // higher now.
+    let moved = i32::try_from(grid.history_size().saturating_sub(history)).unwrap_or(i32::MAX);
+    let at = |p: terminal_session::text::TermPoint| terminal_session::text::TermPoint {
+        line: p.line.saturating_sub(moved),
+        col: p.col,
+    };
+    let selection = &terminal_session::text::TermSelection {
+        anchor: at(selection.anchor),
+        head: at(selection.head),
+    };
+    let cols = grid.columns();
+    let Ok(width) = u16::try_from(cols) else { return String::new() };
+    let (start, end) = selection.ordered();
+    let top = -(i32::try_from(grid.history_size()).unwrap_or(i32::MAX));
+    let bottom = i32::try_from(grid.screen_lines()).unwrap_or(0) - 1;
+    let mut out = String::new();
+    for line in start.line.max(top)..=end.line.min(bottom) {
+        let Some(range) = selection.columns(line, width) else { continue };
+        let row = &grid[Line(line)];
+        let mut text: String = (range.start..range.end)
+            .map(|c| &row[Column(usize::from(c))])
+            .filter(|cell| {
+                !cell.flags.intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER)
+            })
+            .flat_map(|cell| {
+                // A cell's character and what's drawn with it (combining marks, joiners).
+                let c = if cell.c == '\0' { ' ' } else { cell.c };
+                std::iter::once(c).chain(cell.zerowidth().into_iter().flatten().copied())
+            })
+            .collect();
+        let wrapped = line < end.line
+            && usize::from(range.end) == cols
+            && row[Column(cols - 1)].flags.contains(Flags::WRAPLINE);
+        if !wrapped {
+            text.truncate(text.trim_end().len());
+        }
+        out.push_str(&text);
+        if line < end.line.min(bottom) && !wrapped {
+            out.push('\n');
+        }
+    }
+    out
+}
+
 impl Drop for PtySession {
     fn drop(&mut self) {
         let _ = self.sender.send(Msg::Shutdown);
@@ -785,6 +845,22 @@ impl TerminalSession for PtySession {
             app_cursor: mode.contains(TermMode::APP_CURSOR),
             bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
         })
+    }
+
+    fn selection_text(
+        &self,
+        selection: &terminal_session::text::TermSelection,
+        history: usize,
+    ) -> Option<String> {
+        // Asked once for a copy: a few short tries while the reader parses, never a wait
+        // for the program.
+        for _ in 0..COPY_TRIES {
+            if let Some(term) = self.term.try_lock_unfair() {
+                return Some(selection_text_of(&term, selection, history));
+            }
+            std::thread::sleep(COPY_RETRY);
+        }
+        None
     }
 
     fn try_scroll(&mut self, lines: i32) -> bool {

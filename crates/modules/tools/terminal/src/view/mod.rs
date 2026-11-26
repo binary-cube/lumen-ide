@@ -55,6 +55,7 @@ pub(crate) fn cant_sleep(can: contracts::terminal::CanSleep) -> workbench_model:
     let why = match can {
         contracts::terminal::CanSleep::Typed => "terminal.cant_sleep_typed",
         contracts::terminal::CanSleep::Sleeping => "terminal.cant_sleep_sleeping",
+        contracts::terminal::CanSleep::Starting => "terminal.cant_sleep_starting",
         contracts::terminal::CanSleep::Waking => "terminal.cant_sleep_waking",
         _ => "terminal.cant_sleep",
     };
@@ -244,13 +245,13 @@ pub struct TerminalView {
     _gone: Option<Gone>,
     /// What it's known by (a program another module runs).
     key: Option<String>,
-    /// Its program stopped while unseen and idle (`crate::sleep`): its last screen kept, its
-    /// program started again with `launch` (how it resumes) when it's shown.
+    /// Its program stopped (unseen and idle, or by hand: `crate::sleep`): its last screen
+    /// kept, its program started again with `launch` (how it resumes) once woken.
     asleep: bool,
     /// Started again after a sleep: its last screen stays drawn while the new output settles.
     resuming: bool,
-    /// Asleep by hand: not started again when drawn, only once the user acts on it (a key,
-    /// a click, the tab shown again after leaving it).
+    /// Asleep: not started again when drawn (its tab chosen, shown), only once the user
+    /// wakes it (a key, a click in it, "Wake Up").
     held: bool,
     /// Its tab is the active one of its group (told by the app: what the user chose).
     active: bool,
@@ -373,6 +374,7 @@ impl TerminalView {
                 if let Some(slot) = &self.renamed {
                     let mut asked = asked(slot);
                     asked.pid = session.pid();
+                    asked.started = Some(std::time::Instant::now());
                     asked.watch.clone_from(&self.watch);
                     asked.asleep = false;
                     asked.typed = false;
@@ -417,7 +419,7 @@ impl TerminalView {
     }
 
     /// Put to sleep (`crate::sleep`): its program stopped (its process ends as when its tab
-    /// closes), its last screen kept, `launch` how it starts again once shown. Nothing done
+    /// closes), its last screen kept, `launch` how it starts again once woken. Nothing done
     /// if its program ended meanwhile.
     fn fall_asleep(&mut self, launch: agents::Launch, by_hand: bool) {
         let Some(session) = &self.session else { return };
@@ -437,7 +439,9 @@ impl TerminalView {
         self.link = None;
         // Its last screen without a cursor: nothing runs there to type to.
         self.grid.cursor = None;
-        self.held = by_hand;
+        // Asleep until the user wakes it (a key, a click, "Wake Up"): moving through the tabs
+        // onto it never does, by hand or idle.
+        self.held = true;
         // What the next program is told comes from the settings again (its options, the
         // colors it's answered): a new session knows none of them.
         self.options = None;
@@ -463,7 +467,8 @@ impl TerminalView {
         self.asleep || (self.resuming && self.settling.is_some())
     }
 
-    /// Asleep by hand and acted on by the user: resumed at its next paint. `true` if so.
+    /// Asleep and acted on by the user (a key, a click, "Wake Up"): resumed at its next paint.
+    /// `true` if so.
     fn wake_by_user(&mut self) -> bool {
         if !self.asleep {
             return false;

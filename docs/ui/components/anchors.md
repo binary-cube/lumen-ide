@@ -14,6 +14,11 @@ it. Any view, panel or bar may report its own parts the same way.
 - `report(id, rect)`: part `id` (a `&'static str`) is at `rect` (physical pixels) this frame;
   the latest report wins.
 - `find(id)`: where it was drawn this frame; `None` if it wasn't (hidden, scrolled away).
+- `report_keyed(id, key, rect)` / `find_keyed(id, key)`: one of several parts of kind `id`,
+  known by a name of the code's own (hashed: nothing allocated).
+- `report_identified(id, identity, rect)` / `find_identified(id, identity)`: one of several
+  parts known by its identity (a UUID: a tab, `workbench_model::hints::ANCHOR_TAB`), never
+  by a name two of them could share.
 
 ## States and interaction
 

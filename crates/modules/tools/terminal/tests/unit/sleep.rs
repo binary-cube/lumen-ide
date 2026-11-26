@@ -76,11 +76,22 @@ fn each_project_asks_on_its_own_clock() {
     let (a, b) = (Some(kernel::ProjectId::new()), Some(kernel::ProjectId::new()));
     let mut asked = Vec::new();
     let now = Instant::now();
-    assert!(resumes_due(&mut asked, a, now));
-    assert!(resumes_due(&mut asked, b, now), "another project: not held back by the first");
-    assert!(!resumes_due(&mut asked, a, now + RESUMES_EVERY / 2));
-    assert!(resumes_due(&mut asked, a, now + RESUMES_EVERY));
-    assert!(resumes_due(&mut asked, None, now), "terminals of no project too");
+    let ask = |asked: &mut ResumesAsked, p, at, unknown: bool| {
+        let due = resumes_due(resumes_asked_at(asked, p), at, || unknown);
+        if due {
+            note_resumes_asked(asked, p, at);
+        }
+        due
+    };
+    assert!(ask(&mut asked, a, now, false));
+    assert!(ask(&mut asked, b, now, false), "another project: not held back by the first");
+    assert!(!ask(&mut asked, a, now + RESUMES_EVERY / 2, false));
+    assert!(ask(&mut asked, a, now + RESUMES_EVERY, false));
+    assert!(ask(&mut asked, None, now, false), "terminals of no project too");
+    // One of its terminals not knowing how it resumes yet: asked again sooner.
+    let later = now + RESUMES_EVERY;
+    assert!(!ask(&mut asked, a, later + RESUMES_SOON / 2, true));
+    assert!(ask(&mut asked, a, later + RESUMES_SOON, true));
 }
 
 /// A terminal of no project wakes every window (one without a project too); a project's,
@@ -118,7 +129,7 @@ fn the_watch_runs_only_while_needed() {
 fn a_closed_project_leaves_nothing_behind() {
     let project = kernel::ProjectId::new();
     lock(&DUE).push(Some(project));
-    assert!(resumes_due(&mut lock(&RESUMES_ASKED), Some(project), Instant::now()));
+    note_resumes_asked(&mut lock(&RESUMES_ASKED), Some(project), Instant::now());
     forget_project(project);
     assert!(!lock(&DUE).contains(&Some(project)));
     assert!(lock(&RESUMES_ASKED).iter().all(|(p, _)| *p != Some(project)));

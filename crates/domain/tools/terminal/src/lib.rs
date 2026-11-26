@@ -245,6 +245,15 @@ pub trait TerminalSession: Send {
         let mut grid = GridSnapshot::default();
         self.try_snapshot(&mut grid).then(|| InputModes::of(&grid))
     }
+    /// The text `selection` covers, from the history too (what scrolled off the screen while
+    /// it was made): rows joined by `\n`, a row the program's output wrapped joined to the
+    /// next, trailing spaces dropped. `history`: how long the history was in the snapshot
+    /// the selection was made on (output since moves the rows: they're found where they
+    /// went). `None`: the emulator stayed busy (the caller takes what's on screen).
+    fn selection_text(&self, selection: &text::TermSelection, history: usize) -> Option<String> {
+        let _ = (selection, history);
+        None
+    }
     /// Scrolls through history (positive = up).
     fn scroll(&mut self, lines: i32);
     /// [`Self::scroll`] only if the emulator is free now (as [`Self::try_snapshot`]):

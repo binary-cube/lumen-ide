@@ -204,7 +204,7 @@ fn a_tooltips_lines_are_stacked_in_a_pill_sized_for_them() {
     let anchor = Rect::new(100.0, 100.0, 200.0, 24.0);
     let mut scene = render_api::Scene::default();
     let one = scene.push_layer(None);
-    let single = tooltip(one, &mut text, &ctx, anchor, "Sequential scan", None, bounds);
+    let single = tooltip(one, &mut text, &ctx, &tip(anchor, "Sequential scan", bounds)).pill;
     assert_eq!(baselines(one).len(), 1);
     let font = ctx.ui_font(-1.0);
     let wide = text.shape_line("Sequential scan", &font).width;
@@ -212,7 +212,7 @@ fn a_tooltips_lines_are_stacked_in_a_pill_sized_for_them() {
 
     let label = "SEARCH t2 USING INTEGER PRIMARY KEY (rowid=?) LEFT-JOIN\nRow lookup";
     let two = scene.push_layer(None);
-    let rect = tooltip(two, &mut text, &ctx, anchor, label, None, bounds);
+    let rect = tooltip(two, &mut text, &ctx, &tip(anchor, label, bounds)).pill;
     let ys = baselines(two);
     assert_eq!(ys.len(), 2, "two lines, each on its own baseline: {ys:?}");
     assert!(ys[1] - ys[0] >= 14.0, "not on top of each other: {ys:?}");
@@ -235,13 +235,15 @@ fn a_long_tooltip_wraps_within_its_bounds() {
     let long = "word ".repeat(120);
     let mut scene = render_api::Scene::default();
     let layer = scene.push_layer(None);
-    let rect = tooltip(layer, &mut text, &ctx, anchor, &long, Some("⌘K"), bounds);
+    let spec = TooltipSpec { anchor, label: &long, shortcut: Some("⌘K"), bounds, pointer: None };
+    let rect = tooltip(layer, &mut text, &ctx, &spec).pill;
     assert!(baselines(layer).len() > 1);
     assert!(rect.size.width <= ctx.px(TOOLTIP_MAX_W) + ctx.px(60.0), "{rect:?}");
     assert!(bounds.contains(rect.origin) && rect.max_x() <= bounds.max_x());
     // Empty lines are dropped; a lone line keeps the one-line height.
     let layer = scene.push_layer(None);
-    let one = tooltip(layer, &mut text, &ctx, anchor, "Close\n\n", None, bounds);
+    let spec = TooltipSpec { anchor, label: "Close\n\n", shortcut: None, bounds, pointer: None };
+    let one = tooltip(layer, &mut text, &ctx, &spec).pill;
     assert_eq!(one.size.height, ctx.px(28.0));
 }
 
@@ -1942,4 +1944,70 @@ fn a_loading_state_is_told_once_by_its_title() {
     assert_eq!(nodes.len(), 1, "one node, its text not read again: {nodes:?}");
     assert_eq!((nodes[0].role, &*nodes[0].name), (Role::ProgressBar, "Loading"));
     assert!((nodes[0].bounds.size.width - drawn.size.width).abs() < 0.5, "over all of it");
+}
+
+/// The mouse's cursor never covers a tooltip: over its element, a pill below starts past
+/// the cursor's body; with no room for that, it goes above the element — within its
+/// bounds either way.
+#[test]
+fn a_tooltip_keeps_clear_of_the_cursor() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let bounds = Rect::new(0.0, 0.0, 800.0, 600.0);
+    let anchor = Rect::new(100.0, 100.0, 36.0, 36.0);
+    let pointer = Point::new(118.0, 130.0);
+    let layer = scene.push_layer(None);
+    let alone = TooltipSpec { anchor, label: "Database", shortcut: None, bounds, pointer: None };
+    let plain = tooltip(layer, &mut text, &ctx, &alone).pill;
+    assert!((plain.min_y() - (anchor.max_y() + 7.0)).abs() < 1.0, "no mouse: right under it");
+    let layer = scene.push_layer(None);
+    let spec = TooltipSpec { pointer: Some(pointer), ..alone };
+    let clear = tooltip(layer, &mut text, &ctx, &spec).pill;
+    assert!(clear.min_y() >= pointer.y + 22.0, "past the cursor's body: {clear:?}");
+    assert!(bounds.contains(clear.origin) && clear.max_y() <= bounds.max_y());
+    // At the bottom of its bounds: above the element instead.
+    let low = Rect::new(100.0, 560.0, 36.0, 36.0);
+    let layer = scene.push_layer(None);
+    let spec = TooltipSpec { anchor: low, pointer: Some(Point::new(118.0, 590.0)), ..alone };
+    let above = tooltip(layer, &mut text, &ctx, &spec).pill;
+    assert!(above.max_y() <= low.min_y(), "above it: {above:?}");
+    assert!(above.min_y() >= bounds.min_y());
+}
+
+/// A tooltip of `label` about `anchor` within `bounds`, no shortcut, shown with no mouse.
+fn tip<'a>(anchor: Rect, label: &'a str, bounds: Rect) -> TooltipSpec<'a> {
+    TooltipSpec { anchor, label, shortcut: None, bounds, pointer: None }
+}
+
+/// The arrow's box is where the arrow was drawn: moved off the cursor, it's left of it (what
+/// shows over a web page follows it); a mouse below the element (not on it) moves nothing.
+#[test]
+fn a_tooltip_tells_where_its_arrow_went() {
+    let palette = Palette::dark();
+    let ctx = Ctx::new(&palette, 1.0);
+    let mut text = TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    let bounds = Rect::new(0.0, 0.0, 800.0, 600.0);
+    let anchor = Rect::new(100.0, 100.0, 36.0, 36.0);
+    let spec = TooltipSpec {
+        anchor,
+        label: "Database",
+        shortcut: None,
+        bounds,
+        pointer: Some(Point::new(118.0, 130.0)),
+    };
+    let layer = scene.push_layer(None);
+    let shape = tooltip(layer, &mut text, &ctx, &spec);
+    let arrow = shape.arrow.expect("an arrow");
+    assert!(arrow.max_x() <= 118.0, "left of the cursor: {arrow:?}");
+    assert!(
+        (arrow.min_y() - anchor.max_y()).abs() < 0.5 && arrow.max_y() <= shape.pill.min_y() + 0.5
+    );
+    // The mouse below the element (part of a larger hover area): nothing moves for it.
+    let below = TooltipSpec { pointer: Some(Point::new(118.0, 300.0)), ..spec };
+    let layer = scene.push_layer(None);
+    let plain = tooltip(layer, &mut text, &ctx, &below);
+    assert!((plain.pill.min_y() - (anchor.max_y() + 7.0)).abs() < 1.0);
 }

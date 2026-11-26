@@ -67,6 +67,7 @@ impl Workbench {
             }
         }
         ask("tooltips", self.tooltips.is_animating(), None)?;
+        ask("tab-tints", self.tints_moving_in_sight(), None)?;
         ask("top-bar", self.chrome.top_bar_reveal.animating(), None)?;
         ask("editor-split", self.editors.split.animating(), None)?;
         std::ops::ControlFlow::Continue(())

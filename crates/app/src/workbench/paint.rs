@@ -68,7 +68,7 @@ impl Workbench {
         } else {
             self.paint_groups(text, scene);
         }
-        if let Some(tab) = self.tab_bar.tab_rect(self.active) {
+        if let Some(tab) = self.tab_bar.visible_tab_rect(self.active) {
             ui_workbench::anchors::report(workbench_model::hints::ANCHOR_ACTIVE_TAB, tab);
         }
         // The tab a hint is about (by its name), only while one is shown: in whichever group.
@@ -111,30 +111,23 @@ impl Workbench {
         self.paint_phases.mark("overlays");
     }
 
-    /// The tab the shown hint points at (its name), reported as an anchor where it's drawn
-    /// — in the current group or another; nothing while no hint names a tab.
+    /// The tab the shown hint is about (its identity), reported as an anchor where it's
+    /// drawn in sight — in the current group or another; nothing while no hint is about one.
     fn report_hint_tab(&self) {
-        let Some(workbench_model::HintAnchor::Tab(name)) =
-            self.hint.as_ref().and_then(|h| h.anchor.as_ref())
-        else {
-            return;
+        let Some(id) = self.hint_tab else { return };
+        let at = |tabs: &[Tab], bar: &TabBar| {
+            tabs.iter().position(|t| t.id == id).and_then(|i| bar.visible_tab_rect(i))
         };
-        let named = |tab: &Tab| {
-            tab.doc.path().and_then(Path::file_stem).and_then(|n| n.to_str()) == Some(name)
-        };
-        let current = self.tabs.iter().position(named).and_then(|i| self.tab_bar.tab_rect(i));
         let other = || {
             self.editors
                 .groups
                 .iter()
                 .enumerate()
                 .filter(|(g, _)| *g != self.editors.current)
-                .find_map(|(_, group)| {
-                    group.tabs.iter().position(named).and_then(|i| group.tab_bar.tab_rect(i))
-                })
+                .find_map(|(_, group)| at(&group.tabs, &group.tab_bar))
         };
-        if let Some(rect) = current.or_else(other) {
-            ui_workbench::anchors::report_keyed(workbench_model::hints::ANCHOR_TAB, name, rect);
+        if let Some(rect) = at(&self.tabs, &self.tab_bar).or_else(other) {
+            ui_workbench::anchors::report_identified(workbench_model::hints::ANCHOR_TAB, id, rect);
         }
     }
 
@@ -588,6 +581,14 @@ impl Workbench {
         let (support, icons, theme) = (&self.support, &self.icons, self.theme_generation);
         let file_icons = &mut self.file_icons;
         let root = self.project.as_ref().map(|p| p.root_path());
+        // Tabs drawing the eye: those faded out, or of tabs gone, let go first.
+        let now = std::time::Instant::now();
+        let (open, groups) = (&self.tabs, &self.editors.groups);
+        self.tab_tints.purge(now, |id| {
+            open.iter().any(|t| t.id == id)
+                || groups.iter().any(|g| g.tabs.iter().any(|t| t.id == id))
+        });
+        let tints = &self.tab_tints;
         let tabs: Vec<TabTitle<'_>> = self
             .tabs
             .iter()
@@ -610,6 +611,9 @@ impl Workbench {
                 badge: badge.as_ref().map(|(b, c)| (b.as_str(), *c)),
                 locked: t.locked(),
                 outside: t.doc.path().is_some_and(|path| outside_project(path, root)),
+                tint: tints
+                    .of(t.id, now)
+                    .map(|(tone, amount)| (tab_tints::tone_color(palette, tone), amount)),
             })
             .collect();
         let navigation = self.navigation();

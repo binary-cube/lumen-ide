@@ -193,6 +193,7 @@ fn a_quiet_followed_session_says_how_it_resumes() {
     set(now() - 7_200, Some("s-1"));
     let said = contracts::terminal::TerminalState {
         memory: Some(42),
+        running: false,
         asleep: true,
         can_sleep: contracts::terminal::CanSleep::No,
     };
@@ -214,7 +215,7 @@ fn a_session_s_sleep_row_follows_its_terminal() {
     f.agent = "fake";
     lock(&FOLLOWED).push(f);
     assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "nothing said yet");
-    let said = |can_sleep| TerminalState { memory: None, asleep: false, can_sleep };
+    let said = |can_sleep| TerminalState { memory: None, running: true, asleep: false, can_sleep };
     set_state(&key, Some(said(CanSleep::No)));
     assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "it can't");
     set_state(&key, Some(said(CanSleep::Typed)));
@@ -222,7 +223,8 @@ fn a_session_s_sleep_row_follows_its_terminal() {
     set_state(&key, Some(said(CanSleep::Yes)));
     assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(false));
     // Asleep: "Wake Up" in its place.
-    let asleep = TerminalState { memory: None, asleep: true, can_sleep: CanSleep::No };
+    let asleep =
+        TerminalState { memory: None, running: false, asleep: true, can_sleep: CanSleep::No };
     set_state(&key, Some(asleep));
     assert_eq!(crate::panel::wake_row_for_tests("fake", &id), Some(true));
     set_state(&key, Some(said(CanSleep::Yes)));
@@ -243,5 +245,21 @@ fn a_session_s_sleep_row_follows_its_terminal() {
     // Its tab closed (told gone): no row left mid-way.
     told(project, &key, None);
     assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none());
+    forget(&key);
+}
+
+/// A session taken up again from the list (its tab followed anew) keeps what its terminal
+/// told: asleep stays asleep on its row, never blank until the next ask.
+#[test]
+fn following_a_tab_again_keeps_its_state() {
+    use contracts::terminal::{CanSleep, TerminalState};
+    let key = format!("again-{:x}", kernel::id::new_uuid());
+    let id = format!("s-{:x}", kernel::id::new_uuid());
+    follow(key.clone(), "fake", Some(id.clone()), PathBuf::from("/p"), "Work".into());
+    let asleep =
+        TerminalState { memory: None, running: false, asleep: true, can_sleep: CanSleep::No };
+    told(kernel::ProjectId::new(), &key, Some(asleep));
+    follow(key.clone(), "fake", Some(id.clone()), PathBuf::from("/p"), "Work".into());
+    assert_eq!(state_of("fake", &id), Some(asleep));
     forget(&key);
 }

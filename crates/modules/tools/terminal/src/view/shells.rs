@@ -25,7 +25,9 @@ pub(crate) struct Asked {
     pub(crate) watch: Option<Arc<dyn terminal_session::SessionWatch>>,
     /// Its program's process id while it runs (measured with what it started).
     pub(crate) pid: Option<u32>,
-    /// Its program stopped, its tab kept: resumed when shown.
+    /// When its program last started (how long it's been "starting": [`STARTING_WITHIN`]).
+    pub(crate) started: Option<std::time::Instant>,
+    /// Its program stopped, its tab kept: resumed once woken.
     pub(crate) asleep: bool,
     /// Put to sleep: how its program starts again, and when that was asked (taken at its
     /// view's poll; let go if it was drawn since).
@@ -74,6 +76,7 @@ impl Default for Asked {
             typed: false,
             watch: None,
             pid: None,
+            started: None,
             asleep: false,
             sleep: None,
             by_hand: false,
@@ -163,6 +166,10 @@ pub(crate) fn announce_gone(project: Option<kernel::ProjectId>, key: &str) {
     crate::sleep::publish(project, &event);
 }
 
+/// How long a session counts as starting (its owner learning how it resumes, within a
+/// second or two): past that, one still not known can't sleep, and isn't asked about often.
+pub(crate) const STARTING_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// How long an order to sleep stays good: one not taken by then is let go (never applied
 /// later, when its tab is shown).
 pub(crate) const SLEEP_ORDER_FRESH: std::time::Duration = std::time::Duration::from_secs(20);
@@ -172,6 +179,7 @@ impl Asked {
     pub(crate) fn state(&self) -> contracts::terminal::TerminalState {
         contracts::terminal::TerminalState {
             memory: self.memory,
+            running: self.running && self.pid.is_some() && !self.asleep,
             asleep: self.asleep,
             can_sleep: self.can_sleep(),
         }
@@ -187,8 +195,16 @@ impl Asked {
         if self.sleep.is_some() {
             return CanSleep::Sleeping;
         }
-        if self.resume.is_none() || self.asleep || !self.running || self.pid.is_none() {
+        if self.asleep || !self.running || self.pid.is_none() {
             return CanSleep::No;
+        }
+        // Running, its owner not having said yet how it resumes: "starting" only while
+        // someone could say it and for a short while; past that, it can't sleep.
+        if self.resume.is_none() {
+            let answered =
+                workbench_model::presence::request::<contracts::terminal::ResumeLaunch>();
+            let fresh = self.started.is_some_and(|at| at.elapsed() < STARTING_WITHIN);
+            return if answered && fresh { CanSleep::Starting } else { CanSleep::No };
         }
         // By hand, the user chose: only text typed and not sent stops it (never lost).
         if self.typed { CanSleep::Typed } else { CanSleep::Yes }

@@ -142,7 +142,8 @@ pub(crate) fn tab_of(session: &agents::AgentSession) -> Option<String> {
     Some(only.key.clone())
 }
 
-/// A session's tab followed from now on (`id`: `None` for a new one).
+/// A session's tab followed from now on (`id`: `None` for a new one); one followed already
+/// keeps what its terminal told of it.
 pub(crate) fn follow(
     key: String,
     agent: &'static str,
@@ -152,6 +153,9 @@ pub(crate) fn follow(
 ) {
     {
         let mut followed = lock(&FOLLOWED);
+        // Followed already (its session taken up again from the list): what its terminal
+        // told stays (asleep, open) — only its terminal's event changes it.
+        let state = followed.iter().find(|f| f.key == key).and_then(|f| f.state);
         followed.retain(|f| f.key != key);
         if followed.len() >= MOST {
             followed.remove(0);
@@ -166,7 +170,7 @@ pub(crate) fn follow(
             title,
             said,
             active: 0,
-            state: None,
+            state,
         });
     }
     if !RUNNING.swap(true, Ordering::AcqRel) {

@@ -21,8 +21,8 @@ pub const ANCHOR_TAB: &str = "editor.tab";
 /// What a hint points at instead of its step's anchor, said when it's asked for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HintAnchor {
-    /// The editor's tab opened by this name (a module's view: its key), wherever it is.
-    Tab(String),
+    /// The editor's tab of a module's view (as it opened it), wherever it is.
+    Tab(crate::ViewTab),
 }
 
 /// What a hint's button looks like: the main one (in the accent, with ↵) or beside it.

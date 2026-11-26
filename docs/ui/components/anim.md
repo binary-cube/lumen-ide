@@ -4,7 +4,8 @@
 widening — moving smoothly toward its target instead of jumping.
 
 **Where it's used:** the color picker, the level picker and tooltips appearing; About and
-the context menu (`Appear`); the menu drawer's slides; the editor's floating cards.
+the context menu (`Appear`); the menu drawer's slides; the editor's floating cards; a tab
+drawing the eye while a hint is about it (`Attention`).
 
 ## Anatomy
 
@@ -18,6 +19,9 @@ the context menu (`Appear`); the menu drawer's slides; the editor's floating car
 
 - `Tween`: a value moving from where it is toward a target.
 - `Appear`: a window's appearance, from 0 to 1 once it opens (1 before it ever opened).
+- `Attention`: something drawing the eye a moment: it fades in, pulses a few times, then
+  holds still (no frames while it does); let go, it fades out from where it is and is gone.
+  Its times are given (`value(now)`), so it's tested without waiting.
 
 ## Options
 
@@ -30,6 +34,10 @@ the context menu (`Appear`); the menu drawer's slides; the editor's floating car
 | `animating()` | — | still moving: ask for the next frame only while true |
 | `Appear::start(duration)` | 1 (shown) | from 0 toward 1 |
 | `Appear::value()` / `animating()` | — | how far it appeared |
+| `Attention::new(look, now)` | — | starts drawing the eye at `now` |
+| `AttentionLook` | 220 ms fade, 2 pulses of 650 ms, dipping to 0.4 | how it fades and pulses |
+| `release(now)` / `released()` / `gone(now)` | — | let go (fades out once); faded out |
+| `value(now)` / `animating(now)` | — | how strongly it shows (0..=1); changing (fading, pulsing) |
 
 ## States and interaction
 

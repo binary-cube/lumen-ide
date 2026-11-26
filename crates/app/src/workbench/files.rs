@@ -590,6 +590,9 @@ impl Workbench {
         if self.active >= i && self.active > 0 {
             self.active -= 1;
         }
+        // A hint about it, its tint: let go with it (nothing kept alive undrawn).
+        self.let_go_of_orphan_hint();
+        self.tint_tab_id(tab.id, None);
         self.move_focus(Focus::Editor);
         self.layout();
         self.drop_empty_group();

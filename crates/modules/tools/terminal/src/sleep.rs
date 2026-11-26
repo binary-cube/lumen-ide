@@ -1,7 +1,7 @@
 //! Programs other modules run in a terminal (an agent's session), watched while they live:
 //! what each holds (its process with everything it started, measured only while someone asks)
 //! and, when the user chose it, put to sleep once unseen and idle — the program stopped, its
-//! tab kept with its last screen, started again the way its owner says when the tab is shown.
+//! tab kept with its last screen, started again the way its owner says once the user wakes it.
 //!
 //! A thread of its own (`terminal-watch`) runs while some terminal is known by a key: every
 //! [`TICK`] it measures (if asked within [`ASKED_WITHIN`]), every [`SLEEP_TICKS`] ticks it looks
@@ -294,29 +294,46 @@ pub(crate) fn put_to_sleep(host: &mut dyn workbench_model::WorkbenchHost) -> boo
     any
 }
 
-/// How often the keyed terminals' owners are asked how they resume (what the menus offer).
+/// How often the keyed terminals' owners are asked how they resume (what the menus offer),
+/// and how often while one runs not knowing it yet (a session just started: its owner
+/// learns its id within a second or two, the menus follow then).
 const RESUMES_EVERY: Duration = Duration::from_secs(5);
+const RESUMES_SOON: Duration = Duration::from_secs(1);
 /// When each project's window last asked (`None`: terminals of no project).
 type ResumesAsked = Vec<(Option<kernel::ProjectId>, Instant)>;
 static RESUMES_ASKED: Mutex<ResumesAsked> = Mutex::new(Vec::new());
 
-/// Whether project `project`'s window should ask again now (each project on its own
-/// clock: another window's asking never holds this one back), noted if so.
+/// Whether a window should ask again now, `last` asked when it did (`None`: never): every
+/// [`RESUMES_EVERY`], or every [`RESUMES_SOON`] while `unknown` (one of its terminals is
+/// starting, not knowing how it resumes; looked at only then).
 pub(crate) fn resumes_due(
+    last: Option<Instant>,
+    now: Instant,
+    unknown: impl FnOnce() -> bool,
+) -> bool {
+    let Some(last) = last else { return true };
+    let since = now.saturating_duration_since(last);
+    since >= RESUMES_EVERY || (since >= RESUMES_SOON && unknown())
+}
+
+/// When project `project`'s window last asked (each project on its own clock: another
+/// window's asking never holds this one back).
+pub(crate) fn resumes_asked_at(
+    asked: &ResumesAsked,
+    project: Option<kernel::ProjectId>,
+) -> Option<Instant> {
+    asked.iter().find(|(p, _)| *p == project).map(|(_, at)| *at)
+}
+
+/// Project `project`'s window asked at `now`.
+pub(crate) fn note_resumes_asked(
     asked: &mut ResumesAsked,
     project: Option<kernel::ProjectId>,
     now: Instant,
-) -> bool {
+) {
     match asked.iter_mut().find(|(p, _)| *p == project) {
-        Some((_, at)) if now.saturating_duration_since(*at) < RESUMES_EVERY => false,
-        Some((_, at)) => {
-            *at = now;
-            true
-        }
-        None => {
-            asked.push((project, now));
-            true
-        }
+        Some((_, at)) => *at = now,
+        None => asked.push((project, now)),
     }
 }
 
@@ -324,10 +341,26 @@ pub(crate) fn resumes_due(
 /// says now (asked off the menus, which read only this; nobody answers: it can't sleep).
 fn learn_resumes(host: &mut dyn workbench_model::WorkbenchHost) {
     let project = host.project_id();
-    if !crate::view::any_keyed() || !resumes_due(&mut lock(&RESUMES_ASKED), project, Instant::now())
-    {
+    // Some terminal of its project is starting, not knowing how it resumes yet (memory
+    // only; a short while, then it's asked at the usual pace).
+    let unknown = || {
+        keyed().iter().any(|(_, slot)| {
+            let asked = asked(slot);
+            asked.can_sleep() == contracts::terminal::CanSleep::Starting
+                && asked.project.is_none_or(|p| Some(p) == project)
+        })
+    };
+    if !crate::view::any_keyed() {
         return;
     }
+    // When it last asked, read and let go: deciding looks at the terminals (their locks),
+    // never under this one.
+    let now = Instant::now();
+    let last = resumes_asked_at(&lock(&RESUMES_ASKED), project);
+    if !resumes_due(last, now, unknown) {
+        return;
+    }
+    note_resumes_asked(&mut lock(&RESUMES_ASKED), project, now);
     for (key, slot) in keyed() {
         let running = {
             let asked = asked(&slot);

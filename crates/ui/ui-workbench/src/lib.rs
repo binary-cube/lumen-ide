@@ -57,7 +57,7 @@ mod tool_strip;
 mod top_bar;
 
 pub use about::AboutView;
-pub use anim::Tween;
+pub use anim::{Attention, AttentionLook, Tween};
 pub use breadcrumbs::{Breadcrumbs, Crumb};
 pub use choice_menu::{Choice, ChoiceAction, ChoiceMenu};
 pub use code_hover::{CardParam, CodeHover, HoverCard};

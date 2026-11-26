@@ -662,3 +662,49 @@ fn the_agents_list_takes_its_search_text_and_the_wheel() {
     assert!(part.captures_keys());
     assert!(list.shown().len() < 40, "the search narrowed the agents");
 }
+
+/// A session whose tab is open says so on its row (as its terminal told it): awake, a dot and
+/// "Open" (its memory once measured); asleep, the moon and how to wake it.
+#[test]
+fn a_session_s_row_says_whether_its_tab_is_open_or_asleep() {
+    use contracts::terminal::{CanSleep, TerminalState};
+    let id = format!("open-{:x}", kernel::id::new_uuid());
+    let key = format!("open-key-{:x}", kernel::id::new_uuid());
+    let mut panel = listed(vec![session(&id, 100)]);
+    crate::follow::follow(key.clone(), "fake", Some(id), PathBuf::from("/p"), "Work".into());
+    let open =
+        TerminalState { memory: None, running: true, asleep: false, can_sleep: CanSleep::Yes };
+    crate::follow::told(kernel::ProjectId::new(), &key, Some(open));
+    painted(&mut panel, 300.0, 400.0);
+    let (held, _) = *panel.holds.first().expect("its row tells it");
+    let at = Point::new(held.min_x() + 1.0, held.min_y() + held.size.height / 2.0);
+    assert_eq!(panel.tooltip_at(at).map(|t| t.label), Some(t("agents.open")));
+    let asleep = TerminalState { asleep: true, running: false, ..open };
+    crate::follow::told(kernel::ProjectId::new(), &key, Some(asleep));
+    painted(&mut panel, 300.0, 400.0);
+    let (held, _) = *panel.holds.first().unwrap();
+    let at = Point::new(held.min_x() + 1.0, held.min_y() + held.size.height / 2.0);
+    assert_eq!(panel.tooltip_at(at).map(|t| t.label), Some(t("agents.asleep")));
+    crate::follow::forget(&key);
+}
+
+/// The dot says its program runs, whatever it can do: one that can't be resumed (nobody
+/// says how) still runs, and shows it; one ended shows nothing.
+#[test]
+fn the_open_dot_follows_whether_its_program_runs() {
+    use contracts::terminal::{CanSleep, TerminalState};
+    let id = format!("runs-{:x}", kernel::id::new_uuid());
+    let key = format!("runs-key-{:x}", kernel::id::new_uuid());
+    let mut panel = listed(vec![session(&id, 100)]);
+    crate::follow::follow(key.clone(), "fake", Some(id), PathBuf::from("/p"), "Work".into());
+    let runs =
+        TerminalState { memory: None, running: true, asleep: false, can_sleep: CanSleep::No };
+    crate::follow::told(kernel::ProjectId::new(), &key, Some(runs));
+    painted(&mut panel, 300.0, 400.0);
+    assert!(!panel.holds.is_empty(), "running, though it can't sleep: its dot");
+    let ended = TerminalState { running: false, ..runs };
+    crate::follow::told(kernel::ProjectId::new(), &key, Some(ended));
+    painted(&mut panel, 300.0, 400.0);
+    assert!(panel.holds.is_empty(), "ended: nothing");
+    crate::follow::forget(&key);
+}

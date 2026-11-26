@@ -11,10 +11,17 @@ impl EditorApp {
     /// windows' toggles.
     pub(super) fn panel_key(&mut self, event: &KeyEvent) -> Control {
         let m = event.modifiers;
-        let selected = || self.workbench.view_selection().is_some();
+        // The selection read once (a terminal's reads its whole history): asked to know
+        // whether Ctrl+C copies, then copied as read.
+        let mut chosen: Option<String> = None;
+        let selected = || {
+            chosen = self.workbench.view_selection();
+            chosen.is_some()
+        };
         match terminal_clip(event, selected, KeysOf::HERE) {
             Some(TerminalClip::Copy) => {
-                if let (Some(text), Some(window)) = (self.workbench.copy(), &self.window) {
+                let text = chosen.or_else(|| self.workbench.copy());
+                if let (Some(text), Some(window)) = (text, &self.window) {
                     window.set_clipboard_text(&text);
                 }
                 if !m.shift && self.workbench.clear_view_selection() {

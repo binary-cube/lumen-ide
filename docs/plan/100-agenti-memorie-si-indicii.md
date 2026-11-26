@@ -573,6 +573,43 @@ evenimente.
 **Lăsat.** Memoria din card („circa N eliberați”) e cea măsurată înainte de adormire, nu una
 citită după.
 
+### 100i — Adormită până o trezești, tab-uri cu identitate, fără flash (cerut 2026-11-26)
+
+Cerut: schimbatul tab-urilor nu trezește sesiunea; „Adoarme” mereu în meniu, dezactivat cât
+nu se poate; un indicator de sesiuni deschise / adormite în panou; tabul unui indiciu colorat
+(nu încadrat), animat discret; tooltip-urile niciodată sub cursor; copierea din terminal cu tot
+istoricul; un flash negru la revenirea în aplicație; „să aibă tabul un uuid în spate”.
+
+**Făcut.**
+
+- Adormită (de mână sau după inactivitate) rămâne așa până la o tastă, un clic în ea sau
+  „Trezește”; un clic pe sesiunea ei în panou o aduce în față fără s-o trezească (datele de
+  pornire nu se mai reaplică unui terminal cu cheie).
+- `CanSleep::Starting`: „Adoarme (sesiunea abia pornește)”, dezactivat, cât cineva răspunde
+  la `ResumeLaunch` și cel mult 10 s de la pornire; atunci terminalul întreabă la 1 s, altfel
+  la 5 s. `TerminalState::running`: punctul verde din panou (luna, adormită).
+- Fiecare tab are un UUID v4 (`Tab::id`): nuanța și indiciul îl țin după el; modulele numesc
+  tabul cum l-au deschis (`ViewTab { title, extension }`), aplicația îl rezolvă o dată.
+  `WorkbenchHost::tint_tab` colorează tabul în tonul temei, cu `anim::Attention` (apare,
+  pulsează de două ori, stă fără cadre, dispare); indiciul se ascunde cât tabul nu se vede și
+  se renunță la el (nenumărat ca închis) când tabul se închide.
+- Tooltip-urile: săgeata la stânga cursorului, cardul sub corpul lui sau deasupra elementului;
+  ce se decupează peste pagini e forma desenată.
+- Copierea din terminal: din tot istoricul (rândurile împărțite de terminal, unite; mărcile
+  combinate cu litera lor; rândurile venite între timp, găsite unde au ajuns).
+- Flash-ul negru: stratul Metal era lăsat la 1×1 după ce își dădea înapoi imaginile de rezervă
+  (fereastra nefolosită), iar macOS îl arăta așa la activare. Acum e readus la mărimea
+  ferestrei pe loc: rezerva tot se golește. Măsurat (instanță izolată, `footprint`):
+  IOSurface 31 MB → 16 MB după plecarea din aplicație, ca înainte; fără eliberare rămânea 31 MB.
+- Ecranul de start: secțiunile „Sesiuni anterioare” și „Toate proiectele” se pliază din titlu.
+
+**Lăsat.**
+
+- Plierea secțiunilor nu se ține între rulări și nu se face din tastatură.
+- Ritmul de 1 s pentru o sesiune care pornește depinde de trezirea ferestrei (o fereastră
+  liniștită află mai târziu; cel mult 10 s, apoi la ritmul obișnuit).
+- O copiere cât emulatorul rămâne ocupat ~20 ms ia doar ce e pe ecran, fără să spună.
+
 ## Riscuri
 
 - Un program care nu scrie nimic în timpul unei ture lungi (o unealtă tăcută) ar putea părea

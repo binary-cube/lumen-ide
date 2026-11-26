@@ -35,6 +35,9 @@ the one `Tooltips` and paints it last.
   to the next shows it at once. `set(None)` / `hide()` (a click, a scroll, a key) hides it.
 - `pointer(p)`: an item wider than 280 px shows its tip by the mouse, where it was when it
   appeared (it doesn't chase the mouse).
+- The cursor never hides it (`ds::TooltipSpec::pointer`): over the item, the arrow moves to
+  the cursor's left (on the item still) and a pill below starts past the cursor's body; with
+  no room left below, it goes above the item. It always stays within its bounds.
 - `deadline()` schedules the frame it appears at; `is_animating` while it fades in.
 
 ## Accessibility

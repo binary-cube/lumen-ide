@@ -67,8 +67,12 @@ fn a_painted_card_answers_the_mouse() {
         focus: Some(1),
     };
     let mut card = HintCard::default();
-    let place =
-        HintPlace { anchor: Some(Rect::new(100.0, 40.0, 120.0, 30.0)), area: AREA, scale: 1.0 };
+    let place = HintPlace {
+        anchor: Some(Rect::new(100.0, 40.0, 120.0, 30.0)),
+        area: AREA,
+        scale: 1.0,
+        spotlight: true,
+    };
     let painter = Painter { text: &mut text, scene: &mut scene, palette: &palette, icons: &icons };
     card.paint(painter, &spec, place);
     let bounds = card.bounds().unwrap();
@@ -115,7 +119,7 @@ fn a_crowded_footer_takes_two_rows() {
         focus: None,
     };
     let mut card = HintCard::default();
-    let place = HintPlace { anchor: None, area: AREA, scale: 1.0 };
+    let place = HintPlace { anchor: None, area: AREA, scale: 1.0, spotlight: true };
     let painter = Painter { text: &mut text, scene: &mut scene, palette: &palette, icons: &icons };
     card.paint(painter, &spec, place);
     let at = |i| card.hits.iter().find(|(_, h)| *h == CardHit::Button(i)).unwrap().0;
@@ -132,7 +136,7 @@ fn painted(spec: &HintCardSpec<'_>) -> (HintCard, render_api::Scene) {
     let mut text = TextSystem::new();
     let mut scene = render_api::Scene::default();
     let mut card = HintCard::default();
-    let place = HintPlace { anchor: None, area: AREA, scale: 1.0 };
+    let place = HintPlace { anchor: None, area: AREA, scale: 1.0, spotlight: true };
     let painter = Painter { text: &mut text, scene: &mut scene, palette: &palette, icons: &icons };
     card.paint(painter, spec, place);
     (card, scene)

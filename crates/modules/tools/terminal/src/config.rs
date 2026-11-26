@@ -69,7 +69,7 @@ pub struct TerminalConfig {
     /// Links and paths underlined under the pointer, opened with a click.
     pub highlight_links: bool,
     /// A program another module runs (an agent's session) stopped after this long unseen
-    /// and doing nothing, resumed when shown (`None`: never; see `crate::sleep`).
+    /// and doing nothing, resumed once woken (`None`: never; see `crate::sleep`).
     pub sleep_after: Option<std::time::Duration>,
 }
 

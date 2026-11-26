@@ -127,3 +127,56 @@ fn a_hint_stays_under_menus_and_modals() {
     assert!(Overlay::Hint.slot().is_open(&wb), "back once it closed");
     assert!(wb.hint_card.bounds().is_some());
 }
+
+/// A hint about a tab tints that tab (no ring drawn over it) while it shows, and lets the
+/// tint go — fading out — when it closes; a tab not here is never tinted.
+#[test]
+fn a_hint_about_a_tab_tints_it_while_it_shows() {
+    let (mut wb, mut text) = opened("tint");
+    let no_such = workbench_model::ViewTab::new("no-such-tab", "txt");
+    assert!(!wb.tint_tab(&no_such, Some(workbench_model::TabTone::Accent)));
+    let tab = workbench_model::HintAnchor::Tab(workbench_model::ViewTab::new("a", "txt"));
+    assert!(wb.show_hint_by(HINT, Some(tab)));
+    let now = std::time::Instant::now();
+    let id = wb.hint_tab.expect("its tab found");
+    assert_eq!(
+        wb.tab_tints.of(id, now).map(|(tone, _)| tone),
+        Some(workbench_model::TabTone::Accent)
+    );
+    paint(&mut wb, &mut text);
+    assert!(wb.hint_card.bounds().is_some(), "drawn by its tab");
+    wb.close_hint(false);
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    assert_eq!(wb.tab_tints.of(id, later), None, "faded out");
+}
+
+/// Its tab closed, a hint about it is let go whole (card, tint) without counting as closed
+/// by the user: the next tab that asks shows it again — nothing kept alive undrawn.
+#[test]
+fn a_hint_whose_tab_closes_is_let_go_and_can_show_again() {
+    let (mut wb, mut text) = opened("orphan");
+    let tab = workbench_model::HintAnchor::Tab(workbench_model::ViewTab::new("a", "txt"));
+    assert!(wb.show_hint_by(HINT, Some(tab)));
+    let id = wb.hint_tab.expect("its tab found");
+    paint(&mut wb, &mut text);
+    wb.close_tab(wb.active);
+    assert_eq!(wb.hint_shown(), None, "let go with its tab");
+    assert!(wb.hint_card.bounds().is_none());
+    let later = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    assert_eq!(wb.tab_tints.of(id, later), None);
+    assert!(wb.show_hint(HINT), "not counted as closed: it shows again");
+}
+
+/// Two tabs alike by name are two tabs: a hint about a module's view knows its own by its
+/// identity, and a tab not open here gets no hint.
+#[test]
+fn a_hint_knows_its_tab_by_identity() {
+    let (mut wb, _text) = opened("identity");
+    let elsewhere = workbench_model::HintAnchor::Tab(workbench_model::ViewTab::new("a", "md"));
+    assert!(!wb.show_hint_by(HINT, Some(elsewhere)), "no such view open: not shown");
+    let ids: Vec<u128> = wb.tabs.iter().map(|t| t.id).collect();
+    assert!(ids.iter().all(|id| *id != 0));
+    let tab = workbench_model::HintAnchor::Tab(workbench_model::ViewTab::new("a", "txt"));
+    assert!(wb.show_hint_by(HINT, Some(tab)));
+    assert_eq!(wb.hint_tab, Some(wb.tabs[wb.active].id));
+}

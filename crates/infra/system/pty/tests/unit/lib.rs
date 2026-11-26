@@ -536,3 +536,56 @@ fn a_session_not_drawn_parks_its_history_and_gives_it_back() {
     session.snapshot(&mut grid);
     assert_eq!(grid.row_text(grid.rows - 2), "after");
 }
+
+/// A selection made while the screen scrolled is copied whole, its lines from the history
+/// too; a line the program's output wrapped comes back as one.
+#[test]
+fn a_selection_is_copied_with_what_scrolled_off_the_screen() {
+    use alacritty_terminal::vte::ansi::Processor;
+    use terminal_session::text::{TermPoint, TermSelection};
+    struct Quiet;
+    impl EventListener for Quiet {}
+    let mut term = Term::new(term_config(TermOptions::default()), &GridSize::new(20, 5), Quiet);
+    let mut parser: Processor = Processor::new();
+    for i in 0..30 {
+        parser.advance(&mut term, format!("row {i:02}\r\n").as_bytes());
+    }
+    // 30 rows written on a 5-row screen: "row 10" is far up in the history.
+    let line_of = |i: i32| i - 26;
+    let selection = TermSelection {
+        anchor: TermPoint { line: line_of(10), col: 0 },
+        head: TermPoint { line: line_of(13), col: 5 },
+    };
+    let history = term.grid().history_size();
+    assert_eq!(selection_text_of(&term, &selection, history), "row 10\nrow 11\nrow 12\nrow 13");
+    // Output since the selection was made (as the snapshot drawn had it): the same rows,
+    // found where they went.
+    parser.advance(&mut term, b"later 1\r\nlater 2\r\nlater 3\r\n");
+    assert_eq!(selection_text_of(&term, &selection, history), "row 10\nrow 11\nrow 12\nrow 13");
+    // A line longer than the screen's width, wrapped by the terminal: one line again.
+    parser.advance(&mut term, b"abcdefghijklmnopqrstuvwxyz\r\n");
+    let selection = TermSelection {
+        anchor: TermPoint { line: 2, col: 0 },
+        head: TermPoint { line: 3, col: 19 },
+    };
+    let history = term.grid().history_size();
+    assert_eq!(selection_text_of(&term, &selection, history), "abcdefghijklmnopqrstuvwxyz");
+}
+
+/// A letter's combining mark is copied with it (as drawn).
+#[test]
+fn a_combining_mark_is_copied_with_its_letter() {
+    use alacritty_terminal::vte::ansi::Processor;
+    use terminal_session::text::{TermPoint, TermSelection};
+    struct Quiet;
+    impl EventListener for Quiet {}
+    let mut term = Term::new(term_config(TermOptions::default()), &GridSize::new(20, 5), Quiet);
+    let mut parser: Processor = Processor::new();
+    parser.advance(&mut term, "cafe\u{301}".as_bytes());
+    let selection = TermSelection {
+        anchor: TermPoint { line: 0, col: 0 },
+        head: TermPoint { line: 0, col: 3 },
+    };
+    let history = term.grid().history_size();
+    assert_eq!(selection_text_of(&term, &selection, history), "cafe\u{301}");
+}

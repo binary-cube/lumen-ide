@@ -69,7 +69,7 @@ pub const COPY_ON_SELECT: Setting<bool> = Setting::new("terminal", "copy_on_sele
 pub const HIGHLIGHT_LINKS: Setting<bool> = Setting::new("terminal", "highlight_links", || true);
 
 /// Programs other modules run (an agents' sessions) put to sleep when unseen and idle: stopped,
-/// their tabs kept, resumed when shown (off by default: nothing is stopped unasked).
+/// their tabs kept, resumed once woken (off by default: nothing is stopped unasked).
 pub const SLEEP_IDLE: Setting<bool> = Setting::new("terminal", "sleep_idle", || false);
 /// After how many minutes unseen and idle.
 pub const SLEEP_AFTER: Setting<i64> =

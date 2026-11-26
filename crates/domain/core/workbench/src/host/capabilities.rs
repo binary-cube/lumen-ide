@@ -102,6 +102,13 @@ pub trait ViewHost {
         let _ = anchor;
         self.show_hint(id)
     }
+    /// Tab `tab` (named exactly: what opened it) tinted in `tone` to draw the eye (it fades
+    /// in and pulses a moment, then holds still), or let go (`None`: it fades out). `false`:
+    /// no such tab here, or nothing changed.
+    fn tint_tab(&mut self, tab: &crate::ViewTab, tone: Option<crate::TabTone>) -> bool {
+        let _ = (tab, tone);
+        false
+    }
     /// Opens bare view `extension` over every window of the app at once, as one (a dimmed
     /// screen, a calm scene: what stands for the whole app, not a window): here with `data`
     /// (as [`Self::open_overlay`], a modal), in the others without; closed in any, it closes

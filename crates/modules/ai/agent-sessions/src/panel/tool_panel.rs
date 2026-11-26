@@ -288,13 +288,15 @@ impl ToolPanel for SessionsPanel {
             let key = if self.starred(*star) { "agents.unfavorite" } else { "agents.favorite" };
             return Some(ui_components::tooltip::Tip::new(*rect, t(key)));
         }
-        // What a session's terminal holds: its memory, or asleep.
+        // What a session's terminal holds: open (its memory once measured), or asleep.
         if let Some((rect, state)) = self.holds.iter().find(|(r, _)| r.contains(p)) {
-            let tip = if state.asleep {
-                t("agents.asleep")
-            } else {
-                let size = i18n::bytes(state.memory.unwrap_or(0));
-                i18n::tr!("agents.memory", size = size.as_str())
+            let tip = match (state.asleep, state.memory) {
+                (true, _) => t("agents.asleep"),
+                (false, Some(memory)) => {
+                    let size = i18n::bytes(memory);
+                    i18n::tr!("agents.memory", size = size.as_str())
+                }
+                (false, None) => t("agents.open"),
             };
             return Some(ui_components::tooltip::Tip::new(*rect, tip));
         }

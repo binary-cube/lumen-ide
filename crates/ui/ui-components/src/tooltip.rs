@@ -57,14 +57,14 @@ pub struct Tooltips {
     /// Where the shown one points: its item, or (a wide one) the place of it the mouse was
     /// on when it appeared — kept while it shows (it doesn't chase the mouse).
     pointing: Option<Rect>,
+    /// Where the mouse was when the shown one appeared (its arrow keeps clear of it there:
+    /// the pill doesn't move as the mouse does).
+    pointer_at: Option<kernel::Point>,
 }
 
 /// An item at least this wide (logical pixels): its tooltip shows by the mouse, not at its
 /// middle (a field across the window: where the eyes are).
 const WIDE: f32 = 280.0;
-
-/// The arrow between a tooltip and its item (logical pixels).
-const ARROW: f32 = 7.0;
 
 impl Tooltips {
     /// The mouse is at `p` (physical): a wide item's tooltip shows by it.
@@ -163,23 +163,24 @@ impl Tooltips {
             && let Some((tip, _)) = &self.shown
         {
             self.pointing = Some(self.pointing_at(tip.anchor, scale));
+            self.pointer_at = self.pointer;
         }
         let Some((tip, appear)) = &self.shown else { return };
         let anchor = self.pointing.unwrap_or(tip.anchor);
         let ctx = Ctx::new(palette, scale).with_opacity(appear.value());
         let layer = scene.push_layer(None);
-        let pill =
-            ds::tooltip(layer, text, &ctx, anchor, &tip.label, tip.shortcut.as_deref(), bounds);
-        // Its arrow: between the pill and the element, on the element's middle.
-        let (arrow, x) = (ctx.px(ARROW), anchor.min_x() + anchor.size.width / 2.0);
-        let (top, bottom) = if pill.min_y() >= anchor.max_y() {
-            (anchor.max_y(), pill.min_y())
-        } else {
-            (pill.max_y(), anchor.min_y())
+        let spec = ds::TooltipSpec {
+            anchor,
+            label: &tip.label,
+            shortcut: tip.shortcut.as_deref(),
+            bounds,
+            pointer: self.pointer_at,
         };
-        self.drawn.push((pill, ctx.px(ds::radius::SM + 1.0)));
-        if bottom > top {
-            self.drawn.push((Rect::new(x - arrow, top, 2.0 * arrow, bottom - top), 0.0));
+        let shape = ds::tooltip(layer, text, &ctx, &spec);
+        // Its pill and its arrow, where they were drawn (the arrow moved off the cursor too).
+        self.drawn.push((shape.pill, ctx.px(ds::radius::SM + 1.0)));
+        if let Some(arrow) = shape.arrow {
+            self.drawn.push((arrow, 0.0));
         }
     }
 }

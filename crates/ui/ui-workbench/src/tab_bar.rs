@@ -35,6 +35,9 @@ pub struct TabTitle<'a> {
     /// A file outside the open project (dropped in, opened from elsewhere): a small ↗ after
     /// the title, the tab tinted, a line along its top.
     pub outside: bool,
+    /// Tinted to draw the eye (`TabTone`, resolved): its color and how strongly it shows now
+    /// (0..=1, as its animation goes).
+    pub tint: Option<(Rgba, f32)>,
 }
 
 /// The mark of a file outside the project (↗).
@@ -44,6 +47,14 @@ const OUTSIDE_MARK: &str = "arrow-up-right";
 const BADGE_FILL: f32 = 0.16;
 const BADGE_PAD: f32 = 5.0;
 const BADGE_RADIUS: f32 = 4.0;
+/// How much of a tab's width must show for it to be in sight (a hint points at it).
+const IN_SIGHT: f32 = 0.5;
+/// A tinted tab's fill at its strongest (its color's alpha), and its corners (logical).
+const TINT_FILL: f32 = 0.18;
+const TINT_RADIUS: f32 = 6.0;
+/// How far a tinted tab's fill stays from the bar's top and bottom (logical): it sits in
+/// the bar, clear of the active tab's underline.
+const TINT_INSET: f32 = 4.0;
 
 impl TabTitle<'_> {
     /// The small muted icons after the title, in order.
@@ -87,8 +98,10 @@ pub struct TabBar {
     content_width: f32,
     /// The area where the tabs sit (after the navigation buttons).
     strip: Rect,
-    /// The area of the pinned tabs (on the left, not scrolled).
+    /// The area of the pinned tabs (on the left, not scrolled), and how many they are (the
+    /// first ones).
     pinned_area: Rect,
+    pinned_tabs: usize,
     /// (tab area, close button area), in screen coordinates.
     rects: Vec<(Rect, Rect)>,
     back: Rect,
@@ -226,6 +239,31 @@ impl TabBar {
     /// The area of tab `i` (from the last paint).
     pub fn tab_rect(&self, i: usize) -> Option<Rect> {
         self.rects.get(i).map(|(r, _)| *r)
+    }
+
+    /// Where tab `i` is, only while it's in sight: at least [`IN_SIGHT`] of its width shows —
+    /// in the pinned area, or in the strip clear of the hidden tabs' buttons (a tab revealed
+    /// sits right by them).
+    pub fn visible_tab_rect(&self, i: usize) -> Option<Rect> {
+        let r = self.tab_rect(i)?;
+        let shown = |from: f32, to: f32| (r.max_x().min(to) - r.min_x().max(from)).max(0.0);
+        // A pinned one shows in its own area; the others only in the strip (one scrolled
+        // left lies under the pinned ones, unseen).
+        if i < self.pinned_tabs {
+            let pinned = self.pinned_area;
+            let seen = shown(pinned.min_x(), pinned.max_x());
+            return (r.size.width > 0.0 && seen >= r.size.width * IN_SIGHT).then_some(r);
+        }
+        let mut from = self.strip.min_x();
+        let mut to = self.strip.max_x();
+        if self.more_left.size.width > 0.0 {
+            from = from.max(self.more_left.max_x());
+        }
+        if self.more_right.size.width > 0.0 {
+            to = to.min(self.more_right.min_x());
+        }
+        let seen = shown(from, to);
+        (r.size.width > 0.0 && seen >= r.size.width * IN_SIGHT).then_some(r)
     }
 
     /// Scrolls the strip by a "page" (as much as fits, minus a bit), left or right.
@@ -446,6 +484,7 @@ impl TabBar {
     fn split_strip(&mut self, widths: &[f32], pinned_n: usize, active: usize) {
         let px = |v: f32| (v * self.scale).round();
         let pinned_w: f32 = widths[..pinned_n].iter().sum();
+        self.pinned_tabs = pinned_n;
         let full = self.strip;
         self.pinned_area = Rect::new(full.min_x(), full.min_y(), pinned_w, full.size.height);
         self.strip = Rect::new(
@@ -616,6 +655,20 @@ impl<'a> TabLook<'a> {
         layer.quad(Quad::filled(top, color.with_alpha(color.a * alpha)).rounded(self.px(1.0)));
     }
 
+    /// A tab tinted to draw the eye: a soft rounded fill in `color`, `amount` of its full
+    /// strength, inside the bar.
+    fn paint_tint(&self, layer: &mut render_api::Layer, rect: Rect, color: Rgba, amount: f32) {
+        let (b, inset) = (self.bounds, self.px(TINT_INSET));
+        let fill = Rect::new(
+            rect.min_x() + self.px(2.0),
+            b.min_y() + inset,
+            rect.size.width - self.px(4.0),
+            (b.size.height - 2.0 * inset).max(0.0),
+        );
+        let alpha = color.a * TINT_FILL * amount.clamp(0.0, 1.0);
+        layer.quad(Quad::filled(fill, color.with_alpha(alpha)).rounded(self.px(TINT_RADIUS)));
+    }
+
     /// A tab: its underline, file icon, title and right slot.
     fn paint_tab(
         &self,
@@ -643,6 +696,9 @@ impl<'a> TabLook<'a> {
         );
         if tab.outside {
             self.paint_outside(layer, rect, is_active || hovered);
+        }
+        if let Some((color, amount)) = tab.tint.filter(|(_, amount)| *amount > 0.0) {
+            self.paint_tint(layer, rect, color, amount);
         }
         if is_active {
             layer.quad(Quad::filled(under, palette.tab_active_indicator).rounded(self.px(1.0)));

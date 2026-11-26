@@ -15,13 +15,14 @@ never draw it: they contribute a `workbench_model::HintContribution` and ask for
  ┌────────────────────────────────────────┐
  │ (☾)  TIP                       2 / 4 ×  │  ← icon in a soft accent circle, eyebrow
  │      Idle sessions can sleep            │    (accent, capitals), counter (a tour), ×
- │      A session left alone for a while   │  ← the text, under the title (≤ 6 lines)
- │      stops and frees its memory…        │
- │      ⚙ Settings › Terminal › Sleeping…  │  ← where it lives: a muted line of its own
+ ├────────────────────────────────────────┤  ← ds::divider, the whole card wide
+ │ A session left alone for a while stops  │  ← the text, the card's whole width (≤ 6 lines)
+ │ and frees its memory…                   │
+ │ ⚙ Settings › Terminal › Sleeping…       │  ← where it lives: a muted line of its own
  ├────────────────────────────────────────┤  ← ds::divider
  │ Don't show again   [Settings…] [On ↵]   │  ← one row: link left, compact buttons right
  └────────────────────────────────────────┘
- ╭────────╮                                  ← the anchor ringed in the accent (spotlight)
+ ╭────────╮                                  ← a thin accent ring just inside the anchor (spotlight)
 ```
 
 - `HintCard`: its last paint's places (what's under the mouse), the hover, the text wrapped
@@ -50,6 +51,7 @@ never draw it: they contribute a `workbench_model::HintContribution` and ask for
 | `HintCardSpec.counter` | none | "2 / 4" left of the × (a tour) |
 | `HintCardSpec.focus` | none | the button the keys are on, with the shared focus ring |
 | `HintPlace.anchor` | none | the notch and the spotlight; none: the top-right corner |
+| `HintPlace.spotlight` | true | the thin ring inside the anchor; off when the anchor shows itself (a tab the hint is about is tinted through `WorkbenchHost::tint_tab`, and the card hides while that tab is scrolled out of sight) |
 
 ## States and interaction
 

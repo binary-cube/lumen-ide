@@ -860,17 +860,20 @@ fn a_program_starts_only_when_its_tab_is_first_drawn() {
     }
 }
 
-/// Woken from a sleep (drawn again): its program started the way it resumes, its last
-/// screen drawn meanwhile with a band saying so.
+/// Put to sleep when idle, it stays asleep when drawn again (its tab shown); woken (a key),
+/// its program started the way it resumes, its last screen drawn meanwhile.
 #[cfg(unix)]
 #[test]
-fn a_sleeping_terminal_resumes_when_shown() {
+fn a_sleeping_terminal_resumes_when_woken() {
     let (mut view, mut text) = keyed_view("wake-test-key");
     let slot = named("wake-test-key").unwrap();
     let at = std::time::Instant::now();
     asked(&slot).sleep = Some((agents::Launch::new("/bin/sh", &["-c", "sleep 5"], None), at));
     view.poll();
     let screen = view.grid.cells.clone();
+    paint(&mut view, &mut text);
+    assert!(view.session.is_none() && view.asleep, "shown: still asleep");
+    assert!(ui_components::Viewer::text_input(&mut view, "x"), "a key wakes it");
     paint(&mut view, &mut text);
     assert!(view.session.is_some(), "started again");
     assert!(!view.asleep && view.resuming);
@@ -1054,7 +1057,7 @@ fn a_click_or_coming_back_resumes_a_tab_asleep_by_hand() {
     view.set_shown(true);
     paint(&mut view, &mut text);
     assert!(view.session.is_none(), "covered and uncovered: still asleep");
-    // Another tab chosen, then this one again: resumed.
+    // Another tab chosen, then this one again (moving through the tabs): still asleep.
     view.set_active(false);
     view.set_shown(false);
     paint(&mut view, &mut text);
@@ -1062,7 +1065,11 @@ fn a_click_or_coming_back_resumes_a_tab_asleep_by_hand() {
     view.set_active(true);
     view.set_shown(true);
     paint(&mut view, &mut text);
-    assert!(view.session.is_some(), "chosen again: resumed");
+    assert!(view.session.is_none(), "chosen again: still asleep, nothing woken by mistake");
+    // A key in it: woken.
+    assert!(view.text_input("x"));
+    paint(&mut view, &mut text);
+    assert!(view.session.is_some(), "a key resumed it");
 }
 
 /// Asleep: its tab's menu offers "Wake Up" in place of "Put to Sleep", which resumes it; a
@@ -1361,4 +1368,41 @@ fn an_order_let_go_and_a_closed_tab_are_told() {
     assert_eq!(heard.lock().unwrap().last(), Some(&Some(CanSleep::Yes)), "told undone");
     drop(view);
     assert_eq!(heard.lock().unwrap().last(), Some(&None), "told gone");
+}
+
+/// Just started, its owner not having said yet how it resumes: "Put to Sleep" is there,
+/// greyed out (never missing from its menu), until it's known.
+#[test]
+fn a_session_just_started_offers_sleep_greyed_out() {
+    use contracts::terminal::CanSleep;
+    use ui_components::{ViewMenuEntry, Viewer};
+    let (view, _text, slot) = resumable("starting-key", std::time::Duration::from_secs(60));
+    asked(&slot).resume = None;
+    assert_eq!(asked(&slot).can_sleep(), CanSleep::No, "not started by this view: not starting");
+    asked(&slot).started = Some(std::time::Instant::now());
+    assert_eq!(asked(&slot).can_sleep(), CanSleep::Starting);
+    let row = view.tab_menu().into_iter().next().map(|e| match e {
+        ViewMenuEntry::Item { id, look, .. } => (id, look.disabled),
+        _ => panic!("a row"),
+    });
+    assert_eq!(row, Some((crate::SLEEP_ACTION.to_owned(), true)));
+    assert!(!sleep_by_key("starting-key"), "not yet");
+    // Still not known long after it started: it can't sleep (never "starting" for good).
+    asked(&slot).started = std::time::Instant::now().checked_sub(STARTING_WITHIN);
+    assert_eq!(asked(&slot).can_sleep(), CanSleep::No);
+}
+
+/// Asleep and brought forward again by its key (a click on its session in the panel: its
+/// start told again), it stays as it is: asleep, the same slot, nothing announced as awake.
+#[test]
+fn a_sleeping_tab_asked_again_by_its_key_stays_asleep() {
+    use ui_components::Viewer;
+    let (mut view, _text, slot) = resumable("again-key", std::time::Duration::from_secs(60));
+    assert!(view.command(crate::SLEEP_ACTION));
+    assert!(view.asleep);
+    let start = TerminalStart { key: Some("again-key".into()), ..TerminalStart::default() };
+    view.set_data(&start);
+    assert!(view.asleep, "still asleep");
+    assert!(view.renamed.as_ref().is_some_and(|s| Arc::ptr_eq(s, &slot)), "the same slot");
+    assert_eq!(state("again-key").map(|s| s.asleep), Some(true));
 }

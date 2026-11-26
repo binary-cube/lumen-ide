@@ -30,19 +30,17 @@ impl Viewer for TerminalView {
         })
     }
 
-    /// Its tab chosen again after the user left it: one put to sleep by hand resumes (the
-    /// window coming back from the background, a modal closing over it: not that).
+    /// Its tab chosen or left. Asleep, it stays so (moving through the tabs onto it by
+    /// mistake wakes nothing): only a key, a click in it or "Wake Up" does.
     fn set_active(&mut self, active: bool) {
-        if active && !self.active {
-            self.held = false;
-        }
         self.active = active;
     }
 
     fn set_data(&mut self, data: &dyn std::any::Any) {
         // Where it starts (only before it has): as asked, or — reopened from the session —
-        // in its project.
-        if self.session.is_some() {
+        // in its project. Asked again by its key (brought forward from the sessions' panel),
+        // it keeps what it is: asleep stays asleep, its slot and its state the same.
+        if self.session.is_some() || self.renamed.is_some() || self.asleep {
             return;
         }
         if let Some(start) = data.downcast_ref::<TerminalStart>() {
@@ -164,7 +162,7 @@ impl Viewer for TerminalView {
             self.smooth.reset();
         }
         let resuming = self.resuming && self.settling.is_some();
-        // Asleep by hand: its last screen stays, nothing runs until the user acts on it.
+        // Asleep: its last screen stays, nothing runs until the user wakes it.
         let look = ScreenLook {
             font: &font,
             colors: &colors,
@@ -456,7 +454,7 @@ impl Viewer for TerminalView {
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
-        // Asleep by hand: a click resumes it; coming back: nothing to press yet.
+        // Asleep: a click resumes it; coming back: nothing to press yet.
         if self.wake_by_user() || self.frozen() {
             return None;
         }
@@ -542,7 +540,7 @@ impl Viewer for TerminalView {
     }
 
     fn key_press(&mut self, key: KeyPress) -> bool {
-        // Asleep by hand: a key resumes it (the key itself goes to nothing yet).
+        // Asleep: a key resumes it (the key itself goes to nothing yet).
         if self.wake_by_user() {
             return true;
         }
@@ -589,7 +587,11 @@ impl Viewer for TerminalView {
 
     fn selected_text(&self) -> Option<String> {
         let selection = self.selection.filter(|s| !s.is_empty())?;
-        Some(selection.text(&self.grid)).filter(|t| !t.is_empty())
+        // All of it, what scrolled off the screen while it was made too; the screen's part
+        // only if the emulator stayed busy.
+        let whole =
+            self.session.as_ref().and_then(|s| s.selection_text(&selection, self.grid.history));
+        whole.or_else(|| Some(selection.text(&self.grid))).filter(|t| !t.is_empty())
     }
 
     fn clear_selection(&mut self) -> bool {
@@ -618,7 +620,7 @@ impl Viewer for TerminalView {
         self.launch.is_none()
     }
 
-    /// Asleep: a moon in its icon's place (resumed when shown).
+    /// Asleep: a moon in its icon's place (resumed once woken).
     fn tab_icon(&self) -> Option<&'static str> {
         if self.asleep { Some(ASLEEP_ICON) } else { self.icon }
     }
@@ -641,9 +643,10 @@ impl Viewer for TerminalView {
         None
     }
 
-    /// A session that can sleep (its owner knows how it resumes): "Put to Sleep", greyed
-    /// out with why while something typed isn't sent or it's on its way to sleep; asleep,
-    /// "Wake Up", greyed out while it wakes. Read from memory.
+    /// A keyed session: "Put to Sleep", greyed out with why while it's starting (how it
+    /// resumes not known yet), something typed isn't sent or it's on its way to sleep;
+    /// asleep, "Wake Up", greyed out while it wakes; nothing while it can't sleep at all.
+    /// Read from memory.
     fn tab_menu(&self) -> Vec<ui_components::ViewMenuEntry> {
         use contracts::terminal::CanSleep;
         let Some(slot) = &self.renamed else { return Vec::new() };
@@ -663,6 +666,7 @@ impl Viewer for TerminalView {
             CanSleep::Yes => i18n::t("terminal.sleep_now"),
             CanSleep::Typed => i18n::t("terminal.sleep_now_typed"),
             CanSleep::Sleeping => i18n::t("terminal.going_to_sleep"),
+            CanSleep::Starting => i18n::t("terminal.sleep_now_starting"),
         };
         vec![
             ui_components::ViewMenuEntry::item(crate::SLEEP_ACTION, label)

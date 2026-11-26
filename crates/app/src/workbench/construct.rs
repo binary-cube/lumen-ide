@@ -84,6 +84,8 @@ impl Workbench {
             choice_purpose: ChoicePurpose::None,
             toasts: Default::default(),
             hint: None,
+            tab_tints: Default::default(),
+            hint_tab: None,
             hint_card: Default::default(),
             hint_focused: false,
             status_popover: Default::default(),

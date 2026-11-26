@@ -32,19 +32,21 @@ fn a_wide_item_s_tooltip_shows_by_the_mouse() {
     tips.pointer(kernel::Point::new(300.0, 115.0));
     tips.set(Some(Tip::new(field, "SQL condition").with_delay(Duration::ZERO)));
     tips.paint(&mut text, &mut scene, &palette, 1.0, window);
+    // By the mouse, just left of its cursor (never under it).
     let arrow = tips.areas()[1].0;
-    assert!((arrow.center().x - 300.0).abs() <= 1.0, "by the mouse: {arrow:?}");
+    assert!(arrow.max_x() <= 300.0 && arrow.center().x >= 285.0, "by the mouse: {arrow:?}");
     // The mouse moves on over the same field: it stays where it showed.
     tips.pointer(kernel::Point::new(900.0, 115.0));
     tips.paint(&mut text, &mut scene, &palette, 1.0, window);
-    assert!((tips.areas()[1].0.center().x - 300.0).abs() <= 1.0);
+    assert_eq!(tips.areas()[1].0, arrow);
     // A narrow item: at its middle.
     let button = Rect::new(700.0, 100.0, 30.0, 30.0);
     tips.set(None);
     tips.pointer(kernel::Point::new(702.0, 115.0));
     tips.set(Some(Tip::new(button, "Pause").with_delay(Duration::ZERO)));
     tips.paint(&mut text, &mut scene, &palette, 1.0, window);
-    assert!((tips.areas()[1].0.center().x - button.center().x).abs() <= 0.5);
+    let arrow = tips.areas()[1].0;
+    assert!(arrow.min_x() >= button.min_x() && arrow.max_x() <= button.max_x(), "on it: {arrow:?}");
 }
 
 /// Hovered: it waits its delay (one frame asked, for then) and shows nothing before; once

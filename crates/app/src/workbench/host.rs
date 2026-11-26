@@ -251,8 +251,7 @@ impl ViewHost for Workbench {
     }
 
     fn open_view(&mut self, title: &str, extension: &str, data: &dyn std::any::Any) -> bool {
-        let dir = self.project.as_ref().map(|p| p.root_path().to_path_buf()).unwrap_or_default();
-        let path = dir.join(format!("{title}.{extension}"));
+        let path = self.view_path(&workbench_model::ViewTab::new(title, extension));
         if let Some(g) = self.group_for_view(&path) {
             self.focus_group(g);
         }
@@ -274,6 +273,14 @@ impl ViewHost for Workbench {
 
     fn show_hint_by(&mut self, id: &str, anchor: workbench_model::HintAnchor) -> bool {
         Workbench::show_hint_by(self, id, Some(anchor))
+    }
+
+    fn tint_tab(
+        &mut self,
+        tab: &workbench_model::ViewTab,
+        tone: Option<workbench_model::TabTone>,
+    ) -> bool {
+        Workbench::tint_tab(self, tab, tone)
     }
 
     fn open_view_below(&mut self, title: &str, extension: &str, data: &dyn std::any::Any) -> bool {
