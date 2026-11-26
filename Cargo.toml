@@ -180,7 +180,7 @@ default-members = ["crates/app"]
 exclude = ["third_party"]
 
 [workspace.package]
-version = "1.0.0-beta.27"
+version = "1.0.0-beta.28"
 edition = "2024"
 rust-version = "1.99"
 publish = false
