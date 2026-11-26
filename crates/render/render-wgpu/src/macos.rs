@@ -67,11 +67,21 @@ pub(crate) fn lower_layer(surface: &wgpu::Surface<'_>) {
     }
 }
 
-/// The layer's images not on screen are given back: a change of size empties its pool, and
-/// the image shown stays up until the next frame, which sets the size again.
+/// The layer's images not on screen are given back: a change of size empties its pool. It's
+/// set back to the window's `size` at once — that makes no image (one is made at the next
+/// frame), and the layer never stays one pixel large: the system would show that, black,
+/// when the window is activated, before a frame of ours comes. The image shown stays up.
 #[allow(unsafe_code)]
-pub(crate) fn release_spare_drawables(surface: &wgpu::Surface<'_>) {
-    // SAFETY: as in `configure_layer`: one property set on the layer, guard released at once.
+pub(crate) fn release_spare_drawables(surface: &wgpu::Surface<'_>, (width, height): (u32, u32)) {
+    // SAFETY: as in `configure_layer`: one property set on the layer (twice), guard released
+    // at once.
     let Some(hal) = (unsafe { surface.as_hal::<wgpu::hal::api::Metal>() }) else { return };
-    hal.render_layer().lock().setDrawableSize(objc2_core_foundation::CGSize::new(1.0, 1.0));
+    let layer = hal.render_layer().lock();
+    layer.setDrawableSize(objc2_core_foundation::CGSize::new(1.0, 1.0));
+    if width > 0 && height > 0 {
+        layer.setDrawableSize(objc2_core_foundation::CGSize::new(
+            f64::from(width),
+            f64::from(height),
+        ));
+    }
 }

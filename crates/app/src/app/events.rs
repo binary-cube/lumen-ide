@@ -47,6 +47,9 @@ impl EditorApp {
                     // The page that had the keyboard has it again.
                     self.web_views.window_back();
                 }
+                // Its images on screen given back while it was away (left, or hidden long):
+                // its first frame is drawn now, in this event.
+                let released = self.frames.renderers().any(|r| r.images_released());
                 self.window_state.occluded = false;
                 self.window_state.hidden = None;
                 self.workbench.set_occluded(false);
@@ -60,7 +63,18 @@ impl EditorApp {
                 if let Some(resources) = &mut self.resources {
                     resources.set_visible(true);
                 }
-                if let Some(window) = &self.window {
+                // Drawn now, in this event (as a resize step is), not at the next frame — the
+                // empty window would show black till then.
+                if released {
+                    // The window's own renderer (the floating layer's draws when it has
+                    // something), with the window; and a frame for sure — not taken for one
+                    // asked only to give its images back (that would leave the layer empty).
+                    if let Some(renderer) = &mut self.frames.renderer {
+                        renderer.show_with_window();
+                    }
+                    self.frames.dirty = true;
+                    self.render();
+                } else if let Some(window) = &self.window {
                     window.request_redraw();
                 }
             }

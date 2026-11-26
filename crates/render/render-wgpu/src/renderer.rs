@@ -92,6 +92,19 @@ impl Renderer for WgpuRenderer {
         self.ctx.state().release_unshown();
     }
 
+    fn show_with_window(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            self.with_window = WithWindow::Asked;
+        }
+    }
+
+    fn images_released(&self) -> bool {
+        // The spare images' release leaves the layer as it was (its size set back at once):
+        // only the hidden window's empty surface waits for a frame.
+        self.hidden_released
+    }
+
     fn kept_frame_release_at(&self) -> Option<std::time::Instant> {
         let quiet = self.activity.quiet_at()?;
         let kept = self.drawer.kept.as_ref().map(|_| quiet);
@@ -196,6 +209,7 @@ impl Renderer for WgpuRenderer {
             self.reconfigure();
         }
         if self.config.width == 0 || self.config.height == 0 {
+            self.done_with_window();
             return Ok(FrameStats { skipped: true, ..FrameStats::default() });
         }
         // Drawn while hidden (or shown without being told): the window's size again.
@@ -243,6 +257,7 @@ impl Renderer for WgpuRenderer {
             }
             // Nothing changed: what's on screen is already this frame.
             if self.drawer.damage.is_empty() {
+                self.done_with_window();
                 let state = self.ctx.state();
                 return Ok(FrameStats {
                     quads: scene.quad_count(),
@@ -253,9 +268,31 @@ impl Renderer for WgpuRenderer {
             }
         }
         self.drawer.shown = None;
+        // Its spare images given back: its surface set up again before drawing.
         #[cfg(target_os = "macos")]
         if std::mem::take(&mut self.spare_released) {
             self.reconfigure();
+        }
+        // Shown with the window's transaction when asked (it comes back), for this frame
+        // only: one left on (the frame skipped) goes off here.
+        #[cfg(target_os = "macos")]
+        {
+            let resizing = self.transactional_until.is_some();
+            match self.with_window {
+                WithWindow::Asked => {
+                    self.with_window = WithWindow::On;
+                    if !resizing {
+                        macos::set_transactional(&self.surface, true);
+                    }
+                }
+                WithWindow::On => {
+                    self.with_window = WithWindow::Off;
+                    if !resizing {
+                        macos::set_transactional(&self.surface, false);
+                    }
+                }
+                WithWindow::Off => {}
+            }
         }
         let (frame, suboptimal) = match self.acquire_frame()? {
             Acquired::Frame { frame, suboptimal } => (frame, suboptimal),
@@ -263,6 +300,16 @@ impl Renderer for WgpuRenderer {
                 if !stats.retry {
                     // Hidden: the kept frame's memory goes back meanwhile.
                     self.drawer.release_kept();
+                }
+                // A frame to be shown with the window: retried, it still is (the one that
+                // reaches the screen); hidden, nothing waits for the window any more.
+                #[cfg(target_os = "macos")]
+                if self.with_window == WithWindow::On {
+                    self.with_window =
+                        if stats.retry { WithWindow::Asked } else { WithWindow::Off };
+                    if !stats.retry && self.transactional_until.is_none() {
+                        macos::set_transactional(&self.surface, false);
+                    }
                 }
                 return Ok(stats);
             }
@@ -302,6 +349,14 @@ impl Renderer for WgpuRenderer {
         };
         self.ctx.queue.submit([encoder.finish()]);
         self.ctx.queue.present(frame);
+        // Shown: frames go back to not waiting for the window (unless it's being resized).
+        #[cfg(target_os = "macos")]
+        if self.with_window == WithWindow::On {
+            self.with_window = WithWindow::Off;
+            if self.transactional_until.is_none() {
+                macos::set_transactional(&self.surface, false);
+            }
+        }
         self.drawer.shown = Some(size);
         self.spare_held_since = cfg!(target_os = "macos").then(std::time::Instant::now);
         if suboptimal {
@@ -321,5 +376,19 @@ impl Renderer for WgpuRenderer {
             skipped: false,
             retry: false,
         })
+    }
+}
+
+impl WgpuRenderer {
+    /// No frame drawn after all (minimized, nothing changed): a frame asked to be shown with
+    /// the window isn't left for a later, unrelated one, and frames don't wait for it.
+    fn done_with_window(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            if self.with_window == WithWindow::On && self.transactional_until.is_none() {
+                macos::set_transactional(&self.surface, false);
+            }
+            self.with_window = WithWindow::Off;
+        }
     }
 }

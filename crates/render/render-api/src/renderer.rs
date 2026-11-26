@@ -195,6 +195,18 @@ pub trait Renderer {
     /// next frame is drawn whole and keeps them again.
     fn release_idle(&mut self) {}
 
+    /// The image on screen was given back ([`Self::release_hidden`]): the window shows
+    /// nothing of its own until a frame comes, so its next one is drawn at once when it
+    /// comes back (not at a later frame: black meanwhile).
+    fn images_released(&self) -> bool {
+        false
+    }
+
+    /// The next frame is shown with the window's own transaction (the window coming back:
+    /// it appears with its content, never its empty layer); the frames after don't wait for
+    /// the window again.
+    fn show_with_window(&mut self) {}
+
     /// When the frame kept for partial redraws goes if nothing more is drawn: a frame asked
     /// for then gives it back. `None`: none is kept.
     fn kept_frame_release_at(&self) -> Option<std::time::Instant> {

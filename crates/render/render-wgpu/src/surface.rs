@@ -147,7 +147,8 @@ impl WgpuRenderer {
         self.spare_held_since = None;
         #[cfg(target_os = "macos")]
         {
-            macos::release_spare_drawables(&self.surface);
+            let size = (self.config.width, self.config.height);
+            macos::release_spare_drawables(&self.surface, size);
             self.spare_released = true;
         }
         // What was dropped goes when the GPU says it's done with it: no frame may follow.

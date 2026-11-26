@@ -205,11 +205,18 @@ pub struct WgpuRenderer {
     capturing: Arc<std::sync::atomic::AtomicBool>,
     /// A capture asked while no frame was kept: taken from the next one drawn.
     pending_capture: Option<PendingCapture>,
-    /// The surface's spare image was given back: its size is set again before the next frame.
+    /// The surface's spare image was given back (its layer's size set back at once): the
+    /// surface is set up again before the next frame.
     #[cfg(target_os = "macos")]
     spare_released: bool,
-    /// Hidden a while: the surface was made one pixel large (its image on screen given back);
-    /// set to the window's size again before the next frame.
+    /// The next frame shown with the window's own transaction (it comes back): asked by
+    /// [`render_api::Renderer::show_with_window`], let go at the frame after, whatever became
+    /// of the first (drawn, or skipped).
+    #[cfg(target_os = "macos")]
+    with_window: WithWindow,
+    /// Hidden a while: the surface's images given back (macOS: its layer replaced by an empty
+    /// one; elsewhere: made one pixel large); set up at the window's size before the next
+    /// frame.
     hidden_released: bool,
     /// When a frame last reached the screen, while the spare image it took is still held.
     spare_held_since: Option<std::time::Instant>,
@@ -375,6 +382,8 @@ impl WgpuRenderer {
             pending_capture: None,
             #[cfg(target_os = "macos")]
             spare_released: false,
+            #[cfg(target_os = "macos")]
+            with_window: WithWindow::Off,
             hidden_released: false,
             spare_held_since: None,
             activity: activity::Activity::default(),
@@ -500,3 +509,15 @@ fn with_mapped<R>(
 #[cfg(test)]
 #[path = "../tests/unit/lib.rs"]
 mod tests;
+
+/// Where a frame shown with the window's transaction stands ([`WgpuRenderer`]'s
+/// `with_window`).
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WithWindow {
+    Off,
+    /// Asked: the next frame turns it on.
+    Asked,
+    /// On for a frame: the next frame (or this one, once shown) turns it off.
+    On,
+}
