@@ -91,7 +91,8 @@ fn each_project_asks_on_its_own_clock() {
     // One of its terminals not knowing how it resumes yet: asked again sooner.
     let later = now + RESUMES_EVERY;
     assert!(!ask(&mut asked, a, later + RESUMES_SOON / 2, true));
-    assert!(ask(&mut asked, a, later + RESUMES_SOON, true));
+    // A poll a moment early for its second (it came after the wake that called it): taken.
+    assert!(ask(&mut asked, a, later + RESUMES_SOON - RESUMES_SLACK / 2, true));
 }
 
 /// A terminal of no project wakes every window (one without a project too); a project's,

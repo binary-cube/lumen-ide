@@ -177,6 +177,18 @@ pub enum Section {
     Projects,
 }
 
+impl Section {
+    pub const ALL: [Self; 2] = [Self::Sessions, Self::Projects];
+
+    /// What it's saved as (the folded sections, kept across restarts).
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::Sessions => "sessions",
+            Self::Projects => "projects",
+        }
+    }
+}
+
 /// A list row (after filtering).
 #[derive(Debug, Clone, PartialEq)]
 enum Item {
@@ -254,7 +266,19 @@ impl Item {
             Self::SessionWindow { session, index, count, path: None, .. } => {
                 (*count > 0).then_some(PickerAction::ToggleSessionWindow(*session, *index))
             }
-            Self::Header(_) | Self::FoldHeader(..) | Self::HistoryHeader(_) => None,
+            // A section's title: ↵ folds or opens it.
+            Self::FoldHeader(_, section) => Some(PickerAction::ToggleSection(*section)),
+            Self::HistoryHeader(_) => Some(PickerAction::ToggleSection(Section::Projects)),
+            Self::Header(_) => None,
+        }
+    }
+
+    /// The section it's the title of, if it's one.
+    fn section(&self) -> Option<Section> {
+        match self {
+            Self::FoldHeader(_, section) => Some(*section),
+            Self::HistoryHeader(_) => Some(Section::Projects),
+            _ => None,
         }
     }
 
@@ -341,6 +365,9 @@ pub struct ProjectsPicker {
     /// The sections folded (under their titles), the titles that fold them as drawn, and
     /// the one under the mouse.
     folded: HashSet<Section>,
+    /// The section whose title the keys chose (the selection stays on a title only then:
+    /// rows moving under a kept index never land it on one).
+    title_chosen: Option<Section>,
     folds: Vec<(Rect, Section)>,
     fold_hover: Option<Section>,
     /// Each past session's "Reopen" button, and the one under the mouse.
@@ -371,6 +398,7 @@ impl ProjectsPicker {
     pub fn open(&mut self) {
         self.query.set_text("");
         self.selected = 0;
+        self.title_chosen = None;
         self.scroll.reset();
         self.modal.open();
     }
@@ -527,31 +555,56 @@ impl ProjectsPicker {
         self.groups.clone_from(&model.groups);
         self.items = items;
         let selectable = self.selectable();
-        if !selectable.contains(&self.selected) {
-            self.selected = selectable.first().copied().unwrap_or(0);
+        let stray_title = self.items.get(self.selected).and_then(Item::section).is_some()
+            && self.selected_section() != self.title_chosen;
+        if stray_title || !selectable.contains(&self.selected) {
+            // A row first (↵ opens it), a section's title only when there's nothing else.
+            let row = selectable.iter().find(|&&i| self.items[i].section().is_none());
+            self.selected = row.or(selectable.first()).copied().unwrap_or(0);
         }
     }
 
+    /// The rows the keys move through: every one but a plain title (a section's title is
+    /// one: ↵, ← and → fold and open it).
     fn selectable(&self) -> Vec<usize> {
         self.items
             .iter()
             .enumerate()
-            .filter(|(_, i)| {
-                !matches!(i, Item::Header(_) | Item::FoldHeader(..) | Item::HistoryHeader(_))
-            })
+            .filter(|(_, i)| !matches!(i, Item::Header(_)))
             .map(|(i, _)| i)
             .collect()
+    }
+
+    /// Whether section `section` is folded.
+    pub fn is_folded(&self, section: Section) -> bool {
+        self.folded.contains(&section)
+    }
+
+    /// Section `section` folded or opened (its rows made again at the next paint).
+    pub fn set_folded(&mut self, section: Section, folded: bool) {
+        if folded {
+            self.folded.insert(section);
+        } else {
+            self.folded.remove(&section);
+        }
+    }
+
+    /// The section whose title is selected (← / → fold and open it).
+    pub fn selected_section(&self) -> Option<Section> {
+        self.items.get(self.selected)?.section()
     }
 
     pub fn type_text(&mut self, typed: &str) {
         Control::text(&mut self.query, typed);
         self.selected = 0;
+        self.title_chosen = None;
         self.scroll.reset();
     }
 
     pub fn backspace(&mut self) {
         Control::key(&mut self.query, ui_components::ViewerKey::Backspace, Default::default());
         self.selected = 0;
+        self.title_chosen = None;
     }
 
     pub fn select_all(&mut self) {
@@ -565,6 +618,7 @@ impl ProjectsPicker {
     pub fn clear_query(&mut self) {
         self.query.set_text("");
         self.selected = 0;
+        self.title_chosen = None;
     }
 
     /// ↑ / ↓ through the selectable items.
@@ -576,8 +630,13 @@ impl ProjectsPicker {
         };
         let next = ui_kit::step_index(pos, delta, selectable.len());
         self.selected = selectable[next];
-        // The selected row stays visible.
-        if let Some((r, _)) = self.rows.iter().find(|(_, i)| *i == self.selected) {
+        self.title_chosen = self.selected_section();
+        // The selected row (or section's title) stays visible.
+        let title = self
+            .selected_section()
+            .and_then(|section| self.folds.iter().find(|(_, s)| *s == section).map(|(r, _)| r));
+        let row = self.rows.iter().find(|(_, i)| *i == self.selected).map(|(r, _)| r);
+        if let Some(r) = row.or(title) {
             self.scroll.keep_visible(*r, self.list);
         }
     }

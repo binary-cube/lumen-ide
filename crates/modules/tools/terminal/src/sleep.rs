@@ -299,6 +299,10 @@ pub(crate) fn put_to_sleep(host: &mut dyn workbench_model::WorkbenchHost) -> boo
 /// learns its id within a second or two, the menus follow then).
 const RESUMES_EVERY: Duration = Duration::from_secs(5);
 const RESUMES_SOON: Duration = Duration::from_secs(1);
+/// How much earlier than [`RESUMES_SOON`] a window may ask again: its poll comes a moment
+/// after the wake that called it, so a second's wakes give polls a little under or over a
+/// second apart (without it, every other one would be skipped).
+const RESUMES_SLACK: Duration = Duration::from_millis(200);
 /// When each project's window last asked (`None`: terminals of no project).
 type ResumesAsked = Vec<(Option<kernel::ProjectId>, Instant)>;
 static RESUMES_ASKED: Mutex<ResumesAsked> = Mutex::new(Vec::new());
@@ -313,7 +317,7 @@ pub(crate) fn resumes_due(
 ) -> bool {
     let Some(last) = last else { return true };
     let since = now.saturating_duration_since(last);
-    since >= RESUMES_EVERY || (since >= RESUMES_SOON && unknown())
+    since >= RESUMES_EVERY || (since + RESUMES_SLACK >= RESUMES_SOON && unknown())
 }
 
 /// When project `project`'s window last asked (each project on its own clock: another
@@ -334,6 +338,73 @@ pub(crate) fn note_resumes_asked(
     match asked.iter_mut().find(|(p, _)| *p == project) {
         Some((_, at)) => *at = now,
         None => asked.push((project, now)),
+    }
+}
+
+/// The keyed terminals just started, their owner not having said yet how they resume: each
+/// with its project and until when it's followed ([`STARTING_WITHIN`] after its start).
+type Starting = Vec<(std::sync::Weak<crate::view::NameSlot>, Option<kernel::ProjectId>, Instant)>;
+static STARTING: Mutex<Starting> = Mutex::new(Vec::new());
+/// The thread waking their windows runs.
+static STARTING_RUNS: AtomicBool = AtomicBool::new(false);
+
+/// A keyed terminal of `project` just started: its window woken every [`RESUMES_SOON`] while
+/// it's starting (its poll asks how it resumes, the menus follow), even a quiet one that
+/// nothing else wakes — for [`STARTING_WITHIN`] at most, by a thread that ends with the last.
+pub(crate) fn follow_start(slot: &Arc<crate::view::NameSlot>, project: Option<kernel::ProjectId>) {
+    let until = Instant::now() + crate::view::STARTING_WITHIN;
+    lock(&STARTING).push((Arc::downgrade(slot), project, until));
+    if STARTING_RUNS.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // A thread of its own: it waits between wakes (a pool's would be held all that while).
+    #[allow(clippy::disallowed_methods)]
+    let spawned = std::thread::Builder::new().name("terminal-start".into()).spawn(wake_starting);
+    if let Err(e) = spawned {
+        STARTING_RUNS.store(false, Ordering::Release);
+        tracing::warn!(error = %e, "can't start the thread following started terminals");
+    }
+}
+
+/// The terminals still starting kept (those known, gone or past their time let go), and
+/// the projects they're in.
+pub(crate) fn still_starting(list: &mut Starting, now: Instant) -> Vec<Option<kernel::ProjectId>> {
+    use contracts::terminal::CanSleep;
+    list.retain(|(slot, _, until)| {
+        now < *until && slot.upgrade().is_some_and(|s| asked(&s).can_sleep() == CanSleep::Starting)
+    });
+    let mut projects: Vec<Option<kernel::ProjectId>> = Vec::new();
+    for (_, project, _) in list.iter() {
+        if !projects.contains(project) {
+            projects.push(*project);
+        }
+    }
+    projects
+}
+
+/// The thread's loop: the windows of the terminals starting woken every [`RESUMES_SOON`];
+/// none left, it ends (started again by the next one).
+fn wake_starting() {
+    loop {
+        std::thread::sleep(RESUMES_SOON);
+        // Taken out and looked at without the list's lock (each slot has its own).
+        let mut list = std::mem::take(&mut *lock(&STARTING));
+        let projects = still_starting(&mut list, Instant::now());
+        {
+            let mut kept = lock(&STARTING);
+            // Started meanwhile: kept with them.
+            list.append(&mut kept);
+            *kept = list;
+        }
+        if !projects.is_empty() {
+            wake_projects(&projects);
+            continue;
+        }
+        STARTING_RUNS.store(false, Ordering::Release);
+        // One started meanwhile: go on (else a new thread is started by it).
+        if lock(&STARTING).is_empty() || STARTING_RUNS.swap(true, Ordering::AcqRel) {
+            return;
+        }
     }
 }
 

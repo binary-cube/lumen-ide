@@ -816,22 +816,15 @@ impl TerminalSession for PtySession {
     /// The reader holds the terminal while it parses (and, for a held `ESC[2J`, while it
     /// waits a moment for its `ESC[3J`: `filtered::HOLD`): a frame doesn't wait for it.
     fn try_snapshot(&self, out: &mut GridSnapshot) -> bool {
-        if !self.parking.shown(false) {
-            return false;
-        }
-        let Some(mut term) = self.term.try_lock_unfair() else { return false };
-        if self.parking.must_restore() {
-            drop(term);
-            if !self.parking.restore(false) {
-                return false;
-            }
-            let Some(again) = self.term.try_lock_unfair() else { return false };
-            term = again;
-        }
-        self.snapshot_parked(&term, out);
-        drop(term);
-        self.shared.redefined(&out.palette_overrides);
-        true
+        self.try_snapshot_and(out, None) != terminal_session::text::Snapped::Busy
+    }
+
+    fn try_snapshot_selecting(
+        &self,
+        out: &mut GridSnapshot,
+        ask: terminal_session::text::SelectionAsk<'_>,
+    ) -> terminal_session::text::Snapped {
+        self.try_snapshot_and(out, Some(ask))
     }
 
     fn set_palette(&self, palette: TermPalette) {
@@ -855,12 +848,21 @@ impl TerminalSession for PtySession {
         // Asked once for a copy: a few short tries while the reader parses, never a wait
         // for the program.
         for _ in 0..COPY_TRIES {
-            if let Some(term) = self.term.try_lock_unfair() {
-                return Some(selection_text_of(&term, selection, history));
+            if let Some(text) = self.try_selection_text(selection, history) {
+                return Some(text);
             }
             std::thread::sleep(COPY_RETRY);
         }
         None
+    }
+
+    fn try_selection_text(
+        &self,
+        selection: &terminal_session::text::TermSelection,
+        history: usize,
+    ) -> Option<String> {
+        let term = self.term.try_lock_unfair()?;
+        Some(selection_text_of(&term, selection, history))
     }
 
     fn try_scroll(&mut self, lines: i32) -> bool {
@@ -913,6 +915,40 @@ impl TerminalSession for PtySession {
 }
 
 impl PtySession {
+    /// The screen copied if the emulator is free now (see `TerminalSession::try_snapshot`),
+    /// and with it, in the same look, the text `ask` wants when its fingerprint changed.
+    fn try_snapshot_and(
+        &self,
+        out: &mut GridSnapshot,
+        ask: Option<terminal_session::text::SelectionAsk<'_>>,
+    ) -> terminal_session::text::Snapped {
+        use terminal_session::text::Snapped;
+        if !self.parking.shown(false) {
+            return Snapped::Busy;
+        }
+        let Some(mut term) = self.term.try_lock_unfair() else { return Snapped::Busy };
+        if self.parking.must_restore() {
+            drop(term);
+            if !self.parking.restore(false) {
+                return Snapped::Busy;
+            }
+            let Some(again) = self.term.try_lock_unfair() else { return Snapped::Busy };
+            term = again;
+        }
+        self.snapshot_parked(&term, out);
+        let snapped = match ask {
+            Some(ask) if ask.made_at != Some(out.fingerprint) => {
+                // The emulator's own history: what the snapshot shows, nothing moved since.
+                let history = term.grid().history_size();
+                Snapped::With(selection_text_of(&term, ask.selection, history))
+            }
+            _ => Snapped::Taken,
+        };
+        drop(term);
+        self.shared.redefined(&out.palette_overrides);
+        snapped
+    }
+
     /// `term` copied into `out`, the history's length with the rows parked (on its own
     /// screen, a full-screen program has none).
     fn snapshot_parked(&self, term: &Term<Listener>, out: &mut GridSnapshot) {
@@ -951,6 +987,31 @@ fn term_cell(cell: &alacritty_terminal::term::cell::Cell) -> TermCell {
     TermCell { ch: if spacer { ' ' } else { cell.c }, fg, bg, flags: f }
 }
 
+/// A running hash of a snapshot's text (FNV-1a over words): cheap enough for every cell
+/// of every frame, never 0 (0 says "not worked out").
+struct Fingerprint(u64);
+
+impl Fingerprint {
+    const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0100_0000_01b3;
+
+    fn new(words: &[u64]) -> Self {
+        let mut f = Self(Self::OFFSET);
+        for w in words {
+            f.add(*w);
+        }
+        f
+    }
+
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0 ^ word).wrapping_mul(Self::PRIME);
+    }
+
+    fn done(&self) -> u64 {
+        self.0.max(1)
+    }
+}
+
 fn snapshot_of<L: EventListener>(term: &Term<L>, out: &mut GridSnapshot) {
     let content = term.renderable_content();
     let (cols, rows) = (term.columns(), term.screen_lines());
@@ -972,14 +1033,22 @@ fn snapshot_of<L: EventListener>(term: &Term<L>, out: &mut GridSnapshot) {
         MouseReport::Normal
     };
     let offset = content.display_offset as i32;
+    let mut fingerprint = Fingerprint::new(&[
+        out.history as u64,
+        content.display_offset as u64,
+        cols as u64,
+        rows as u64,
+    ]);
     for indexed in content.display_iter {
         let row = indexed.point.line.0 + offset;
         let col = indexed.point.column.0;
         if row < 0 || row as usize >= rows || col >= cols {
             continue;
         }
+        fingerprint.add(u64::from(indexed.cell.c));
         out.cells[row as usize * cols + col] = term_cell(indexed.cell);
     }
+    out.fingerprint = fingerprint.done();
     // The history line just above the screen, when the view asked (scrolled by part of a
     // line): drawn in the gap.
     out.above.clear();

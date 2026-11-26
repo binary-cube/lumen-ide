@@ -23,9 +23,46 @@ pub(super) struct HomeScreen {
     /// What `recent.sessions` was built for: the theme's generation (the files' icons),
     /// the language, the minute (`2 hours ago`).
     pub sessions_key: Option<(u64, String, u64)>,
+    /// The folded sections were read from the settings (once, at the lists' first paint).
+    pub folds_read: bool,
 }
 
 impl Workbench {
+    /// The sections folded as saved, given to both lists once (later changes are this
+    /// window's own: [`Self::fold_section`]).
+    pub(super) fn sync_home_folds(&mut self) {
+        if std::mem::replace(&mut self.home.folds_read, true) {
+            return;
+        }
+        let saved = crate::config::settings().get(&crate::settings::HOME_FOLDED);
+        for section in ui_workbench::ProjectsSection::ALL {
+            let folded = saved.iter().any(|k| k == section.key());
+            self.home.picker.set_folded(section, folded);
+            self.home.projects_menu.set_folded(section, folded);
+        }
+    }
+
+    /// Section `section` folded or opened in both lists, and saved: the saved list is read
+    /// again first, so another window's folds are kept.
+    pub(super) fn fold_section(&mut self, section: ui_workbench::ProjectsSection, folded: bool) {
+        self.home.picker.set_folded(section, folded);
+        self.home.projects_menu.set_folded(section, folded);
+        let settings = crate::config::settings();
+        let mut saved = settings.get(&crate::settings::HOME_FOLDED);
+        let had = saved.iter().any(|k| k == section.key());
+        if had == folded {
+            return;
+        }
+        if folded {
+            saved.push(section.key().to_owned());
+        } else {
+            saved.retain(|k| k != section.key());
+        }
+        if let Err(e) = settings.set(&crate::settings::HOME_FOLDED, saved) {
+            tracing::warn!(error = %e, "can't save the home screen's folded sections");
+        }
+    }
+
     /// The app's past sessions as the projects list shows them (plan 78): read at start,
     /// they don't change; their rows are made again only when the theme (the files' icons),
     /// the language or the minute (`2 hours ago`) changes.

@@ -478,3 +478,38 @@ fn a_section_title_folds_and_opens_its_section() {
     paint(&mut picker, &recent);
     assert!(count(&picker, is_project) > 0, "open again");
 }
+
+/// The keys reach a section's title: the list starts on a row (↵ opens it), ↑ from the
+/// section's first row lands on its title, ↵ there folds the section, and it's told for ← / →.
+#[test]
+fn the_keys_reach_a_section_s_title() {
+    let (mut recent, ..) = sample();
+    recent.sessions = sample_sessions();
+    let mut picker = ProjectsPicker::default();
+    paint(&mut picker, &recent);
+    assert_eq!(picker.selected_section(), None, "a row first, not a title");
+    let first_session = picker.items.iter().position(|i| matches!(i, Item::Session { .. }));
+    picker.selected = first_session.unwrap();
+    picker.step(-1);
+    assert_eq!(picker.selected_section(), Some(Section::Sessions), "↑ from its first row");
+    let action = picker.confirm();
+    assert_eq!(action, Some(PickerAction::ToggleSection(Section::Sessions)));
+    picker.set_folded(Section::Sessions, true);
+    paint(&mut picker, &recent);
+    assert!(picker.is_folded(Section::Sessions));
+    assert_eq!(picker.selected_section(), Some(Section::Sessions), "the title stays chosen");
+    // Down to the history's title: it folds the projects.
+    while picker.selected_section() != Some(Section::Projects) {
+        picker.step(1);
+    }
+    assert_eq!(picker.confirm(), Some(PickerAction::ToggleSection(Section::Projects)));
+    // Landed on by rows moving under the kept index (not by the keys): a row instead.
+    let history_title =
+        picker.items.iter().position(|i| matches!(i, Item::HistoryHeader(_))).unwrap();
+    picker.step(1);
+    picker.selected = history_title;
+    paint(&mut picker, &recent);
+    assert_eq!(picker.selected_section(), None, "never left on a title by itself");
+    // Their keys, as saved.
+    assert_eq!(Section::ALL.map(Section::key), ["sessions", "projects"]);
+}

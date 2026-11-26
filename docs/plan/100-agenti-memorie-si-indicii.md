@@ -603,12 +603,60 @@ istoricul; un flash negru la revenirea în aplicație; „să aibă tabul un uui
   IOSurface 31 MB → 16 MB după plecarea din aplicație, ca înainte; fără eliberare rămânea 31 MB.
 - Ecranul de start: secțiunile „Sesiuni anterioare” și „Toate proiectele” se pliază din titlu.
 
-**Lăsat.**
+**Lăsat.** Cele trei rămase aici sunt făcute la 100j.
 
-- Plierea secțiunilor nu se ține între rulări și nu se face din tastatură.
-- Ritmul de 1 s pentru o sesiune care pornește depinde de trezirea ferestrei (o fereastră
-  liniștită află mai târziu; cel mult 10 s, apoi la ritmul obișnuit).
-- O copiere cât emulatorul rămâne ocupat ~20 ms ia doar ce e pe ecran, fără să spună.
+### 100j — Ce rămăsese de la 100i (cerut 2026-11-26)
+
+**Făcut.**
+
+- **Copierea din terminal cât emulatorul e ocupat**: o selecție care iese din ecran își are
+  textul întreg făcut în aceeași privire la emulator ca instantaneul ecranului
+  (`TerminalSession::try_snapshot_selecting`, o singură încercare, niciodată o așteptare;
+  `view::selection::ReadyCopy`), deci e chiar textul evidențiat. Fiecare instantaneu are o
+  amprentă (`GridSnapshot::fingerprint`: caracterele vizibile, lungimea istoricului,
+  derularea, mărimea; ieșirea care mută istoricul mută și ecranul, chiar cu istoricul plin):
+  cu aceeași amprentă textul nu se mai face (o redesenare fără nimic nou nu costă), iar la
+  copiere e folosit doar dacă amprenta ecranului arătat e a lui. Nu se face cât selecția e
+  trasă cu mouse-ul, pentru una aflată toată pe ecran (ecranul o are întreagă) sau pentru
+  una de peste 1000 de rânduri (`COPY_READY_MOST`: ar fi construită la fiecare cadru cât
+  programul scrie). Copierea încearcă întâi textul proaspăt (~20 ms), apoi pe cel pregătit,
+  abia apoi partea de pe ecran.
+- **Plierea secțiunilor ecranului de start**: ținută în setarea `[home] folded` (`sessions`,
+  `projects`), aceeași în ambele liste (ecranul de start și fereastra din bara de sus), citită
+  o dată la primul desen. La scriere se recitește întâi lista salvată, ca să rămână ce au pliat
+  alte ferestre. Titlurile secțiunilor se pot alege cu ↑ ↓ (lista pornește tot pe un rând,
+  nu pe un titlu, iar selecția rămâne pe un titlu doar dacă tastele l-au ales, niciodată
+  pentru că rândurile s-au mutat sub ea): ↵ pliază sau deschide secțiunea, ← o pliază,
+  → o deschide. Cititorul de ecran le aude ca butoane, deschise sau pliate.
+- **Ritmul de 1 s pentru o sesiune care pornește**: un fir mic (`terminal-start`) trezește
+  fereastra proiectului la fiecare secundă cât terminalul e „pornind”. Se oprește singur după
+  cel mult 10 s (`STARTING_WITHIN`), când se află cum se reia sesiunea sau când tabul s-a
+  închis. Fereastra nu mai depinde de alte treziri. Fiindcă sondajul ferestrei vine puțin
+  după trezire, o întrebare cu până la 200 ms mai devreme de secundă e primită
+  (`RESUMES_SLACK`), altfel una din două ar fi sărită.
+
+**Teste.** Copierea cu emulatorul ocupat ia selecția întreagă (61 de rânduri, nu cele 11 de pe
+ecran); o selecție nepregătită ia ecranul; una toată pe ecran sau trasă încă nu păstrează
+nimic. Tastele ajung la titlul unei secțiuni (↑ din primul ei rând, ↵ o pliază, cheile
+salvate). Terminalele „pornind” sunt urmărite doar cât pornesc: cele aflate, expirate sau
+închise sunt lăsate, iar proiectul e numit o singură dată.
+
+**Revizie** (agent separat): textul pregătit era legat de lungimea istoricului, care nu mai
+crește când istoricul e plin (rămânea vechi): legat acum de instantaneu. Banda titlului ales
+intra sub rândul următor: oprită unde începe el. Selecția putea ajunge singură pe un titlu:
+doar tastele o duc acolo.
+
+**A doua revizie** (alt agent): textul pregătit se refăcea la fiecare desenare și era citit
+într-o a doua privire la emulator (putea fi decalat față de ce e evidențiat): acum în aceeași
+privire, păstrat după amprentă. Pasul de 1 s putea deveni 2 s: toleranța de mai sus. Titlurile
+spuse cititorului de ecran; alegerea unui titlu uitată odată cu selecția.
+
+**Lăsat.** Setarea pliată nu se sincronizează în timp real între ferestre deja deschise
+(fiecare o citește o dată; o pliere într-una nu o strică pe a celeilalte la salvare). O
+selecție de peste 1000 de rânduri copiată exact când emulatorul e ocupat ia tot doar ecranul.
+↵ / ← / → pe un titlu nu sunt testate prin `Workbench` (doar lista însăși), nici citirea și
+scrierea setării. Amprenta nu vede ieșirea care mută istoricul plin cu rânduri identice celor
+de pe ecran (același text arătat): textul pregătit rămâne cel de dinainte.
 
 ## Riscuri
 

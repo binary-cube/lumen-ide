@@ -1095,6 +1095,7 @@ impl OverlaySlot for ProjectsMenuSlot {
         // Open, the list has the keyboard (its field shows the caret / selection).
         wb.home.projects_menu.focused =
             wb.home.projects_menu.is_open() && !wb.dialogs.dialog.is_open();
+        wb.sync_home_folds();
         let current = wb.current_project();
         wb.home.projects_menu.paint_modal(
             current.as_ref(),

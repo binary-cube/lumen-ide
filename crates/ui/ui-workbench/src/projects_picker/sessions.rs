@@ -68,9 +68,7 @@ impl ProjectsPicker {
                 }
             }
             PickerAction::ToggleSection(section) => {
-                if !self.folded.remove(&section) {
-                    self.folded.insert(section);
-                }
+                self.set_folded(section, !self.is_folded(section));
             }
             _ => return false,
         }

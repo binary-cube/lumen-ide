@@ -195,21 +195,25 @@ impl ProjectsPicker {
                 }
                 Item::FoldHeader(title, section) => {
                     let top = y;
+                    paint_title_selected(&mut list, top, w, i == self.selected);
                     y = paint_section_title(&mut list, title, &header_font, y);
                     let header = Rect::new(list.x0, top + px(4.0), w, y - top - px(2.0));
                     let fold = self.fold_look(*section);
+                    describe_title(header, fold.open, i == self.selected);
                     paint_fold_chevron(&mut list, header, fold);
                     self.folds.push((header, *section));
                     continue;
                 }
                 Item::HistoryHeader(title) => {
                     let top = y;
+                    paint_title_selected(&mut list, top, w, i == self.selected);
                     y = paint_section_title(&mut list, title, &header_font, y);
                     let header = Rect::new(list.x0, top + px(4.0), w, y - top - px(2.0));
                     if mark == Some(Mark::Header) {
                         paint_drop_target(list.layer, ctx, header);
                     }
                     let fold = self.fold_look(Section::Projects);
+                    describe_title(header, fold.open, i == self.selected);
                     let chevron = paint_fold_chevron(&mut list, header, fold);
                     let right = chevron.min_x() - px(FOLD_GAP);
                     let hovered = self.new_group_hover;
@@ -311,6 +315,35 @@ pub(super) struct ListArea<'a, 'c> {
     pub(super) x0: f32,
 }
 
+/// How tall a section's title is (its room above included), in points.
+const SECTION_TITLE_H: f32 = 34.0;
+/// The room above a section's title its highlight leaves, in points.
+const SECTION_TITLE_INSET: f32 = 4.0;
+
+/// A section's title chosen with the keys (↵ folds it): the rows' highlight behind it, from
+/// its top `top` down to where the next row starts.
+fn paint_title_selected(list: &mut ListArea<'_, '_>, top: f32, w: f32, selected: bool) {
+    if !selected {
+        return;
+    }
+    let ctx = list.ctx;
+    let band = Rect::new(
+        list.x0,
+        top + ctx.px(SECTION_TITLE_INSET),
+        w,
+        ctx.px(SECTION_TITLE_H - SECTION_TITLE_INSET),
+    );
+    paint_row_bg(list.layer, ctx, band, true, false);
+}
+
+/// A section's title told to the screen reader: a button that folds its section (its name
+/// the title on its line), open or not, chosen or not.
+fn describe_title(header: Rect, open: bool, selected: bool) {
+    use ui_kit::access::{Described, Role, State};
+    let state = State { selected, expanded: Some(open), ..State::default() };
+    ui_kit::access::node(|| Described::new(Role::Button, "", header).state(state));
+}
+
 /// A group's title (uppercase) at `y`; returns the y below it.
 fn paint_section_title(list: &mut ListArea<'_, '_>, title: &str, font: &Font, y: f32) -> f32 {
     let ctx = list.ctx;
@@ -324,7 +357,7 @@ fn paint_section_title(list: &mut ListArea<'_, '_>, title: &str, font: &Font, y:
         ds::optical_baseline(y, px(24.0), font),
         ctx.fade(ctx.palette.text_muted),
     );
-    y + px(26.0)
+    y + px(SECTION_TITLE_H - 8.0)
 }
 
 /// An action's row `r`: (label, icon, shortcut).

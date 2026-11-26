@@ -35,6 +35,25 @@ impl GridSnapshot {
     }
 }
 
+/// A snapshot asked with a selection's text ([`crate::TerminalSession::try_snapshot_selecting`]).
+#[derive(Debug, Clone, Copy)]
+pub struct SelectionAsk<'a> {
+    pub selection: &'a TermSelection,
+    /// The fingerprint the caller's text was made at (`None`: it has none for it).
+    pub made_at: Option<u64>,
+}
+
+/// What a snapshot asked with a selection's text gave.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Snapped {
+    /// The emulator was busy: nothing copied.
+    Busy,
+    /// The snapshot taken; the text not made (unchanged since `made_at`, or not readable).
+    Taken,
+    /// The snapshot taken, with the selection's text.
+    With(String),
+}
+
 /// A selection: from where the mouse was pressed to where it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TermSelection {

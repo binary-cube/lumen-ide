@@ -2,6 +2,7 @@
 //! the edge) and ended, the link under it and the file it names.
 
 use super::*;
+use terminal_session::text::Snapped;
 
 impl TerminalView {
     /// The visible cell (row, column) under `p`; outside the grid, the nearest one when
@@ -149,5 +150,70 @@ impl TerminalView {
         };
         let path = if path.is_absolute() { path } else { self.cwd.as_ref()?.join(path) };
         path.is_file().then_some(path)
+    }
+}
+
+/// A selection's whole text, made in the same look at the emulator as the snapshot shown (so
+/// it's the text highlighted): a copy that finds the emulator busy (the program's output
+/// being parsed) takes this instead of the screen's part alone. Kept while the snapshots'
+/// fingerprint stays the same (nothing built again on a repaint with nothing new); made only
+/// for a selection reaching off the screen, of at most [`COPY_READY_MOST`] lines, once it's
+/// no longer being dragged.
+#[derive(Debug, Clone)]
+pub(super) struct ReadyCopy {
+    /// The selection it was made for.
+    selection: TermSelection,
+    /// The fingerprint of the snapshot it was made with (`GridSnapshot::fingerprint`).
+    fingerprint: u64,
+    text: String,
+}
+
+impl TerminalView {
+    /// The selection a copy should find made ready: reaching off the screen, not dragged,
+    /// not too long (the screen has the rest whole).
+    fn copy_wanted(&self) -> Option<TermSelection> {
+        let selection = self.selection.filter(|s| !s.is_empty() && !self.selecting)?;
+        let (start, end) = selection.ordered();
+        let on_screen = self.grid.visible_row(start.line).is_some()
+            && self.grid.visible_row(end.line).is_some();
+        let lines = usize::try_from(end.line.saturating_sub(start.line)).unwrap_or(usize::MAX);
+        (!on_screen && lines < COPY_READY_MOST).then_some(selection)
+    }
+
+    /// The screen copied if the emulator is free now (never a wait: `false`, nothing
+    /// copied), the selection's whole text made ready in the same look when it changed.
+    pub(super) fn try_snapshot(&mut self) -> bool {
+        let Some(session) = self.session.as_ref() else { return false };
+        let Some(selection) = self.copy_wanted() else {
+            self.ready_copy = None;
+            return session.try_snapshot(&mut self.grid);
+        };
+        let made_at =
+            self.ready_copy.as_ref().filter(|r| r.selection == selection).map(|r| r.fingerprint);
+        let ask = terminal_session::text::SelectionAsk { selection: &selection, made_at };
+        match session.try_snapshot_selecting(&mut self.grid, ask) {
+            Snapped::Busy => return false,
+            Snapped::Taken => {}
+            Snapped::With(text) => {
+                let fingerprint = self.grid.fingerprint;
+                self.ready_copy = Some(ReadyCopy { selection, fingerprint, text });
+            }
+        }
+        true
+    }
+
+    /// A snapshot was taken by waiting (a scroll, Clear Terminal): the text made ready kept
+    /// only if it shows the same.
+    pub(super) fn snapshot_waited(&mut self) {
+        if self.ready_copy.as_ref().is_some_and(|r| r.fingerprint != self.grid.fingerprint) {
+            self.ready_copy = None;
+        }
+    }
+
+    /// The whole text made ready for `selection` with what's shown now, if it was.
+    pub(super) fn ready_copy_of(&self, selection: &TermSelection) -> Option<String> {
+        let ready = self.ready_copy.as_ref()?;
+        let shown = ready.fingerprint != 0 && ready.fingerprint == self.grid.fingerprint;
+        (ready.selection == *selection && shown).then(|| ready.text.clone())
     }
 }

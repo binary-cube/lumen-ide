@@ -230,10 +230,14 @@ impl Viewer for TerminalView {
                     self.pending_scroll = 0;
                 }
             }
-            if behind {
+            let taken = if behind {
                 session.snapshot(&mut self.grid);
-                self.stale_since = None;
-            } else if session.try_snapshot(&mut self.grid) {
+                self.snapshot_waited();
+                true
+            } else {
+                self.try_snapshot()
+            };
+            if taken {
                 self.stale_since = None;
             } else {
                 self.stale_since.get_or_insert_with(std::time::Instant::now);
@@ -587,10 +591,14 @@ impl Viewer for TerminalView {
 
     fn selected_text(&self) -> Option<String> {
         let selection = self.selection.filter(|s| !s.is_empty())?;
-        // All of it, what scrolled off the screen while it was made too; the screen's part
-        // only if the emulator stayed busy.
-        let whole =
-            self.session.as_ref().and_then(|s| s.selection_text(&selection, self.grid.history));
+        // All of it, what scrolled off the screen while it was made too. The emulator busy:
+        // the whole text made ready at its last free moment, else the screen's part (the
+        // whole selection is on it then).
+        let whole = self
+            .session
+            .as_ref()
+            .and_then(|s| s.selection_text(&selection, self.grid.history))
+            .or_else(|| self.ready_copy_of(&selection));
         whole.or_else(|| Some(selection.text(&self.grid))).filter(|t| !t.is_empty())
     }
 
@@ -709,6 +717,7 @@ impl Viewer for TerminalView {
         session.clear_history();
         self.selection = None;
         session.snapshot(&mut self.grid);
+        self.snapshot_waited();
         true
     }
 }

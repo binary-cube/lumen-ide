@@ -20,6 +20,10 @@ pub const AUTOSAVE: Setting<bool> = Setting::new("editor", "autosave", || true);
 /// How many of the app's past sessions are kept (the home screen lists them all: six by
 /// default, so the recent projects under them stay near).
 pub const SESSIONS_KEPT: Setting<i64> = Setting::new("sessions", "kept", || 6);
+/// The home screen's sections folded under their titles (`[home] folded`: `sessions`,
+/// `projects`), kept across restarts: each window reads it as it first shows its lists, and
+/// saves only the section it folds or opens.
+pub const HOME_FOLDED: Setting<Vec<String>> = Setting::new("home", "folded", Vec::new);
 /// How many windows a session's "Reopen" opens at most (0: all), one after the other.
 pub const SESSIONS_REOPEN: Setting<i64> = Setting::new("sessions", "reopen", || 10);
 

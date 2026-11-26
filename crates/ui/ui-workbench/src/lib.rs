@@ -85,6 +85,7 @@ pub use param_hint::{ParamHint, ParamHintCard};
 pub use projects_picker::{
     HomeContent, HomeFile, HomeSession, HomeSessionWindow, PickerAction as ProjectsAction,
     PickerTarget as ProjectsTarget, ProjectsPicker, RecentList, RecentProject,
+    Section as ProjectsSection,
 };
 pub use settings_view::{
     ContributedBlock, FileIconChoice, FrameworkRow, IconChoice, ModuleRow, SettingsAction,

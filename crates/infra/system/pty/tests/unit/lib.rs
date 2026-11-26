@@ -589,3 +589,28 @@ fn a_combining_mark_is_copied_with_its_letter() {
     let history = term.grid().history_size();
     assert_eq!(selection_text_of(&term, &selection, history), "cafe\u{301}");
 }
+
+/// A snapshot's fingerprint: the same text, the same number; output that moves the history
+/// changes it, even with the history full (its length then stays the same).
+#[test]
+fn a_snapshot_s_fingerprint_follows_its_text() {
+    use alacritty_terminal::vte::ansi::Processor;
+    struct Quiet;
+    impl EventListener for Quiet {}
+    let options = TermOptions { scrollback: 10, ..TermOptions::default() };
+    let mut term = Term::new(term_config(options), &GridSize::new(20, 5), Quiet);
+    let mut parser: Processor = Processor::new();
+    for i in 0..40 {
+        parser.advance(&mut term, format!("row {i:02}\r\n").as_bytes());
+    }
+    let (mut first, mut again) = (GridSnapshot::default(), GridSnapshot::default());
+    snapshot_of(&term, &mut first);
+    snapshot_of(&term, &mut again);
+    assert_ne!(first.fingerprint, 0);
+    assert_eq!(first.fingerprint, again.fingerprint, "nothing new: the same");
+    assert_eq!(first.history, 10, "the history full");
+    parser.advance(&mut term, b"row 40\r\n");
+    snapshot_of(&term, &mut again);
+    assert_eq!(again.history, first.history, "its length the same");
+    assert_ne!(first.fingerprint, again.fingerprint, "its text moved: another");
+}

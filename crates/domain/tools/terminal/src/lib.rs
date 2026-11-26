@@ -116,6 +116,12 @@ pub struct GridSnapshot {
     pub want_above: bool,
     /// That line's cells (`cols` of them; empty: not asked, or none above).
     pub above: Vec<TermCell>,
+    /// What its text is, in a number: the visible characters, the history's length, the
+    /// offset and the size. Two snapshots with the same one show the same text (output
+    /// moving the history moves the screen too), so what's made from one is kept for the
+    /// next (a selection's whole text: [`TerminalSession::try_snapshot_selecting`]).
+    /// 0: not worked out (a session that doesn't).
+    pub fingerprint: u64,
 }
 
 /// How a program asked for the mouse to be reported.
@@ -251,6 +257,36 @@ pub trait TerminalSession: Send {
     /// the selection was made on (output since moves the rows: they're found where they
     /// went). `None`: the emulator stayed busy (the caller takes what's on screen).
     fn selection_text(&self, selection: &text::TermSelection, history: usize) -> Option<String> {
+        let _ = (selection, history);
+        None
+    }
+    /// [`Self::try_snapshot`], and in the same look at the emulator the text `ask.selection`
+    /// covers (from the history too), unless it was made at the snapshot's fingerprint
+    /// already (`ask.made_at`: nothing changed, nothing built). Both from one look: the
+    /// text is the one the snapshot shows highlighted.
+    fn try_snapshot_selecting(
+        &self,
+        out: &mut GridSnapshot,
+        ask: text::SelectionAsk<'_>,
+    ) -> text::Snapped {
+        if !self.try_snapshot(out) {
+            return text::Snapped::Busy;
+        }
+        if out.fingerprint != 0 && ask.made_at == Some(out.fingerprint) {
+            return text::Snapped::Taken;
+        }
+        match self.try_selection_text(ask.selection, out.history) {
+            Some(text) => text::Snapped::With(text),
+            None => text::Snapped::Taken,
+        }
+    }
+    /// [`Self::selection_text`] tried once, only if the emulator is free now (as
+    /// [`Self::try_snapshot`]).
+    fn try_selection_text(
+        &self,
+        selection: &text::TermSelection,
+        history: usize,
+    ) -> Option<String> {
         let _ = (selection, history);
         None
     }

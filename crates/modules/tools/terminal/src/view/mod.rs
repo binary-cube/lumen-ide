@@ -34,6 +34,7 @@ mod shells;
 mod viewer;
 
 use grid::*;
+use selection::ReadyCopy;
 pub(crate) use shells::*;
 
 /// Spacing between the view's edge and the grid (logical).
@@ -140,6 +141,10 @@ const SNAP_AFTER: std::time::Duration = std::time::Duration::from_millis(200);
 /// How long the screen may stay behind the program's output (its reader busy at every
 /// frame) before a frame waits for it once.
 const MAX_BEHIND: std::time::Duration = std::time::Duration::from_millis(100);
+/// The most lines a selection's text is made ready for (see [`ReadyCopy`]): it's built
+/// again at each snapshot whose text changed (every frame the program writes), the emulator
+/// held meanwhile; a longer one's copy tries the emulator itself (~20 ms), else the screen.
+const COPY_READY_MOST: usize = 1000;
 
 /// A program another module runs (an agent's session taken up again) prints, as it starts,
 /// what it had — maybe a very long conversation. Drawn as it comes, the screen would scroll
@@ -189,6 +194,9 @@ pub struct TerminalView {
     selection: Option<TermSelection>,
     /// The mouse button is down, extending the selection.
     selecting: bool,
+    /// The selection's whole text, made ready while the emulator was free (see
+    /// [`ReadyCopy`]).
+    ready_copy: Option<ReadyCopy>,
     /// Where the mouse is while it extends the selection: held past the grid's top or
     /// bottom, the history scrolls (the selection with it).
     drag_at: Option<Point>,
@@ -289,8 +297,10 @@ impl TerminalView {
 
     /// The screen copied after a scroll, if it's free now (else the next frame copies it).
     fn show_scrolled(&mut self) {
-        let Some(session) = self.session.as_mut() else { return };
-        if self.pending_scroll == 0 && session.try_snapshot(&mut self.grid) {
+        if self.session.is_none() {
+            return;
+        }
+        if self.pending_scroll == 0 && self.try_snapshot() {
             self.stale_since = None;
         } else {
             self.stale_since.get_or_insert_with(std::time::Instant::now);
@@ -372,12 +382,17 @@ impl TerminalView {
                 }
                 self.shell = session.pid().map(|pid| ShellPid::new(Shell { pid, project, watch }));
                 if let Some(slot) = &self.renamed {
-                    let mut asked = asked(slot);
-                    asked.pid = session.pid();
-                    asked.started = Some(std::time::Instant::now());
-                    asked.watch.clone_from(&self.watch);
-                    asked.asleep = false;
-                    asked.typed = false;
+                    let project = {
+                        let mut asked = asked(slot);
+                        asked.pid = session.pid();
+                        asked.started = Some(std::time::Instant::now());
+                        asked.watch.clone_from(&self.watch);
+                        asked.asleep = false;
+                        asked.typed = false;
+                        asked.project
+                    };
+                    // Its window asks soon how it resumes, quiet or not.
+                    crate::sleep::follow_start(slot, project);
                 }
                 self.typed = 0;
                 // A new session: the options and colors are told to it at its first paint; its
@@ -692,6 +707,7 @@ impl TerminalView {
         self.grid.want_above = false;
         session.scroll(delta as i32);
         session.snapshot(&mut self.grid);
+        self.snapshot_waited();
         true
     }
 

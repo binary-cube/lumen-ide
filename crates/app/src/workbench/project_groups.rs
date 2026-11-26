@@ -94,9 +94,13 @@ impl Workbench {
                 self.ask_group_name(RecentAsk::NewGroup { parent: None, project: None });
                 MouseResult::Redraw
             }
-            ProjectsAction::ToggleSession(_)
-            | ProjectsAction::ToggleSessionWindow(..)
-            | ProjectsAction::ToggleSection(_) => {
+            ProjectsAction::ToggleSection(section) => {
+                let picker = if modal { &self.home.projects_menu } else { &self.home.picker };
+                let folded = !picker.is_folded(section);
+                self.fold_section(section, folded);
+                MouseResult::Redraw
+            }
+            ProjectsAction::ToggleSession(_) | ProjectsAction::ToggleSessionWindow(..) => {
                 let picker =
                     if modal { &mut self.home.projects_menu } else { &mut self.home.picker };
                 picker.toggle_fold(&action);
@@ -134,6 +138,13 @@ impl Workbench {
     /// `false`: no group is selected.
     pub(super) fn fold_selected_group(&mut self, modal: bool, collapse: bool) -> bool {
         let picker = if modal { &mut self.home.projects_menu } else { &mut self.home.picker };
+        // A section's title: the section folded or opened (in both lists, saved).
+        if let Some(section) = picker.selected_section() {
+            if picker.is_folded(section) != collapse {
+                self.fold_section(section, collapse);
+            }
+            return true;
+        }
         // A past session (or one of its windows) is folded in the list itself.
         if picker.fold_selected_session(collapse) {
             return true;

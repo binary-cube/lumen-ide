@@ -1,4 +1,5 @@
 use super::*;
+use terminal_session::text::TermPoint;
 
 #[test]
 fn indexed_colors_cover_ansi_cube_and_grays() {
@@ -132,6 +133,8 @@ struct FakeSession {
     exit: Option<i32>,
     /// New output since last asked.
     dirty: std::sync::atomic::AtomicBool,
+    /// How many times a selection's text was built.
+    built: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl FakeSession {
@@ -203,6 +206,8 @@ impl TerminalSession for FakeSession {
         };
         out.alternate_scroll = true;
         out.cursor = Some((self.rows - 1, 0));
+        // What it shows, in a number: its lines and where it's scrolled.
+        out.fingerprint = (self.lines.len() as u64) << 20 | (self.offset as u64) << 4 | 1;
     }
     fn try_snapshot(&self, out: &mut GridSnapshot) -> bool {
         if self.busy.load(std::sync::atomic::Ordering::Relaxed) {
@@ -238,6 +243,21 @@ impl TerminalSession for FakeSession {
     }
     fn take_dirty(&self) -> bool {
         self.dirty.swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+    fn selection_text(&self, selection: &TermSelection, history: usize) -> Option<String> {
+        self.try_selection_text(selection, history)
+    }
+    /// Whole rows of what the selection covers, history included (busy: none).
+    fn try_selection_text(&self, selection: &TermSelection, history: usize) -> Option<String> {
+        if self.busy.load(std::sync::atomic::Ordering::Relaxed) {
+            return None;
+        }
+        self.built.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (start, end) = selection.ordered();
+        let at = |line: i32| usize::try_from(history as i64 + i64::from(line)).unwrap_or(0);
+        let last = self.lines.len().checked_sub(1)?;
+        let rows = self.lines.get(at(start.line)..=at(end.line).min(last))?;
+        Some(rows.join("\n"))
     }
 }
 
@@ -1392,6 +1412,33 @@ fn a_session_just_started_offers_sleep_greyed_out() {
     assert_eq!(asked(&slot).can_sleep(), CanSleep::No);
 }
 
+/// A session just started is followed (its window woken each second) only while it's
+/// starting: known how it resumes, past its time, or gone, it's let go — and its project
+/// named once.
+#[test]
+fn a_starting_session_is_followed_only_while_it_starts() {
+    let (view, _text, slot) = resumable("followed-key", std::time::Duration::from_secs(60));
+    asked(&slot).resume = None;
+    asked(&slot).started = Some(std::time::Instant::now());
+    let project = Some(kernel::ProjectId::new());
+    let now = std::time::Instant::now();
+    let until = now + STARTING_WITHIN;
+    let gone = std::sync::Arc::new(NameSlot::default());
+    let mut list = vec![
+        (Arc::downgrade(&slot), project, until),
+        (Arc::downgrade(&slot), project, until),
+        (Arc::downgrade(&gone), None, until),
+    ];
+    drop(gone);
+    assert_eq!(crate::sleep::still_starting(&mut list, now), vec![project], "once, its project");
+    assert_eq!(list.len(), 2, "the one gone let go");
+    assert!(crate::sleep::still_starting(&mut list, until).is_empty(), "past its time");
+    let mut list = vec![(Arc::downgrade(&slot), project, until)];
+    asked(&slot).resume = Some(agents::Launch::default());
+    assert!(crate::sleep::still_starting(&mut list, now).is_empty(), "known: let go");
+    drop(view);
+}
+
 /// Asleep and brought forward again by its key (a click on its session in the panel: its
 /// start told again), it stays as it is: asleep, the same slot, nothing announced as awake.
 #[test]
@@ -1405,4 +1452,67 @@ fn a_sleeping_tab_asked_again_by_its_key_stays_asleep() {
     assert!(view.asleep, "still asleep");
     assert!(view.renamed.as_ref().is_some_and(|s| Arc::ptr_eq(s, &slot)), "the same slot");
     assert_eq!(state("again-key").map(|s| s.asleep), Some(true));
+}
+
+/// A selection reaching off the screen: its whole text is made ready with each snapshot, so
+/// a copy that finds the emulator busy takes all of it, not the screen's part — only with
+/// the snapshot it was made with; one wholly on screen, dragged or too long keeps nothing.
+#[test]
+fn a_copy_while_the_emulator_is_busy_takes_the_whole_selection() {
+    let session = FakeSession::new(200, 80, 24);
+    let busy = std::sync::Arc::clone(&session.busy);
+    let built = std::sync::Arc::clone(&session.built);
+    let (mut view, mut text) = painted(session);
+    // From 50 lines up in the history to the screen's 10th row.
+    view.selection = Some(TermSelection {
+        anchor: TermPoint { line: -50, col: 0 },
+        head: TermPoint { line: 10, col: 5 },
+    });
+    paint(&mut view, &mut text);
+    assert!(view.ready_copy.is_some(), "made ready while free");
+    let made = built.load(std::sync::atomic::Ordering::Relaxed);
+    paint(&mut view, &mut text);
+    paint(&mut view, &mut text);
+    assert_eq!(built.load(std::sync::atomic::Ordering::Relaxed), made, "repaints build nothing");
+    busy.store(true, std::sync::atomic::Ordering::Relaxed);
+    let copied = view.selected_text().unwrap_or_default();
+    assert_eq!(copied.lines().count(), 61, "all of it, not the screen's 11 rows");
+    let first = format!("{:05}", view.grid.history - 50);
+    assert!(copied.starts_with(&first), "from the history's line: {copied:.20}");
+    // Shown since with other text (output came, the history cleared): what's highlighted
+    // may be other text, the ready one isn't taken.
+    view.grid.fingerprint += 1;
+    assert_eq!(view.selected_text().map(|t| t.lines().count()), Some(11), "the screen's part");
+    view.grid.fingerprint -= 1;
+    // Another selection, not made ready yet: the screen's part.
+    view.selection = Some(TermSelection {
+        anchor: TermPoint { line: -40, col: 0 },
+        head: TermPoint { line: 2, col: 5 },
+    });
+    assert_eq!(view.selected_text().map(|t| t.lines().count()), Some(3));
+    // Wholly on screen: nothing kept.
+    busy.store(false, std::sync::atomic::Ordering::Relaxed);
+    view.selection = Some(TermSelection {
+        anchor: TermPoint { line: 1, col: 0 },
+        head: TermPoint { line: 4, col: 5 },
+    });
+    paint(&mut view, &mut text);
+    assert!(view.ready_copy.is_none());
+    // Dragged: made once it ends.
+    view.selection = Some(TermSelection {
+        anchor: TermPoint { line: -30, col: 0 },
+        head: TermPoint { line: 4, col: 5 },
+    });
+    view.selecting = true;
+    paint(&mut view, &mut text);
+    assert!(view.ready_copy.is_none(), "not while it's dragged");
+    // Too long to build at each frame: left to the copy itself.
+    view.selecting = false;
+    let most = i32::try_from(COPY_READY_MOST).unwrap();
+    view.selection = Some(TermSelection {
+        anchor: TermPoint { line: -most, col: 0 },
+        head: TermPoint { line: 4, col: 5 },
+    });
+    paint(&mut view, &mut text);
+    assert!(view.ready_copy.is_none(), "too long");
 }

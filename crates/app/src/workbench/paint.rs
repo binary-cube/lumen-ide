@@ -942,6 +942,7 @@ impl Workbench {
             self.home.recent_generation = Some(generation);
         }
         self.sync_home_sessions();
+        self.sync_home_folds();
         let current = self.current_project();
         let query = self.home.picker.query.text().trim().to_owned();
         let key = self.project.as_ref().map(|_| {
