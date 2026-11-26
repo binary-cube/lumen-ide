@@ -658,6 +658,48 @@ selecție de peste 1000 de rânduri copiată exact când emulatorul e ocupat ia 
 scrierea setării. Amprenta nu vede ieșirea care mută istoricul plin cu rânduri identice celor
 de pe ecran (același text arătat): textul pregătit rămâne cel de dinainte.
 
+### 100k — Terminalele închise chiar se închid (cerut 2026-11-27)
+
+O instanță pornită de 5 zile ținea ~970 MB după ce proiectele ei fuseseră închise: 22 de
+terminale rămăseseră deschise (cititorul fiecăruia oprit în `wait4`), cu agenții lor vii sau
+blocați „la ieșire” (starea `E`, fără memorie), plus două shell-uri la fel.
+
+**Cauza:** la eliberarea PTY-ului, biblioteca emulatorului trimite hangup programului și îl
+așteaptă, cu PTY-ul încă deschis și necitit. Un program care avea de scris (un shell la
+hangup, un agent oprit de 100i) nu poate ieși până nu i se citește ce a scris: așteptarea nu
+se mai termină, terminalul și memoria lui rămân. Oprirea forțată (`ending`) nu ajută: un
+proces omorât rămâne și el blocat la ieșire.
+
+**Făcut:** `drain` — la pornire se ia o a doua copie a PTY-ului; când terminalul e eliberat
+(abia atunci: unul viu nu pierde nimic), un fir `pty-drain` citește și aruncă ce a rămas cât
+timp biblioteca așteaptă programul, apoi se oprește (sau când PTY-ul nu mai dă nimic).
+Windows are aceeași așteptare altfel: închiderea consolei pseudo așteaptă să i se citească ce
+mai scrie, iar cititorul bibliotecii are un tampon fix (1 MB) pe care nu-l mai golește nimeni.
+Acolo, pe firul care închide: programul e oprit întâi (închiderea consolei l-ar opri oricum),
+apoi tamponul e golit până nu mai vine nimic (100 ms de liniște, cel mult 2 s; `drain_until_quiet`),
+abia apoi e închisă consola: loc pentru ultimul ecran pe care îl scrie. Doar cât programul
+încă rulează (sfârșitul lui nevăzut): un `exit` obișnuit nu pornește nimic. O copie a PTY-ului
+care nu se poate lua (prea multe fișiere deschise) e spusă în jurnal.
+
+Review (agent separat): `#[cfg(unix)]` ajunsese pe `drain` în loc de `ending` (Windows nu s-ar
+fi compilat); firul putea învârti procesorul pe un hangup fără date (citește acum doar cu
+`POLLIN`); testul firului putea rămâne agățat (scrie acum pe un fir, cu termen); intervalul,
+o `Duration` cu motivul ei. Copia închisă cu cel mult 100 ms după PTY: scris în doc.
+Al doilea review: pe Windows golirea o singură dată nu ajungea (programul încă scria și umplea
+tamponul la loc): oprit întâi, golit până tace; firul Unix nu mai învârte procesorul pe o citire
+goală după `POLLIN` (pauză de 10 ms); niciun fir pentru un program deja ieșit; testele: cititorul
+fals spune „gol” ca cel adevărat (`Ok(0)`), o aserțiune care nu putea pica scoasă, programul
+recunoscut după id și ora pornirii (un id refolosit nu-l mai e).
+Testul vectorilor din setări cerea cadre (animația de deschidere, pe care o încărcare mare o
+termina înainte): cere acum ca vectorii să fie pe drum (îi aduce waker-ul, nu cadrele).
+
+**Teste:** un shell care scrie fără oprire, închis: dispare din sistem (cu hangup tratat ca
+ieșire, și ignorat — oprit forțat); amândouă picau înainte (7 s, rămas „la ieșire”), trec
+acum (2 s, cât e grația hangup-ului). Firul: citește până la capăt, se oprește la cerere,
+fără copie nu face nimic.
+
+**Lăsat:** procesele deja blocate într-o instanță veche se eliberează doar la închiderea ei.
+
 ## Riscuri
 
 - Un program care nu scrie nimic în timpul unei ture lungi (o unealtă tăcută) ar putea părea

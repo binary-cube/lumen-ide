@@ -19,14 +19,30 @@ use alacritty_terminal::tty::{ChildEvent, EventedPty, EventedReadWrite};
 use polling::{Event, PollMode, Poller};
 use terminal_session::history::{EraseFilter, Foreground, HistoryClear, honors};
 
+use crate::drain::Drain;
 use crate::foreground::Probe;
 
-/// The PTY `P`, its output filtered.
-pub(crate) struct Filtered<P> {
+/// The PTY `P`, its output filtered; drained while it's let go ([`Drain`]).
+pub(crate) struct Filtered<P: EventedReadWrite> {
     reader: FilterReader<P>,
+    /// Dropped after the PTY (the fields' order): it drains while the PTY's drop waits.
+    drain: Drain,
 }
 
-impl<P> Filtered<P> {
+impl<P: EventedReadWrite> Drop for Filtered<P> {
+    /// The PTY dropped next (it waits for its program, or its console for its last output):
+    /// its output drained meanwhile (Unix), its reader's buffer emptied first (Windows).
+    fn drop(&mut self) {
+        if !self.drain.wanted() {
+            return;
+        }
+        #[cfg(windows)]
+        self.drain.empty_before_close(self.reader.pty.reader());
+        self.drain.start();
+    }
+}
+
+impl<P: EventedReadWrite> Filtered<P> {
     /// `policy`: the user's choice ([`HistoryClear::to_u8`]), changed while it runs;
     /// `redrawing`: when the program redrawing over its screen started (see [`Redrawing`]);
     /// `erased`: the erases of the history handed to the emulator, counted.
@@ -49,7 +65,14 @@ impl<P> Filtered<P> {
                 erased,
                 erase_at: None,
             },
+            drain: Drain::default(),
         }
+    }
+
+    /// Drained by `drain` while it's let go.
+    pub(crate) fn draining(mut self, drain: Drain) -> Self {
+        self.drain = drain;
+        self
     }
 }
 
@@ -210,7 +233,7 @@ impl<P: EventedPty> EventedPty for Filtered<P> {
     }
 }
 
-impl<P: OnResize> OnResize for Filtered<P> {
+impl<P: EventedReadWrite + OnResize> OnResize for Filtered<P> {
     fn on_resize(&mut self, size: WindowSize) {
         self.reader.pty.on_resize(size);
     }

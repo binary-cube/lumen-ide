@@ -18,6 +18,7 @@
 //! The history of a terminal not drawn for a while is parked in a compact form and put back
 //! before anything reads it ([`parking`]).
 
+mod drain;
 #[cfg(unix)]
 mod ending;
 mod filtered;
@@ -456,27 +457,40 @@ pub fn spawn(profile: &ShellProfile, size: TermSize, waker: Waker) -> io::Result
     let probe = foreground::probe(pid);
 
     let history_clear = Arc::new(AtomicU8::new(TermOptions::default().history_clear.to_u8()));
+    // A second handle to the PTY, drained once it's let go (see `drain`).
+    #[cfg(unix)]
+    let pty_handle = std::os::fd::AsFd::as_fd(pty.file()).try_clone_to_owned();
     let probe = Arc::new(Mutex::new(probe));
     let redrawing = filtered::Redrawing::default();
     let erased = Arc::new(AtomicU64::new(0));
-    let pty = filtered::Filtered::new(
-        pty,
-        Arc::clone(&history_clear),
-        Arc::clone(&probe),
-        Arc::clone(&redrawing),
-        Arc::clone(&erased),
-    );
     let shared = Arc::new(Shared {
         wakes: wakes::Wakes::new(waker),
         dirty: AtomicBool::new(true),
         title: Mutex::new(None),
         exit: Mutex::new(None),
         sender: OnceLock::new(),
-        history_clear,
+        history_clear: Arc::clone(&history_clear),
         colors: Mutex::default(),
         started: Instant::now(),
         output_at: AtomicU64::new(0),
     });
+    let drain = drain::Drain::new(still_running(Arc::downgrade(&shared)));
+    #[cfg(unix)]
+    let drain = drain.through(
+        pty_handle
+            .map_err(|error| tracing::warn!(%error, "can't keep a terminal's handle to drain it"))
+            .ok(),
+    );
+    #[cfg(windows)]
+    let drain = drain.ending(pid);
+    let pty = filtered::Filtered::new(
+        pty,
+        history_clear,
+        Arc::clone(&probe),
+        Arc::clone(&redrawing),
+        Arc::clone(&erased),
+    )
+    .draining(drain);
     let listener = Listener(Arc::clone(&shared));
     let term = Arc::new(FairMutex::new(Term::new(
         term_config(TermOptions::default()),
@@ -513,6 +527,13 @@ pub fn spawn(profile: &ShellProfile, size: TermSize, waker: Waker) -> io::Result
         #[cfg(unix)]
         born,
     })
+}
+
+/// Whether the program `shared` tells of still runs: not once its end was seen; with the
+/// session's state already gone it can't be told, so it's taken as running (a drain of a
+/// program gone ends at once).
+fn still_running(shared: std::sync::Weak<Shared>) -> drain::Running {
+    Box::new(move || shared.upgrade().is_none_or(|s| s.exit.lock().is_ok_and(|e| e.is_none())))
 }
 
 impl PtySession {

@@ -491,7 +491,8 @@ fn closing_lets_go_of_the_semantic_model() {
 }
 
 /// With the semantic model, the entries' vectors are made in the background: the search
-/// finds by words meanwhile (frames keep coming), then by meaning too once they're here.
+/// finds by words meanwhile (the vectors on their way: their worker wakes the app), then by
+/// meaning too once they're here.
 #[test]
 fn the_entries_vectors_are_made_in_the_background() {
     // A "model" for which every text means the same.
@@ -520,7 +521,7 @@ fn the_entries_vectors_are_made_in_the_background() {
     };
     paint(&mut view);
     assert!(view.results.is_empty(), "no word matches, no vectors yet");
-    assert!(view.is_animating(), "frames until the vectors come");
+    assert!(view.making.is_some(), "the vectors on their way");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while view.results.is_empty() && std::time::Instant::now() < deadline {
         std::thread::sleep(std::time::Duration::from_millis(5));

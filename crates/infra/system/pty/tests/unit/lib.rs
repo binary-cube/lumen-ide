@@ -614,3 +614,61 @@ fn a_snapshot_s_fingerprint_follows_its_text() {
     assert_eq!(again.history, first.history, "its length the same");
     assert_ne!(first.fingerprint, again.fingerprint, "its text moved: another");
 }
+
+/// A program still writing when its terminal is let go, ending at the hangup as a shell
+/// does: the output it had left is drained, so it ends for good (gone from the system's
+/// table, its reader with it), never held exiting with its terminal open.
+#[cfg(unix)]
+#[test]
+fn a_program_writing_when_its_terminal_closes_ends_for_good() {
+    let gone = closed_while_writing("trap 'exit 0' HUP");
+    assert!(gone, "the program is still there, held exiting");
+}
+
+/// The same with a program that goes on after its hangup (an agent): stopped, it ends for
+/// good too.
+#[cfg(unix)]
+#[test]
+fn a_program_going_on_after_its_hangup_ends_for_good_once_stopped() {
+    let gone = closed_while_writing("trap '' HUP");
+    assert!(gone, "the program is still there after it was stopped");
+}
+
+/// A shell writing lines without end (its hangup handled by `trap`), its session dropped
+/// once it wrote: whether it's gone from the system's table within the time it's given
+/// (its hangup's grace and its stop's, and a little more).
+#[cfg(unix)]
+fn closed_while_writing(trap: &str) -> bool {
+    let line = "x".repeat(200);
+    let profile = ShellProfile {
+        program: Some("/bin/sh".into()),
+        args: vec!["-c".into(), format!("{trap}; while :; do echo {line}; done")],
+        ..Default::default()
+    };
+    let size = TermSize { cols: 80, rows: 10, cell_width: 8, cell_height: 16 };
+    let session = spawn(&profile, size, Arc::new(|| {})).unwrap();
+    let pid = session.pid().unwrap();
+    let mut grid = GridSnapshot::default();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !(0..grid.rows).any(|r| grid.row_text(r).starts_with("xxxx")) {
+        assert!(Instant::now() < deadline, "the program wrote nothing");
+        std::thread::sleep(Duration::from_millis(20));
+        session.snapshot(&mut grid);
+    }
+    // The program named by its id and its start: an id given to another one later isn't it.
+    let started = |pid: u32| {
+        process::descendants::Descendants::with_root(pid).found().first().map(|f| f.start)
+    };
+    let start = started(pid);
+    assert!(start.is_some(), "the program is in the system's table");
+    drop(session);
+    let deadline =
+        Instant::now() + ending::HANGUP_GRACE + ending::STOP_GRACE + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if started(pid) != start {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    false
+}
