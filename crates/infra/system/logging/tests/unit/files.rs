@@ -36,6 +36,21 @@ fn a_full_file_continues_in_the_next_and_another_instance_writes_its_own() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// The day's file held by the instance writing it can still be read (the log's viewer):
+/// another instance is kept out of writing it, not out of reading it.
+#[test]
+fn a_held_file_stays_readable() {
+    let dir = scratch();
+    let mut held = open(&dir, "2026-11-20", "one", Limits::default()).unwrap();
+    std::io::Write::write_all(&mut held.file, b"{\"msg\":\"a line\"}\n").unwrap();
+    let read = std::fs::read_to_string(&held.path).unwrap();
+    assert_eq!(read, "{\"msg\":\"a line\"}\n");
+    let other = open(&dir, "2026-11-20", "two", Limits::default()).unwrap();
+    assert_eq!(other.path, dir.join("app-2026-11-20-two.jsonl"), "still held by the first");
+    drop((held, other));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn kept(day: &str, name: &str, size: u64) -> Kept {
     Kept { path: PathBuf::from(name), day: day.into(), size }
 }

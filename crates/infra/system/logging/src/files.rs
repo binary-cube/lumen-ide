@@ -3,7 +3,8 @@
 //! day's file first holds it locked; another one running meanwhile writes its own
 //! (`app-2026-11-20-<run>.jsonl`), so no line is mixed with another's and no turnover
 //! steps on another's. What's kept: at most [`Limits::days`] days and [`Limits::total`]
-//! bytes, the oldest let go first (never a file in use).
+//! bytes, the oldest let go first (never a file in use). The lock never keeps the lines from
+//! being read ([`hold`]).
 
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -75,12 +76,11 @@ pub fn open(dir: &Path, day: &str, run: &str, limits: Limits) -> io::Result<Curr
                 continue;
             }
             let file = append_to(&path)?;
-            // Held by another instance: this one writes its own.
-            if own.is_none() && file.try_lock().is_err() {
+            // Taken for its own file too (whatever the answer); held by another instance:
+            // this one writes its own.
+            let held = hold(&file);
+            if !held && own.is_none() {
                 break;
-            }
-            if own.is_some() {
-                let _ = file.try_lock();
             }
             return Ok(Current { file, path, day: day.to_owned(), index, size });
         }
@@ -103,7 +103,7 @@ pub fn next(dir: &Path, current: &Current, run: &str, limits: Limits) -> io::Res
         let size = std::fs::metadata(&path).map_or(0, |m| m.len());
         if size < limits.file {
             let file = append_to(&path)?;
-            let _ = file.try_lock();
+            hold(&file);
             return Ok(Current { file, path, day: current.day.clone(), index, size });
         }
         index += 1;
@@ -196,11 +196,59 @@ pub fn clean(dir: &Path, today: &str, limits: Limits, in_use: &Path) -> usize {
     to_remove(&kept, today, limits, in_use)
         .into_iter()
         .filter(|path| {
-            let held = File::open(path).is_ok_and(|f| f.try_lock().is_err());
+            let held = File::open(path).is_ok_and(|f| !hold(&f));
             !held && std::fs::remove_file(path).is_ok()
         })
         .count()
         + legacy_gone
+}
+
+/// `file` held by this instance, until it's closed; `false` when another instance holds it.
+/// The lock only says who writes: elsewhere it's advisory (the whole file), on Windows locks
+/// are enforced (a locked part can't be read by anyone else: the log's own viewer, an
+/// editor), so only a byte far past the end is locked there and the lines stay readable.
+#[cfg(not(windows))]
+fn hold(file: &File) -> bool {
+    file.try_lock().is_ok()
+}
+
+/// Where the lock is taken on Windows: one byte this far in, past any log file's end (and
+/// clear of the largest offset, so the byte's end can't overflow).
+#[cfg(windows)]
+const HELD_AT: u64 = 0x7FFF_FFFF_FFFF_FFFE;
+
+#[cfg(windows)]
+#[allow(unsafe_code)]
+fn hold(file: &File) -> bool {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx,
+    };
+    use windows_sys::Win32::System::IO::{OVERLAPPED, OVERLAPPED_0, OVERLAPPED_0_0};
+    let mut at = OVERLAPPED {
+        Internal: 0,
+        InternalHigh: 0,
+        Anonymous: OVERLAPPED_0 {
+            Anonymous: OVERLAPPED_0_0 {
+                Offset: (HELD_AT & 0xFFFF_FFFF) as u32,
+                OffsetHigh: (HELD_AT >> 32) as u32,
+            },
+        },
+        hEvent: std::ptr::null_mut(),
+    };
+    // SAFETY: the handle is `file`'s, open for the call; `at` lives through it (the call
+    // returns at once: the lock is asked not to wait); one byte is locked, released when
+    // the handle closes.
+    unsafe {
+        LockFileEx(
+            file.as_raw_handle(),
+            LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+            0,
+            1,
+            0,
+            &raw mut at,
+        ) != 0
+    }
 }
 
 #[cfg(test)]
