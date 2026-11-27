@@ -16,6 +16,10 @@ pub use crate::request_tree::THREAD;
 pub struct Open;
 
 impl CommandHandler for Open {
+    fn requires(&self) -> &'static [command_model::Requires] {
+        &[command_model::Requires::Project]
+    }
+
     fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
         if host.focus_view(crate::collection_view::EXTENSION) {
             return true;
@@ -58,6 +62,10 @@ impl ToolWindowProvider for HttpTool {
     /// Its group on the strip: the services the project talks to.
     fn group(&self) -> &'static str {
         "services"
+    }
+
+    fn requires(&self) -> &'static [command_model::Requires] {
+        &[command_model::Requires::Project]
     }
 
     fn toggle_command(&self) -> Option<&'static str> {

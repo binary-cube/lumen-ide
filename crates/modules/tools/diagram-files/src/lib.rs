@@ -116,6 +116,10 @@ impl ToolWindowProvider for Window {
         "documents"
     }
 
+    fn requires(&self) -> &'static [command_model::Requires] {
+        &[command_model::Requires::Project]
+    }
+
     fn content(&self) -> ToolContent {
         ToolContent::Panel
     }

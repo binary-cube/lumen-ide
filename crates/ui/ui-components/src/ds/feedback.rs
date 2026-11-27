@@ -363,23 +363,32 @@ impl EmptyBlock {
         (rect, top): (Rect, f32),
         (title, detail): (&str, Option<&str>),
     ) {
-        let shaped = text.shape_line(title, &self.title.font);
-        draw_text(
+        let pad = ctx.px(16.0);
+        let max_w = (rect.size.width - 2.0 * pad).max(0.0);
+        let edges = (rect.min_x() + pad, rect.max_x() - pad);
+        let title = super::ellipsize(text, title, &self.title.font, max_w);
+        let shaped = text.shape_line(&title, &self.title.font);
+        let x = (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round();
+        draw_text_within(
             layer,
             &shaped,
-            (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round(),
+            x,
             (top + self.title.ascent).round(),
             ctx.fade(ctx.palette.text_muted),
+            edges,
         );
         let (Some(detail), Some(line)) = (detail, &self.detail) else { return };
-        let shaped = text.shape_line(detail, &line.font);
+        let detail = super::ellipsize(text, detail, &line.font, max_w);
+        let shaped = text.shape_line(&detail, &line.font);
         let y = top + self.title.height + self.gap + line.ascent;
-        draw_text(
+        let x = (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round();
+        draw_text_within(
             layer,
             &shaped,
-            (rect.min_x() + (rect.size.width - shaped.width) / 2.0).round(),
+            x,
             y.round(),
             ctx.fade(ctx.palette.text_muted.with_alpha(0.75)),
+            edges,
         );
     }
 }

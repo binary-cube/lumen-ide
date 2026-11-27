@@ -216,16 +216,18 @@ impl Workbench {
         self.support.tools.iter().find(|t| t.id() == id)
     }
 
-    /// The tool windows of `dock` whose button shows now: a window of views only while its
-    /// command is enabled (Git in a repository, Remote in a remote project).
+    /// The tool windows of `dock` whose button shows now: its requirements met (a project,
+    /// a repository), and — a window of views — its command enabled (Git in a repository).
     pub(super) fn docked(
         &self,
         dock: ui_workbench::Dock,
     ) -> Vec<Arc<dyn ui_workbench::ToolWindowProvider>> {
+        let context = self.menu_context();
         self.support
             .tools
             .iter()
             .filter(|t| t.dock() == dock && t.available())
+            .filter(|t| context.missing(t.requires()).is_none())
             .filter(|t| match t.content() {
                 ui_workbench::ToolContent::Views { command, .. }
                 | ui_workbench::ToolContent::Command { command, .. } => self.ready(command),

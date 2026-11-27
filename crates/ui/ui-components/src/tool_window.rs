@@ -78,6 +78,11 @@ pub trait ToolWindowProvider: Send + Sync + Debug {
     fn active(&self) -> bool {
         false
     }
+    /// What it needs of the window (a project, a repository…): without it, its button
+    /// is hidden from the strip — the same [`command_model::Requires`] the commands use.
+    fn requires(&self) -> &'static [command_model::Requires] {
+        &[]
+    }
     /// Its button is offered now (asked as the strip is drawn: cheap). A window whose
     /// partner may be missing (the agents' sessions, without any agent) says so here.
     fn available(&self) -> bool {

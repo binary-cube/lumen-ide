@@ -167,6 +167,9 @@ impl Renderer for WgpuRenderer {
     }
 
     fn resize(&mut self, size: PhysicalSize) {
+        if self.ctx.lost.load(std::sync::atomic::Ordering::Acquire) {
+            return;
+        }
         // The size it has already (the system tells it again as the window opens): nothing to
         // set up, and no third image for a resize that isn't one.
         if !resizes(&self.config, size) {
@@ -179,7 +182,11 @@ impl Renderer for WgpuRenderer {
             self.drawer.release_kept();
         }
         self.config.desired_maximum_frame_latency = 2;
-        self.reconfigure();
+        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.reconfigure())).is_err() {
+            self.ctx.lost.store(true, std::sync::atomic::Ordering::Release);
+            tracing::error!("the renderer panicked during resize");
+            return;
+        }
         #[cfg(target_os = "macos")]
         {
             if self.transactional_until.is_none() {
@@ -195,6 +202,29 @@ impl Renderer for WgpuRenderer {
     }
 
     fn render(
+        &mut self,
+        scene: &Scene,
+        rasterizer: &mut dyn GlyphRasterizer,
+    ) -> Result<FrameStats, RenderError> {
+        if self.ctx.lost.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(RenderError::DeviceLost);
+        }
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.do_render(scene, rasterizer)
+        })) {
+            Ok(result) => result,
+            Err(panic) => {
+                self.ctx.lost.store(true, std::sync::atomic::Ordering::Release);
+                let message = crate::panic_message(&panic);
+                tracing::error!(message, "the renderer panicked");
+                Err(RenderError::DeviceLost)
+            }
+        }
+    }
+}
+
+impl WgpuRenderer {
+    fn do_render(
         &mut self,
         scene: &Scene,
         rasterizer: &mut dyn GlyphRasterizer,

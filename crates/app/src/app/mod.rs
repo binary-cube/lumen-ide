@@ -15,7 +15,7 @@ use platform_api::{
     Control, CursorIcon, ImeEvent, Key, KeyEvent, MenuItem, MouseButton, NamedKey, PlatformEvent,
     ScrollDelta, SystemAppearance, Window,
 };
-use render_api::{RenderOptions, RenderTarget, Renderer, RendererFactory, Scene};
+use render_api::{RenderError, RenderOptions, RenderTarget, Renderer, RendererFactory, Scene};
 use render_wgpu::WgpuRendererFactory;
 use text_layout::{FontFamily, TextSystem};
 use theming::Appearance;

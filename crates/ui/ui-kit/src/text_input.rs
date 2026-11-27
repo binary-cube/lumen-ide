@@ -6,7 +6,7 @@ use kernel::{Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
 
-use crate::{centered_baseline, draw_text, draw_text_within};
+use crate::{centered_baseline, draw_text_within};
 
 #[derive(Debug, Default)]
 pub struct TextInput {
@@ -424,11 +424,7 @@ impl TextInput {
         if self.text.is_empty() {
             let shaped = text.shape_line(placeholder, &s.font);
             let x = bounds.min_x() + s.padding + s.lead;
-            if s.trail > 0.0 {
-                draw_text_within(layer, &shaped, x, baseline, s.placeholder, inside);
-            } else {
-                draw_text(layer, &shaped, x, baseline, s.placeholder);
-            }
+            draw_text_within(layer, &shaped, x, baseline, s.placeholder, inside);
         }
 
         // A secret: a dot per character (the offsets follow).

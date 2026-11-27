@@ -1,6 +1,9 @@
 //! The shared GPU context made: the instance, the adapter and device chosen, the atlas and
 //! the layouts; what it keeps of the images and the atlas over frames.
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use super::*;
 
 /// How the GPU's memory is allocated. `MemoryUsage`: the DX12 / Vulkan allocator grows its
@@ -137,6 +140,12 @@ impl GpuContext {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let lost = Arc::new(AtomicBool::new(false));
+        let lost_flag = Arc::clone(&lost);
+        device.set_device_lost_callback(move |reason, message| {
+            lost_flag.store(true, std::sync::atomic::Ordering::Release);
+            tracing::error!(?reason, message, "the GPU device was lost");
+        });
         Ok(Self {
             instance,
             adapter,
@@ -158,6 +167,7 @@ impl GpuContext {
                 shown: HashMap::new(),
                 sources: crate::import::Sources::default(),
             }),
+            lost,
         })
     }
 

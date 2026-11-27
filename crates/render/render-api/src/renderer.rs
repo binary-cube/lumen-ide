@@ -154,6 +154,8 @@ pub enum RenderError {
     Surface(String),
     #[error("graphics device error: {0}")]
     Device(String),
+    #[error("the GPU device was lost")]
+    DeviceLost,
 }
 
 /// An active render driver, bound to a surface.

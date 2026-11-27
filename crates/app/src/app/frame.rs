@@ -386,6 +386,12 @@ impl EditorApp {
                     }
                 }
             }
+            Err(RenderError::DeviceLost) => {
+                tracing::error!("the GPU device was lost; recreating the renderer");
+                drop(fonts);
+                self.recover_renderer(&window);
+                return;
+            }
             Err(e) => tracing::error!(error = %e, "render error"),
         }
         // Now and then, how the decorations' frames went (`RUST_LOG=debug`).
@@ -541,6 +547,36 @@ impl EditorApp {
         }
         self.frames.kept_frame_check = later;
         true
+    }
+
+    /// The GPU device was lost (a driver reset, a resize that broke the shared texture): the
+    /// renderer and the pages' importers are dead. Drop them, make a new one, let the pages
+    /// sync again with fresh importers.
+    fn recover_renderer(&mut self, window: &Arc<dyn Window>) {
+        self.frames.renderer = None;
+        self.frames.floating = None;
+        self.frames.floating_failed = false;
+        self.web_views.let_go_all_pages();
+        let size = window.inner_size();
+        let target: Arc<dyn RenderTarget> = Arc::new(window.handles());
+        let factories: [&dyn RendererFactory; 1] = [&WgpuRendererFactory];
+        for factory in factories {
+            match factory.create(Arc::clone(&target), size, &self.shared.render_options) {
+                Ok(renderer) => {
+                    let description = renderer.description();
+                    tracing::info!(renderer = %description, "renderer recovered");
+                    self.workbench.set_renderer(description.clone());
+                    self.frames.overlay = DebugOverlay::new(description);
+                    self.workbench.set_backdrop_blur(renderer.backdrop_blur());
+                    self.frames.renderer = Some(renderer);
+                    break;
+                }
+                Err(e) => {
+                    tracing::error!(driver = factory.name(), error = %e, "recovery failed");
+                }
+            }
+        }
+        window.request_redraw();
     }
 
     /// Tells the decorations how the window is: focused, shown, and whether the system asks

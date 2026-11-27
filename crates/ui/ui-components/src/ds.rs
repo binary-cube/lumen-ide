@@ -10,7 +10,7 @@
 use kernel::{Point, Rect, Rgba};
 use render_api::{Layer, Quad};
 use text_layout::{Font, TextSystem};
-use ui_kit::{KeyHint, draw_text, paint_key_hints};
+use ui_kit::{KeyHint, draw_text, draw_text_within, paint_key_hints};
 
 use crate::backdrop::BackdropRole;
 use crate::painter::LayerPainter;

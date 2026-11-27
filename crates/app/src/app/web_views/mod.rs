@@ -391,6 +391,16 @@ impl WebViews {
         self.forget_gone();
     }
 
+    /// All pages let go (the GPU device was lost: their importers are dead). Each made again
+    /// at the next sync, with a new importer from the new renderer.
+    pub(super) fn let_go_all_pages(&mut self) {
+        self.live.clear();
+        self.failed.clear();
+        self.pictures.clear();
+        self.drawn.clear();
+        self.forget_gone();
+    }
+
     /// Some page the app draws is open (input may go to it).
     pub(super) fn any_drawn(&self) -> bool {
         self.live.iter().any(Live::is_drawn)

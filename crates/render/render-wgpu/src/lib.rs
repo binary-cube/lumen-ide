@@ -116,6 +116,8 @@ struct GpuContext {
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
     /// Shared mutable state (the atlas, the images); used on the UI thread.
     state: Mutex<SharedState>,
+    /// The GPU device was lost (a driver reset, another process): nothing drawn on it again.
+    lost: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl GpuContext {
@@ -504,6 +506,15 @@ fn with_mapped<R>(
     let result = f(&buffer.slice(..).get_mapped_range().ok()?);
     buffer.unmap();
     Some(result)
+}
+
+/// The message of a caught panic (`catch_unwind`), if it's a string.
+pub(crate) fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| (*s).to_owned())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 #[cfg(test)]

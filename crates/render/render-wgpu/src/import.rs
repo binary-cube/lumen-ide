@@ -136,11 +136,29 @@ impl FrameImporter for Importer {
     }
 
     fn write(&self, image: &ImageData, frame: PixelFrame<'_>) -> bool {
-        told(self.try_write(image, frame))
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.try_write(image, frame)
+        })) {
+            Ok(outcome) => told(outcome),
+            Err(panic) => {
+                self.ctx.lost.store(true, std::sync::atomic::Ordering::Release);
+                tracing::error!(message = crate::panic_message(&panic), "frame write panicked");
+                false
+            }
+        }
     }
 
     fn import(&self, image: &ImageData, frame: ImportedFrame<'_>) -> bool {
-        told(self.try_import(image, frame))
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.try_import(image, frame)
+        })) {
+            Ok(outcome) => told(outcome),
+            Err(panic) => {
+                self.ctx.lost.store(true, std::sync::atomic::Ordering::Release);
+                tracing::error!(message = crate::panic_message(&panic), "frame import panicked");
+                false
+            }
+        }
     }
 }
 
@@ -155,6 +173,9 @@ impl Importer {
         image: &ImageData,
         frame: PixelFrame<'_>,
     ) -> Result<CopiedFrame, Refused> {
+        if self.ctx.lost.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(Refused::NotLive);
+        }
         let size = self.frame_size(image, frame.size)?;
         let stride = frame.stride;
         let needed = u64::from(stride) * u64::from(size.height);
@@ -200,6 +221,9 @@ impl Importer {
         image: &ImageData,
         frame: ImportedFrame<'_>,
     ) -> Result<CopiedFrame, Refused> {
+        if self.ctx.lost.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(Refused::NotLive);
+        }
         let size = self.frame_size(image, frame.size)?;
         let source = platform::open(&self.ctx, image.id, frame.native, size)?;
         self.fill(image, size, frame.changed, |target, areas| {

@@ -43,6 +43,10 @@ impl Workbench {
     pub fn row_state(&self, context: &MenuContext, id: &str) -> RowState {
         // A tool window without a toggle of its own: while its button shows.
         if let Some(tool) = id.strip_prefix(crate::commands::TOOL_WINDOW_PREFIX) {
+            // The provider's own requirements (a project, a repository).
+            if let Some(missing) = self.tool(tool).and_then(|t| context.missing(t.requires())) {
+                return RowState::Disabled(Some(missing));
+            }
             let command = self.tool(tool).and_then(|t| match t.content() {
                 ui_workbench::ToolContent::Views { command, .. }
                 | ui_workbench::ToolContent::Command { command, .. } => Some(command),
