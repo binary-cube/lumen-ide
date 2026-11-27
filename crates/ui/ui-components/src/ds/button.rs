@@ -139,6 +139,9 @@ pub struct ButtonSpec<'a> {
     /// As wide as its label with the usual padding (a filled or bordered one in a small
     /// card's footer), not the dialogs' wider minimum.
     pub compact: bool,
+    /// Its name to a screen reader when it shows no label (its icon alone, the label its
+    /// tooltip); `None`: the label, or the text on its line.
+    pub name: Option<&'a str>,
 }
 
 impl<'a> ButtonSpec<'a> {
@@ -178,7 +181,14 @@ impl<'a> ButtonSpec<'a> {
             start: None,
             compact: false,
             avatar: None,
+            name: None,
         }
+    }
+
+    /// Named so to a screen reader while it shows no label.
+    pub fn name(mut self, name: &'a str) -> Self {
+        self.name = Some(name);
+        self
     }
 
     pub fn icon(mut self, icon: &'a str) -> Self {
@@ -384,7 +394,7 @@ impl<'a> ButtonSpec<'a> {
         self.lit_amount() >= LIT_AT
     }
 
-    fn has_icon(&self) -> bool {
+    pub(super) fn has_icon(&self) -> bool {
         self.icon.is_some() || self.icon_id.is_some() || self.avatar.is_some()
     }
 }
@@ -609,12 +619,12 @@ pub fn chip_spec<'a>(
 
 /// Draws the button `spec` describes in `rect`.
 impl ButtonSpec<'_> {
-    /// What it is to a screen reader: a button named by its label (an icon alone: by the
-    /// text on its line, never the icon's own id), greyed out while it can't be used; one
-    /// opening a menu says its list is closed.
+    /// What it is to a screen reader: a button named by its label (an icon alone: by its
+    /// [`Self::name`], else the text on its line, never the icon's own id), greyed out while
+    /// it can't be used; one opening a menu says its list is closed.
     fn described(&self, rect: Rect) -> ui_kit::access::Described {
         use ui_kit::access::{Described, Role};
-        let name = self.label.unwrap_or_default();
+        let name = self.label.or(self.name).unwrap_or_default();
         let role = if self.toggle { Role::ToggleButton } else { Role::Button };
         let mut node = Described::new(role, name, rect).disabled(!self.enabled);
         if self.toggle {

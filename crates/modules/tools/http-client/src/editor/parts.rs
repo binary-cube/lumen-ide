@@ -42,6 +42,17 @@ impl RequestEditor {
         self.follow(told);
     }
 
+    /// The label of the button drawn by its icon alone at `p`, as the last paint drew it (a
+    /// Send become Cancel, labels back after a wider pane: never the one before); none
+    /// under an open list.
+    pub(super) fn tip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
+        if self.picker.is_open() {
+            return None;
+        }
+        let (rect, label) = self.tips.iter().rev().find(|(r, _)| r.contains(p))?;
+        Some(ui_components::tooltip::Tip::new(*rect, label.clone()))
+    }
+
     /// What the form draws topmost at `p`.
     fn hit_at(&self, p: Point) -> Option<Hit> {
         self.hits.iter().rev().find(|(r, _)| r.contains(p)).map(|(_, h)| *h)
@@ -401,6 +412,11 @@ impl Control for FormPart<'_, '_> {
             Hit::Field(_) => ViewerCursor::Text,
             _ => ViewerCursor::Pointer,
         })
+    }
+
+    /// A button drawn by its icon alone: its label.
+    fn tooltip(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
+        self.0.borrow().tip_at(p)
     }
 
     fn scroll(&mut self, dx: f32, dy: f32) -> bool {

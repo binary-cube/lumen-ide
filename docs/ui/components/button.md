@@ -60,6 +60,7 @@ the Git log's filter pills (`chip`), the top bar's project (`avatar`).
 | `.font(&Font)` | the kind's | the label in a font of the caller's |
 | `.start(pad)` | centered | content from the left edge after `pad` (a slot kept for its widest value) |
 | `.avatar(Avatar)` | none | a name's avatar in the icon's place |
+| `.name(&str)` | the label | its name to a screen reader while it shows no label (an icon alone, its label its tooltip) |
 
 `ds::chip(…, spec)` draws a filter's pill (`chip_spec(label, on, hovered, clear_hovered)`:
 a round soft button with ▾ and ×) and returns `ChipRects { body, clear }`.
@@ -111,6 +112,29 @@ let w = ds::button_width(text, ds, &spec, h);
 let r = Rect::new(x, (mid - h / 2.0).round(), w, h);
 ds::button(layer, text, icons, ds, r, spec);
 self.hits.push((r, Hit::ShowAll));
+```
+
+## A row of buttons (`ds::button_row`)
+
+Buttons side by side in a width that may be too small for them (a panel dragged narrow):
+`ds::button_row` keeps every one. While they all fit they show their labels; when they
+don't, each shows its icon alone (a filled one, primary or danger, round) and its label
+comes back as `PlacedButton::tip`, for the view's tooltip. Those made with
+`RowButton::start` go from the row's left, those with `RowButton::end` end at its right,
+each side in order; none is ever drawn over another. A button without an icon keeps its
+label. A toolbar button without a label centers its icon.
+
+```rust
+let buttons = [
+    ds::RowButton::start(ButtonSpec::new(ButtonKind::Toolbar).label(&add).icon("plus")),
+    ds::RowButton::end(ButtonSpec::new(ButtonKind::Toolbar).label(&bulk).icon("file-text")),
+];
+for (hit, placed) in [Hit::Add, Hit::Bulk].into_iter().zip(ds::button_row(layer, text, icons, ds, row, &buttons)) {
+    self.hits.push((placed.rect, hit));
+    if let Some(tip) = placed.tip {
+        self.tips.push((placed.rect, tip.to_owned()));
+    }
+}
 ```
 
 ## Don't

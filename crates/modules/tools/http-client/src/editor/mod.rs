@@ -5,6 +5,7 @@
 //! moment after each change (and before a Send) — the file stays a plain `.http` file.
 
 mod form;
+mod layout;
 mod paint;
 mod parts;
 mod suggest;
@@ -205,6 +206,8 @@ pub struct RequestEditor {
     picker: Picker,
     picking: Option<Pick>,
     hits: Vec<(Rect, Hit)>,
+    /// The buttons drawn by their icons alone (too narrow for their labels): their labels.
+    tips: Vec<(Rect, String)>,
     /// The field the open list hangs from.
     anchor: Rect,
     hover: Option<Hit>,
@@ -957,6 +960,12 @@ impl Viewer for RequestEditor {
 
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
         self.controls.cursor_at(p)
+    }
+
+    /// Read from the last paint, not from the last hover: a button that changed under a
+    /// still mouse (Send become Cancel) tells its own label.
+    fn tooltip_at(&self, p: Point) -> Option<ui_components::tooltip::Tip> {
+        self.tip_at(p)
     }
 
     fn takes_keyboard(&self) -> bool {

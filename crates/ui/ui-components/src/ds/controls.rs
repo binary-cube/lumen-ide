@@ -260,17 +260,26 @@ fn paint_toolbar_button(
             .bordered(ctx.line(), ctx.fade(border)),
     );
     let icon_size = ctx.px(TOOLBAR_ICON);
+    // An icon alone (its label is its tooltip: a row too narrow) is centered.
+    let icon_x = if button.label.is_empty() {
+        (rect.min_x() + (rect.size.width - icon_size) / 2.0).round()
+    } else {
+        rect.min_x() + ctx.px(TOOLBAR_ICON_X)
+    };
     if busy {
         let spinner = Loader { size: TOOLBAR_ICON, color: Some(color), ..Loader::default() };
-        loader(layer, text, ctx, rect.min_x() + ctx.px(TOOLBAR_ICON_X), rect.center().y, &spinner);
+        loader(layer, text, ctx, icon_x, rect.center().y, &spinner);
     } else if let Some(id) = icons.id(button.icon) {
         let ir = Rect::new(
-            rect.min_x() + ctx.px(TOOLBAR_ICON_X),
+            icon_x,
             (rect.min_y() + (rect.size.height - icon_size) / 2.0).round(),
             icon_size,
             icon_size,
         );
         ui_kit::draw_icon(layer, icons, id, ir, ctx.fade(color));
+    }
+    if button.label.is_empty() {
+        return;
     }
     let font = toolbar_button_font(ctx);
     let shaped = text.shape_line(button.label, &font);

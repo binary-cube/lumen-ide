@@ -32,6 +32,15 @@ const PAD: f32 = 14.0;
 const DEFAULT_SHARE: f32 = 0.56;
 /// The room kept for the URL field's × on its right (logical pixels).
 const CLEAR_ROOM: f32 = 30.0;
+/// The method's field (logical pixels).
+const METHOD_W: f32 = 104.0;
+/// The least the method's field narrows to in a narrow request (logical pixels): its
+/// longest names cut short.
+const METHOD_LEAST: f32 = 76.0;
+/// The least the URL field keeps before Send shows its icon alone (logical pixels).
+const URL_LEAST: f32 = 120.0;
+/// The room between the top row's parts: the method, the URL, Send (logical pixels).
+const TOP_GAP: f32 = 8.0;
 
 /// A field without a frame (a table's cell, between the table's lines): typed in, its
 /// caret shows it.
@@ -53,12 +62,14 @@ impl RequestEditor {
         let ds = Ctx::new(p, scale);
         let px = |v: f32| ds.px(v);
         let mut hits: Vec<(Rect, Hit)> = Vec::new();
+        let mut tips: Vec<(Rect, String)> = Vec::new();
         let mut layer = scene.push_layer(Some(b));
         layer.quad(Quad::filled(b, p.editor_background));
         let Some(form) = self.form.as_mut() else {
             let message = self.error.clone().unwrap_or_else(|| t("http.loading"));
             ds::empty_state(layer, text, &ds, b, &message, None);
             self.hits.clear();
+            self.tips.clear();
             return;
         };
         let font = ds.ui_font(0.0);
@@ -75,7 +86,20 @@ impl RequestEditor {
         let top = Rect::new(left.min_x(), left.min_y(), left.size.width, px(TOP));
         let mid = top.min_y() + top.size.height / 2.0;
         let h = px(32.0);
-        let method_r = Rect::new(top.min_x() + px(PAD), mid - h / 2.0, px(104.0), h);
+        let (send_label, cancel_label) = (t("http.send"), t("http.cancel"));
+        let send_w = ds::primary_width(text, &ds, &[send_label.as_str(), cancel_label.as_str()]);
+        // Too narrow for every part at its width: Send by its icon, then the method narrower.
+        let row = super::layout::top_row(
+            (top.min_x() + px(PAD), top.max_x() - px(PAD)),
+            super::layout::TopWidths {
+                method: (px(METHOD_W), px(METHOD_LEAST)),
+                url: px(URL_LEAST),
+                send: (send_w, h),
+                gap: px(TOP_GAP),
+            },
+        );
+        let at = |(x, w): (f32, f32)| Rect::new(x, mid - h / 2.0, w, h);
+        let method_r = at(row.method);
         // The method: the shared dropdown, its value in the method's color.
         let look = ds::DropdownLook {
             value_color: Some(crate::format::method_color(&form.method, p)),
@@ -91,27 +115,27 @@ impl RequestEditor {
         };
         ds::dropdown_styled(layer, text, icons, &ds, method_r, (spec, look));
         hits.push((method_r, Hit::Method));
-        // Send, or Cancel while its run goes.
-        let (send_label, cancel_label) = (t("http.send"), t("http.cancel"));
-        let send_w = ds::primary_width(text, &ds, &[send_label.as_str(), cancel_label.as_str()]);
-        let send_r = Rect::new(top.max_x() - px(PAD) - send_w, mid - h / 2.0, send_w, h);
-        let (kind, label, hit) = if running {
-            (ButtonKind::Danger, &cancel_label, Hit::Cancel)
+        // Send, or Cancel while its run goes: by its icon alone when the row is narrow.
+        let send_r = at(row.send);
+        let (kind, label, icon, hit) = if running {
+            (ButtonKind::Danger, &cancel_label, "square", Hit::Cancel)
         } else {
-            (ButtonKind::Primary, &send_label, Hit::Send)
+            (ButtonKind::Primary, &send_label, "play", Hit::Send)
         };
-        let spec = ButtonSpec::new(kind).label(label).hovered(self.hover == Some(hit));
+        let spec = ButtonSpec::new(kind).hovered(self.hover == Some(hit));
+        let spec = if row.send_labeled {
+            spec.label(label)
+        } else {
+            tips.push((send_r, label.clone()));
+            spec.icon(icon).round().name(label)
+        };
         ds::button(layer, text, icons, &ds, send_r, spec);
         hits.push((send_r, hit));
-        let url_r = Rect::new(
-            method_r.max_x() + px(8.0),
-            mid - h / 2.0,
-            (send_r.min_x() - method_r.max_x() - px(16.0)).max(0.0),
-            h,
-        );
+        let url_r = at(row.url);
         let url_focused = focused && self.focus == Some(Focus::Url);
-        // The text ends before the × (never under it): the shared field, × in its room.
-        let clearing = !form.url.text().is_empty();
+        // The text ends before the × (never under it): the shared field, × in its room; none
+        // in a field too narrow to hold it and some text (it would stand over the method).
+        let clearing = !form.url.text().is_empty() && url_r.size.width >= 2.0 * px(CLEAR_ROOM);
         let style = TextInputStyle {
             trail: if clearing { px(CLEAR_ROOM) } else { 0.0 },
             ..ds::field_style(&ds, code.clone(), false)
@@ -234,35 +258,27 @@ impl RequestEditor {
                 let caption = text.shape_line(&t("http.query_params"), &small);
                 draw_text(layer, &caption, content.min_x(), caption_y + px(14.0), p.text_muted);
                 let actions_y = caption_y + px(24.0);
-                if self.bulk.is_none() {
-                    let row = Rect::new(
-                        content.min_x(),
-                        actions_y,
-                        content.size.width,
-                        px(ds::TOOLBAR_BUTTON_H),
-                    );
-                    actions_row(
-                        (layer, text, icons),
-                        &ds,
-                        (row, Table::Params, self.hover),
-                        &mut hits,
-                    );
-                }
+                // Add and Delete All while the rows show, Bulk Edit (or back) at the end.
+                let mut actions: Vec<Action> = match self.bulk {
+                    None => table_actions(Table::Params).into(),
+                    Some(_) => Vec::new(),
+                };
                 let bulk_label =
                     t(if self.bulk.is_some() { "http.table_edit" } else { "http.bulk_edit" });
-                let bulk_w = ds::toolbar_button_width(text, &ds, &bulk_label);
-                let bulk_r = Rect::new(
-                    content.max_x() - bulk_w,
-                    actions_y,
-                    bulk_w,
-                    px(ds::TOOLBAR_BUTTON_H),
+                actions.push(Action {
+                    label: bulk_label,
+                    icon: "file-text",
+                    hit: Hit::Bulk,
+                    end: true,
+                });
+                let row = Rect::new(content.min_x(), actions_y, content.size.width, 0.0);
+                actions_row(
+                    (layer, text, icons),
+                    &ds,
+                    (row, self.hover),
+                    &actions,
+                    (&mut hits, &mut tips),
                 );
-                let spec = ButtonSpec::new(ButtonKind::Toolbar)
-                    .label(&bulk_label)
-                    .icon("file-text")
-                    .hovered(self.hover == Some(Hit::Bulk));
-                ds::button(layer, text, icons, &ds, bulk_r, spec);
-                hits.push((bulk_r, Hit::Bulk));
                 let table_top = actions_y + px(ds::TOOLBAR_BUTTON_H) + px(8.0);
                 let area = Rect::new(
                     content.min_x(),
@@ -292,8 +308,9 @@ impl RequestEditor {
                 let actions = actions_row(
                     (layer, text, icons),
                     &ds,
-                    (content, Table::Headers, self.hover),
-                    &mut hits,
+                    (content, self.hover),
+                    &table_actions(Table::Headers),
+                    (&mut hits, &mut tips),
                 );
                 let mut y = actions.max_y() + px(6.0);
                 // The app's own, dimmed.
@@ -769,34 +786,68 @@ impl RequestEditor {
         }
         self.anchor = anchor;
         self.hits = hits;
+        self.tips = tips;
     }
 }
 
-/// A table's actions over it (Add, Delete all), where they are.
+/// The buttons drawn by their icons alone, with their labels (their tooltips).
+type Tips = Vec<(Rect, String)>;
+
+/// A button of a table's actions row: its label, its icon, what it does, whether it goes at
+/// the row's end.
+struct Action {
+    label: String,
+    icon: &'static str,
+    hit: Hit,
+    end: bool,
+}
+
+/// What every table offers: a row added, all of them deleted.
+fn table_actions(table: Table) -> [Action; 2] {
+    [
+        Action { label: t("http.add_row"), icon: "plus", hit: Hit::Add(table), end: false },
+        Action {
+            label: t("http.delete_all"),
+            icon: "trash",
+            hit: Hit::DeleteAll(table),
+            end: false,
+        },
+    ]
+}
+
+/// A table's actions on a row at the top of `content`, the shared row of buttons: labeled
+/// while they fit, by their icons otherwise (their labels then their tooltips). The row.
 fn actions_row(
     (layer, text, icons): (&mut Layer, &mut TextSystem, &icons::Icons),
     ds: &Ctx<'_>,
-    (content, table, hover): (Rect, Table, Option<Hit>),
-    hits: &mut Vec<(Rect, Hit)>,
+    (content, hover): (Rect, Option<Hit>),
+    actions: &[Action],
+    (hits, tips): (&mut Vec<(Rect, Hit)>, &mut Tips),
 ) -> Rect {
-    let px = |v: f32| ds.px(v);
-    let h = px(ds::TOOLBAR_BUTTON_H);
-    let mut x = content.min_x();
-    for (label, icon, hit) in [
-        (t("http.add_row"), "plus", Hit::Add(table)),
-        (t("http.delete_all"), "trash", Hit::DeleteAll(table)),
-    ] {
-        let w = ds::toolbar_button_width(text, ds, &label);
-        let r = Rect::new(x, content.min_y(), w, h);
-        let spec = ButtonSpec::new(ButtonKind::Toolbar)
-            .label(&label)
-            .icon(icon)
-            .hovered(hover == Some(hit));
-        ds::button(layer, text, icons, ds, r, spec);
-        hits.push((r, hit));
-        x = r.max_x() + px(8.0);
+    let row = Rect::new(
+        content.min_x(),
+        content.min_y(),
+        content.size.width,
+        ds.px(ds::TOOLBAR_BUTTON_H),
+    );
+    let buttons: Vec<ds::RowButton<'_>> = actions
+        .iter()
+        .map(|a| {
+            let spec = ButtonSpec::new(ButtonKind::Toolbar)
+                .label(&a.label)
+                .icon(a.icon)
+                .hovered(hover == Some(a.hit));
+            if a.end { ds::RowButton::end(spec) } else { ds::RowButton::start(spec) }
+        })
+        .collect();
+    let placed = ds::button_row(layer, text, icons, ds, row, &buttons);
+    for (action, placed) in actions.iter().zip(placed) {
+        hits.push((placed.rect, action.hit));
+        if let Some(tip) = placed.tip {
+            tips.push((placed.rect, tip.to_owned()));
+        }
     }
-    Rect::new(content.min_x(), content.min_y(), content.size.width, h)
+    row
 }
 
 /// How far past a row's checkbox its remove button's center is (logical pixels): 12 apart,
