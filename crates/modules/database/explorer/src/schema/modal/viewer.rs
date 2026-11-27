@@ -21,12 +21,13 @@ impl Viewer for SchemaView {
                 Kind::DropIndex(name) => format!("{table} · {name}"),
                 _ => table.to_string(),
             },
+            None if form.kind.is_catalog() => String::new(),
             None => t("schema.subtitle_new_table"),
         })
     }
 
     fn modal_icon(&self) -> Option<&'static str> {
-        Some("table")
+        Some(if self.is_catalog() { "database" } else { "table" })
     }
 
     /// The submit (in the danger color when it only takes away), Cancel.

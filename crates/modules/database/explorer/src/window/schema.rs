@@ -11,6 +11,8 @@ impl DatabaseWindow {
         let table = key.table().cloned();
         let kind = match (what, key) {
             ("create-table", _) => Kind::CreateTable,
+            ("create-database", _) => Kind::CreateDatabase,
+            ("create-schema", _) => Kind::CreateSchema,
             ("rename-table", _) => Kind::RenameTable,
             ("drop-table", _) => Kind::DropTable,
             ("add-column", _) => Kind::AddColumn,
@@ -31,10 +33,11 @@ impl DatabaseWindow {
             NodeKey::Schema(_, s) | NodeKey::Group(_, Some(s), _) => Some(s.clone()),
             _ => None,
         };
-        if kind != Kind::CreateTable {
+        if kind.is_catalog() || kind == Kind::CreateTable {
+            self.open_schema(id, None, schema, kind);
+        } else {
             let Some(table) = table else { return };
             if self.tree.structure(id, &table).is_none() {
-                // Read first; the modal opens once it's here.
                 if let Some(need) = self.tree.expand(&NodeKey::Table(id, table.clone())) {
                     self.ask(vec![need]);
                 }
@@ -42,8 +45,6 @@ impl DatabaseWindow {
                 return;
             }
             self.open_schema(id, Some(table), None, kind);
-        } else {
-            self.open_schema(id, None, schema, kind);
         }
     }
 
@@ -118,6 +119,13 @@ impl DatabaseWindow {
             "schema.done",
             count = done.applied.affected
         )));
+        // A catalog change (a new database or schema) refreshes the tree.
+        if done.changes.is_empty()
+            && done.applied.affected > 0
+            && let Some(key) = &self.selected
+        {
+            self.refresh_asked(key.source());
+        }
         true
     }
 }

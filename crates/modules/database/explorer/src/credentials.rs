@@ -135,6 +135,10 @@ pub struct Credentials {
     keychain: Arc<dyn SecretStore>,
     /// `Session` and `Never` passwords, by source (`Never`'s taken by its connection).
     memory: Mutex<HashMap<DataSourceId, Secret>>,
+    /// Secrets read from a persistent store (keychain, vault), cached so that a keychain
+    /// prompt is asked at most once per source: databases of the same server, reconnections
+    /// after an idle timeout, and concurrent workers all read the cache instead.
+    read_cache: Mutex<HashMap<String, Secret>>,
 }
 
 impl std::fmt::Debug for Credentials {
@@ -163,7 +167,7 @@ pub enum Moved {
 
 impl Credentials {
     pub fn new(vault: Arc<dyn SecretStore>, keychain: Arc<dyn SecretStore>) -> Self {
-        Self { vault, keychain, memory: Mutex::default() }
+        Self { vault, keychain, memory: Mutex::default(), read_cache: Mutex::default() }
     }
 
     /// The system's: the project at `root`'s vaults (their keys in the keychain) and the
@@ -182,6 +186,10 @@ impl Credentials {
         self.memory.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    fn read_cache(&self) -> std::sync::MutexGuard<'_, HashMap<String, Secret>> {
+        self.read_cache.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
     fn store(&self, policy: SecretPolicy) -> Option<&Arc<dyn SecretStore>> {
         match policy {
             SecretPolicy::ProjectVault => Some(&self.vault),
@@ -190,13 +198,24 @@ impl Credentials {
         }
     }
 
+    /// The secret from a persistent store, served from cache when already read (a keychain
+    /// read can prompt the user for access on macOS).
+    fn cached_get(&self, policy: SecretPolicy, id: &str) -> Option<Secret> {
+        if let Some(cached) = self.read_cache().get(id).cloned() {
+            return Some(cached);
+        }
+        let secret = self.store(policy)?.get(id)?;
+        self.read_cache().insert(id.to_owned(), secret.clone());
+        Some(secret)
+    }
+
     /// `source`'s password for a connection (may wait for the keychain: never on the UI
     /// thread). One asked each time is given once (the next connection asks again).
     pub fn get(&self, source: &DataSource) -> Option<Secret> {
         match effective(source) {
             SecretPolicy::Session => self.memory().get(&source.id).cloned(),
             SecretPolicy::Never => self.memory().remove(&source.id),
-            policy => self.store(policy)?.get(&source.secret_id()),
+            policy => self.cached_get(policy, &source.secret_id()),
         }
     }
 
@@ -205,7 +224,7 @@ impl Credentials {
     pub fn peek(&self, source: &DataSource) -> Option<Secret> {
         match effective(source) {
             SecretPolicy::Session | SecretPolicy::Never => self.memory().get(&source.id).cloned(),
-            policy => self.store(policy)?.get(&source.secret_id()),
+            policy => self.cached_get(policy, &source.secret_id()),
         }
     }
 
@@ -229,7 +248,12 @@ impl Credentials {
                 Ok(())
             }
             policy => match self.store(policy) {
-                Some(store) => store.set(&source.secret_id(), secret.expose()),
+                Some(store) => {
+                    let id = source.secret_id();
+                    store.set(&id, secret.expose())?;
+                    self.read_cache().insert(id, secret.clone());
+                    Ok(())
+                }
                 None => Ok(()),
             },
         }
@@ -238,8 +262,10 @@ impl Credentials {
     /// `source`'s password forgotten, wherever it was.
     pub fn remove(&self, source: &DataSource) -> Result<(), String> {
         self.memory().remove(&source.id);
+        let id = source.secret_id();
+        self.read_cache().remove(&id);
         match self.store(effective(source)) {
-            Some(store) => store.remove(&source.secret_id()),
+            Some(store) => store.remove(&id),
             None => Ok(()),
         }
     }
@@ -269,7 +295,9 @@ impl Credentials {
             self.memory().remove(&old.id);
         }
         if let Some(store) = self.store(from) {
-            store.remove(&old.secret_id())?;
+            let id = old.secret_id();
+            store.remove(&id)?;
+            self.read_cache().remove(&id);
         }
         Ok(Moved::To(to))
     }

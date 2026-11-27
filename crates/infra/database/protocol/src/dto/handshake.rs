@@ -168,6 +168,8 @@ pub struct SchemaChanges {
     pub renames: bool,
     pub foreign_keys: bool,
     pub reorder: bool,
+    pub databases: bool,
+    pub schemas: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]

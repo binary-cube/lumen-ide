@@ -50,6 +50,12 @@ pub(crate) fn run(
         Request::AlterAsShown { changes, shown } => {
             alter(session, source, changes, Some(shown.as_ref()), cancel).map(Response::Applied)
         }
+        Request::CatalogDdl(sql) => {
+            writable(source)?;
+            let mut sink = First::default();
+            session.execute(sql, &mut sink, cancel)?;
+            Ok(Response::CatalogDone)
+        }
         Request::Close => Ok(Response::Closed),
     }
 }

@@ -73,6 +73,8 @@ pub enum Request {
         changes: Vec<SchemaChange>,
         shown: Option<Script>,
     },
+    /// A catalog statement (CREATE DATABASE, CREATE SCHEMA) run outside a transaction.
+    CatalogDdl(String),
     /// The session is closed (after what was asked before); the next request opens it.
     Close,
 }
@@ -93,6 +95,8 @@ pub enum Response {
     Applied(Applied),
     /// What [`Request::PlanAlter`] would run (none: a source that writes no SQL).
     Plan(Option<AlterPreview>),
+    /// A catalog statement ran.
+    CatalogDone,
     Closed,
 }
 

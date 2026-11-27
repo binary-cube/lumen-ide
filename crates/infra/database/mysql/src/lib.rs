@@ -99,7 +99,7 @@ pub fn capabilities() -> Capabilities {
     Capabilities {
         transactions: true,
         edit_rows: true,
-        schema_changes: SchemaChanges { reorder: false, ..SchemaChanges::ALL },
+        schema_changes: SchemaChanges { reorder: false, schemas: false, ..SchemaChanges::ALL },
         schemas: true,
         file_based: false,
         cancel: true,

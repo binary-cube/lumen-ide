@@ -1,11 +1,14 @@
 //! A branch's or a tag's right-click menu, the same wherever a reference is listed (the log's
-//! branches panel, the commit screen's places): a branch from it, renamed (a local one), a
-//! tag on it, and a local branch's pushes (to what it tracks, to a remote chosen). The rows'
-//! commands carry the row they were opened on (`branch.rename:3`); the view tells which
-//! reference that row is.
+//! branches panel, the commit screen's places): a branch from it, renamed (a local one),
+//! deleted (a local one, not the current), a tag on it, and a local branch's pushes (to what
+//! it tracks, to a remote chosen). The rows' commands carry the row they were opened on
+//! (`branch.rename:3`); the view tells which reference that row is.
+
+use std::sync::Arc;
 
 use i18n::{t, tr};
 use ui_components::{ViewMenuEntry, ViewerAction};
+use workbench_model::{Notification, Question, WorkbenchHost};
 
 use crate::ref_dialog::{self, Target};
 
@@ -16,6 +19,7 @@ pub(crate) const NEW_TAG: &str = "branch.new-tag:";
 pub(crate) const PUSH: &str = "branch.push:";
 /// `branch.push-to:<row>:<remote>`.
 pub(crate) const PUSH_TO: &str = "branch.push-to:";
+pub(crate) const DELETE: &str = "branch.delete:";
 pub(crate) const SWITCH: &str = "branch.switch:";
 
 /// The reference a menu is opened on.
@@ -63,6 +67,14 @@ pub(crate) fn rows(row: usize, on: &MenuRef, remotes: &[String]) -> Vec<ViewMenu
     rows.push(
         ViewMenuEntry::item(format!("{NEW_TAG}{row}"), t("git.new_tag_here")).with_icon("tag"),
     );
+    if on.local && !on.current {
+        rows.push(ViewMenuEntry::Separator);
+        rows.push(
+            ViewMenuEntry::item(format!("{DELETE}{row}"), t("git.delete_branch"))
+                .with_icon("trash-2")
+                .danger_if(true),
+        );
+    }
     if on.local && !remotes.is_empty() {
         rows.push(ViewMenuEntry::Separator);
         if let Some(upstream) = &on.upstream {
@@ -109,6 +121,10 @@ pub(crate) fn chosen(
     if let Some(i) = row(RENAME) {
         return Some(dialog(i, ref_dialog::rename_branch));
     }
+    if let Some(i) = row(DELETE) {
+        let on = reference(i).filter(|on| on.local && !on.current);
+        return Some(on.map(|on| delete_action(on.name)));
+    }
     if let Some(i) = row(NEW_TAG) {
         return Some(dialog(i, ref_dialog::new_tag));
     }
@@ -133,4 +149,49 @@ pub(crate) fn switch_action(wanted: crate::switch::Wanted) -> ViewerAction {
     ViewerAction::WithHost(ui_components::WithHost::once(move |host| {
         crate::switch::switch(host, wanted);
     }))
+}
+
+/// Deleting local branch `name`, confirmed first.
+fn delete_action(name: String) -> ViewerAction {
+    ViewerAction::WithHost(ui_components::WithHost::once(move |host| {
+        delete_branch(host, name);
+    }))
+}
+
+/// Asks to delete `name`, then does it on a worker.
+fn delete_branch(host: &mut dyn WorkbenchHost, name: String) {
+    let Some(repo) = host.repository() else { return };
+    let question = Question {
+        title: tr!("git.delete_branch_title", name = name.as_str()),
+        message: t("git.delete_branch_message"),
+        icon: "trash-2",
+        yes: t("git.delete_branch_yes"),
+        danger: true,
+        list: Vec::new(),
+    };
+    host.confirm(
+        question,
+        Box::new(move |host| {
+            let repo = Arc::clone(&repo);
+            let name = name;
+            host.spawn(Box::new(move || {
+                let result = repo.delete_branch(&name, false);
+                let name = name;
+                Box::new(move |host: &mut dyn WorkbenchHost| match result {
+                    Ok(()) => {
+                        host.notify(Notification::success(tr!(
+                            "git.branch_deleted",
+                            name = name.as_str()
+                        )));
+                    }
+                    Err(e) => {
+                        host.notify(
+                            Notification::error(t("git.delete_branch_failed"))
+                                .with_detail(e.to_string()),
+                        );
+                    }
+                }) as workbench_model::Completion
+            }));
+        }),
+    );
 }

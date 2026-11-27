@@ -17,6 +17,10 @@ pub struct SchemaChanges {
     pub foreign_keys: bool,
     /// Move a column to another place among the columns.
     pub reorder: bool,
+    /// Create databases (MySQL, PostgreSQL).
+    pub databases: bool,
+    /// Create schemas (PostgreSQL).
+    pub schemas: bool,
 }
 
 impl SchemaChanges {
@@ -28,6 +32,8 @@ impl SchemaChanges {
         renames: true,
         foreign_keys: true,
         reorder: true,
+        databases: true,
+        schemas: true,
     };
 
     pub fn any(self) -> bool {
@@ -38,6 +44,8 @@ impl SchemaChanges {
             || self.renames
             || self.foreign_keys
             || self.reorder
+            || self.databases
+            || self.schemas
     }
 
     /// Whether `change` is one of these.

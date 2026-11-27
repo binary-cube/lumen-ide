@@ -15,6 +15,8 @@ impl From<dto::SchemaChanges> for d::SchemaChanges {
             renames: c.renames,
             foreign_keys: c.foreign_keys,
             reorder: c.reorder,
+            databases: c.databases,
+            schemas: c.schemas,
         }
     }
 }
@@ -29,6 +31,8 @@ impl From<d::SchemaChanges> for dto::SchemaChanges {
             renames: c.renames,
             foreign_keys: c.foreign_keys,
             reorder: c.reorder,
+            databases: c.databases,
+            schemas: c.schemas,
         }
     }
 }

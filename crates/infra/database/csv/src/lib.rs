@@ -82,6 +82,8 @@ pub const CAPABILITIES: Capabilities = Capabilities {
         renames: true,
         foreign_keys: false,
         reorder: true,
+        databases: false,
+        schemas: false,
     },
     schemas: false,
     file_based: true,

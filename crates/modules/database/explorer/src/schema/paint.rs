@@ -667,6 +667,14 @@ impl SchemaView {
                 self.group(pen, Text::TableName, (x0, *y, half), &t("schema.table_name"), "");
                 *y += px(GROUP_H);
             }
+            Kind::CreateDatabase => {
+                self.group(pen, Text::TableName, (x0, *y, half), &t("schema.database_name"), "");
+                *y += px(GROUP_H);
+            }
+            Kind::CreateSchema => {
+                self.group(pen, Text::TableName, (x0, *y, half), &t("schema.schema_name"), "");
+                *y += px(GROUP_H);
+            }
             Kind::AddColumn | Kind::AlterColumn(_) => self.paint_column(pen, x0, width, y),
             Kind::MoveColumn(_) => {
                 self.label(pen, x0, *y, &t("schema.position"));

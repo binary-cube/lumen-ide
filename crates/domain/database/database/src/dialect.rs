@@ -557,6 +557,16 @@ pub trait Dialect: Send + Sync {
         change.clone()
     }
 
+    /// `CREATE DATABASE` for `name`.
+    fn create_database(&self, name: &str) -> Result<String, DbError> {
+        Ok(format!("CREATE DATABASE {}", self.quote_identifier(name)?))
+    }
+
+    /// `CREATE SCHEMA` for `name`.
+    fn create_schema(&self, name: &str) -> Result<String, DbError> {
+        Ok(format!("CREATE SCHEMA {}", self.quote_identifier(name)?))
+    }
+
     fn begin(&self) -> &'static str {
         "BEGIN"
     }

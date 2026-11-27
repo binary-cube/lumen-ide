@@ -30,6 +30,8 @@ pub enum Kind {
     DropIndex(String),
     AddForeignKey,
     DropForeignKey(ForeignKey),
+    CreateDatabase,
+    CreateSchema,
 }
 
 impl Kind {
@@ -47,7 +49,14 @@ impl Kind {
             Self::DropIndex(_) => "schema.title_drop_index",
             Self::AddForeignKey => "schema.title_add_key",
             Self::DropForeignKey(_) => "schema.title_drop_key",
+            Self::CreateDatabase => "schema.title_create_database",
+            Self::CreateSchema => "schema.title_create_schema",
         })
+    }
+
+    /// A catalog change (outside a transaction, no table involved).
+    pub fn is_catalog(&self) -> bool {
+        matches!(self, Self::CreateDatabase | Self::CreateSchema)
     }
 
     /// It only takes something away (asked to confirm, its button in the danger color).
@@ -406,6 +415,7 @@ impl Form {
             }
             Kind::AddForeignKey => form.keys = vec![KeyRow::default()],
             Kind::CreateIndex => form.follow_index_name(),
+            Kind::CreateDatabase | Kind::CreateSchema => {}
             _ => {}
         }
         form
@@ -439,6 +449,7 @@ impl Form {
             Kind::AlterColumn(_) => vec![Text::Name(0)],
             Kind::CreateIndex => vec![Text::IndexName, Text::Where],
             Kind::AddForeignKey => vec![Text::KeyName(0)],
+            Kind::CreateDatabase | Kind::CreateSchema => vec![Text::TableName],
             _ => Vec::new(),
         }
     }
@@ -607,6 +618,24 @@ impl Form {
         Ok(changes)
     }
 
+    /// The SQL for a catalog change (CREATE DATABASE / CREATE SCHEMA), through the dialect.
+    pub fn catalog_sql(&self) -> Result<String, String> {
+        let name = self.table_name.text().trim().to_owned();
+        if name.is_empty() {
+            return Err(t(match self.kind {
+                Kind::CreateDatabase => "schema.invalid_database_name",
+                _ => "schema.invalid_schema_name",
+            }));
+        }
+        let dialect = self.ctx.dialect.as_ref().ok_or_else(|| t("schema.invalid_no_table"))?;
+        let sql = match self.kind {
+            Kind::CreateDatabase => dialect.create_database(&name),
+            Kind::CreateSchema => dialect.create_schema(&name),
+            _ => return Err(String::new()),
+        };
+        sql.map_err(|e| crate::grid_source::message(&e))
+    }
+
     fn draft(&self) -> Result<Vec<SchemaChange>, String> {
         Ok(match &self.kind {
             Kind::CreateTable => vec![SchemaChange::CreateTable(self.table_def()?)],
@@ -713,6 +742,10 @@ impl Form {
             }
             Kind::DropForeignKey(key) => {
                 vec![SchemaChange::DropForeignKey { table: self.acted_on()?, key: key.clone() }]
+            }
+            Kind::CreateDatabase | Kind::CreateSchema => {
+                self.catalog_sql()?;
+                Vec::new()
             }
         })
     }

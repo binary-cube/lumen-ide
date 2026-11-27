@@ -184,6 +184,10 @@ impl SchemaView {
         }
     }
 
+    fn is_catalog(&self) -> bool {
+        self.form.as_ref().is_some_and(|f| f.kind.is_catalog())
+    }
+
     /// Why the last run failed (nothing changed), shown in the modal.
     pub fn failed_text(&self) -> Option<String> {
         self.failed.clone()
@@ -267,7 +271,9 @@ impl SchemaView {
     pub fn submit_label(&self) -> String {
         let kind = self.form.as_ref().map(|f| f.kind.clone());
         t(match kind {
-            Some(Kind::CreateTable | Kind::CreateIndex) => "schema.create",
+            Some(
+                Kind::CreateTable | Kind::CreateIndex | Kind::CreateDatabase | Kind::CreateSchema,
+            ) => "schema.create",
             Some(Kind::RenameTable) => "schema.rename",
             Some(Kind::AddColumn | Kind::AddForeignKey) => "schema.add",
             Some(Kind::MoveColumn(_)) => "schema.move",

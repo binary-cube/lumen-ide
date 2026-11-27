@@ -205,3 +205,24 @@ fn drops_moves_and_renames_of_tables() {
     assert!(index.kind.drops() && index.changes().is_ok());
     let _ = DbError::Cancelled;
 }
+
+#[test]
+fn catalog_changes_produce_sql_through_the_dialect() {
+    let c = ctx(None);
+    // A database: its SQL, its kind, and an empty name refused.
+    let mut db = Form::new(Kind::CreateDatabase, c.clone());
+    assert!(db.kind.is_catalog());
+    assert!(db.catalog_sql().is_err(), "no name yet");
+    db.table_name.set_text("analytics");
+    assert_eq!(db.catalog_sql().unwrap(), "CREATE DATABASE \"analytics\"");
+    assert!(db.changes().unwrap().is_empty(), "catalog changes return no SchemaChange");
+    assert_eq!(db.texts(), vec![Text::TableName]);
+
+    // A schema: same path, different SQL.
+    let mut schema = Form::new(Kind::CreateSchema, c);
+    assert!(schema.kind.is_catalog());
+    assert!(schema.catalog_sql().is_err(), "no name yet");
+    schema.table_name.set_text("reporting");
+    assert_eq!(schema.catalog_sql().unwrap(), "CREATE SCHEMA \"reporting\"");
+    assert!(schema.changes().unwrap().is_empty());
+}

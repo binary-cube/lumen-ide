@@ -157,6 +157,33 @@ impl DatabaseWindow {
                 entries.push(
                     item("schema:create-table", "schema.menu_create_table").with_icon("plus"),
                 );
+                if matches!(key, NodeKey::Source(_) | NodeKey::Database(_)) {
+                    if can.databases {
+                        entries.push(
+                            item("schema:create-database", "schema.menu_create_database")
+                                .with_icon("plus"),
+                        );
+                    }
+                    if can.schemas {
+                        entries.push(
+                            item("schema:create-schema", "schema.menu_create_schema")
+                                .with_icon("plus"),
+                        );
+                    }
+                }
+            }
+            (_, NodeKey::Source(_) | NodeKey::Database(_)) if can.databases || can.schemas => {
+                if can.databases {
+                    entries.push(
+                        item("schema:create-database", "schema.menu_create_database")
+                            .with_icon("plus"),
+                    );
+                }
+                if can.schemas {
+                    entries.push(
+                        item("schema:create-schema", "schema.menu_create_schema").with_icon("plus"),
+                    );
+                }
             }
             _ => {}
         }

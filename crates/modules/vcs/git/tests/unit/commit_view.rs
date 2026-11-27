@@ -788,6 +788,7 @@ fn a_place_s_branch_has_the_log_s_menu() {
             format!("branch.new-branch:{i}"),
             format!("branch.rename:{i}"),
             format!("branch.new-tag:{i}"),
+            format!("branch.delete:{i}"),
             format!("branch.push:{i}"),
         ]
     );

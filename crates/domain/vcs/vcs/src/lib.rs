@@ -387,6 +387,11 @@ pub trait Repository: Send + Sync + std::fmt::Debug {
         let _ = (from, to);
         Err(VcsError::Failed("branches not supported".into()))
     }
+    /// Local branch `name` deleted. `force`: even when it has commits not on any other branch.
+    fn delete_branch(&self, name: &str, force: bool) -> Result<(), VcsError> {
+        let _ = (name, force);
+        Err(VcsError::Failed("branches not supported".into()))
+    }
     /// Tag `name` on `on` (`None`: `HEAD`); with a `message`, an annotated one.
     fn create_tag(
         &self,

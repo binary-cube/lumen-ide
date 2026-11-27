@@ -661,6 +661,11 @@ impl Repository for GitRepository {
         self.git(&["branch", "-m", from, to]).map(|_| ())
     }
 
+    fn delete_branch(&self, name: &str, force: bool) -> Result<(), VcsError> {
+        let flag = if force { "-D" } else { "-d" };
+        self.git(&["branch", flag, name]).map(|_| ())
+    }
+
     fn create_tag(
         &self,
         name: &str,

@@ -77,7 +77,7 @@ const CURSORS: usize = 16;
 pub const CAPABILITIES: Capabilities = Capabilities {
     transactions: true,
     edit_rows: true,
-    schema_changes: SchemaChanges::ALL,
+    schema_changes: SchemaChanges { databases: false, schemas: false, ..SchemaChanges::ALL },
     schemas: true,
     file_based: true,
     cancel: true,

@@ -117,3 +117,22 @@ fn moving_a_source_moves_its_password() {
     // Unchanged: kept.
     assert_eq!(f.credentials.moved(&never, &never), Ok(Moved::Kept));
 }
+
+#[test]
+fn a_stored_password_is_read_from_the_cache_after_the_first_access() {
+    let f = fixture("cache");
+    let chain = source(SecretPolicy::Keychain, Scope::Project);
+    f.credentials.set(&chain, &Secret::new("cached")).unwrap();
+    assert_eq!(f.credentials.get(&chain).as_ref().map(Secret::expose), Some("cached"));
+    // The store is emptied: a real keychain prompt would be needed without the cache.
+    f.keychain.remove(&chain.secret_id()).unwrap();
+    assert_eq!(
+        f.credentials.get(&chain).as_ref().map(Secret::expose),
+        Some("cached"),
+        "from cache"
+    );
+    assert_eq!(f.credentials.peek(&chain).as_ref().map(Secret::expose), Some("cached"));
+    // Removing the source clears the cache too.
+    f.credentials.remove(&chain).unwrap();
+    assert_eq!(f.credentials.get(&chain), None, "gone from cache and store");
+}
