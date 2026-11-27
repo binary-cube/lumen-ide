@@ -218,9 +218,11 @@ jobs:
         run: bash scripts/ci/macos-keychain.sh
       # Inside out, with the hardened runtime: the framework's libraries, the framework, each
       # helper, then the host. Only the renderer and the GPU helper may JIT (their own
-      # entitlements); the host and the other helpers get none. Ad hoc (no certificate),
-      # library validation is turned off on every program, which has no team to match the
-      # framework's by (`packaging/web-engine.entitlements` says why).
+      # entitlements); the host and the other helpers get none. Without an Apple Developer ID
+      # (ad hoc or the project's self-signed certificate), library validation is turned off on
+      # every program (`packaging/web-engine.entitlements` says why): with no team to match,
+      # the hardened runtime refuses to load the framework otherwise. With a real Team ID, the
+      # entitlement is harmless (everything has the same team).
       - name: Sign the engine (macOS)
         if: runner.os == 'macOS'
         run: |
@@ -234,9 +236,7 @@ jobs:
             if [ -n "$entitlements" ]; then
               local plist="$RUNNER_TEMP/$(basename "$entitlements")"
               cp "$entitlements" "$plist"
-              if [ "$identity" = "-" ]; then
-                /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$plist"
-              fi
+              /usr/libexec/PlistBuddy -c "Add :com.apple.security.cs.disable-library-validation bool true" "$plist" 2>/dev/null || true
               args+=(--entitlements "$plist")
             fi
             codesign "${args[@]}" "$target"

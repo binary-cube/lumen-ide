@@ -21,13 +21,24 @@ use crate::state::{self, Phase};
 /// The modal's virtual extension.
 pub const EXTENSION: &str = "view-update-notes";
 
-/// What the modal is opened with: the version it's about (its notes read then).
+/// One version's notes in the What's New dialog.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VersionNotes {
+    pub version: String,
+    pub date: String,
+    pub lines: Vec<Line>,
+}
+
+/// What the modal is opened with: the newest version and those between it and the user's.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Notes {
     pub version: String,
     pub date: String,
     pub size: u64,
     pub lines: Vec<Line>,
+    /// The versions between the newest and the user's, newest first (each one's notes shown
+    /// under the offered version's).
+    pub prior: Vec<VersionNotes>,
 }
 
 impl Notes {
@@ -37,11 +48,25 @@ impl Notes {
         let available = phase.available()?;
         let release = &available.release;
         let notes = app_updates::notes::for_app(&release.notes);
+        let prior: Vec<VersionNotes> = available
+            .prior
+            .iter()
+            .map(|r| {
+                let text = app_updates::notes::for_app(&r.notes);
+                VersionNotes {
+                    version: r.version.to_string(),
+                    date: r.published.get(..10).unwrap_or("").to_owned(),
+                    lines: app_updates::notes::lines(&text),
+                }
+            })
+            .filter(|v| !v.lines.is_empty())
+            .collect();
         Some(Self {
             version: release.version.to_string(),
             date: release.published.get(..10).unwrap_or(&available.manifest.date).to_owned(),
             size: available.file.size,
             lines: app_updates::notes::lines(&notes),
+            prior,
         })
     }
 
@@ -103,11 +128,8 @@ impl Default for NotesView {
     }
 }
 
-/// The notes as blocks to read (none written: a line saying so).
-fn blocks(lines: &[Line]) -> Vec<Block> {
-    if lines.is_empty() {
-        return vec![Block::new(BlockKind::Paragraph, t("updates.notes_none"))];
-    }
+/// Lines as blocks to read.
+fn lines_to_blocks(lines: &[Line]) -> Vec<Block> {
     lines
         .iter()
         .map(|line| {
@@ -120,6 +142,26 @@ fn blocks(lines: &[Line]) -> Vec<Block> {
             Block::new(kind, line.text.clone())
         })
         .collect()
+}
+
+/// The notes as blocks to read: the newest version's notes, then each prior version's with
+/// its heading (none written: a line saying so).
+fn blocks(notes: &Notes) -> Vec<Block> {
+    if notes.lines.is_empty() && notes.prior.is_empty() {
+        return vec![Block::new(BlockKind::Paragraph, t("updates.notes_none"))];
+    }
+    let mut out = lines_to_blocks(&notes.lines);
+    for prior in &notes.prior {
+        out.push(Block::new(BlockKind::Gap, String::new()));
+        let heading = i18n::tr!(
+            "updates.notes_prior_heading",
+            version = prior.version.as_str(),
+            date = prior.date.as_str()
+        );
+        out.push(Block::new(BlockKind::Heading, heading));
+        out.extend(lines_to_blocks(&prior.lines));
+    }
+    out
 }
 
 /// Logical sizes: a block's row as the notes draw it, the window's least and most.
@@ -198,7 +240,7 @@ impl Drop for NotesView {
 impl Viewer for NotesView {
     fn set_data(&mut self, data: &dyn std::any::Any) {
         if let Some(notes) = data.downcast_ref::<Notes>() {
-            self.read.set_blocks(blocks(&notes.lines));
+            self.read.set_blocks(blocks(notes));
             self.notes = Some(notes.clone());
             state::notes_open(true);
         }

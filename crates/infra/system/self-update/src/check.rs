@@ -6,13 +6,17 @@ use app_updates::{Manifest, ManifestFile, Release, Version};
 use pinned_downloads::fetch::{Fetch, FetchError};
 
 /// What's offered: the release (its notes), its manifest as signed, this system's file in
-/// it and where it's downloaded from.
+/// it and where it's downloaded from; the versions between this one and the user's, for the
+/// What's New dialog (newest first, the offered release itself not among them).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Available {
     pub release: Release,
     pub manifest: Manifest,
     pub file: ManifestFile,
     pub url: String,
+    /// The releases between the user's version and the offered one, newest first (each one's
+    /// notes shown in What's New under the offered version's).
+    pub prior: Vec<Release>,
 }
 
 /// Why it couldn't be told.
@@ -109,7 +113,12 @@ pub fn check_signed_by(
     let url = release.asset(&file.name).map(|a| a.url.clone()).ok_or_else(|| {
         CheckError::Failed(format!("{}: {} isn't among its files", release.tag, file.name))
     })?;
-    Ok(Some(Available { release: release.clone(), manifest, file, url }))
+    let prior: Vec<Release> =
+        app_updates::release::between(&releases, ask.current, &release.version, ask.prereleases)
+            .into_iter()
+            .cloned()
+            .collect();
+    Ok(Some(Available { release: release.clone(), manifest, file, url, prior }))
 }
 
 /// A small file (a list, a manifest, a signature), at most [`SMALL`] bytes.

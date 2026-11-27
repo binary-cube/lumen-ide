@@ -137,9 +137,20 @@ installs it when you choose to.
    xattr -dr com.apple.quarantine /Applications/Lumen.app
    ```
 
-This is asked only once: the app's own updates don't ask again. When you open a project
-in *Documents*, *Desktop* or *Downloads*, macOS asks whether Lumen may read that folder:
-click **Allow**.
+This is asked only once: the app's own updates don't ask again.
+
+The **web engine** (Chromium, downloaded when you first open a diagram or an HTML
+response) is re-signed after downloading so macOS lets it load its framework. If it
+still fails to start, run:
+
+```sh
+codesign --force --deep --options runtime --sign - ~/Library/Application\ Support/lumen/web-engine/*/web-host.app
+```
+
+Then open **Settings › Web Engine** and click **Try Again**.
+
+When you open a project in *Documents*, *Desktop* or *Downloads*, macOS asks whether
+Lumen may read that folder: click **Allow**.
 
 Intel Macs have no build of their own: Lumen builds on them from source (below).
 

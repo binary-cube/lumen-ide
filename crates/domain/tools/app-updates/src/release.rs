@@ -95,6 +95,23 @@ pub fn newest<'a>(
         .max_by(|a, b| a.version.cmp(&b.version))
 }
 
+/// Every release above `current` and below `newest` (both exclusive), newest first: the
+/// versions between the user's and the one being offered.
+pub fn between<'a>(
+    releases: &'a [Release],
+    current: &Version,
+    newest: &Version,
+    prereleases: bool,
+) -> Vec<&'a Release> {
+    let mut found: Vec<&Release> = releases
+        .iter()
+        .filter(|r| r.version > *current && r.version < *newest)
+        .filter(|r| prereleases || !r.prerelease)
+        .collect();
+    found.sort_by(|a, b| b.version.cmp(&a.version));
+    found
+}
+
 #[cfg(test)]
 #[path = "../tests/unit/release.rs"]
 mod tests;

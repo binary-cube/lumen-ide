@@ -32,6 +32,7 @@ fn available(bytes: &[u8], sha256: String) -> Available {
         manifest: Manifest { version, date: String::new(), files: vec![file.clone()] },
         file,
         url: URL.into(),
+        prior: Vec::new(),
     }
 }
 

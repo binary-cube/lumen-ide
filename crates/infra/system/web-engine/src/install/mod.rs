@@ -226,11 +226,160 @@ pub fn install(going: Going<'_>, root: &Path, package: &Package) -> Result<PathB
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::rename(&unpacked, &dir).map_err(unpack_error)?;
     let _ = std::fs::remove_file(&part);
+    ensure_loadable(&dir);
     layout::choose(root, &package.version).map_err(unpack_error)?;
     drop(staging);
     tracing::info!(version = %package.version, "the web engine installed");
     Ok(dir)
 }
+
+/// The engine's program made loadable on macOS: its quarantine attributes removed (the app
+/// that downloaded it may itself be quarantined, and macOS passes that to files it writes),
+/// and its executables re-signed ad-hoc with `disable-library-validation` when the build's
+/// certificate has no Apple Team ID (without it, the hardened runtime refuses to load the
+/// CEF framework into the host and its helpers: "different Team IDs").
+#[cfg(target_os = "macos")]
+fn ensure_loadable(dir: &Path) {
+    for attr in ["com.apple.quarantine", "com.apple.provenance"] {
+        let _ = std::process::Command::new("xattr")
+            .args(["-d", "-r", attr])
+            .arg(dir)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+    resign_if_needed(dir);
+}
+
+/// Re-signs every executable in the engine's bundle ad-hoc with
+/// `disable-library-validation` when the main program doesn't have it: a build signed
+/// with a certificate that has no Apple Team ID needs it (the workflow adds it for ad-hoc
+/// builds, but not for certificate builds without a team). Already-correct builds (ad-hoc
+/// with the entitlement, or a real Team ID) are left alone.
+#[cfg(target_os = "macos")]
+fn resign_if_needed(dir: &Path) {
+    let app = dir.join("web-host.app");
+    let binary = app.join("Contents/MacOS/web-host");
+    if !binary.is_file() {
+        return;
+    }
+    if has_disable_library_validation(&binary) {
+        return;
+    }
+    let entitlements = match write_entitlements_plist() {
+        Some(path) => path,
+        None => return,
+    };
+    let jit_entitlements = match write_jit_entitlements_plist() {
+        Some(path) => path,
+        None => {
+            let _ = std::fs::remove_file(&entitlements);
+            return;
+        }
+    };
+    let framework = app.join("Contents/Frameworks/Chromium Embedded Framework.framework");
+    // Inside out: the framework's libraries, the framework, each helper, then the host.
+    let libraries = framework.join("Libraries");
+    if let Ok(entries) = std::fs::read_dir(&libraries) {
+        for entry in entries.flatten() {
+            if entry.path().extension().is_some_and(|e| e == "dylib") {
+                codesign(&entry.path(), None);
+            }
+        }
+    }
+    codesign(&framework, None);
+    let helpers = app.join("Contents/Frameworks");
+    if let Ok(entries) = std::fs::read_dir(&helpers) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("web-host Helper") && name.ends_with(".app") {
+                let ent = if name.contains("Renderer") || name.contains("GPU") {
+                    &jit_entitlements
+                } else {
+                    &entitlements
+                };
+                codesign(&entry.path(), Some(ent));
+            }
+        }
+    }
+    codesign(&app, Some(&entitlements));
+    let _ = std::fs::remove_file(&entitlements);
+    let _ = std::fs::remove_file(&jit_entitlements);
+    let ok = std::process::Command::new("codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(&app)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if ok {
+        tracing::info!("the web engine re-signed for library validation");
+    } else {
+        tracing::warn!("the web engine's re-signing couldn't be verified");
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn has_disable_library_validation(binary: &Path) -> bool {
+    std::process::Command::new("codesign")
+        .args(["-d", "--xml", "--entitlements", "-"])
+        .arg(binary)
+        .output()
+        .is_ok_and(|o| String::from_utf8_lossy(&o.stdout).contains("disable-library-validation"))
+}
+
+#[cfg(target_os = "macos")]
+fn codesign(target: &Path, entitlements: Option<&Path>) {
+    let mut cmd = std::process::Command::new("codesign");
+    cmd.args(["--force", "--options", "runtime", "--sign", "-"]);
+    if let Some(ent) = entitlements {
+        cmd.arg("--entitlements").arg(ent);
+    }
+    cmd.arg(target).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let _ = cmd.status();
+}
+
+#[cfg(target_os = "macos")]
+fn write_entitlements_plist() -> Option<PathBuf> {
+    let path = std::env::temp_dir().join(format!("web-engine-ent-{}.plist", std::process::id()));
+    std::fs::write(&path, ENTITLEMENTS_PLIST).ok()?;
+    Some(path)
+}
+
+#[cfg(target_os = "macos")]
+fn write_jit_entitlements_plist() -> Option<PathBuf> {
+    let path =
+        std::env::temp_dir().join(format!("web-engine-jit-ent-{}.plist", std::process::id()));
+    std::fs::write(&path, JIT_ENTITLEMENTS_PLIST).ok()?;
+    Some(path)
+}
+
+#[cfg(target_os = "macos")]
+const ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+</dict>
+</plist>"#;
+
+/// The renderer and the GPU helper compile code at run time (JavaScript, shaders).
+#[cfg(target_os = "macos")]
+const JIT_ENTITLEMENTS_PLIST: &str = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>"#;
+
+#[cfg(not(target_os = "macos"))]
+fn ensure_loadable(_dir: &Path) {}
 
 fn unpack_error(e: std::io::Error) -> InstallError {
     InstallError::Unpack(e.to_string())

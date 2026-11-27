@@ -37,6 +37,7 @@ pub(crate) fn made_up(version: &str, notes: &str) -> Option<Arc<Available>> {
         url: format!(
             "https://github.com/o/r/releases/download/v{version}/app-{version}-windows-x64.zip"
         ),
+        prior: Vec::new(),
     }))
 }
 

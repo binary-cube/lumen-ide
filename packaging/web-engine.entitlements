@@ -4,11 +4,11 @@
      beyond the hardened runtime. The renderer and the GPU helper have files of their own
      (web-engine-renderer.entitlements, web-engine-gpu.entitlements).
 
-     Signed ad hoc (no certificate, identity "-"), the workflow adds
-     com.apple.security.cs.disable-library-validation to every executable's entitlements:
-     without a team, the hardened runtime refuses to load the framework into the host and
-     its helpers. Signed with the project's certificate, everything has the same team and
-     library validation stays on. -->
+     The workflow adds com.apple.security.cs.disable-library-validation to every
+     executable's entitlements: without an Apple Team ID (ad hoc or the project's
+     self-signed certificate), the hardened runtime refuses to load the framework into
+     the host and its helpers. With a real Team ID, the entitlement is harmless. The app
+     also re-signs after downloading when the entitlement is missing (install/mod.rs). -->
 <plist version="1.0">
 <dict/>
 </plist>
