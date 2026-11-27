@@ -47,9 +47,19 @@ impl WgpuRenderer {
         Ok(config)
     }
 
+    /// The surface set up at the window's size; one refused is set up again before the next
+    /// frame ([`Self::unconfigured`]), told in the log once, not at each attempt.
     pub(crate) fn reconfigure(&mut self) {
-        if self.config.width > 0 && self.config.height > 0 {
-            self.surface.configure(&self.ctx.device, &self.config);
+        if self.config.width == 0 || self.config.height == 0 {
+            return;
+        }
+        match configure(&self.ctx, &self.surface, &self.config) {
+            Ok(()) => self.unconfigured = false,
+            Err(e) if !self.unconfigured => {
+                tracing::warn!(error = %e, "the window's surface wasn't set up; tried again");
+                self.unconfigured = true;
+            }
+            Err(e) => tracing::debug!(error = %e, "the window's surface still isn't set up"),
         }
     }
 
@@ -108,7 +118,10 @@ impl WgpuRenderer {
             desired_maximum_frame_latency: 1,
             ..self.config.clone()
         };
-        self.surface.configure(&self.ctx.device, &tiny);
+        if let Err(e) = configure(&self.ctx, &self.surface, &tiny) {
+            tracing::debug!(error = %e, "the hidden window's surface stays");
+            return false;
+        }
         if let wgpu::CurrentSurfaceTexture::Success(frame)
         | wgpu::CurrentSurfaceTexture::Suboptimal(frame) = self.surface.get_current_texture()
         {
@@ -200,6 +213,32 @@ pub(crate) enum Acquired {
     Frame { frame: wgpu::SurfaceTexture, suboptimal: bool },
     /// No image this time: the frame is skipped with these stats.
     Skipped(FrameStats),
+}
+
+/// The errors a surface's setup is caught for: every kind wgpu reports.
+const SETUP_ERRORS: [wgpu::ErrorFilter; 3] =
+    [wgpu::ErrorFilter::Validation, wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal];
+
+/// `surface` set up as `config` says, or why wgpu refused (the surface keeps what it had).
+/// Nothing is submitted from another thread meanwhile (a page's frame): wgpu sets a surface
+/// up only with the queue empty. Its error is caught here, never left to wgpu's handler,
+/// which would end the app on it.
+pub(crate) fn configure(
+    ctx: &GpuContext,
+    surface: &wgpu::Surface<'_>,
+    config: &wgpu::SurfaceConfiguration,
+) -> Result<(), wgpu::Error> {
+    let _alone = ctx.configuring();
+    let scopes = SETUP_ERRORS.map(|filter| ctx.device.push_error_scope(filter));
+    surface.configure(&ctx.device, config);
+    // Popped the last pushed first.
+    let mut refused = None;
+    for scope in scopes.into_iter().rev() {
+        if let Some(e) = pollster::block_on(scope.pop()) {
+            refused.get_or_insert(e);
+        }
+    }
+    refused.map_or(Ok(()), Err)
 }
 
 /// Whether `size` changes the surface set up by `config`.

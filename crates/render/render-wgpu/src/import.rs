@@ -8,7 +8,8 @@
 //! one freed meanwhile took the frame with it), never around GPU work. A frame not taken
 //! leaves its texture marked as not holding a whole frame ([`Filled`]): one made for it
 //! isn't drawn, and the next frame is copied whole. Why a frame wasn't taken is a
-//! [`Refused`], in the log.
+//! [`Refused`], in the log. A frame's work is submitted while no window sets its surface up
+//! (`GpuContext::submitting`): wgpu refuses to set one up while another thread submits.
 //!
 //! A frame's texture is checked before it's read: its size and format must be the ones the
 //! engine said (another process's handle is not trusted). On macOS, the few `IOSurface`s an
@@ -210,6 +211,9 @@ impl Importer {
                     area.size,
                 );
             }
+            // Only the submit is held (the writes are only staged until one): a window's
+            // surface never waits for the pixels to be copied.
+            let _submitting = self.ctx.submitting();
             self.ctx.queue.submit([]);
             Ok(())
         })
@@ -240,7 +244,12 @@ impl Importer {
                 };
                 encoder.copy_texture_to_texture(at(&source.texture), at(target), area.size);
             }
-            self.wait(self.ctx.queue.submit([encoder.finish()]))
+            // Only the submit is held: a surface set up meanwhile waits for the copy itself.
+            let submitted = {
+                let _submitting = self.ctx.submitting();
+                self.ctx.queue.submit([encoder.finish()])
+            };
+            self.wait(submitted)
         })
     }
 

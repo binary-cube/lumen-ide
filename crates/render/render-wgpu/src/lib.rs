@@ -118,9 +118,23 @@ struct GpuContext {
     state: Mutex<SharedState>,
     /// The GPU device was lost (a driver reset, another process): nothing drawn on it again.
     lost: Arc<std::sync::atomic::AtomicBool>,
+    /// Held to submit from a thread other than the windows' (a page's frame copied), and
+    /// alone while a window's surface is set up: wgpu sets a surface up only once the queue
+    /// is empty, and refuses if work is submitted meanwhile.
+    surfaces: std::sync::RwLock<()>,
 }
 
 impl GpuContext {
+    /// Work may be submitted from another thread: no surface is being set up meanwhile.
+    fn submitting(&self) -> std::sync::RwLockReadGuard<'_, ()> {
+        self.surfaces.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// A surface may be set up: nothing is submitted from another thread meanwhile.
+    fn configuring(&self) -> std::sync::RwLockWriteGuard<'_, ()> {
+        self.surfaces.write().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     /// The pipelines for `format`, made by the first window with it.
     fn pipelines(&self, format: wgpu::TextureFormat) -> Arc<Pipelines> {
         let mut made = self.pipelines.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -220,6 +234,9 @@ pub struct WgpuRenderer {
     /// one; elsewhere: made one pixel large); set up at the window's size before the next
     /// frame.
     hidden_released: bool,
+    /// wgpu refused to set the surface up at `config` (it kept what it had): tried again
+    /// before the next frame, which isn't drawn until it is.
+    unconfigured: bool,
     /// When a frame last reached the screen, while the spare image it took is still held.
     spare_held_since: Option<std::time::Instant>,
     /// How busy the window is drawing: a quiet one keeps no frame.
@@ -363,7 +380,13 @@ impl WgpuRenderer {
         } else {
             tracing::info!(copies, "frames are drawn whole (no partial redraw)");
         }
-        surface.configure(&ctx.device, &config);
+        let unconfigured = match surface::configure(&ctx, &surface, &config) {
+            Ok(()) => false,
+            Err(e) => {
+                tracing::warn!(error = %e, "the window's surface wasn't set up; tried again");
+                true
+            }
+        };
         #[cfg(target_os = "macos")]
         macos::configure_layer(&surface);
         let transparent = matches!(
@@ -387,6 +410,7 @@ impl WgpuRenderer {
             #[cfg(target_os = "macos")]
             with_window: WithWindow::Off,
             hidden_released: false,
+            unconfigured,
             spare_held_since: None,
             activity: activity::Activity::default(),
             target,

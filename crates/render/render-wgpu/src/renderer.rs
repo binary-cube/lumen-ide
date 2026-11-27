@@ -182,11 +182,7 @@ impl Renderer for WgpuRenderer {
             self.drawer.release_kept();
         }
         self.config.desired_maximum_frame_latency = 2;
-        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.reconfigure())).is_err() {
-            self.ctx.lost.store(true, std::sync::atomic::Ordering::Release);
-            tracing::error!("the renderer panicked during resize");
-            return;
-        }
+        self.reconfigure();
         #[cfg(target_os = "macos")]
         {
             if self.transactional_until.is_none() {
@@ -242,9 +238,13 @@ impl WgpuRenderer {
             self.done_with_window();
             return Ok(FrameStats { skipped: true, ..FrameStats::default() });
         }
-        // Drawn while hidden (or shown without being told): the window's size again.
-        if std::mem::take(&mut self.hidden_released) {
+        // Drawn while hidden (or shown without being told), or refused the last time: the
+        // window's size again. Still refused: the frame waits (asked again).
+        if std::mem::take(&mut self.hidden_released) || self.unconfigured {
             self.reconfigure();
+        }
+        if self.unconfigured {
+            return Ok(FrameStats { skipped: true, retry: true, ..FrameStats::default() });
         }
         let size = PhysicalSize::new(self.config.width, self.config.height);
         // While resizing, every frame is whole and of another size: no kept frame (a texture

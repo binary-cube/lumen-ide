@@ -168,6 +168,7 @@ impl GpuContext {
                 sources: crate::import::Sources::default(),
             }),
             lost,
+            surfaces: std::sync::RwLock::new(()),
         })
     }
 
