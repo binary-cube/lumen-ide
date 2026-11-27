@@ -793,13 +793,12 @@ fn keyed_view(key: &str) -> (TerminalView, TextSystem) {
 }
 
 /// Put to sleep: its program stopped at its poll, its last screen kept, a moon on its tab,
-/// how it resumes kept as its launch; its slot says it's asleep and was shown.
+/// how it resumes kept as its launch; its slot says it's asleep.
 #[test]
 fn a_sleeping_terminal_keeps_its_screen_and_how_it_resumes() {
     let (mut view, _text) = keyed_view("sleep-test-key");
     let screen = view.grid.cells.clone();
     let slot = named("sleep-test-key").unwrap();
-    assert!(asked(&slot).shown.is_some(), "drawn: its slot knows when");
     let at = std::time::Instant::now();
     asked(&slot).sleep = Some((agents::Launch::new("agent", &["--resume", "id-1"], None), at));
     assert!(view.poll(), "asleep: its tab changes");
@@ -813,22 +812,79 @@ fn a_sleeping_terminal_keeps_its_screen_and_how_it_resumes() {
     assert!(view.options.is_none() && view.answered.is_none(), "told again to the next one");
 }
 
-/// A tab on screen never sleeps, frames or not: the app tells it's shown; an order given
-/// while it's shown is let go.
+/// A terminal sleeps only untouched: its tab chosen counts as touched, and an order given
+/// before a key (or a click, the wheel) is let go; one given while it's left alone is
+/// taken, on screen or not.
 #[test]
-fn a_tab_on_screen_never_sleeps() {
+fn a_terminal_sleeps_only_untouched() {
     let (mut view, _text) = keyed_view("on-screen-key");
     let slot = named("on-screen-key").unwrap();
-    ui_components::Viewer::set_shown(&mut view, true);
-    assert!(asked(&slot).visible);
-    let long_ago = std::time::Instant::now() - std::time::Duration::from_secs(1);
-    asked(&slot).shown = Some(long_ago);
-    asked(&slot).sleep = Some((agents::Launch::new("agent", &[], None), std::time::Instant::now()));
+    let before = std::time::Instant::now();
+    let order = || Some((agents::Launch::new("agent", &[], None), std::time::Instant::now()));
+    asked(&slot).touched = None;
+    ui_components::Viewer::set_active(&mut view, true);
+    assert!(asked(&slot).touched.is_some_and(|at| at >= before), "its tab chosen: touched");
+    // Ordered, then a key before its poll: awake.
+    asked(&slot).sleep = order();
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    let key = KeyPress { key: PressedKey::Char('x'), shift: false, ctrl: false, alt: false };
+    view.key_press(key);
     view.poll();
-    assert!(view.session.is_some() && !view.asleep, "shown: awake");
-    ui_components::Viewer::set_shown(&mut view, false);
-    assert!(!asked(&slot).visible);
-    assert!(asked(&slot).shown.is_some_and(|at| at > long_ago), "unseen from now on");
+    assert!(view.session.is_some() && !view.asleep, "touched since the order: awake");
+    // Ordered while left alone: asleep.
+    asked(&slot).sleep = order();
+    view.poll();
+    assert!(view.asleep, "untouched: asleep");
+}
+
+/// Drawn again since it was asked to sleep (its window uncovered, a frame), never touched:
+/// it sleeps all the same; its tab left, the pointer passing over it touch nothing either.
+#[test]
+fn drawn_left_or_hovered_a_terminal_is_not_touched() {
+    let (mut view, mut text) = keyed_view("drawn-since-key");
+    let slot = named("drawn-since-key").unwrap();
+    asked(&slot).touched = None;
+    ui_components::Viewer::set_active(&mut view, false);
+    ui_components::Viewer::hover(&mut view, Point::new(5.0, 5.0));
+    ui_components::Viewer::link_hover(&mut view, Some(Point::new(5.0, 5.0)));
+    assert!(asked(&slot).touched.is_none(), "left, hovered: not touched");
+    let at = std::time::Instant::now();
+    asked(&slot).sleep = Some((agents::Launch::new("agent", &[], None), at));
+    std::thread::sleep(std::time::Duration::from_millis(2));
+    paint(&mut view, &mut text);
+    view.poll();
+    assert!(view.asleep, "drawn, untouched: asleep");
+}
+
+/// Something the user does in a terminal, named.
+type Act = (&'static str, fn(&mut TerminalView));
+
+/// What the user does in a terminal counts as touching it (its time untouched starts again):
+/// a click, the wheel, text typed, a paste.
+#[test]
+fn acting_on_a_terminal_touches_it() {
+    let (mut view, _text) = keyed_view("touched-key");
+    let slot = named("touched-key").unwrap();
+    let acts: [Act; 5] = [
+        ("a click", |v| drop(v.press(Point::new(5.0, 5.0), 1))),
+        ("the wheel", |v| {
+            ui_components::Viewer::scroll(v, 0.0, 10.0);
+        }),
+        ("text", |v| {
+            v.text_input("a");
+        }),
+        ("a paste", |v| {
+            v.paste("b");
+        }),
+        ("a command (Clear)", |v| {
+            ui_components::Viewer::command(v, crate::CLEAR_ACTION);
+        }),
+    ];
+    for (what, act) in acts {
+        asked(&slot).touched = None;
+        act(&mut view);
+        assert!(asked(&slot).touched.is_some(), "{what}");
+    }
 }
 
 /// Text typed and not sent keeps a terminal awake: ↵ (or Ctrl+C) clears it.
@@ -929,15 +985,16 @@ fn a_keyed_terminal_tells_what_it_holds_and_its_title() {
     assert_eq!(state("no-such-key"), None);
 }
 
-/// Asked to sleep but drawn since (shown again meanwhile): it stays awake, the order let go.
+/// Asked to sleep but its tab chosen since: it stays awake, the order let go.
 #[test]
-fn a_terminal_shown_since_it_was_asked_to_sleep_stays_awake() {
+fn a_terminal_chosen_since_it_was_asked_to_sleep_stays_awake() {
     let (mut view, mut text) = keyed_view("shown-since-key");
     let slot = named("shown-since-key").unwrap();
     let at = std::time::Instant::now();
     asked(&slot).sleep = Some((agents::Launch::new("agent", &[], None), at));
     std::thread::sleep(std::time::Duration::from_millis(2));
     paint(&mut view, &mut text);
+    ui_components::Viewer::set_active(&mut view, true);
     view.poll();
     assert!(view.session.is_some() && !view.asleep, "awake");
     assert!(asked(&slot).sleep.is_none(), "the order let go");

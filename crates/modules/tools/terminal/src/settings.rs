@@ -68,10 +68,10 @@ pub const COPY_ON_SELECT: Setting<bool> = Setting::new("terminal", "copy_on_sele
 /// Links and file paths underlined under the pointer, opened with a click.
 pub const HIGHLIGHT_LINKS: Setting<bool> = Setting::new("terminal", "highlight_links", || true);
 
-/// Programs other modules run (an agents' sessions) put to sleep when unseen and idle: stopped,
-/// their tabs kept, resumed once woken (off by default: nothing is stopped unasked).
+/// Programs other modules run (an agents' sessions) put to sleep when untouched and idle:
+/// stopped, their tabs kept, resumed once woken (off by default: nothing is stopped unasked).
 pub const SLEEP_IDLE: Setting<bool> = Setting::new("terminal", "sleep_idle", || false);
-/// After how many minutes unseen and idle.
+/// After how many minutes untouched and idle.
 pub const SLEEP_AFTER: Setting<i64> =
     Setting::new("terminal", "sleep_after", || DEFAULT_SLEEP_AFTER)
         .valid(|n| SLEEP_AFTERS.contains(n));
@@ -496,7 +496,7 @@ impl SettingsContribution for BehaviorSettings {
     }
 }
 
-/// The "Sleeping sessions" block: programs other modules run, stopped when unseen and idle.
+/// The "Sleeping sessions" block: programs other modules run, stopped when untouched and idle.
 #[derive(Debug)]
 pub(crate) struct SleepSettings;
 

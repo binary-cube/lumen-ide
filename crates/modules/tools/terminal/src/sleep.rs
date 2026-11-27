@@ -1,6 +1,6 @@
 //! Programs other modules run in a terminal (an agent's session), watched while they live:
 //! what each holds (its process with everything it started, measured only while someone asks)
-//! and, when the user chose it, put to sleep once unseen and idle — the program stopped, its
+//! and, when the user chose it, put to sleep once untouched and idle — the program stopped, its
 //! tab kept with its last screen, started again the way its owner says once the user wakes it.
 //!
 //! A thread of its own (`terminal-watch`) runs while some terminal is known by a key: every
@@ -9,8 +9,11 @@
 //! asks the owner how the program resumes (`ResumeLaunch`: nobody answers, it stays awake)
 //! and leaves the order in the terminal's slot; its view stops the program at its own poll.
 //!
-//! Never asleep (each checked, else it stays awake): shown within the idle time, its program
-//! wrote within it, text typed and not sent, its program ended, already asleep.
+//! Never asleep (each checked, else it stays awake): touched within the idle time (a key, a
+//! click, the wheel, a paste, its tab chosen: on screen or not), its program wrote within it,
+//! its owner's session was written within it (its agent at work), text typed and not sent,
+//! its program ended, already asleep. Why it stays awake is in the log (`debug`), as it
+//! changes.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -80,14 +83,36 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 /// Whether the terminal described by `asked` should be put to sleep now, after `idle`
-/// unseen and quiet: conservative, any doubt keeps it awake.
+/// untouched (no key, click, wheel, paste, its tab not chosen: on screen or not) and quiet:
+/// conservative, any doubt keeps it awake.
 pub(crate) fn sleepy(asked: &Asked, idle: Duration, now: Instant) -> bool {
-    if asked.visible || asked.asleep || asked.sleep.is_some() || !asked.running || asked.typed {
-        return false;
-    }
-    let unseen = asked.shown.is_some_and(|at| now.saturating_duration_since(at) >= idle);
+    awake_because(asked, idle, now).is_none()
+}
+
+/// What keeps the terminal described by `asked` awake now (`None`: nothing, it may sleep):
+/// the first of its reasons, as the log names it.
+pub(crate) fn awake_because(asked: &Asked, idle: Duration, now: Instant) -> Option<&'static str> {
+    let Some(touched) = asked.touched else { return Some("never started") };
+    let untouched = now.saturating_duration_since(touched) >= idle;
     let quiet = asked.watch.as_ref().and_then(|w| w.quiet_for()).is_some_and(|q| q >= idle);
-    unseen && quiet && asked.pid.is_some()
+    let reason = if asked.asleep {
+        "asleep"
+    } else if asked.sleep.is_some() {
+        "ordered to sleep"
+    } else if !asked.running {
+        "not running"
+    } else if asked.pid.is_none() {
+        "no process"
+    } else if asked.typed {
+        "text typed, not sent"
+    } else if !untouched {
+        "used lately"
+    } else if !quiet {
+        "output lately"
+    } else {
+        return None;
+    };
+    Some(reason)
 }
 
 /// Someone wants to know what the terminals hold: measured for a while from now on.
@@ -211,9 +236,13 @@ fn look_for_sleepers() {
     let now = Instant::now();
     let projects: Vec<Option<kernel::ProjectId>> = keyed()
         .iter()
-        .filter_map(|(_, slot)| {
-            let asked = asked(slot);
-            sleepy(&asked, idle, now).then_some(asked.project)
+        .filter_map(|(key, slot)| {
+            let (awake, project) = {
+                let asked = asked(slot);
+                (awake_because(&asked, idle, now), asked.project)
+            };
+            tell_awake(slot, key, awake);
+            awake.is_none().then_some(project)
         })
         .collect();
     if projects.is_empty() {
@@ -228,6 +257,20 @@ fn look_for_sleepers() {
         }
     }
     wake_projects(&projects);
+}
+
+/// Why the terminal in `slot`, known by `key`, stays awake (`None`: it may sleep), written to
+/// the log only when that changed since it last was (the lock let go first).
+fn tell_awake(slot: &crate::view::NameSlot, key: &str, awake: Option<&'static str>) {
+    let changed = {
+        let mut asked = asked(slot);
+        let changed = asked.awake != Some(awake);
+        asked.awake = Some(awake);
+        changed
+    };
+    if changed {
+        tracing::debug!(key, awake = awake.unwrap_or("no: may sleep"), "a session's sleep");
+    }
 }
 
 /// The windows of `projects` woken (`None`: a terminal of no project — every window, a
@@ -274,11 +317,12 @@ pub(crate) fn put_to_sleep(host: &mut dyn workbench_model::WorkbenchHost) -> boo
     for (key, slot) in due {
         // Asked outside the slot's lock (it reaches another module).
         let Some(Some(launch)) = host.ask(ResumeLaunch { key: key.clone(), idle }) else {
+            tell_awake(&slot, &key, Some("its owner can't resume it now"));
             continue;
         };
         let ordered = {
             let mut asked = asked(&slot);
-            // Looked at again: shown or typed into meanwhile, it stays awake.
+            // Looked at again: touched or typed into meanwhile, it stays awake.
             let now = Instant::now();
             let sleepy = sleepy(&asked, idle, now);
             if sleepy {

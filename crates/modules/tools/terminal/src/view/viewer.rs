@@ -12,17 +12,7 @@ impl Viewer for TerminalView {
         ui_components::ViewMemory { ram, gpu: 0 }
     }
 
-    /// Its tab shown or hidden (told by the app, frames or not): a terminal on screen never
-    /// sleeps; hidden, its time unseen counts from now.
-    fn set_shown(&mut self, shown: bool) {
-        if let Some(slot) = &self.renamed {
-            let mut asked = asked(slot);
-            asked.visible = shown;
-            asked.shown = Some(std::time::Instant::now());
-        }
-    }
-
-    /// An order to sleep or to wake waits (given from elsewhere while it's unseen): polled.
+    /// An order to sleep or to wake waits (given from elsewhere while it's idle): polled.
     fn wants_poll(&self) -> bool {
         self.renamed.as_ref().is_some_and(|slot| {
             let asked = asked(slot);
@@ -30,10 +20,14 @@ impl Viewer for TerminalView {
         })
     }
 
-    /// Its tab chosen or left. Asleep, it stays so (moving through the tabs onto it by
-    /// mistake wakes nothing): only a key, a click in it or "Wake Up" does.
+    /// Its tab chosen or left: chosen, it's touched (its time untouched starts again). Asleep,
+    /// it stays so (moving through the tabs onto it by mistake wakes nothing): only a key, a
+    /// click in it or "Wake Up" does.
     fn set_active(&mut self, active: bool) {
         self.active = active;
+        if active {
+            self.touch();
+        }
     }
 
     fn set_data(&mut self, data: &dyn std::any::Any) {
@@ -61,7 +55,7 @@ impl Viewer for TerminalView {
                     .push((key.clone(), Arc::downgrade(&slot)));
                 self.renamed = Some(slot);
                 self._gone = Some(Gone { key: key.clone(), project: start.project });
-                // Watched while it lives (what it holds; asleep when unseen and idle).
+                // Watched while it lives (what it holds; asleep when untouched and idle).
                 crate::sleep::ensure_running();
             }
             self.project = start.project;
@@ -84,7 +78,6 @@ impl Viewer for TerminalView {
         if b.size.width <= 0.0 || b.size.height <= 0.0 {
             return;
         }
-        self.mark_shown();
         // What wakes its window, for orders from elsewhere (once: the same every frame).
         if let (Some(slot), Some(waker)) = (&self.renamed, &ctx.waker) {
             let mut asked = asked(slot);
@@ -283,7 +276,7 @@ impl Viewer for TerminalView {
             asked(slot).waking = false;
         }
         // Put to sleep: by hand now, shown or not (it stays asleep until the user acts on
-        // it); when idle, unless it was drawn since it was asked (shown again: awake).
+        // it); when idle, unless it was touched since it was asked (used again: awake).
         let order = self.renamed.as_ref().and_then(|slot| {
             let mut asked = asked(slot);
             let (launch, at) = asked.sleep.take()?;
@@ -292,8 +285,9 @@ impl Viewer for TerminalView {
             if at.elapsed() >= SLEEP_ORDER_FRESH {
                 return None;
             }
-            let unseen = !asked.visible && asked.shown.is_none_or(|shown| shown <= at);
-            (by_hand || unseen).then_some((launch, by_hand))
+            // Touched since it was asked: awake.
+            let untouched = asked.touched.is_none_or(|touched| touched <= at);
+            (by_hand || untouched).then_some((launch, by_hand))
         });
         if let Some((launch, by_hand)) = order {
             self.fall_asleep(launch, by_hand);
@@ -396,6 +390,7 @@ impl Viewer for TerminalView {
     /// shifted by the rest. A program that asked for the mouse, or a full-screen one, gets it
     /// instead, at once, in lines.
     fn scroll(&mut self, _dx: f32, dy: f32) -> bool {
+        self.touch();
         // Asleep (or coming back): its last screen stays still, nothing sent anywhere.
         if self.frozen() {
             return false;
@@ -458,6 +453,7 @@ impl Viewer for TerminalView {
     }
 
     fn press(&mut self, p: Point, clicks: u32) -> Option<ViewerAction> {
+        self.touch();
         // Asleep: a click resumes it; coming back: nothing to press yet.
         if self.wake_by_user() || self.frozen() {
             return None;
@@ -544,6 +540,7 @@ impl Viewer for TerminalView {
     }
 
     fn key_press(&mut self, key: KeyPress) -> bool {
+        self.touch();
         // Asleep: a key resumes it (the key itself goes to nothing yet).
         if self.wake_by_user() {
             return true;
@@ -579,6 +576,7 @@ impl Viewer for TerminalView {
     }
 
     fn text_input(&mut self, text: &str) -> bool {
+        self.touch();
         if self.wake_by_user() {
             return true;
         }
@@ -607,6 +605,7 @@ impl Viewer for TerminalView {
     }
 
     fn paste(&mut self, text: &str) -> bool {
+        self.touch();
         if self.wake_by_user() {
             return true;
         }
@@ -695,6 +694,9 @@ impl Viewer for TerminalView {
         if id == "snapshot:asleep" {
             return self.asleep_for_snapshot();
         }
+        // Acted on (Clear, Wake Up): its time untouched starts again (put to sleep by hand,
+        // it sleeps whatever).
+        self.touch();
         if id == crate::WAKE_ACTION {
             return self.wake_by_user();
         }

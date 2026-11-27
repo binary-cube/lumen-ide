@@ -20,11 +20,11 @@ impl terminal_session::SessionWatch for Quiet {
 
 const IDLE: Duration = Duration::from_secs(3600);
 
-/// A keyed terminal unseen and quiet for `unseen` and `quiet`.
-fn state(unseen: Duration, quiet: Duration) -> (Asked, Instant) {
+/// A keyed terminal untouched and quiet for `untouched` and `quiet`.
+fn state(untouched: Duration, quiet: Duration) -> (Asked, Instant) {
     let now = Instant::now() + IDLE * 3;
     let asked = Asked {
-        shown: Some(now - unseen),
+        touched: Some(now - untouched),
         watch: Some(Arc::new(Quiet(quiet))),
         pid: Some(4_000_001),
         ..Asked::default()
@@ -32,41 +32,50 @@ fn state(unseen: Duration, quiet: Duration) -> (Asked, Instant) {
     (asked, now)
 }
 
-/// Only a program unseen and quiet for the whole idle time sleeps; anything else keeps it
-/// awake: shown or writing lately, text typed and not sent, ended, already asleep or about
-/// to be, never shown, its quiet not known.
+/// Only a program untouched (no key, click, wheel, paste, its tab not chosen) and quiet for
+/// the whole idle time sleeps, on screen or not; anything else keeps it awake, each named:
+/// used or writing lately, text typed and not sent, ended, already asleep or about to be,
+/// never started, its quiet not known.
 #[test]
-fn only_an_unseen_quiet_program_sleeps() {
+fn only_an_untouched_quiet_program_sleeps() {
     let (asked, now) = state(IDLE, IDLE);
     assert!(sleepy(&asked, IDLE, now));
+    let awake = |asked: &Asked, now| awake_because(asked, IDLE, now);
     let (asked, now) = state(IDLE / 2, IDLE);
-    assert!(!sleepy(&asked, IDLE, now), "shown lately");
+    assert_eq!(awake(&asked, now), Some("used lately"));
     let (asked, now) = state(IDLE, IDLE / 2);
-    assert!(!sleepy(&asked, IDLE, now), "at work: it wrote lately");
+    assert_eq!(awake(&asked, now), Some("output lately"), "at work: it wrote lately");
     let (mut asked, now) = state(IDLE, IDLE);
     asked.typed = true;
-    assert!(!sleepy(&asked, IDLE, now), "something typed, not sent");
+    assert_eq!(awake(&asked, now), Some("text typed, not sent"));
     let (mut asked, now) = state(IDLE, IDLE);
     asked.running = false;
-    assert!(!sleepy(&asked, IDLE, now), "its program ended");
+    assert_eq!(awake(&asked, now), Some("not running"), "its program ended");
     let (mut asked, now) = state(IDLE, IDLE);
     asked.asleep = true;
-    assert!(!sleepy(&asked, IDLE, now), "asleep already");
+    assert_eq!(awake(&asked, now), Some("asleep"));
     let (mut asked, now) = state(IDLE, IDLE);
     asked.sleep = Some((agents::Launch::default(), Instant::now()));
-    assert!(!sleepy(&asked, IDLE, now), "about to sleep");
+    assert_eq!(awake(&asked, now), Some("ordered to sleep"));
     let (mut asked, now) = state(IDLE, IDLE);
-    asked.shown = None;
-    assert!(!sleepy(&asked, IDLE, now), "never shown: never started");
+    asked.touched = None;
+    assert_eq!(awake(&asked, now), Some("never started"));
     let (mut asked, now) = state(IDLE, IDLE);
     asked.watch = None;
     assert!(!sleepy(&asked, IDLE, now), "its quiet not known");
-    let (mut asked, now) = state(IDLE * 2, IDLE * 2);
-    asked.visible = true;
-    assert!(!sleepy(&asked, IDLE, now), "on screen (no frame drawn for long: still seen)");
     let (mut asked, now) = state(IDLE, IDLE);
     asked.pid = None;
-    assert!(!sleepy(&asked, IDLE, now), "no process");
+    assert_eq!(awake(&asked, now), Some("no process"));
+}
+
+/// Why a session stays awake is kept as last told: told again only when it changes.
+#[test]
+fn why_a_session_stays_awake_is_told_once_per_change() {
+    let slot = crate::view::NameSlot::new(Asked::default());
+    tell_awake(&slot, "told-key", Some("used lately"));
+    assert_eq!(asked(&slot).awake, Some(Some("used lately")));
+    tell_awake(&slot, "told-key", None);
+    assert_eq!(asked(&slot).awake, Some(None), "may sleep: kept apart from never told");
 }
 
 /// Each project's window asks how its terminals resume on its own clock: one asking never

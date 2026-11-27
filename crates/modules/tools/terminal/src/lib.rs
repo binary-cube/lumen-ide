@@ -119,7 +119,7 @@ impl Module for TerminalModule {
         ctx.contribute::<Arc<dyn workbench_model::SettingsContribution>>(Arc::new(
             settings::SleepSettings,
         ));
-        // Programs other modules run, watched: what each holds; asleep when unseen and idle.
+        // Programs other modules run, watched: what each holds; asleep when untouched and idle.
         ctx.contribute::<Arc<dyn workbench_model::ProjectService>>(Arc::new(sleep::Sleeper));
         ctx.contribute(workbench_model::Answers::of(|asked: TerminalUse, _host| {
             sleep::memory_asked();

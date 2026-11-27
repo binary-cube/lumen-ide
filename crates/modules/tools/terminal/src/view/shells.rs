@@ -9,16 +9,16 @@ use super::*;
 pub(crate) static NAMED: Mutex<Vec<(String, std::sync::Weak<NameSlot>)>> = Mutex::new(Vec::new());
 
 /// What's asked of a terminal by its key, waiting for its view (a new name, to sleep), and
-/// what its view tells (its program still runs, when it was last shown, what it holds).
+/// what its view tells (its program still runs, when it was last touched, what it holds).
 pub(crate) struct Asked {
     pub(crate) name: Option<String>,
     pub(crate) running: bool,
     /// The project it was opened in (whose window is woken to put it to sleep).
     pub(crate) project: Option<kernel::ProjectId>,
-    /// Its tab is on screen now (told by the app: it never sleeps then).
-    pub(crate) visible: bool,
-    /// When it was last on screen (drawn, or hidden at; `None`: never yet).
-    pub(crate) shown: Option<std::time::Instant>,
+    /// When the user last acted on it (a key, text, a paste, a click, the wheel, its tab
+    /// chosen) or its program started (`None`: never started): untouched and quiet long
+    /// enough, on screen or not, it may sleep.
+    pub(crate) touched: Option<std::time::Instant>,
     /// Text typed since the last ↵ (not sent yet: never lost to a sleep).
     pub(crate) typed: bool,
     /// What tells how long its program has been quiet, while it runs.
@@ -53,6 +53,9 @@ pub(crate) struct Asked {
     pub(crate) title: Option<String>,
     /// How it stood when that was last published ([`announce`]).
     pub(crate) announced: Option<contracts::terminal::TerminalState>,
+    /// What kept it awake at the sleep's last look, as last written to the log (`Some(None)`:
+    /// nothing).
+    pub(crate) awake: Option<Option<&'static str>>,
 }
 
 impl std::fmt::Debug for Asked {
@@ -71,8 +74,7 @@ impl Default for Asked {
             name: None,
             running: true,
             project: None,
-            visible: false,
-            shown: None,
+            touched: None,
             typed: false,
             watch: None,
             pid: None,
@@ -88,6 +90,7 @@ impl Default for Asked {
             title: None,
             waker: None,
             announced: None,
+            awake: None,
         }
     }
 }
@@ -171,7 +174,7 @@ pub(crate) fn announce_gone(project: Option<kernel::ProjectId>, key: &str) {
 pub(crate) const STARTING_WITHIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How long an order to sleep stays good: one not taken by then is let go (never applied
-/// later, when its tab is shown).
+/// later, after it was touched).
 pub(crate) const SLEEP_ORDER_FRESH: std::time::Duration = std::time::Duration::from_secs(20);
 
 impl Asked {

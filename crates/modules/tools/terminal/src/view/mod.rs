@@ -253,7 +253,7 @@ pub struct TerminalView {
     _gone: Option<Gone>,
     /// What it's known by (a program another module runs).
     key: Option<String>,
-    /// Its program stopped (unseen and idle, or by hand: `crate::sleep`): its last screen
+    /// Its program stopped (untouched and idle, or by hand: `crate::sleep`): its last screen
     /// kept, its program started again with `launch` (how it resumes) once woken.
     asleep: bool,
     /// Started again after a sleep: its last screen stays drawn while the new output settles.
@@ -386,6 +386,7 @@ impl TerminalView {
                         let mut asked = asked(slot);
                         asked.pid = session.pid();
                         asked.started = Some(std::time::Instant::now());
+                        asked.touched = asked.started;
                         asked.watch.clone_from(&self.watch);
                         asked.asleep = false;
                         asked.typed = false;
@@ -503,10 +504,11 @@ impl TerminalView {
         }
     }
 
-    /// Drawn now: its slot says when (a terminal shown never sleeps).
-    fn mark_shown(&self) {
+    /// Acted on by the user now (a key, text, a paste, a click, the wheel, its tab chosen):
+    /// its slot says when (it sleeps only once untouched long enough, on screen or not).
+    fn touch(&self) {
         if let Some(slot) = &self.renamed {
-            asked(slot).shown = Some(std::time::Instant::now());
+            asked(slot).touched = Some(std::time::Instant::now());
         }
     }
 

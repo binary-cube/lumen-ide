@@ -67,7 +67,7 @@ impl Module for SessionsModule {
             let title = one_line(&asked.title);
             !title.is_empty() && follow::renamed(&asked.key, &title).is_some()
         }));
-        // A session's terminal put to sleep (unseen, idle): how it resumes, its agent's way
+        // A session's terminal put to sleep (untouched, idle): how it resumes, its agent's way
         // — only for one whose file has been still as long (no turn running).
         ctx.contribute(workbench_model::Answers::of(|asked: ResumeLaunch, _host| {
             follow::resume_launch(&asked.key, asked.idle)

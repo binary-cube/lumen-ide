@@ -700,6 +700,37 @@ fără copie nu face nimic.
 
 **Lăsat:** procesele deja blocate într-o instanță veche se eliberează doar la închiderea ei.
 
+### 100l — Adormită și pe ecran, când n-o mai atingi (cerut 2026-11-27)
+
+O sesiune de agent lăsată pe ecran nu adormea niciodată: regula era „nevăzută atâta timp”, iar
+un tab ales într-o fereastră lăsată deschisă rămânea „văzut” la nesfârșit. Nici nu se vedea de
+ce rămâne trează una ascunsă: jurnalul spunea doar când adoarme.
+
+**Făcut:** o singură regulă, aceeași pentru orice agent (terminalul nu știe care e):
+neatinsă atâta timp, pe ecran sau nu, programul tăcut atâta timp (nimic scris în PTY) și
+sesiunea agentului nescrisă atâta timp (`ResumeLaunch`, din fișierele lui, prin
+`AgentProvider::sessions`: fiecare agent își citește formatul). „Atinsă” (`Asked::touched`)
+= o tastă, text, un paste, un clic, rotița, o comandă a tabului (Clear, Wake Up), tabul ales,
+programul pornit. O fereastră acoperită și descoperită de alta, un cadru desenat, mouse-ul
+trecut peste nu ating nimic (ar fi ținut-o trează la nesfârșit). Urmărirea „văzută / pe ecran”
+(`shown`, `visible`) scoasă. Un ordin dat e lăsat dacă tabul a fost atins între timp.
+Jurnalul spune la `debug`, doar când se schimbă, de ce rămâne trează fiecare sesiune
+(`a session's sleep`: `used lately`, `output lately`, `text typed, not sent`, `never started`,
+`its owner can't resume it now`…; `no: may sleep`), scris cu lacătul slotului lăsat.
+Textele setărilor și ale cardului („neatinsă și inactivă”) spun regula nouă.
+
+**Verificat** pe o instanță izolată (un `HOME` al ei, un agent de probă care scrie un fișier
+de sesiune ca cel adevărat, apoi tace; adormirea la 3 min): ascunsă, a adormit; pe ecran,
+neatinsă, a adormit. Pe macOS, cu fereastra în spatele altora, adormirea a venit cu ~1–2 min
+după termen (sistemul încetinește aplicațiile din fundal): la o oră, neînsemnat.
+
+**Teste:** regula și motivul spus pentru fiecare caz; tastă, clic, rotiță, text, paste,
+comandă ating; tabul lăsat, mouse-ul trecut peste, un cadru nu; un ordin urmat de o tastă e
+lăsat, unul neatins e luat; motivul e ținut ca ultimul spus.
+
+**Lăsat:** dacă un agent adevărat (nu cel de probă) scrie ceva în terminal cât stă (un
+indicator, o linie de stare), nu adoarme: jurnalul spune atunci `output lately` și se vede.
+
 ## Riscuri
 
 - Un program care nu scrie nimic în timpul unei ture lungi (o unealtă tăcută) ar putea părea
