@@ -326,6 +326,8 @@ impl Drawer {
         let mut state = ctx.state();
         state.frame += 1;
         let frame = state.frame;
+        // A page's frame kept as asked (a sleeping view's picture), whether it's drawn or not.
+        ctx.copy_pending(&mut state);
         let Some(bounds) = areas.iter().copied().reduce(|a, b| a.union(&b)) else {
             return Ok(());
         };

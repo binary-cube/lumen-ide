@@ -31,6 +31,7 @@ pub(super) fn page(id: u128, html: &Arc<str>, x: f32) -> WebPage {
         id,
         source: WebSource::Html(Arc::clone(html)),
         area: kernel::Rect::new(x, 0.0, 100.0, 100.0),
+        freeze: false,
     }
 }
 
@@ -42,6 +43,7 @@ pub(super) fn app(id: u128, entry: &str) -> WebPage {
             entry: entry.into(),
         },
         area: kernel::Rect::new(0.0, 0.0, 100.0, 100.0),
+        freeze: false,
     }
 }
 
@@ -584,4 +586,51 @@ pub(super) fn taking_at(views: &mut WebViews, calls: &Arc<Calls>, pages: &[(u128
         let view: Box<dyn WebView> = Box::new(Taking(Arc::clone(&made)));
         Some(MadePage { view, drawn: Some(render_api::ImageData::live()), popup: None })
     });
+}
+
+/// A page whose view falls asleep is given its picture once: a page the app draws, a copy
+/// of its frame at its own size (taken from its frame on the GPU as it's first drawn); one
+/// with no frame (hidden a while), or let go, none — told, never waited for.
+#[test]
+fn a_page_falling_asleep_is_given_its_picture_once() {
+    let image = render_api::ImageData::live();
+    let make = {
+        let image = image.clone();
+        move |_: &WebSource, _: kernel::Rect, _: platform_api::WebInbox| {
+            let view: Box<dyn WebView> = Box::new(WithPopup);
+            Some(MadePage { view, drawn: Some(image.clone()), popup: None })
+        }
+    };
+    let html: Arc<str> = "<p>a</p>".into();
+    let freezing = |id, freeze| WebPage { freeze, ..page(id, &html, 0.0) };
+    let mut views = WebViews::default();
+    views.sync_at(vec![(freezing(1, false), true)], false, make.clone());
+    image.frame_copied(render_api::CopiedFrame { size: (100, 100), changed: None, bytes: 0 });
+    views.sync_at(vec![(freezing(1, true), true)], false, make.clone());
+    let told = views.take_events();
+    let [(1, WebEvent::Picture(Some(picture)))] = told.as_slice() else { panic!("{told:?}") };
+    assert_eq!((picture.width, picture.height), (100, 100), "its own size");
+    assert!(picture.is_held() && picture.copy_source().is_some_and(|s| s == image));
+    views.sync_at(vec![(freezing(1, true), true)], false, make.clone());
+    assert!(views.take_events().is_empty(), "once");
+    // Awake again, then asleep once more: asked again — its frame let go meanwhile (hidden
+    // a while), drawn anew by its engine first, then copied.
+    views.sync_at(vec![(freezing(1, false), true)], false, make.clone());
+    image.evicted();
+    views.sync_at(vec![(freezing(1, true), true)], false, make.clone());
+    assert!(views.take_events().is_empty(), "its frame waited for");
+    image.frame_copied(render_api::CopiedFrame { size: (100, 100), changed: None, bytes: 0 });
+    views.sync_at(vec![(freezing(1, true), true)], false, make.clone());
+    let told = views.take_events();
+    assert!(matches!(told.as_slice(), [(1, WebEvent::Picture(Some(_)))]), "{told:?}");
+    // Its frame never coming: none, past the wait.
+    views.sync_at(vec![(freezing(1, false), true)], false, make.clone());
+    image.evicted();
+    views.sync_at(vec![(freezing(1, true), true)], false, make.clone());
+    let later = start() + std::time::Duration::from_secs(60);
+    views.sync(vec![(freezing(1, true), true)], false, later, make.clone());
+    assert_eq!(views.take_events(), [(1, WebEvent::Picture(None))], "not in time: none");
+    // A page never made (or let go): none.
+    views.sync_at(vec![(freezing(2, true), false)], false, make);
+    assert_eq!(views.take_events(), [(2, WebEvent::Picture(None))]);
 }

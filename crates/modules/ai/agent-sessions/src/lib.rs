@@ -15,7 +15,8 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Instant;
 
 use contracts::agents::RenameSession;
-use contracts::terminal::{ResumeLaunch, TerminalRunning, TerminalUse};
+use contracts::sleep::SleepStateOf;
+use contracts::terminal::{ResumeLaunch, TerminalRunning};
 use extensions::{Module, ModuleContext, ModuleError, ModuleId, ModuleManifest};
 use ui_components::{Dock, ToolContent, ToolPanel, ToolWindowProvider};
 
@@ -128,11 +129,10 @@ impl workbench_model::ProjectService for Renamer {
         // How its sessions' terminals stand, as they tell it (asleep, on their way, back):
         // the rows and menus follow at once, its window woken to draw them.
         let (wake, id) = (Arc::clone(&project.wake), project.id);
-        let states =
-            project.events.subscribe(move |e: &contracts::terminal::TerminalStateChanged| {
-                follow::told(id, &e.key, e.state);
-                wake();
-            });
+        let states = project.events.subscribe(move |e: &contracts::sleep::SleepStateChanged| {
+            follow::told(id, &e.key, e.state);
+            wake();
+        });
         // The project closed: its window not woken, its favorites let go.
         vec![
             states,
@@ -184,7 +184,7 @@ impl workbench_model::ProjectService for Renamer {
             })
         {
             for key in follow::keys() {
-                let state = host.ask(TerminalUse { key: key.clone() }).flatten();
+                let state = host.ask(SleepStateOf { key: key.clone() }).flatten();
                 states_changed |= follow::set_state(&key, state);
             }
         }

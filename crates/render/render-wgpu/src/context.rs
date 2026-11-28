@@ -189,6 +189,10 @@ impl GpuContext {
         if image.is_live() {
             return false;
         }
+        // A copy of another's texture (a page's last frame, kept after it goes).
+        if let Some(source) = image.copy_source() {
+            return self.copy_image(state, image, &source);
+        }
         let max = self.device.limits().max_texture_dimension_2d;
         // A mask: one byte of coverage per pixel.
         let bpp = image.bytes_per_pixel() as u32;
@@ -266,6 +270,84 @@ impl GpuContext {
             },
         );
         image.uploaded();
+        true
+    }
+
+    /// The copies asked for ([`render_api::ImageData::copy_of`]) made now, drawn or not;
+    /// one whose source has no frame yet is tried again next frame, one given up is let go.
+    pub(super) fn copy_pending(&self, state: &mut SharedState) {
+        for image in render_api::take_pending_copies() {
+            if image.released() || state.textures.contains_key(&image.id) {
+                continue;
+            }
+            let Some(source) = image.copy_source() else { continue };
+            if !self.copy_image(state, &image, &source) && !source.released() {
+                render_api::pend_copy(image);
+            }
+        }
+    }
+
+    /// `image`'s texture made as a copy of `source`'s as it is now (a live image's frame, on
+    /// the GPU): `false` while `source` has none (nothing drawn; asked again next frame).
+    fn copy_image(
+        &self,
+        state: &mut SharedState,
+        image: &render_api::ImageData,
+        source: &render_api::ImageData,
+    ) -> bool {
+        let Some(from) = state
+            .textures
+            .get(&source.id)
+            .filter(|gpu| gpu.filled != crate::instances::Filled::Empty)
+            .and_then(|gpu| gpu.live.clone())
+        else {
+            return false;
+        };
+        let size = from.size();
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("image-copy"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: from.format(),
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("image-copy") });
+        encoder.copy_texture_to_texture(from.as_image_copy(), texture.as_image_copy(), size);
+        self.queue.submit([encoder.finish()]);
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("image-copy"),
+            layout: &self.image_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.image_sampler),
+                },
+            ],
+        });
+        let bytes = u64::from(size.width) * u64::from(size.height) * 4;
+        state.textures.insert(
+            image.id,
+            GpuImage {
+                bind_group,
+                bytes,
+                last_frame: state.frame,
+                last_used: std::time::Instant::now(),
+                image: image.clone(),
+                live: None,
+                filled: crate::instances::Filled::Whole,
+            },
+        );
+        image.copied();
         true
     }
 }

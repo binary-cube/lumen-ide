@@ -106,6 +106,7 @@ impl Viewer for PreviewView {
             id: self.id,
             source: WebSource::Html(Arc::clone(&data.html)),
             area: self.area,
+            freeze: false,
         })
     }
 

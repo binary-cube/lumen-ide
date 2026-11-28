@@ -73,7 +73,7 @@ pub(super) fn to_view(inbox: &Rc<RefCell<Inbox>>, id: u128) -> platform_api::Web
 fn event_size(event: &WebEvent) -> usize {
     match event {
         WebEvent::Message(text) | WebEvent::OpenLink(text) => text.len(),
-        WebEvent::Shown | WebEvent::Failed => 0,
+        WebEvent::Shown | WebEvent::Failed | WebEvent::Picture(_) => 0,
     }
 }
 

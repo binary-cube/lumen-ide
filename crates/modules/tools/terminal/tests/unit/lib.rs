@@ -24,9 +24,7 @@ fn registers_its_window_its_shells_and_its_command() {
             MOUSE_REPORTING.0,
             CLOSE_ON_EXIT.0,
             SETTINGS.0,
-            SLEEP_ON.0,
-            SLEEP_NOW.0,
-            WAKE_NOW.0
+            SLEEP_ON.0
         ]
     );
 }
@@ -97,76 +95,4 @@ fn a_running_program_is_reported_an_idle_shell_is_not() {
     // Without a name, the shell's title names it.
     let unnamed = [shell(14, Says(Foreground::Program(std::time::Duration::from_secs(5)), None))];
     assert_eq!(running_programs(&unnamed)[0].title, "npm run dev");
-}
-
-/// A host recording which tab it was asked to show (and whether it can).
-struct Shows {
-    events: kernel::EventBus,
-    shown: Vec<(Option<String>, String)>,
-    can: bool,
-}
-
-impl WorkbenchHost for Shows {
-    fn project_root(&self) -> Option<std::path::PathBuf> {
-        None
-    }
-    fn active_file(&self) -> Option<workbench_model::ActiveFile> {
-        None
-    }
-    fn repository(&self) -> Option<Arc<dyn version_control::Repository>> {
-        None
-    }
-    fn project_storage(&self) -> Option<std::path::PathBuf> {
-        None
-    }
-    fn events(&self) -> &kernel::EventBus {
-        &self.events
-    }
-    fn choose(&mut self, _: workbench_model::ChoiceList, _: workbench_model::OnChoice) -> bool {
-        false
-    }
-    fn spawn(&mut self, _: workbench_model::Job) {}
-    fn notify(&mut self, _: workbench_model::Notification) {}
-}
-
-impl workbench_model::ViewHost for Shows {
-    fn open_view(&mut self, title: &str, _: &str, _: &dyn std::any::Any) -> bool {
-        self.shown.push((None, title.to_owned()));
-        self.can
-    }
-    fn show_in_panel(&mut self, tool: &str, title: &str, _: &str, _: &dyn std::any::Any) -> bool {
-        self.shown.push((Some(tool.to_owned()), title.to_owned()));
-        self.can
-    }
-}
-impl workbench_model::EditorHost for Shows {}
-impl workbench_model::RefactoringHost for Shows {}
-impl workbench_model::ServicesHost for Shows {}
-impl workbench_model::SystemHost for Shows {}
-
-/// Woken from elsewhere, a sleeping session's tab is shown where it is — the window at the
-/// bottom's, or the editor's — so it's drawn and starts again; one that can't be shown, or
-/// isn't asleep, answers no.
-#[test]
-fn a_woken_session_s_tab_is_shown_where_it_is() {
-    let asleep = |key: &str, in_editor: bool| {
-        let start = TerminalStart { key: Some(key.into()), in_editor, ..TerminalStart::default() };
-        let mut view = TerminalView::new();
-        ui_components::Viewer::set_data(&mut view, &start);
-        view::asleep_for_tests(key);
-        view
-    };
-    let mut host = Shows { events: kernel::EventBus::new(), shown: Vec::new(), can: true };
-    let _bottom = asleep("wake bottom", false);
-    assert!(wake_terminal("wake bottom", &mut host));
-    assert_eq!(host.shown, [(Some(TOOL.to_owned()), "wake-bottom".to_owned())]);
-    let _editor = asleep("wake-editor", true);
-    assert!(wake_terminal("wake-editor", &mut host));
-    assert_eq!(host.shown[1], (None, "wake-editor".to_owned()));
-    let _hidden = asleep("wake-nowhere", false);
-    host.can = false;
-    assert!(!wake_terminal("wake-nowhere", &mut host), "its tab can't be shown");
-    assert!(!view::wake_pending("wake-nowhere"), "not shown: left asleep as it was");
-    assert!(view::wake_pending("wake bottom"), "shown: woken");
-    assert!(!wake_terminal("no-such-session", &mut host));
 }

@@ -23,6 +23,9 @@ pub use renderer::{
     FrameStats, GpuApi, GpuInfo, GpuMemory, GpuPreference, RenderError, RenderOptions,
     RenderTarget, Renderer, RendererFactory,
 };
-pub use scene::{GlyphInstance, ImageCorners, ImageData, ImageInstance, Layer, Quad, Scene};
+pub use scene::{
+    GlyphInstance, ImageCorners, ImageData, ImageInstance, Layer, Quad, Scene, pend_copy,
+    take_pending_copies,
+};
 
 pub use kernel::{Corners, PhysicalSize, Point, Rect, Rgba, Size};

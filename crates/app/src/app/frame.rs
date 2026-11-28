@@ -166,6 +166,7 @@ impl EditorApp {
                 if web_engine::became_usable(self.web_views.engine_seen()) {
                     self.web_views.let_go_system_pages();
                 }
+                self.web_views.set_waker(|| window.waker());
                 let pictured = self.web_views.sync(
                     self.workbench.web_pages(),
                     self.workbench.overlay_open(),

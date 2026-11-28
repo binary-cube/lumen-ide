@@ -113,11 +113,11 @@ pub fn current() -> Arc<TerminalConfig> {
 
 /// The settings changed (or were read at startup).
 pub fn configure(config: TerminalConfig) {
+    // The sessions' idle time told to the sleeping (turned on: they're looked at again).
+    ui_components::sleep::configure(&crate::sleep::SESSIONS, config.sleep_after);
     if let Ok(mut current) = current_slot().write() {
         *current = Arc::new(config);
     }
-    // Sleeping turned on: the keyed terminals watched again.
-    crate::sleep::ensure_running();
 }
 
 /// How a new tab starts its shell in `cwd`: the one chosen, or "Other…"'s command; the

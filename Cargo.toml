@@ -23,6 +23,7 @@ members = [
     "crates/domain/code/refactor",
     "crates/domain/core/workbench",
     "crates/domain/core/contracts",
+    "crates/domain/core/sleep",
     "crates/domain/core/commands",
     "crates/domain/core/settings",
     "crates/domain/core/extensions",
@@ -159,6 +160,7 @@ members = [
     "crates/modules/tools/relax",
     "crates/modules/tools/focus",
     "crates/modules/tools/keep-awake",
+    "crates/modules/tools/sleep",
     "crates/modules/tools/profiler",
     "crates/modules/tools/updates",
     "crates/modules/tools/web-engine-install",
@@ -283,6 +285,7 @@ colors = { path = "crates/modules/editing/colors" }
 language-levels = { path = "crates/modules/editing/language-levels" }
 canvas = { path = "crates/modules/insight/canvas" }
 contracts = { path = "crates/domain/core/contracts" }
+sleep = { path = "crates/domain/core/sleep" }
 agents = { path = "crates/domain/ai/agents" }
 acp = { path = "crates/domain/ai/acp" }
 mcp = { path = "crates/domain/ai/mcp" }
@@ -336,6 +339,7 @@ task-manager = { path = "crates/modules/tools/task-manager" }
 relax = { path = "crates/modules/tools/relax" }
 focus-mode = { path = "crates/modules/tools/focus" }
 keep-awake = { path = "crates/modules/tools/keep-awake" }
+sleep-timer = { path = "crates/modules/tools/sleep" }
 profiler = { path = "crates/modules/tools/profiler" }
 updates = { path = "crates/modules/tools/updates" }
 web-engine-install = { path = "crates/modules/tools/web-engine-install" }

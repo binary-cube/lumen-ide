@@ -192,6 +192,10 @@ pub trait Renderer {
     /// it's shown again, is drawn whole at the window's size (plan 76f).
     fn release_hidden(&mut self) {}
 
+    /// The copies asked for ([`crate::ImageData::copy_of`]: a page's frame kept as its view
+    /// falls asleep) made now, with no frame drawn (a covered window draws none).
+    fn make_pending_copies(&self) {}
+
     /// The window lost the focus (it rarely draws now): what's kept only to redraw it
     /// quickly — the last frame, the blurs, each as large as the window — is given back; the
     /// next frame is drawn whole and keeps them again.

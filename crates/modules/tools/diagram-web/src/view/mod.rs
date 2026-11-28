@@ -8,7 +8,10 @@
 //! writes, our page written into the install); its results, and the project's events about
 //! the file (written by someone, renamed), come back through one inbox that wakes the app.
 //! The theme's colors are worked out once per palette; a theme changed while the tab is
-//! open makes the page anew (nothing unsaved), or after the next write.
+//! open makes the page anew (nothing unsaved), or after the next write. Left alone, it may
+//! sleep ([`asleep`]).
+
+mod asleep;
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender};
@@ -29,6 +32,9 @@ use crate::install::{self, Status};
 use crate::protocol::{Effect, Session};
 use crate::theme::{self, Theme};
 use crate::{file, package, page};
+
+pub use asleep::DIAGRAMS;
+use asleep::{LastChange, Slumber};
 
 /// The extension its tabs are opened by.
 pub const EXTENSION: &str = "view-diagram-web";
@@ -131,6 +137,12 @@ pub struct DiagramWebView {
     notifications: Vec<Notification>,
     buttons: Vec<(Rect, Button)>,
     hovered: Option<Button>,
+    /// Its part of the sleeping (a tab with a file: [`Self::in_tab`]).
+    sleep: Option<ui_components::sleep::SleepPart>,
+    /// When the diagram last changed: how long it's been quiet.
+    quiet: Arc<LastChange>,
+    /// Where its page stands as it sleeps.
+    slumber: Slumber,
 }
 
 impl Default for DiagramWebView {
@@ -165,6 +177,9 @@ impl Default for DiagramWebView {
             notifications: Vec::new(),
             buttons: Vec::new(),
             hovered: None,
+            sleep: None,
+            quiet: Arc::default(),
+            slumber: Slumber::Awake,
         }
     }
 }
@@ -257,6 +272,11 @@ impl DiagramWebView {
 
     /// The page made anew (another id): it asks for its configuration and the file again.
     fn new_page(&mut self) {
+        // Made anew while falling asleep (a theme changed): it stays awake (the picture asked
+        // of the old page would never come).
+        if matches!(self.slumber, Slumber::Freezing(_)) {
+            self.slumber = Slumber::Awake;
+        }
         self.page_id = kernel::id::new_uuid();
         self.page = PageState::Opening;
         self.session.new_page();
@@ -271,7 +291,11 @@ impl DiagramWebView {
         for effect in effects {
             match effect {
                 Effect::Send(text) => self.sends.push((self.page_id, text)),
-                Effect::Write(xml) => self.write(xml),
+                Effect::Write(xml) => {
+                    self.quiet.now();
+                    self.write(xml);
+                }
+                Effect::Touched => self.touch(),
                 Effect::Close => self.actions.push(ViewerAction::Close),
                 Effect::OpenLink(url) => self.actions.push(ViewerAction::OpenLink(url)),
                 Effect::SaveAs { name, bytes } => {
@@ -385,6 +409,7 @@ impl DiagramWebView {
                             self.apply(effects);
                         }
                         Ok(Some(xml)) => {
+                            self.quiet.now();
                             let effects = self.session.disk_changed(xml);
                             self.apply(effects);
                         }
@@ -667,9 +692,23 @@ impl Viewer for DiagramWebView {
                 install::follow(waker);
             }
         }
+        // What wakes its window, for the sleeping's orders (taken at once, not at an unrelated
+        // poll); with the keyboard, what "Put Tab to Sleep" acts on.
+        if let Some(part) = &self.sleep {
+            if let Some(waker) = &ctx.waker {
+                part.give_waker(waker);
+            }
+            part.focus(ctx.focused);
+        }
         self.follow_theme(ctx.palette);
         self.follow_install();
         self.drain();
+        // Asleep or coming back: its picture and its card in its page's place.
+        if self.paint_asleep(&mut ctx) {
+            self.area = ctx.bounds;
+            self.buttons.clear();
+            return;
+        }
         if self.page_ready() {
             self.area = ctx.bounds;
             self.buttons.clear();
@@ -706,11 +745,13 @@ impl Viewer for DiagramWebView {
 
     fn web_page(&self) -> Option<WebPage> {
         let dir = self.page_dir.as_ref()?;
+        let freeze = self.page_wanted()?;
         (self.page_ready() && self.area.size.height > 0.0 && self.area.size.width > 0.0).then(
             || WebPage {
                 id: self.page_id,
                 source: WebSource::App { root: Arc::clone(dir), entry: Arc::clone(&self.entry) },
                 area: self.area,
+                freeze,
             },
         )
     }
@@ -721,6 +762,11 @@ impl Viewer for DiagramWebView {
         }
         match event {
             WebEvent::Message(text) => {
+                // A draw.io starting in a page that was drawn (made again after its tab was
+                // hidden a while): its loader under it until it's drawn again.
+                if self.page == PageState::Shown && text.contains(r#""event":"configure""#) {
+                    self.page = PageState::Opening;
+                }
                 let effects = self.session.page_message(&text);
                 tracing::debug!(bytes = text.len(), answers = effects.len(), "draw.io said");
                 self.apply(effects);
@@ -729,8 +775,23 @@ impl Viewer for DiagramWebView {
                 self.actions.push(ViewerAction::OpenLink(url));
             }
             WebEvent::OpenLink(_) => {}
-            WebEvent::Shown => self.page = PageState::Shown,
-            WebEvent::Failed => self.page = PageState::Failed,
+            WebEvent::Shown => {
+                self.page = PageState::Shown;
+                self.page_shown();
+            }
+            WebEvent::Failed => {
+                self.page = PageState::Failed;
+                // Coming back and it can't be made: no longer shown as coming back.
+                if let Slumber::Waking(picture) = std::mem::take(&mut self.slumber) {
+                    if let Some(picture) = picture {
+                        picture.release();
+                    }
+                    if let Some(part) = &mut self.sleep {
+                        part.waking(false);
+                    }
+                }
+            }
+            WebEvent::Picture(picture) => self.got_picture(picture),
         }
     }
 
@@ -743,10 +804,57 @@ impl Viewer for DiagramWebView {
 
     fn poll(&mut self) -> bool {
         let installed = self.follow_install();
-        self.drain() | installed | !self.sends.is_empty() | !self.actions.is_empty()
+        let changed = self.drain() | installed;
+        let slept = self.take_sleep_orders();
+        self.tell_veto();
+        changed | slept | !self.sends.is_empty() | !self.actions.is_empty()
+    }
+
+    /// An order to sleep or to wake waits (given while it's unseen): polled.
+    fn wants_poll(&self) -> bool {
+        self.sleep.as_ref().is_some_and(ui_components::sleep::SleepPart::order_waits)
+    }
+
+    /// Its tab chosen: touched (its time left alone starts again). Asleep, it stays so: only
+    /// a key, a click in it or "Wake Up" wakes it.
+    fn set_active(&mut self, active: bool) {
+        if active {
+            self.touch();
+        }
+    }
+
+    /// Asleep, the keys are its own (any wakes it); else its page's.
+    fn takes_keyboard(&self) -> bool {
+        matches!(self.slumber, Slumber::Asleep { .. })
+    }
+
+    fn wants_text(&self) -> bool {
+        self.takes_keyboard()
+    }
+
+    fn key_press(&mut self, _key: ui_components::KeyPress) -> bool {
+        self.wake_by_user()
+    }
+
+    fn text_input(&mut self, _text: &str) -> bool {
+        self.wake_by_user()
+    }
+
+    /// Its sleeping's rows ("Put to Sleep"; asleep, "Wake Up").
+    fn tab_menu(&self) -> Vec<ui_components::ViewMenuEntry> {
+        self.sleep_menu()
+    }
+
+    /// "Wake Up" brings its tab to the front first: shown, it comes back.
+    fn tab_row_activates(&self, id: &str) -> bool {
+        id == ui_components::sleep::WAKE_ACTION
     }
 
     fn pointer_down(&mut self, p: Point, _clicks: u32, _mods: PressMods) -> Option<ViewerAction> {
+        // Asleep: a click wakes it.
+        if self.wake_by_user() {
+            return None;
+        }
         match self.button_at(p)? {
             Button::Download | Button::Retry => install::start(),
             Button::Stop => install::stop(),
@@ -777,15 +885,20 @@ impl Viewer for DiagramWebView {
 
     fn is_loading(&self) -> bool {
         // Only an unknown amount sweeps (the download wakes it as it goes); the page loading
-        // turns the loader under it until it's drawn.
+        // turns the loader under it until it's drawn (coming back from a sleep: its card,
+        // still).
         match self.page_ready() {
-            true => self.page == PageState::Opening && !self.hidden,
+            true => self.page == PageState::Opening && !self.hidden && !self.sleeping(),
             false => matches!(self.status, Status::Unpacking | Status::Looking),
         }
     }
 
-    /// The Save dialog's answer for an export: written there on the worker.
+    /// The Save dialog's answer for an export: written there on the worker; "Put to Sleep",
+    /// "Wake Up".
     fn command(&mut self, id: &str) -> bool {
+        if let Some(done) = self.sleep_command(id) {
+            return done;
+        }
         let Some(path) = id.strip_prefix("picked-save:") else { return false };
         let Some(bytes) = self.export.take() else { return false };
         let path = PathBuf::from(path);
@@ -813,6 +926,11 @@ impl Viewer for DiagramWebView {
     /// The next look at the file, while its tab is seen (a look happens as it paints: a
     /// hidden tab's would be due forever, a frame asked for at every turn).
     fn frame_deadline(&self) -> Option<std::time::Instant> {
+        // Asleep, its picture's copy not made yet: a frame (the renderer makes it then; its
+        // page is let go at the one after).
+        if self.copy_waits() {
+            return Some(std::time::Instant::now());
+        }
         (self.read_once && !self.hidden)
             .then(|| self.looked_at.map_or_else(std::time::Instant::now, |t| t + LOOK_EVERY))
     }
@@ -847,7 +965,8 @@ impl Viewer for DiagramWebView {
     }
 
     fn tab_icon(&self) -> Option<&'static str> {
-        Some("file-pen")
+        let asleep = matches!(self.slumber, Slumber::Asleep { .. });
+        Some(if asleep { ui_components::sleep::ASLEEP_ICON } else { "file-pen" })
     }
 
     fn memory(&self) -> ViewMemory {
@@ -860,6 +979,12 @@ impl Viewer for DiagramWebView {
 /// on the worker, never lost (a write under way finishes on its own).
 impl Drop for DiagramWebView {
     fn drop(&mut self) {
+        // Its picture (kept on the GPU till it's let go), let go with it.
+        if let Slumber::Asleep { picture: Some(picture) } | Slumber::Waking(Some(picture)) =
+            &self.slumber
+        {
+            picture.release();
+        }
         if !self.session.dirty() {
             return;
         }
@@ -874,5 +999,5 @@ impl Drop for DiagramWebView {
 }
 
 #[cfg(test)]
-#[path = "../tests/unit/view.rs"]
+#[path = "../../tests/unit/view.rs"]
 mod tests;

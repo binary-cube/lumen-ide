@@ -1,67 +1,126 @@
-//! Programs other modules run in a terminal (an agent's session), watched while they live:
-//! what each holds (its process with everything it started, measured only while someone asks)
-//! and, when the user chose it, put to sleep once untouched and idle — the program stopped, its
-//! tab kept with its last screen, started again the way its owner says once the user wakes it.
+//! The terminal's own part of the sleeping (plan 101): programs other modules run in a
+//! terminal (an agent's session) are a kind of view that can sleep ([`SESSIONS`]); when and
+//! how often is the sleeping module's, never this one's. What is the terminal's:
 //!
-//! A thread of its own (`terminal-watch`) runs while some terminal is known by a key: every
-//! [`TICK`] it measures (if asked within [`ASKED_WITHIN`]), every [`SLEEP_TICKS`] ticks it looks
-//! for one to put to sleep and wakes its project's window. The window's poll ([`Sleeper`])
-//! asks the owner how the program resumes (`ResumeLaunch`: nobody answers, it stays awake)
-//! and leaves the order in the terminal's slot; its view stops the program at its own poll.
-//!
-//! Never asleep (each checked, else it stays awake): touched within the idle time (a key, a
-//! click, the wheel, a paste, its tab chosen: on screen or not), its program wrote within it,
-//! its owner's session was written within it (its agent at work), text typed and not sent,
-//! its program ended, already asleep. Why it stays awake is in the log (`debug`), as it
-//! changes.
+//! - what keeps a session awake ([`veto`]): its program ended, nobody can resume it (or not
+//!   yet: it's starting), something typed isn't sent, its owner's record was written lately
+//!   (a turn under way: told by `ResumeLaunch` asked with the idle time);
+//! - how it resumes, learned from its owner ([`learn_resumes`], `ResumeLaunch`) at each
+//!   window's poll on its project's clock, and every second while a session starts (a
+//!   thread of its own, `terminal-start`, wakes those windows);
+//! - what each holds (its process with everything it started), measured on a thread
+//!   (`terminal-measure`) only while someone asked lately.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use contracts::terminal::ResumeLaunch;
+use ui_components::sleep::{self as views, SleepKind, SleepTexts, Veto};
 
-use crate::view::{Asked, asked, keyed};
+use crate::view::{Asked, NameSlot, asked, keyed};
 
-/// How often the terminals are looked at.
-const TICK: Duration = Duration::from_secs(10);
-/// Every so many ticks, whether one should sleep (a minute: idle times are minutes long).
-const SLEEP_TICKS: u32 = 6;
-/// Memory is measured only while someone asked for it this recently (a panel showing it).
-const ASKED_WITHIN: Duration = Duration::from_secs(30);
+/// Programs other modules run in a terminal (an agent's session), as a kind of view that can
+/// sleep: their hint, their words.
+pub(crate) static SESSIONS: SleepKind = SleepKind {
+    id: "agent-session",
+    viewer: crate::VIEWER,
+    hint: Some(crate::SLEEP_HINT),
+    texts: &TEXTS,
+};
+
+static TEXTS: SleepTexts = SleepTexts {
+    asleep_title: "terminal.asleep_title",
+    resuming: "terminal.resuming",
+    by_hand: "terminal.asleep_by_hand",
+    idle: "terminal.asleep_idle",
+    freed: "terminal.asleep_freed",
+    wake_up: "terminal.wake_up",
+    how: "terminal.asleep_how",
+    sleep_now: "terminal.sleep_now",
+    going_to_sleep: "terminal.going_to_sleep",
+    waking_up: "terminal.waking_up",
+    cant: "terminal.cant_sleep",
+    cant_sleeping: "terminal.cant_sleep_sleeping",
+    cant_waking: "terminal.cant_sleep_waking",
+};
+
+/// Its program ended (not asleep): nothing to put to sleep.
+pub(crate) const ENDED: Veto = Veto {
+    id: "not running",
+    menu: "terminal.sleep_now",
+    refusal: "terminal.cant_sleep",
+    by_hand: true,
+    never: true,
+};
+/// Nobody says how it would come back: it can't sleep.
+pub(crate) const NO_RESUME: Veto = Veto { id: "nobody can resume it", ..ENDED };
+/// Just started: its owner learns how it resumes within a second or two.
+pub(crate) const STARTING: Veto = Veto {
+    id: "starting",
+    menu: "terminal.sleep_now_starting",
+    refusal: "terminal.cant_sleep_starting",
+    by_hand: true,
+    never: false,
+};
+/// Something typed isn't sent yet (it would be lost).
+pub(crate) const TYPED: Veto = Veto {
+    id: "text typed, not sent",
+    menu: "terminal.sleep_now_typed",
+    refusal: "terminal.cant_sleep_typed",
+    by_hand: true,
+    never: false,
+};
+/// Its owner's record was written lately (a turn may run): only the idle sleep waits.
+pub(crate) const OWNER_BUSY: Veto =
+    Veto { id: "its owner is at work", by_hand: false, never: false, ..TYPED };
+
+/// How long a session counts as starting (its owner learning how it resumes, within a second
+/// or two): past that, one still not known can't sleep, and isn't asked about often.
+pub(crate) const STARTING_WITHIN: Duration = Duration::from_secs(10);
+
+/// What of its own keeps the terminal described by `asked` awake now (`None`: nothing).
+pub(crate) fn veto(asked: &Asked, now: Instant) -> Option<Veto> {
+    if !asked.running || asked.pid.is_none() {
+        return Some(ENDED);
+    }
+    if asked.resume.is_none() {
+        let answered = workbench_model::presence::request::<ResumeLaunch>();
+        let fresh =
+            asked.started.is_some_and(|at| now.saturating_duration_since(at) < STARTING_WITHIN);
+        return Some(if answered && fresh { STARTING } else { NO_RESUME });
+    }
+    if asked.typed {
+        return Some(TYPED);
+    }
+    asked.owner_busy.then_some(OWNER_BUSY)
+}
+
+/// The terminal in `slot` tells its sleeping slot what keeps it awake now (its lock let go
+/// first: the slot announces).
+pub(crate) fn tell_veto(slot: &NameSlot) {
+    let (sleeping, veto) = {
+        let asked = asked(slot);
+        (asked.sleeping.clone(), veto(&asked, Instant::now()))
+    };
+    if let Some(sleeping) = sleeping {
+        sleeping.set_veto(veto);
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+// ---------------------------------------------------------------------------------------
+// The windows to wake while a session starts.
 
 /// What wakes each open project's window (the newest asked; a closed one's let go).
 type Wake = Arc<dyn Fn() + Send + Sync>;
 static WAKES: Mutex<Vec<(kernel::ProjectId, Wake)>> = Mutex::new(Vec::new());
-/// What wakes each open window, a project in it or not (by a number of its own): a
-/// terminal of no project is put to sleep by any window's poll.
+/// What wakes each open window, a project in it or not (by a number of its own): a terminal
+/// of no project is followed by any window's poll.
 static WINDOW_WAKES: Mutex<Vec<(u64, Wake)>> = Mutex::new(Vec::new());
-
-/// Each open project's bus: where its terminals say how they stand.
-/// Each kept under a number of its own: a project attached again before its last
-/// attachment ended keeps its new bus when the old one goes.
-static BUSES: Mutex<Vec<(u64, kernel::ProjectId, kernel::EventBus)>> = Mutex::new(Vec::new());
-
-/// `bus` heard as project `project`'s until the guard returned is dropped.
-pub(crate) fn hear(project: kernel::ProjectId, bus: kernel::EventBus) -> kernel::Subscription {
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let id = NEXT.fetch_add(1, Ordering::Relaxed);
-    lock(&BUSES).push((id, project, bus));
-    kernel::Subscription::on_end(move || lock(&BUSES).retain(|(b, ..)| *b != id))
-}
-
-/// `event` published on project `project`'s bus (`None`: a terminal of no project — on every
-/// open project's). The buses are taken out of the lock first: a listener may publish too.
-pub(crate) fn publish<E: kernel::DomainEvent>(project: Option<kernel::ProjectId>, event: &E) {
-    let buses: Vec<kernel::EventBus> = lock(&BUSES)
-        .iter()
-        .filter(|(_, p, _)| project.is_none_or(|q| q == *p))
-        .map(|(.., bus)| bus.clone())
-        .collect();
-    for bus in buses {
-        bus.publish(event);
-    }
-}
 
 /// Window wake `wake` kept until the subscription returned ends (the window closed).
 pub(crate) fn add_window_wake(wake: Wake) -> kernel::Subscription {
@@ -69,56 +128,6 @@ pub(crate) fn add_window_wake(wake: Wake) -> kernel::Subscription {
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
     lock(&WINDOW_WAKES).push((id, wake));
     kernel::Subscription::on_end(move || lock(&WINDOW_WAKES).retain(|(w, _)| *w != id))
-}
-/// The thread runs.
-static RUNNING: AtomicBool = AtomicBool::new(false);
-/// The projects with a terminal to put to sleep (`None`: one of no project's), found by the
-/// thread: each window's poll takes its own.
-static DUE: Mutex<Vec<Option<kernel::ProjectId>>> = Mutex::new(Vec::new());
-/// When a terminal's memory was last asked for.
-static ASKED: Mutex<Option<Instant>> = Mutex::new(None);
-
-fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    m.lock().unwrap_or_else(PoisonError::into_inner)
-}
-
-/// Whether the terminal described by `asked` should be put to sleep now, after `idle`
-/// untouched (no key, click, wheel, paste, its tab not chosen: on screen or not) and quiet:
-/// conservative, any doubt keeps it awake.
-pub(crate) fn sleepy(asked: &Asked, idle: Duration, now: Instant) -> bool {
-    awake_because(asked, idle, now).is_none()
-}
-
-/// What keeps the terminal described by `asked` awake now (`None`: nothing, it may sleep):
-/// the first of its reasons, as the log names it.
-pub(crate) fn awake_because(asked: &Asked, idle: Duration, now: Instant) -> Option<&'static str> {
-    let Some(touched) = asked.touched else { return Some("never started") };
-    let untouched = now.saturating_duration_since(touched) >= idle;
-    let quiet = asked.watch.as_ref().and_then(|w| w.quiet_for()).is_some_and(|q| q >= idle);
-    let reason = if asked.asleep {
-        "asleep"
-    } else if asked.sleep.is_some() {
-        "ordered to sleep"
-    } else if !asked.running {
-        "not running"
-    } else if asked.pid.is_none() {
-        "no process"
-    } else if asked.typed {
-        "text typed, not sent"
-    } else if !untouched {
-        "used lately"
-    } else if !quiet {
-        "output lately"
-    } else {
-        return None;
-    };
-    Some(reason)
-}
-
-/// Someone wants to know what the terminals hold: measured for a while from now on.
-pub(crate) fn memory_asked() {
-    *lock(&ASKED) = Some(Instant::now());
-    ensure_running();
 }
 
 /// What wakes project `project`'s window (as it attaches; until [`unset_wake`]).
@@ -128,149 +137,14 @@ pub(crate) fn set_wake(project: kernel::ProjectId, wake: Wake) {
     wakes.push((project, wake));
 }
 
-/// Project `project` closed: what's kept for it (sleeps due, when it last asked how its
-/// terminals resume) let go.
-pub(crate) fn forget_project(project: kernel::ProjectId) {
-    lock(&DUE).retain(|p| *p != Some(project));
-    lock(&RESUMES_ASKED).retain(|(p, _)| *p != Some(project));
-}
-
 /// Project `project`'s window closed: not woken any more.
 pub(crate) fn unset_wake(project: kernel::ProjectId) {
     lock(&WAKES).retain(|(p, _)| *p != project);
 }
 
-/// The watching thread started, if it isn't running and some terminal is known by a key.
-pub(crate) fn ensure_running() {
-    if !needed() || RUNNING.swap(true, Ordering::AcqRel) {
-        return;
-    }
-    // A thread of its own: it waits between looks for as long as it's needed (a pool's
-    // would be held all that while), and ends when it isn't.
-    #[allow(clippy::disallowed_methods)]
-    let spawned = std::thread::Builder::new().name("terminal-watch".into()).spawn(run);
-    if let Err(e) = spawned {
-        RUNNING.store(false, Ordering::Release);
-        tracing::warn!(error = %e, "can't start the terminals' watching thread");
-    }
-}
-
-/// Whether the watching thread has work: some keyed terminal lives, and sleeping is on or
-/// someone asked lately what they hold (else nothing wakes it every tick).
-pub(crate) fn watch_needed(
-    keyed: bool,
-    sleeping: bool,
-    asked: Option<Instant>,
-    now: Instant,
-) -> bool {
-    let asked_lately = asked.is_some_and(|at| now.saturating_duration_since(at) < ASKED_WITHIN);
-    keyed && (sleeping || asked_lately)
-}
-
-/// [`watch_needed`] now.
-fn needed() -> bool {
-    let sleeping = crate::config::current().sleep_after.is_some();
-    watch_needed(crate::view::any_keyed(), sleeping, *lock(&ASKED), Instant::now())
-}
-
-/// The thread's loop: while it's needed ([`watch_needed`]); started again when it is
-/// (a keyed terminal opened, sleeping turned on, its memory asked).
-fn run() {
-    let mut trees = process_stats::ProcessTrees::default();
-    let mut ticks = 0u32;
-    loop {
-        std::thread::sleep(TICK);
-        if !needed() {
-            RUNNING.store(false, Ordering::Release);
-            // Needed again meanwhile: go on (else a new thread is started by it).
-            if !needed() || RUNNING.swap(true, Ordering::AcqRel) {
-                return;
-            }
-        }
-        ticks = ticks.wrapping_add(1);
-        let asked_lately = lock(&ASKED).is_some_and(|at| at.elapsed() < ASKED_WITHIN);
-        if asked_lately {
-            measure(&mut trees);
-        }
-        if ticks.is_multiple_of(SLEEP_TICKS) {
-            look_for_sleepers();
-        }
-    }
-}
-
-/// Each keyed terminal's program measured with everything it started (its slot keeps it).
-fn measure(trees: &mut process_stats::ProcessTrees) {
-    let slots = keyed();
-    let pids: Vec<u32> = slots.iter().filter_map(|(_, s)| asked(s).pid).collect();
-    let used = trees.sample(&pids);
-    for (key, slot) in &slots {
-        {
-            let mut asked = asked(slot);
-            asked.memory = asked.pid.and_then(|pid| used.get(&pid)).map(|u| u.memory);
-        }
-        // Said on its bus from this thread (its listeners only keep it and wake a window).
-        crate::view::announce(slot, key);
-    }
-}
-
-/// The windows of the projects with a terminal to put to sleep woken (their poll asks how
-/// each resumes).
-fn look_for_sleepers() {
-    // Orders never taken (no view polled them in time): let go, the slot free again.
-    for (key, slot) in keyed() {
-        {
-            let mut asked = asked(&slot);
-            if !asked
-                .sleep
-                .as_ref()
-                .is_some_and(|(_, at)| at.elapsed() >= crate::view::SLEEP_ORDER_FRESH)
-            {
-                continue;
-            }
-            asked.sleep = None;
-            asked.by_hand = false;
-        }
-        crate::view::announce(&slot, &key);
-    }
-    let Some(idle) = crate::config::current().sleep_after else { return };
-    let now = Instant::now();
-    let projects: Vec<Option<kernel::ProjectId>> = keyed()
-        .iter()
-        .filter_map(|(key, slot)| {
-            let (awake, project) = {
-                let asked = asked(slot);
-                (awake_because(&asked, idle, now), asked.project)
-            };
-            tell_awake(slot, key, awake);
-            awake.is_none().then_some(project)
-        })
-        .collect();
-    if projects.is_empty() {
-        return;
-    }
-    {
-        let mut due = lock(&DUE);
-        for project in &projects {
-            if !due.contains(project) {
-                due.push(*project);
-            }
-        }
-    }
-    wake_projects(&projects);
-}
-
-/// Why the terminal in `slot`, known by `key`, stays awake (`None`: it may sleep), written to
-/// the log only when that changed since it last was (the lock let go first).
-fn tell_awake(slot: &crate::view::NameSlot, key: &str, awake: Option<&'static str>) {
-    let changed = {
-        let mut asked = asked(slot);
-        let changed = asked.awake != Some(awake);
-        asked.awake = Some(awake);
-        changed
-    };
-    if changed {
-        tracing::debug!(key, awake = awake.unwrap_or("no: may sleep"), "a session's sleep");
-    }
+/// Project `project` closed: when it last asked how its terminals resume, let go.
+pub(crate) fn forget_project(project: kernel::ProjectId) {
+    lock(&RESUMES_ASKED).retain(|(p, _)| *p != Some(project));
 }
 
 /// The windows of `projects` woken (`None`: a terminal of no project — every window, a
@@ -289,63 +163,77 @@ pub(crate) fn wake_projects(projects: &[Option<kernel::ProjectId>]) {
     }
 }
 
-/// The terminals of the window's project (one without a project: any window's) to put to
-/// sleep, each asked of its owner (how it resumes) and, answered, given the order.
-pub(crate) fn put_to_sleep(host: &mut dyn workbench_model::WorkbenchHost) -> bool {
-    let project = host.project_id();
-    {
-        let mut due = lock(&DUE);
-        if due.is_empty() {
-            return false;
-        }
-        let before = due.len();
-        due.retain(|p| p.is_some_and(|p| Some(p) != project));
-        if due.len() == before {
-            return false;
-        }
-    }
-    let Some(idle) = crate::config::current().sleep_after else { return false };
-    let now = Instant::now();
-    let due: Vec<(String, Arc<crate::view::NameSlot>)> = keyed()
-        .into_iter()
-        .filter(|(_, slot)| {
-            let asked = asked(slot);
-            asked.project.is_none_or(|p| Some(p) == project) && sleepy(&asked, idle, now)
-        })
-        .collect();
-    let mut any = false;
-    for (key, slot) in due {
-        // Asked outside the slot's lock (it reaches another module).
-        let Some(Some(launch)) = host.ask(ResumeLaunch { key: key.clone(), idle }) else {
-            tell_awake(&slot, &key, Some("its owner can't resume it now"));
-            continue;
-        };
-        let ordered = {
-            let mut asked = asked(&slot);
-            // Looked at again: touched or typed into meanwhile, it stays awake.
-            let now = Instant::now();
-            let sleepy = sleepy(&asked, idle, now);
-            if sleepy {
-                asked.sleep = Some((launch, now));
-            }
-            sleepy
-        };
-        if ordered {
-            crate::view::announce(&slot, &key);
-            any = true;
-        }
-    }
-    any
+// ---------------------------------------------------------------------------------------
+// What each session holds: measured while someone asked lately.
+
+/// How often what they hold is measured, and for how long after someone asked.
+const MEASURE_EVERY: Duration = Duration::from_secs(10);
+const ASKED_WITHIN: Duration = Duration::from_secs(30);
+/// The measuring thread runs.
+static MEASURING: AtomicBool = AtomicBool::new(false);
+
+/// Whether measuring has work: some keyed terminal lives and someone asked lately.
+fn measure_needed() -> bool {
+    crate::view::any_keyed() && views::memory_wanted(ASKED_WITHIN)
 }
 
+/// The measuring thread started, if it's needed and not running.
+pub(crate) fn ensure_measuring() {
+    if !measure_needed() || MEASURING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    // A thread of its own: it waits between measures for as long as it's needed.
+    #[allow(clippy::disallowed_methods)]
+    let spawned = std::thread::Builder::new().name("terminal-measure".into()).spawn(measuring);
+    if let Err(e) = spawned {
+        MEASURING.store(false, Ordering::Release);
+        tracing::warn!(error = %e, "can't start the terminals' measuring thread");
+    }
+}
+
+/// The measuring loop: at once, then every [`MEASURE_EVERY`] while it's needed.
+fn measuring() {
+    let mut trees = process_stats::ProcessTrees::default();
+    loop {
+        measure(&mut trees);
+        std::thread::sleep(MEASURE_EVERY);
+        if !measure_needed() {
+            MEASURING.store(false, Ordering::Release);
+            // Needed again meanwhile: go on (else a new thread is started by it).
+            if !measure_needed() || MEASURING.swap(true, Ordering::AcqRel) {
+                return;
+            }
+        }
+    }
+}
+
+/// Each keyed terminal's program measured with everything it started, told to its slot.
+fn measure(trees: &mut process_stats::ProcessTrees) {
+    let slots = keyed();
+    let pids: Vec<u32> = slots.iter().filter_map(|(_, s)| asked(s).pid).collect();
+    let used = trees.sample(&pids);
+    for (_, slot) in &slots {
+        let (sleeping, memory) = {
+            let asked = asked(slot);
+            (asked.sleeping.clone(), asked.pid.and_then(|pid| used.get(&pid)).map(|u| u.memory))
+        };
+        if let Some(sleeping) = sleeping {
+            sleeping.set_memory(memory);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------------------
+// How each session resumes, learned from its owner.
+
 /// How often the keyed terminals' owners are asked how they resume (what the menus offer),
-/// and how often while one runs not knowing it yet (a session just started: its owner
-/// learns its id within a second or two, the menus follow then).
+/// and how often while one runs not knowing it yet (a session just started: its owner learns
+/// its id within a second or two, the menus follow then).
 const RESUMES_EVERY: Duration = Duration::from_secs(5);
 const RESUMES_SOON: Duration = Duration::from_secs(1);
-/// How much earlier than [`RESUMES_SOON`] a window may ask again: its poll comes a moment
-/// after the wake that called it, so a second's wakes give polls a little under or over a
-/// second apart (without it, every other one would be skipped).
+/// How much earlier than [`RESUMES_SOON`] a window may ask again: its poll comes a moment after
+/// the wake that called it, so a second's wakes give polls a little under or over a second
+/// apart (without it, every other one would be skipped).
 const RESUMES_SLACK: Duration = Duration::from_millis(200);
 /// When each project's window last asked (`None`: terminals of no project).
 type ResumesAsked = Vec<(Option<kernel::ProjectId>, Instant)>;
@@ -387,17 +275,18 @@ pub(crate) fn note_resumes_asked(
 
 /// The keyed terminals just started, their owner not having said yet how they resume: each
 /// with its project and until when it's followed ([`STARTING_WITHIN`] after its start).
-type Starting = Vec<(std::sync::Weak<crate::view::NameSlot>, Option<kernel::ProjectId>, Instant)>;
-static STARTING: Mutex<Starting> = Mutex::new(Vec::new());
+type Starting = Vec<(std::sync::Weak<NameSlot>, Option<kernel::ProjectId>, Instant)>;
+static STARTING_LIST: Mutex<Starting> = Mutex::new(Vec::new());
 /// The thread waking their windows runs.
 static STARTING_RUNS: AtomicBool = AtomicBool::new(false);
 
 /// A keyed terminal of `project` just started: its window woken every [`RESUMES_SOON`] while
 /// it's starting (its poll asks how it resumes, the menus follow), even a quiet one that
-/// nothing else wakes — for [`STARTING_WITHIN`] at most, by a thread that ends with the last.
-pub(crate) fn follow_start(slot: &Arc<crate::view::NameSlot>, project: Option<kernel::ProjectId>) {
-    let until = Instant::now() + crate::view::STARTING_WITHIN;
-    lock(&STARTING).push((Arc::downgrade(slot), project, until));
+/// nothing else wakes — for [`STARTING_WITHIN`] at most (and once more after, so its menus
+/// stop saying "starting"), by a thread that ends with the last.
+pub(crate) fn follow_start(slot: &Arc<NameSlot>, project: Option<kernel::ProjectId>) {
+    let until = Instant::now() + STARTING_WITHIN;
+    lock(&STARTING_LIST).push((Arc::downgrade(slot), project, until));
     if STARTING_RUNS.swap(true, Ordering::AcqRel) {
         return;
     }
@@ -410,19 +299,28 @@ pub(crate) fn follow_start(slot: &Arc<crate::view::NameSlot>, project: Option<ke
     }
 }
 
-/// The terminals still starting kept (those known, gone or past their time let go), and
-/// the projects they're in.
+/// Whether the terminal described by `asked` is starting: running, its owner not having said
+/// yet how it resumes, within [`STARTING_WITHIN`] of its start.
+fn starting(asked: &Asked, now: Instant) -> bool {
+    veto(asked, now) == Some(STARTING)
+}
+
+/// The terminals still starting kept (those known, gone or past their time let go: one past
+/// its time told what keeps it awake now, no longer "starting"), and their projects.
 pub(crate) fn still_starting(list: &mut Starting, now: Instant) -> Vec<Option<kernel::ProjectId>> {
-    use contracts::terminal::CanSleep;
-    list.retain(|(slot, _, until)| {
-        now < *until && slot.upgrade().is_some_and(|s| asked(&s).can_sleep() == CanSleep::Starting)
-    });
     let mut projects: Vec<Option<kernel::ProjectId>> = Vec::new();
-    for (_, project, _) in list.iter() {
-        if !projects.contains(project) {
+    list.retain(|(slot, project, until)| {
+        let Some(slot) = slot.upgrade() else { return false };
+        if now >= *until {
+            tell_veto(&slot);
+            return false;
+        }
+        let keep = starting(&asked(&slot), now);
+        if keep && !projects.contains(project) {
             projects.push(*project);
         }
-    }
+        keep
+    });
     projects
 }
 
@@ -432,83 +330,94 @@ fn wake_starting() {
     loop {
         std::thread::sleep(RESUMES_SOON);
         // Taken out and looked at without the list's lock (each slot has its own).
-        let mut list = std::mem::take(&mut *lock(&STARTING));
+        let mut list = std::mem::take(&mut *lock(&STARTING_LIST));
         let projects = still_starting(&mut list, Instant::now());
-        {
-            let mut kept = lock(&STARTING);
+        let left = {
+            let mut kept = lock(&STARTING_LIST);
             // Started meanwhile: kept with them.
             list.append(&mut kept);
             *kept = list;
-        }
+            !kept.is_empty()
+        };
         if !projects.is_empty() {
             wake_projects(&projects);
+        }
+        if left {
             continue;
         }
         STARTING_RUNS.store(false, Ordering::Release);
         // One started meanwhile: go on (else a new thread is started by it).
-        if lock(&STARTING).is_empty() || STARTING_RUNS.swap(true, Ordering::AcqRel) {
+        if lock(&STARTING_LIST).is_empty() || STARTING_RUNS.swap(true, Ordering::AcqRel) {
             return;
         }
     }
 }
 
-/// Each running keyed terminal of the window's project told how it resumes, as its owner
-/// says now (asked off the menus, which read only this; nobody answers: it can't sleep).
+/// Each running keyed terminal of the window's project told how it resumes, as its owner says
+/// now (asked off the menus, which read only this; nobody answers: it can't sleep), and
+/// whether its owner is at work (asked again with the idle time, while sleeping is on).
 fn learn_resumes(host: &mut dyn workbench_model::WorkbenchHost) {
-    let project = host.project_id();
-    // Some terminal of its project is starting, not knowing how it resumes yet (memory
-    // only; a short while, then it's asked at the usual pace).
-    let unknown = || {
-        keyed().iter().any(|(_, slot)| {
-            let asked = asked(slot);
-            asked.can_sleep() == contracts::terminal::CanSleep::Starting
-                && asked.project.is_none_or(|p| Some(p) == project)
-        })
-    };
     if !crate::view::any_keyed() {
         return;
     }
+    let project = host.project_id();
+    let now = Instant::now();
+    // Some terminal of its project is starting (memory only; a short while, then it's asked
+    // at the usual pace).
+    let unknown = || {
+        keyed().iter().any(|(_, slot)| {
+            let asked = asked(slot);
+            asked.project.is_none_or(|p| Some(p) == project) && starting(&asked, now)
+        })
+    };
     // When it last asked, read and let go: deciding looks at the terminals (their locks),
     // never under this one.
-    let now = Instant::now();
     let last = resumes_asked_at(&lock(&RESUMES_ASKED), project);
     if !resumes_due(last, now, unknown) {
         return;
     }
     note_resumes_asked(&mut lock(&RESUMES_ASKED), project, now);
+    let idle = views::idle_for(SESSIONS.id);
     for (key, slot) in keyed() {
-        let running = {
+        let ours = {
             let asked = asked(&slot);
             asked.pid.is_some() && asked.project.is_none_or(|p| Some(p) == project)
         };
-        if !running {
+        if !ours {
             continue;
         }
         // Asked outside the slot's lock (it reaches another module).
         let resume = host.ask(ResumeLaunch { key: key.clone(), idle: Duration::ZERO }).flatten();
-        asked(&slot).resume = resume;
-        crate::view::announce(&slot, &key);
+        let owner_busy = match idle {
+            Some(idle) if resume.is_some() => {
+                host.ask(ResumeLaunch { key: key.clone(), idle }).flatten().is_none()
+            }
+            _ => false,
+        };
+        {
+            let mut asked = asked(&slot);
+            asked.resume = resume;
+            asked.owner_busy = owner_busy;
+        }
+        tell_veto(&slot);
     }
 }
 
-/// The terminal's part of each window's poll: put to sleep what's due (see the module).
+/// The terminal's part of each window's poll: how its sessions resume, learned; their
+/// memory measured while someone shows it.
 #[derive(Debug)]
 pub(crate) struct Sleeper;
 
 impl workbench_model::ProjectService for Sleeper {
     fn attach(&self, project: &workbench_model::ProjectContext<'_>) -> Vec<kernel::Subscription> {
         set_wake(project.id, Arc::clone(&project.wake));
-        let bus = hear(project.id, project.events.clone());
         let (id, root) = (project.id, project.root.to_path_buf());
-        // Closed: not woken any more, its bus and its terminals' history store let go.
-        vec![
-            bus,
-            kernel::Subscription::on_end(move || {
-                unset_wake(id);
-                forget_project(id);
-                crate::spill::release(&root);
-            }),
-        ]
+        // Closed: not woken any more, its terminals' history store let go.
+        vec![kernel::Subscription::on_end(move || {
+            unset_wake(id);
+            forget_project(id);
+            crate::spill::release(&root);
+        })]
     }
 
     /// A window, a project in it or not: woken for a terminal of no project.
@@ -518,7 +427,8 @@ impl workbench_model::ProjectService for Sleeper {
 
     fn poll(&self, host: &mut dyn workbench_model::WorkbenchHost) -> bool {
         learn_resumes(host);
-        put_to_sleep(host)
+        ensure_measuring();
+        false
     }
 }
 

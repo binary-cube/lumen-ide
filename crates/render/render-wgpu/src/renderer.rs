@@ -67,6 +67,10 @@ impl Renderer for WgpuRenderer {
         }
     }
 
+    fn make_pending_copies(&self) {
+        self.ctx.copy_pending(&mut self.ctx.state());
+    }
+
     fn release_hidden(&mut self) {
         if self.hidden_released || self.config.width == 0 || self.config.height == 0 {
             return;

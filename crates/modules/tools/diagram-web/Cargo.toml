@@ -22,11 +22,16 @@ command-model.workspace = true
 files.workspace = true
 pinned-downloads.workspace = true
 serde_json.workspace = true
+# Its own settings (sleeping), declared here.
+settings-model.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
 # The package served from memory, a war made in memory.
 pinned-downloads = { workspace = true, features = ["fake"] }
+# A view painted in a test: its text and icons.
+text-layout.workspace = true
+icons.workspace = true
 
 [lints]
 workspace = true

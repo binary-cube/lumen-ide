@@ -23,6 +23,10 @@ Part of the project's rules: [index](project-conventions.md). Related: [modules]
 - A view's file follows its tab (`Viewer::moved`); its reads are numbered (an older one, or one
   before a save, is let go); a small field with the keys (a number typed, a search) takes the
   edit commands, never the cells under it.
+- What draw.io's page holds beyond the file (its page, zoom, position, selection) is told by
+  our `host.js` and put back on a page made anew (`state::ViewState`); undo goes on past it
+  from what the diagram was (`state::History`, bounded). draw.io's internals are reached only
+  in `host.js`, checked against the pinned package when it's updated.
 - The view, the SVG and the PNG lay out texts with one function (`texts::lay`), so a label breaks
   the same everywhere; the PNG composes the view's own tiles and glyphs on a worker.
 

@@ -503,3 +503,30 @@ mod surfaces {
         unsafe { CFRelease(shared.cast_const()) };
     }
 }
+
+/// A page's frame kept after it goes (a sleeping view's picture): a copy made on the GPU at
+/// the next frame (drawn or not), unchanged by the page's later frames and kept, unshown,
+/// until it's released.
+#[test]
+fn a_copy_of_a_page_s_frame_stays_as_it_was_until_released() {
+    let Ok(mut gpu) = Offscreen::new(PhysicalSize::new(8, 4)) else { return };
+    let importer = gpu.importer();
+    let page = ImageData::live();
+    let red = [0u8, 0, 255, 255].repeat(8 * 4);
+    assert!(importer.try_write(&page, corner_frame(&red)).is_ok());
+    let copy = ImageData::copy_of(&page, 8, 4);
+    // A frame of something else: the copy made all the same.
+    let mut other = Scene::default();
+    other.reset(Rgba::rgb(0x000000));
+    gpu.draw(&other, &mut NoGlyphs, true);
+    assert_eq!(gpu.kept(copy.id, false), Some(true), "made though not drawn");
+    assert_eq!(drawn_at(&mut gpu, &copy), [255, 0, 0, 255], "the page's frame");
+    assert!(copy.copy_source().is_none(), "copied: the page let go of");
+    let blue = [255u8, 0, 0, 255].repeat(8 * 4);
+    assert!(importer.try_write(&page, corner_frame(&blue)).is_ok());
+    page.release();
+    assert_eq!(drawn_at(&mut gpu, &copy), [255, 0, 0, 255], "as it was, the page gone");
+    assert_eq!(gpu.kept(copy.id, false), Some(true), "unshown: kept");
+    copy.release();
+    assert_eq!(gpu.kept(copy.id, false), Some(false), "released: gone");
+}

@@ -137,6 +137,12 @@ struct Pixels {
     unwanted: AtomicBool,
     /// Its colors are premultiplied by their alpha (a web engine's frames), not straight.
     premultiplied: bool,
+    /// The image its texture is copied from on the GPU, at its first upload (taken then):
+    /// a live image's frame kept after its page goes ([`ImageData::copy_of`]).
+    copy_of: Mutex<Option<ImageData>>,
+    /// Kept on the GPU until its owner releases it, drawn or not (a sleeping view's picture:
+    /// nothing could make it again).
+    held: bool,
 }
 
 impl ImageData {
@@ -164,6 +170,51 @@ impl ImageData {
             pixels.data = Mutex::new(None);
         }
         image
+    }
+
+    /// A copy of `source`'s texture as it is now (a live image's last frame), `width` ×
+    /// `height` pixels: made on the GPU at the renderer's next frame, drawn or not (its view
+    /// may be hidden; `source` must still have its frame then — tried again each frame until
+    /// it does, or is released), and kept until it's [released](Self::release).
+    pub fn copy_of(source: &ImageData, width: u32, height: u32) -> Self {
+        let mut image = Self::make(width, height, Vec::new(), true);
+        if let Some(pixels) = Arc::get_mut(&mut image.shared) {
+            pixels.data = Mutex::new(None);
+            pixels.premultiplied = source.is_premultiplied();
+            pixels.copy_of = Mutex::new(Some(source.clone()));
+            pixels.held = true;
+        }
+        pend_copy(image.clone());
+        image
+    }
+
+    /// `pixels` (RGBA8, `width` × `height`) kept on the GPU until [released](Self::release),
+    /// drawn or not (a sleeping view's picture: nothing could make it again); dropped from
+    /// memory once uploaded.
+    pub fn held(width: u32, height: u32, pixels: Vec<u8>) -> Self {
+        let mut image = Self::make(width, height, pixels, true);
+        if let Some(shared) = Arc::get_mut(&mut image.shared) {
+            shared.held = true;
+        }
+        image
+    }
+
+    /// Kept on the GPU until released ([`Self::copy_of`], [`Self::held`]).
+    pub fn is_held(&self) -> bool {
+        self.shared.held
+    }
+
+    /// The image to copy its texture from, while it hasn't been ([`Self::copy_of`]).
+    pub fn copy_source(&self) -> Option<ImageData> {
+        self.shared.copy_of.lock().ok().and_then(|s| s.clone())
+    }
+
+    /// Its texture was copied: the source let go.
+    pub fn copied(&self) {
+        if let Ok(mut source) = self.shared.copy_of.lock() {
+            *source = None;
+        }
+        self.shared.on_gpu.store(true, Ordering::Release);
     }
 
     /// Its colors are premultiplied by their alpha (a live image's), else straight.
@@ -219,6 +270,8 @@ impl ImageData {
                 live_bytes: AtomicU64::new(0),
                 unwanted: AtomicBool::new(false),
                 premultiplied: false,
+                copy_of: Mutex::new(None),
+                held: false,
             }),
         }
     }
@@ -330,6 +383,29 @@ impl ImageData {
         }
     }
 }
+
+/// The copies asked for and not made yet ([`ImageData::copy_of`]): the renderer's next frame
+/// makes them.
+static PENDING_COPIES: Mutex<Vec<ImageData>> = Mutex::new(Vec::new());
+
+/// A copy to make at the renderer's next frame (again: its source had no frame yet).
+pub fn pend_copy(image: ImageData) {
+    PENDING_COPIES.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push(image);
+}
+
+/// The copies to make now, taken (the renderer's, at each frame; cheap when there are none).
+pub fn take_pending_copies() -> Vec<ImageData> {
+    std::mem::take(&mut *PENDING_COPIES.lock().unwrap_or_else(std::sync::PoisonError::into_inner))
+}
+
+/// The same image: the same id (each made is new).
+impl PartialEq for ImageData {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for ImageData {}
 
 impl std::fmt::Debug for ImageData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

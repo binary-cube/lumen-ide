@@ -38,10 +38,6 @@ miniz_oxide.workspace = true
 # What each program run by a module holds (its process tree), measured on a thread.
 process-stats.workspace = true
 
-[dev-dependencies]
-# A test host's repository (none).
-version-control.workspace = true
-
 [features]
 # The app's `--snapshot`: a session's tab put to sleep by hand (`snapshot:asleep`).
 snapshot = []

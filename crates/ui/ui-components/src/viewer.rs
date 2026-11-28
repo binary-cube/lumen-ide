@@ -81,6 +81,9 @@ pub struct WebPage {
     pub source: WebSource,
     /// Where it goes (physical pixels, in the window): set as the view paints.
     pub area: Rect,
+    /// Its picture as it is now is wanted (its view falls asleep): told once, by
+    /// [`WebEvent::Picture`].
+    pub freeze: bool,
 }
 
 /// What a [`WebPage`] shows.
@@ -110,6 +113,10 @@ pub enum WebEvent {
     /// It can't be made (no web engine here, none started): it never shows, and the view
     /// says so in its place instead of a loader.
     Failed,
+    /// Its picture as it was when asked ([`WebPage::freeze`]), at its own size in pixels —
+    /// kept on the GPU until the view releases it; `None`: none could be taken (its page
+    /// already gone, or a system's page that can't).
+    Picture(Option<render_api::ImageData>),
 }
 
 /// What was requested by a click in the viewer.

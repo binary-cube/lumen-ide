@@ -191,11 +191,12 @@ fn a_quiet_followed_session_says_how_it_resumes() {
     assert_eq!(resume_launch("no-such-tab", idle), None);
     // What its terminal said, kept for its row.
     set(now() - 7_200, Some("s-1"));
-    let said = contracts::terminal::TerminalState {
+    let said = contracts::sleep::SleepState {
+        kind: "fake",
         memory: Some(42),
         running: false,
         asleep: true,
-        can_sleep: contracts::terminal::CanSleep::No,
+        can_sleep: contracts::sleep::CanSleep::No,
     };
     set_state(&key, Some(said));
     assert_eq!(state_of("fake-resume", "s-1"), Some(said));
@@ -207,7 +208,7 @@ fn a_quiet_followed_session_says_how_it_resumes() {
 /// out while something typed isn't sent.
 #[test]
 fn a_session_s_sleep_row_follows_its_terminal() {
-    use contracts::terminal::{CanSleep, TerminalState};
+    use contracts::sleep::{CanSleep, SleepState as TerminalState};
     let key = format!("sleep-row-{:x}", kernel::id::new_uuid());
     let id = format!("s-{:x}", kernel::id::new_uuid());
     assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "no tab");
@@ -215,16 +216,34 @@ fn a_session_s_sleep_row_follows_its_terminal() {
     f.agent = "fake";
     lock(&FOLLOWED).push(f);
     assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "nothing said yet");
-    let said = |can_sleep| TerminalState { memory: None, running: true, asleep: false, can_sleep };
+    let said = |can_sleep| TerminalState {
+        kind: "fake",
+        memory: None,
+        running: true,
+        asleep: false,
+        can_sleep,
+    };
     set_state(&key, Some(said(CanSleep::No)));
     assert!(crate::panel::sleep_row_for_tests("fake", &id).is_none(), "it can't");
-    set_state(&key, Some(said(CanSleep::Typed)));
+    let typed = contracts::sleep::Veto {
+        id: "typed",
+        menu: "agents.sleep",
+        refusal: "agents.sleep",
+        by_hand: true,
+        never: false,
+    };
+    set_state(&key, Some(said(CanSleep::NotNow(typed))));
     assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(true), "greyed out");
     set_state(&key, Some(said(CanSleep::Yes)));
     assert_eq!(crate::panel::sleep_row_for_tests("fake", &id), Some(false));
     // Asleep: "Wake Up" in its place.
-    let asleep =
-        TerminalState { memory: None, running: false, asleep: true, can_sleep: CanSleep::No };
+    let asleep = TerminalState {
+        kind: "fake",
+        memory: None,
+        running: false,
+        asleep: true,
+        can_sleep: CanSleep::No,
+    };
     set_state(&key, Some(asleep));
     assert_eq!(crate::panel::wake_row_for_tests("fake", &id), Some(true));
     set_state(&key, Some(said(CanSleep::Yes)));
@@ -252,12 +271,17 @@ fn a_session_s_sleep_row_follows_its_terminal() {
 /// told: asleep stays asleep on its row, never blank until the next ask.
 #[test]
 fn following_a_tab_again_keeps_its_state() {
-    use contracts::terminal::{CanSleep, TerminalState};
+    use contracts::sleep::{CanSleep, SleepState as TerminalState};
     let key = format!("again-{:x}", kernel::id::new_uuid());
     let id = format!("s-{:x}", kernel::id::new_uuid());
     follow(key.clone(), "fake", Some(id.clone()), PathBuf::from("/p"), "Work".into());
-    let asleep =
-        TerminalState { memory: None, running: false, asleep: true, can_sleep: CanSleep::No };
+    let asleep = TerminalState {
+        kind: "fake",
+        memory: None,
+        running: false,
+        asleep: true,
+        can_sleep: CanSleep::No,
+    };
     told(kernel::ProjectId::new(), &key, Some(asleep));
     follow(key.clone(), "fake", Some(id.clone()), PathBuf::from("/p"), "Work".into());
     assert_eq!(state_of("fake", &id), Some(asleep));

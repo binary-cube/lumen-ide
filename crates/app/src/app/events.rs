@@ -453,6 +453,33 @@ impl EditorApp {
         tracing::debug!("hidden a while: the window's images on screen given back");
     }
 
+    /// What the pages need while the window draws no frames (covered): a view falling asleep
+    /// given its page's picture (its copy made now), a page no longer wanted let go — nothing
+    /// made (no page is seen), nothing drawn. Twice: what the views do with what they were
+    /// told (asleep: their pages let go) followed at once.
+    fn follow_pages_unseen(&mut self) {
+        for _ in 0..2 {
+            for renderer in self.frames.renderers() {
+                renderer.make_pending_copies();
+            }
+            let pages = self.workbench.web_pages();
+            if !self.web_views.sleep_work(&pages) {
+                return;
+            }
+            let covered = self.workbench.overlay_open();
+            let none = |_: &ui_workbench::WebSource, _, _| None::<super::web_views::MadePage>;
+            self.web_views.sync(pages, covered, Instant::now(), none);
+            let told = self.web_views.take_events();
+            if told.is_empty() {
+                return;
+            }
+            for (page, event) in told {
+                self.workbench.web_event(page, event);
+            }
+            self.workbench.poll_viewers();
+        }
+    }
+
     /// Background work woke the loop: collects what it finished.
     pub(super) fn on_wake(&mut self) {
         self.release_if_hidden();
@@ -463,6 +490,11 @@ impl EditorApp {
         changed |= self.workbench.poll_fs();
         changed |= self.workbench.poll_format_reads();
         changed |= self.workbench.poll_viewers();
+        // Covered, the window draws no frames: its pages followed all the same (after the
+        // views took their orders).
+        if self.window_state.occluded {
+            self.follow_pages_unseen();
+        }
         // The pages drawn by the app's engine: what they told (a whole frame hands it to
         // their views), or only a frame come (drawn again where it is, the rest kept).
         let pages = self.web_views.poll();

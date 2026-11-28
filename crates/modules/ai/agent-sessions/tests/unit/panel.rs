@@ -667,13 +667,18 @@ fn the_agents_list_takes_its_search_text_and_the_wheel() {
 /// "Open" (its memory once measured); asleep, the moon and how to wake it.
 #[test]
 fn a_session_s_row_says_whether_its_tab_is_open_or_asleep() {
-    use contracts::terminal::{CanSleep, TerminalState};
+    use contracts::sleep::{CanSleep, SleepState as TerminalState};
     let id = format!("open-{:x}", kernel::id::new_uuid());
     let key = format!("open-key-{:x}", kernel::id::new_uuid());
     let mut panel = listed(vec![session(&id, 100)]);
     crate::follow::follow(key.clone(), "fake", Some(id), PathBuf::from("/p"), "Work".into());
-    let open =
-        TerminalState { memory: None, running: true, asleep: false, can_sleep: CanSleep::Yes };
+    let open = TerminalState {
+        kind: "fake",
+        memory: None,
+        running: true,
+        asleep: false,
+        can_sleep: CanSleep::Yes,
+    };
     crate::follow::told(kernel::ProjectId::new(), &key, Some(open));
     painted(&mut panel, 300.0, 400.0);
     let (held, _) = *panel.holds.first().expect("its row tells it");
@@ -692,13 +697,18 @@ fn a_session_s_row_says_whether_its_tab_is_open_or_asleep() {
 /// says how) still runs, and shows it; one ended shows nothing.
 #[test]
 fn the_open_dot_follows_whether_its_program_runs() {
-    use contracts::terminal::{CanSleep, TerminalState};
+    use contracts::sleep::{CanSleep, SleepState as TerminalState};
     let id = format!("runs-{:x}", kernel::id::new_uuid());
     let key = format!("runs-key-{:x}", kernel::id::new_uuid());
     let mut panel = listed(vec![session(&id, 100)]);
     crate::follow::follow(key.clone(), "fake", Some(id), PathBuf::from("/p"), "Work".into());
-    let runs =
-        TerminalState { memory: None, running: true, asleep: false, can_sleep: CanSleep::No };
+    let runs = TerminalState {
+        kind: "fake",
+        memory: None,
+        running: true,
+        asleep: false,
+        can_sleep: CanSleep::No,
+    };
     crate::follow::told(kernel::ProjectId::new(), &key, Some(runs));
     painted(&mut panel, 300.0, 400.0);
     assert!(!panel.holds.is_empty(), "running, though it can't sleep: its dot");

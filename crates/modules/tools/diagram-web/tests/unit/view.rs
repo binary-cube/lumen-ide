@@ -222,3 +222,186 @@ fn a_page_that_cant_be_made_stops_the_loader() {
     assert_eq!(view.page, PageState::Shown);
     assert!(!view.is_loading());
 }
+
+/// A draw.io tab with its page drawn, as the sleeping knows it (started, quiet).
+fn drawn_tab(name: &str) -> DiagramWebView {
+    let file = PathBuf::from(format!("/p/{name}.drawio"));
+    let mut view = DiagramWebView::in_tab(&file, Some(file.clone()));
+    view.page_dir = Some(Arc::from(Path::new("page")));
+    view.status = Status::Installed(Arc::from(Path::new("drawio")));
+    view.entry = Arc::from("index.html");
+    view.area = Rect::new(0.0, 0.0, 800.0, 600.0);
+    view.web_event(view.page_id, WebEvent::Shown);
+    view.tell_veto();
+    view
+}
+
+fn painted(view: &mut DiagramWebView) -> render_api::Scene {
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 1000.0, 700.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: None,
+    });
+    scene
+}
+
+/// Put to sleep: its page asked for its picture, then — once the picture is drawn in its
+/// place (its copy made then) — let go; asleep, the moon on its tab, the picture at its own
+/// size under the card; a key wakes it: a page made anew, the picture shown till it's drawn.
+#[test]
+fn a_diagram_falls_asleep_on_its_picture_and_wakes_as_a_new_page() {
+    use ui_components::sleep::{SLEEP_ACTION, SleepWhy};
+    let mut view = drawn_tab("sleepy");
+    assert_eq!(view.can_sleep(), ui_components::sleep::CanSleep::Yes);
+    assert!(view.command(SLEEP_ACTION));
+    assert!(matches!(view.slumber, Slumber::Freezing(SleepWhy::ByHand)));
+    assert!(view.web_page().is_some_and(|p| p.freeze), "its picture asked for");
+    let page = view.page_id;
+    // A copy of its frame (made at the renderer's next frame): its page kept till then.
+    let frame = render_api::ImageData::live();
+    let shot = render_api::ImageData::copy_of(&frame, 800, 600);
+    view.web_event(page, WebEvent::Picture(Some(shot.clone())));
+    assert_eq!(view.tab_icon(), Some(ui_components::sleep::ASLEEP_ICON));
+    assert!(view.web_page().is_some_and(|p| !p.freeze), "kept till its frame is copied");
+    shot.copied();
+    assert_eq!(view.web_page(), None, "copied: its page let go");
+    let scene = painted(&mut view);
+    let images: Vec<_> = scene.layers().iter().flat_map(|l| l.images.iter()).collect();
+    assert_eq!(images.len(), 1);
+    assert_eq!(images[0].bounds, Rect::new(0.0, 0.0, 800.0, 600.0), "never stretched");
+    // (Painting looked at the install; this test's is made up.)
+    view.status = Status::Installed(Arc::from(Path::new("drawio")));
+    // A key wakes it.
+    let key = ui_components::KeyPress {
+        key: ui_components::PressedKey::Char('x'),
+        shift: false,
+        ctrl: false,
+        alt: false,
+    };
+    assert!(view.takes_keyboard());
+    assert!(view.key_press(key));
+    assert_ne!(view.page_id, page, "a page made anew");
+    assert!(view.web_page().is_some_and(|p| !p.freeze));
+    assert!(matches!(view.slumber, Slumber::Waking(Some(_))), "its picture till it's drawn");
+    view.web_event(view.page_id, WebEvent::Shown);
+    assert!(matches!(view.slumber, Slumber::Awake));
+    assert!(shot.released(), "its picture let go");
+    assert!(!view.takes_keyboard(), "the keys its page's again");
+}
+
+/// What it holds that isn't written, or being edited, keeps it awake (saying why); with no
+/// picture to be had, it sleeps on its plain card; a theme changed while it falls asleep
+/// leaves it awake.
+#[test]
+fn a_diagram_sleeps_only_when_nothing_would_be_lost() {
+    use ui_components::sleep::{CanSleep, SLEEP_ACTION};
+    let mut view = drawn_tab("careful");
+    view.session.file_read(Arc::from("<a/>"));
+    view.session.page_message(r#"{"event":"init"}"#);
+    view.session.page_message(r#"{"event":"autosave","xml":"<b/>"}"#);
+    view.tell_veto();
+    assert_eq!(view.can_sleep(), CanSleep::NotNow(asleep::UNSAVED));
+    assert!(view.command(SLEEP_ACTION));
+    assert_eq!(view.take_notifications().len(), 1, "told why");
+    assert!(matches!(view.slumber, Slumber::Awake));
+    view.session.written(&Arc::from("<b/>"), true);
+    let editing =
+        r#"{"event":"hostState","page":0,"scale":1,"tx":0,"ty":0,"left":0,"top":0,"busy":true}"#;
+    view.session.page_message(editing);
+    view.tell_veto();
+    assert_eq!(view.can_sleep(), CanSleep::NotNow(asleep::EDITING));
+    let idle =
+        r#"{"event":"hostState","page":0,"scale":1,"tx":0,"ty":0,"left":0,"top":0,"busy":false}"#;
+    view.session.page_message(idle);
+    view.tell_veto();
+    assert_eq!(view.can_sleep(), CanSleep::Yes);
+    // No picture to be had: asleep on its card alone, its page let go at once.
+    assert!(view.command(SLEEP_ACTION));
+    view.web_event(view.page_id, WebEvent::Picture(None));
+    assert_eq!(view.web_page(), None);
+    // A theme changed while falling asleep: awake (the old page's picture never comes).
+    let mut view = drawn_tab("themed");
+    view.command(SLEEP_ACTION);
+    view.new_page();
+    assert!(matches!(view.slumber, Slumber::Awake));
+}
+
+/// Used in its page (a press, a key, the wheel: told by our page), or its tab chosen, it's
+/// touched: left alone counts from then.
+#[test]
+fn using_a_diagram_touches_it() {
+    let mut view = drawn_tab("used");
+    let slot = Arc::clone(view.sleep.as_ref().unwrap().slot());
+    slot.lock().touched = None;
+    say(&mut view, r#"{"event":"hostTouched"}"#);
+    assert!(slot.lock().touched.is_some(), "used in its page");
+    slot.lock().touched = None;
+    view.set_active(true);
+    assert!(slot.lock().touched.is_some(), "its tab chosen");
+}
+
+/// Its tab chosen before its page is drawn (as it always is) still starts it as its page
+/// shows; and after a sleep its new page starts it again — it can sleep again.
+#[test]
+fn a_diagram_chosen_before_its_page_shows_can_sleep_and_again_after_waking() {
+    use ui_components::sleep::SLEEP_ACTION;
+    let file = PathBuf::from("/p/chosen.drawio");
+    let mut view = DiagramWebView::in_tab(&file, Some(file.clone()));
+    view.page_dir = Some(Arc::from(Path::new("page")));
+    view.status = Status::Installed(Arc::from(Path::new("drawio")));
+    view.entry = Arc::from("index.html");
+    view.area = Rect::new(0.0, 0.0, 800.0, 600.0);
+    view.set_active(true);
+    view.web_event(view.page_id, WebEvent::Shown);
+    let slot = Arc::clone(view.sleep.as_ref().unwrap().slot());
+    assert!(slot.lock().quiet.is_some(), "how quiet it is, known");
+    assert!(slot.lock().running);
+    view.tell_veto();
+    assert!(view.command(SLEEP_ACTION));
+    view.web_event(view.page_id, WebEvent::Picture(None));
+    assert!(slot.lock().quiet.is_none(), "asleep: nothing to measure");
+    assert!(view.wake_by_user());
+    view.web_event(view.page_id, WebEvent::Shown);
+    assert!(slot.lock().quiet.is_some(), "back: measured again");
+    view.tell_veto();
+    assert_eq!(view.can_sleep(), ui_components::sleep::CanSleep::Yes, "it can sleep again");
+}
+
+/// Drawn, it gives the sleeping what wakes its window: an order to sleep reaches it at once.
+#[test]
+fn a_diagram_drawn_is_woken_for_its_orders() {
+    let mut view = drawn_tab("woken");
+    let woken = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = Arc::clone(&woken);
+    let waker: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+        count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    });
+    let palette = Palette::dark();
+    let icons = icons::Icons::builtin();
+    let mut text = text_layout::TextSystem::new();
+    let mut scene = render_api::Scene::default();
+    view.paint(ViewerPaint {
+        bounds: Rect::new(0.0, 0.0, 800.0, 600.0),
+        scale: 1.0,
+        text: &mut text,
+        scene: &mut scene,
+        palette: &palette,
+        icons: &icons,
+        focused: true,
+        waker: Some(waker),
+    });
+    let slot = Arc::clone(view.sleep.as_ref().unwrap().slot());
+    // (Painting may wake it for other things: its install followed.)
+    let before = woken.load(std::sync::atomic::Ordering::SeqCst);
+    assert!(slot.sleep_by_hand().is_ok());
+    assert_eq!(woken.load(std::sync::atomic::Ordering::SeqCst), before + 1, "its window woken");
+}

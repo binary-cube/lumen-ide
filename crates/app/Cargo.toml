@@ -112,6 +112,7 @@ remote.workspace = true
 task-manager.workspace = true
 relax.workspace = true
 keep-awake.workspace = true
+sleep-timer.workspace = true
 profiler.workspace = true
 # The modules' figures for a profile recording, registered for the recorder.
 contracts.workspace = true

@@ -13,11 +13,18 @@
 //! - `export` (its exports, asked by `exportProtocol` instead of a download the web view
 //!   refuses) → the bytes, to be saved where the user chooses.
 //! - `exit` → the tab closes; `openLink` → the link, if it's the web's.
+//! - Our page's own (`host.js`, [`crate::state`]): `hostTouched` → the user acted on it;
+//!   `hostState` → where the user is, kept and
+//!   given back after every `load` (`hostRestore`, with whether an undo or redo here is
+//!   offered); `hostUndo` / `hostRedo` → a step back or forward past the page's own history,
+//!   loaded and written.
 //! - Anything else, malformed or too large, is let go.
 
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+
+use crate::state::{History, ViewState};
 
 /// The largest message read from the page (bytes): a diagram with pictures is a few MB.
 pub const MAX_MESSAGE: usize = 64 << 20;
@@ -35,6 +42,8 @@ pub enum Effect {
     OpenLink(String),
     /// An export to save (where the user chooses): its suggested name, its bytes.
     SaveAs { name: String, bytes: Vec<u8> },
+    /// The user acted on the page (it's in use: not put to sleep).
+    Touched,
 }
 
 /// One page's conversation about one file.
@@ -57,6 +66,10 @@ pub struct Session {
     queued: Option<Arc<str>>,
     /// The last write failed (what's in the page isn't on disk).
     failed: bool,
+    /// Where the user was in the page, as it last said.
+    view: Option<ViewState>,
+    /// What the diagram was before each change (undo past a page made anew).
+    history: History,
 }
 
 impl Session {
@@ -83,7 +96,7 @@ impl Session {
         self.failed = false;
         self.on_disk = Some(Arc::clone(&disk));
         self.xml = Some(disk);
-        if self.ready { self.load().into_iter().collect() } else { Vec::new() }
+        if self.ready { self.load() } else { Vec::new() }
     }
 
     /// Something's unsaved: a write under way or waiting, or one that failed.
@@ -94,6 +107,11 @@ impl Session {
     /// The page takes messages (it said `init`).
     pub fn ready(&self) -> bool {
         self.ready
+    }
+
+    /// Something is being typed into a cell, or a dialog is open (as the page last said).
+    pub fn busy(&self) -> bool {
+        self.view.as_ref().is_some_and(|v| v.busy)
     }
 
     /// The diagram as last known.
@@ -110,9 +128,11 @@ impl Session {
         self.title = title.into();
     }
 
-    /// The page is made anew (another id): it will ask again.
+    /// The page is made anew (another id): it will ask again; its own history is gone, ours
+    /// takes over from here.
     pub fn new_page(&mut self) {
         self.ready = false;
+        self.history.page_made();
     }
 
     /// What the page said.
@@ -126,15 +146,17 @@ impl Session {
         let Some(event) = message.get("event").and_then(Value::as_str) else { return Vec::new() };
         match event {
             "configure" => {
-                // A page starting (made again, or reloaded on its own).
+                // A page starting (made again, or reloaded on its own): its own history gone,
+                // ours takes over from here.
                 self.ready = false;
+                self.history.page_made();
                 vec![Effect::Send(
                     json!({"action": "configure", "config": self.config}).to_string(),
                 )]
             }
             "init" => {
                 self.ready = true;
-                self.load().into_iter().collect()
+                self.load()
             }
             "autosave" | "save" => {
                 let Some(xml) = message.get("xml").and_then(Value::as_str) else {
@@ -146,6 +168,15 @@ impl Session {
                 }
                 out
             }
+            "hostState" => {
+                if let Some(view) = ViewState::read(&message) {
+                    self.view = Some(view);
+                }
+                Vec::new()
+            }
+            "hostTouched" => vec![Effect::Touched],
+            "hostUndo" => self.step(true),
+            "hostRedo" => self.step(false),
             "exit" => vec![Effect::Close],
             "export" => export(&message).map(|e| vec![e]).unwrap_or_default(),
             "openLink" => message
@@ -158,26 +189,53 @@ impl Session {
         }
     }
 
-    /// The `load` message for what's known, if it is.
-    fn load(&self) -> Option<Effect> {
-        let xml = self.xml.as_ref()?;
-        Some(Effect::Send(
-            json!({
-                "action": "load",
-                "xml": &**xml,
-                "autosave": 1,
-                "title": self.title,
-                "modified": 0,
-                // Exports come to us as messages, never as a download.
-                "exportProtocol": true,
-            })
-            .to_string(),
-        ))
+    /// The `load` message for what's known (if it is), then where the user was and what can be
+    /// undone here (our page keeps it until the diagram has loaded).
+    fn load(&self) -> Vec<Effect> {
+        let Some(xml) = self.xml.as_ref() else { return Vec::new() };
+        let load = json!({
+            "action": "load",
+            "xml": &**xml,
+            "autosave": 1,
+            "title": self.title,
+            "modified": 0,
+            // Exports come to us as messages, never as a download.
+            "exportProtocol": true,
+        });
+        let (past, future) = self.history.can();
+        let restore = json!({
+            "action": "hostRestore",
+            "state": self.view.as_ref().map(ViewState::to_json),
+            "past": past,
+            "future": future,
+        });
+        vec![Effect::Send(load.to_string()), Effect::Send(restore.to_string())]
     }
 
-    /// The page's diagram as it sent it: written (now, or after the write under way).
+    /// A step back (`back`) or forward past the page's own history: loaded where the user is,
+    /// and written.
+    fn step(&mut self, back: bool) -> Vec<Effect> {
+        let Some(now) = self.xml.clone() else { return Vec::new() };
+        let to = if back { self.history.undo(now) } else { self.history.redo(now) };
+        let Some(to) = to else { return Vec::new() };
+        self.xml = Some(Arc::clone(&to));
+        let mut out = if self.ready { self.load() } else { Vec::new() };
+        out.extend(self.write_latest(to));
+        out
+    }
+
+    /// The page's diagram as it sent it: what it was kept (to undo past a page made anew),
+    /// then written.
     fn edited(&mut self, xml: Arc<str>) -> Vec<Effect> {
-        self.xml = Some(Arc::clone(&xml));
+        let was = self.xml.replace(Arc::clone(&xml));
+        if let Some(was) = was.filter(|was| **was != *xml) {
+            self.history.changed(was);
+        }
+        self.write_latest(xml)
+    }
+
+    /// `xml`, the latest, written (now, or after the write under way).
+    fn write_latest(&mut self, xml: Arc<str>) -> Vec<Effect> {
         if !self.writing && !self.failed && self.on_disk.as_deref() == Some(&*xml) {
             return Vec::new();
         }
@@ -193,7 +251,7 @@ impl Session {
     pub fn file_read(&mut self, xml: Arc<str>) -> Vec<Effect> {
         self.on_disk = Some(Arc::clone(&xml));
         self.xml = Some(xml);
-        if self.ready { self.load().into_iter().collect() } else { Vec::new() }
+        if self.ready { self.load() } else { Vec::new() }
     }
 
     /// The write of `xml` ended (`ok`: it's on disk): the next one waiting starts, else the
@@ -231,7 +289,7 @@ impl Session {
         if !self.ready {
             return Vec::new();
         }
-        self.load().into_iter().collect()
+        self.load()
     }
 }
 

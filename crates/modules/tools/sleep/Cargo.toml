@@ -1,0 +1,27 @@
+[package]
+name = "sleep-timer"
+description = "Views put to sleep when left alone (plan 101): the timer looking once a minute, the requests, the commands, the hint — naming no view; each view's module stops and brings back its own."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+kernel.workspace = true
+i18n.workspace = true
+extensions.workspace = true
+command-model.workspace = true
+workbench-model.workspace = true
+ui-components.workspace = true
+contracts.workspace = true
+sleep.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+# A test host's repository (none).
+version-control.workspace = true
+
+[lints]
+workspace = true

@@ -19,6 +19,7 @@ use terminal_session::{
 use text_layout::{Font, TextSystem};
 use theming::caret::CaretShape;
 use ui_components::control::{Control, Controls, Shown, Thumb};
+use ui_components::sleep::{SleepPart, SleepPlace};
 use ui_components::{
     KeyPress, Palette, PressedKey, Viewer, ViewerAction, ViewerCursor, ViewerPaint,
 };
@@ -51,18 +52,6 @@ struct ScreenLook<'a> {
     bold_bright: bool,
 }
 
-/// Why a session can't be put to sleep by hand now, as told to the user.
-pub(crate) fn cant_sleep(can: contracts::terminal::CanSleep) -> workbench_model::Notification {
-    let why = match can {
-        contracts::terminal::CanSleep::Typed => "terminal.cant_sleep_typed",
-        contracts::terminal::CanSleep::Sleeping => "terminal.cant_sleep_sleeping",
-        contracts::terminal::CanSleep::Starting => "terminal.cant_sleep_starting",
-        contracts::terminal::CanSleep::Waking => "terminal.cant_sleep_waking",
-        _ => "terminal.cant_sleep",
-    };
-    workbench_model::Notification::warning(i18n::t(why))
-}
-
 /// What a key or a text does to what waits unsent ([`TerminalView::note_typed`]).
 #[derive(Debug, Clone, Copy)]
 enum Typing {
@@ -83,7 +72,7 @@ struct Band<'a> {
 const SCRIM_ALPHA: f32 = 0.78;
 
 /// A sleeping terminal's tab icon (in place of its own).
-pub(crate) const ASLEEP_ICON: &str = "moon";
+pub(crate) const ASLEEP_ICON: &str = ui_components::sleep::ASLEEP_ICON;
 /// The scrollbar's lane on the right, beside the grid (logical): it never covers text.
 const LANE: f32 = 10.0;
 
@@ -169,6 +158,15 @@ impl Settling {
     }
 }
 
+/// A session's quiet, as its program's output says it (what the sleeping reads).
+struct WatchQuiet(Arc<dyn terminal_session::SessionWatch>);
+
+impl ui_components::sleep::Quiet for WatchQuiet {
+    fn quiet_for(&self) -> Option<std::time::Duration> {
+        self.0.quiet_for()
+    }
+}
+
 #[derive(Default)]
 pub struct TerminalView {
     session: Option<Box<dyn TerminalSession>>,
@@ -249,8 +247,8 @@ pub struct TerminalView {
     title: Option<String>,
     /// What's asked of it by its key (a name, text to type), taken at its poll.
     renamed: Option<Arc<NameSlot>>,
-    /// Tells it's gone when the view goes (a keyed terminal only).
-    _gone: Option<Gone>,
+    /// Its part of the sleeping (a keyed terminal only: a program another module runs).
+    sleep: Option<ui_components::sleep::SleepPart>,
     /// What it's known by (a program another module runs).
     key: Option<String>,
     /// Its program stopped (untouched and idle, or by hand: `crate::sleep`): its last screen
@@ -268,10 +266,6 @@ pub struct TerminalView {
     /// Characters typed since the last send, an estimate (the program's own line editing —
     /// a word erased, history recalled — isn't seen): anything left keeps it from sleeping.
     typed: usize,
-    /// Why it sleeps (said on its card until it's back), and where its card's "Wake Up"
-    /// button was drawn last.
-    slept: Option<asleep::Slept>,
-    wake_button: Option<Rect>,
     /// Its own settings in place of the saved ones (tests: never the shared ones).
     #[cfg(test)]
     config: Option<std::sync::Arc<crate::config::TerminalConfig>>,
@@ -386,12 +380,18 @@ impl TerminalView {
                         let mut asked = asked(slot);
                         asked.pid = session.pid();
                         asked.started = Some(std::time::Instant::now());
-                        asked.touched = asked.started;
+                        asked.running = true;
                         asked.watch.clone_from(&self.watch);
-                        asked.asleep = false;
                         asked.typed = false;
                         asked.project
                     };
+                    if let Some(part) = &self.sleep {
+                        let quiet = self.watch.clone().map(|w| {
+                            Arc::new(WatchQuiet(w)) as Arc<dyn ui_components::sleep::Quiet>
+                        });
+                        part.started(quiet);
+                    }
+                    crate::sleep::tell_veto(slot);
                     // Its window asks soon how it resumes, quiet or not.
                     crate::sleep::follow_start(slot, project);
                 }
@@ -409,8 +409,8 @@ impl TerminalView {
                 self.size = size;
                 // Woken from a sleep: its last screen stays until the new one settles.
                 self.resuming = std::mem::take(&mut self.asleep);
-                if let Some(slot) = &self.renamed {
-                    asked(slot).waking = self.resuming;
+                if let Some(part) = &mut self.sleep {
+                    part.waking(self.resuming);
                 }
                 if self.launch.is_some() {
                     let now = std::time::Instant::now();
@@ -424,24 +424,24 @@ impl TerminalView {
                 // is taken to wake it, nobody's told it sleeps).
                 self.asleep = false;
                 self.held = false;
-                self.slept = None;
-                if let Some(slot) = &self.renamed {
-                    let mut asked = asked(slot);
-                    asked.asleep = false;
-                    asked.waking = false;
+                if let Some(part) = &mut self.sleep {
+                    part.waking(false);
                 }
             }
         }
     }
 
-    /// Put to sleep (`crate::sleep`): its program stopped (its process ends as when its tab
-    /// closes), its last screen kept, `launch` how it starts again once woken. Nothing done
-    /// if its program ended meanwhile.
-    fn fall_asleep(&mut self, launch: agents::Launch, by_hand: bool) {
+    /// Put to sleep (`why`: by hand, or left alone): its program stopped (its process ends as
+    /// when its tab closes), its last screen kept, started again the way its owner said once
+    /// woken. Nothing done if its program ended meanwhile, or nobody knows how it resumes.
+    fn fall_asleep(&mut self, why: ui_components::sleep::SleepWhy) {
         let Some(session) = &self.session else { return };
         if session.exit_status().is_some() {
             return;
         }
+        let Some(launch) = self.renamed.as_ref().and_then(|slot| asked(slot).resume.clone()) else {
+            return;
+        };
         self.session = None;
         self.watch = None;
         self.shell = None;
@@ -462,19 +462,15 @@ impl TerminalView {
         // colors it's answered): a new session knows none of them.
         self.options = None;
         self.answered = None;
-        let freed = self.renamed.as_ref().and_then(|slot| asked(slot).memory);
-        let idle = if by_hand { None } else { self.config().sleep_after };
-        self.slept = Some(asleep::Slept { by_hand, idle, freed });
         if let Some(slot) = &self.renamed {
             let mut asked = asked(slot);
-            asked.asleep = true;
             asked.running = false;
             asked.pid = None;
             asked.watch = None;
-            asked.memory = None;
         }
-        self.announce();
-        tracing::info!(by_hand, "a session was put to sleep");
+        if let Some(part) = &mut self.sleep {
+            part.fell_asleep(why);
+        }
     }
 
     /// Asleep, or coming back (its last screen shown while the new one settles): the screen
@@ -490,25 +486,24 @@ impl TerminalView {
             return false;
         }
         self.held = false;
-        if let Some(slot) = &self.renamed {
-            asked(slot).waking = true;
+        if let Some(part) = &mut self.sleep {
+            part.waking(true);
         }
-        self.announce();
         true
     }
 
     /// How it stands told on its project's bus, if that changed (a keyed terminal only).
     pub(super) fn announce(&self) {
-        if let (Some(slot), Some(key)) = (&self.renamed, &self.key) {
-            shells::announce(slot, key);
+        if let Some(part) = &self.sleep {
+            part.announce();
         }
     }
 
-    /// Acted on by the user now (a key, text, a paste, a click, the wheel, its tab chosen):
-    /// its slot says when (it sleeps only once untouched long enough, on screen or not).
+    /// Acted on by the user now (a key, text, a paste, a click, the wheel, a command, its tab
+    /// chosen): it sleeps only once left alone long enough, on screen or not.
     fn touch(&self) {
-        if let Some(slot) = &self.renamed {
-            asked(slot).touched = Some(std::time::Instant::now());
+        if let Some(part) = &self.sleep {
+            part.touch();
         }
     }
 
@@ -523,6 +518,7 @@ impl TerminalView {
         };
         if let Some(slot) = &self.renamed {
             asked(slot).typed = self.typed > 0;
+            crate::sleep::tell_veto(slot);
         }
     }
 

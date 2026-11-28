@@ -12,6 +12,12 @@
 //! A page the app draws itself (its own engine's, [`MadePage::drawn`]) is an image in the
 //! scene: what opens over it is drawn over it, so it needs no picture and isn't hidden.
 //!
+//! A page whose view falls asleep ([`WebPage::freeze`]) is given its picture once
+//! ([`WebEvent::Picture`]): a page the app draws, a copy of its last frame on the GPU (one
+//! hidden long enough to have none drawn anew by its engine first); a system's page, its
+//! snapshot — each waited for at most [`FREEZE_WAIT`]; none could be taken (it was let go,
+//! a system's page hidden, the system can't): `None`. The view draws it in its place.
+//!
 //! Its parts: the input handed to the pages the app draws ([`input`]), files dragged from
 //! the system over them ([`files`]), what the pages tell their views ([`inbox`]).
 
@@ -38,6 +44,10 @@ pub(super) use input::Pointer;
 /// hidden without one (a blank under what opened).
 const PICTURE_WAIT: Duration = Duration::from_millis(500);
 
+/// How long a page falling asleep is waited for: its engine drawing it anew (a page hidden a
+/// while has no frame left), or the system taking its snapshot.
+const FREEZE_WAIT: Duration = Duration::from_secs(2);
+
 /// A page's picture asked for, filled on the window's thread when it comes (`Some(None)`:
 /// none could be taken).
 type Asked = Rc<RefCell<Option<Option<platform_api::WebPicture>>>>;
@@ -54,6 +64,8 @@ struct Live {
     hidden_since: Option<Instant>,
     /// Its picture asked for (something opened over it), since when.
     asked: Option<(Instant, Asked)>,
+    /// Its picture asked for its view falling asleep, since when (a system's page).
+    freezing: Option<(Instant, Asked)>,
     /// What floats over it (the mouse there the app's), as last told, and whether it's cut
     /// out of it.
     holes: Vec<(kernel::Rect, f32)>,
@@ -188,6 +200,20 @@ pub(super) struct WebViews {
     /// The engine's install as this window last saw it: each window moves its own system
     /// pages to the engine once it's there.
     engine_seen: super::web_engine::EngineSeen,
+    /// The pages whose view was given the picture it asked for (while it still asks).
+    pictured: Vec<u128>,
+    /// What wakes the window (a system's picture come, for a view falling asleep).
+    wake: Option<WindowWake>,
+}
+
+/// What wakes a window.
+#[derive(Clone)]
+struct WindowWake(std::sync::Arc<dyn Fn() + Send + Sync>);
+
+impl std::fmt::Debug for WindowWake {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WindowWake")
+    }
 }
 
 impl WebViews {
@@ -231,10 +257,21 @@ impl WebViews {
                 && l.hidden_since.is_none_or(|since| now.duration_since(since) < HIDDEN_KEPT)
         });
         self.failed.retain(|id| pages.iter().any(|(p, _)| p.id == *id));
+        self.pictured.retain(|id| pages.iter().any(|(p, _)| p.id == *id && p.freeze));
         if self.live.len() != before {
             self.forget_gone();
         }
         for (page, sight) in pages {
+            // Its view falls asleep: its picture, once.
+            if page.freeze
+                && !self.pictured.contains(&page.id)
+                && let Some(picture) = self.picture_of(page.id, now)
+            {
+                tracing::debug!(taken = picture.is_some(), "a sleeping page's picture given");
+                self.pictured.push(page.id);
+                self.inbox.borrow_mut().push(page.id, WebEvent::Picture(picture));
+                changed = true;
+            }
             let mut visible = sight == Sight::Shown && page.area.size.width > 0.0;
             match self.live.iter_mut().find(|l| l.id == page.id) {
                 // Drawn by the app: what's over it is drawn over it, it stays.
@@ -270,6 +307,7 @@ impl WebViews {
                                 visible: true,
                                 hidden_since: None,
                                 asked: None,
+                                freezing: None,
                                 holes: Vec::new(),
                                 cut: true,
                                 corners: render_api::ImageCorners::NONE,
@@ -292,6 +330,91 @@ impl WebViews {
             changed = true;
         }
         changed
+    }
+
+    /// Whether `pages` (as the views have them now) ask something of a window that draws no
+    /// frames: a page's picture (its view falls asleep), or a page let go (asleep). Nothing
+    /// else is done unseen — a covered window's hidden pages are kept as they were.
+    pub(in crate::app) fn sleep_work(&self, pages: &[(WebPage, Sight)]) -> bool {
+        pages.iter().any(|(p, _)| p.freeze && !self.pictured.contains(&p.id))
+            || self.live.iter().any(|l| !pages.iter().any(|(p, _)| p.id == l.id))
+    }
+
+    /// What wakes the window: a page's picture come is taken at once (set once).
+    pub(in crate::app) fn set_waker(
+        &mut self,
+        wake: impl FnOnce() -> std::sync::Arc<dyn Fn() + Send + Sync>,
+    ) {
+        if self.wake.is_none() {
+            self.wake = Some(WindowWake(wake()));
+        }
+    }
+
+    /// Page `id`'s picture as it is now, for its view falling asleep: `Some(picture)` once
+    /// it's known (`None` in it: none could be taken), `None` while a system's is awaited.
+    fn picture_of(&mut self, id: u128, now: Instant) -> Option<Option<render_api::ImageData>> {
+        let Some(live) = self.live.iter_mut().find(|l| l.id == id) else { return Some(None) };
+        // Its size in pixels: drawn as it is, never stretched.
+        let size = |area: kernel::Rect| {
+            (area.size.width.round().max(0.0) as u32, area.size.height.round().max(0.0) as u32)
+        };
+        let (width, height) = size(live.area);
+        if let Some(drawn) = &live.drawn {
+            if drawn.has_frame() {
+                // Shown for it alone (hidden): hidden again.
+                if live.freezing.take().is_some() {
+                    live.view.set_visible(live.visible);
+                }
+                // A copy of its frame, made on the GPU at the renderer's next frame.
+                return Some(Some(render_api::ImageData::copy_of(drawn, width, height)));
+            }
+            // Hidden a while, its frame let go: its engine draws it anew (told it's seen;
+            // nothing of it is drawn on screen), waited for.
+            return match &live.freezing {
+                None => {
+                    live.view.set_visible(true);
+                    live.freezing = Some((now, Rc::default()));
+                    None
+                }
+                Some((since, _)) if now.duration_since(*since) >= FREEZE_WAIT => {
+                    live.freezing = None;
+                    live.view.set_visible(live.visible);
+                    Some(None)
+                }
+                Some(_) => None,
+            };
+        }
+        if !live.visible {
+            return Some(None);
+        }
+        let Some((since, asked)) = &live.freezing else {
+            let asked: Asked = Rc::default();
+            let filled = Rc::clone(&asked);
+            // Come, the window woken to take it (it may draw nothing meanwhile).
+            let wake = self.wake.clone();
+            let taking = live.view.snapshot(Box::new(move |picture| {
+                *filled.borrow_mut() = Some(picture);
+                if let Some(WindowWake(wake)) = &wake {
+                    wake();
+                }
+            }));
+            if !taking {
+                return Some(None);
+            }
+            live.freezing = Some((now, asked));
+            return None;
+        };
+        let come = asked.borrow_mut().take();
+        let picture = match come {
+            Some(Some(picture)) if Some(picture.rgba.len()) == picture_bytes(&picture) => {
+                Some(render_api::ImageData::held(picture.width, picture.height, picture.rgba))
+            }
+            Some(_) => None,
+            None if now.duration_since(*since) >= FREEZE_WAIT => None,
+            None => return None,
+        };
+        live.freezing = None;
+        Some(picture)
     }
 
     /// Whether what the app draws of its pages (shown, with a frame) isn't as last told:
@@ -473,7 +596,9 @@ impl WebViews {
         let let_go = self.live.iter().filter_map(|l| l.hidden_since).map(|s| s + HIDDEN_KEPT);
         let waits =
             self.live.iter().filter_map(|l| l.asked.as_ref()).map(|(s, _)| *s + PICTURE_WAIT);
-        let_go.chain(waits).min()
+        let freezing =
+            self.live.iter().filter_map(|l| l.freezing.as_ref()).map(|(s, _)| *s + FREEZE_WAIT);
+        let_go.chain(waits).chain(freezing).min()
     }
 
     /// How many pages are made (tests).

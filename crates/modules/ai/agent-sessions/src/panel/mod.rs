@@ -74,9 +74,9 @@ const NEW_WITH: &str = "new:";
 /// A session's menu rows.
 const OPEN_CHAT: &str = "open-chat";
 const OPEN_TERMINAL: &str = "open-terminal";
-/// A session's terminal put to sleep by hand (asked of the terminal: `SleepTerminal`).
+/// A session's terminal put to sleep by hand (asked of the sleeping: `PutToSleep`).
 const SLEEP: &str = "sleep";
-/// A session's sleeping terminal woken (asked of the terminal: `WakeTerminal`).
+/// A session's sleeping terminal woken (asked of the sleeping: `WakeUp`).
 const WAKE: &str = "wake";
 /// A session added to the favorites, or taken off them.
 const FAVORITE: &str = "favorite";
@@ -201,7 +201,7 @@ pub struct SessionsPanel {
     stars: Vec<(Rect, Star)>,
     /// Where each row's terminal says what it holds (its memory, or asleep), from the last
     /// paint: its tooltip explains.
-    holds: Vec<(Rect, contracts::terminal::TerminalState)>,
+    holds: Vec<(Rect, contracts::sleep::SleepState)>,
     /// The memory labels shaped, by their value and font size (see `paint::held_label`).
     held_labels: Vec<((u64, u32), std::sync::Arc<text_layout::ShapedLine>)>,
     hover_star: Option<Star>,

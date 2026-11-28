@@ -51,7 +51,7 @@ struct Followed {
     /// read yet).
     active: i64,
     /// What its terminal said at the last look ([`set_state`]): its memory, asleep.
-    state: Option<contracts::terminal::TerminalState>,
+    state: Option<contracts::sleep::SleepState>,
 }
 
 static FOLLOWED: Mutex<Vec<Followed>> = Mutex::new(Vec::new());
@@ -305,7 +305,7 @@ pub(crate) fn keys() -> Vec<String> {
 
 /// What the terminal of tab `key` said (its memory, asleep): kept for the panel's rows.
 /// `true` if it changed.
-pub(crate) fn set_state(key: &str, state: Option<contracts::terminal::TerminalState>) -> bool {
+pub(crate) fn set_state(key: &str, state: Option<contracts::sleep::SleepState>) -> bool {
     let mut followed = lock(&FOLLOWED);
     let Some(f) = followed.iter_mut().find(|f| f.key == key) else { return false };
     let changed = f.state != state;
@@ -322,7 +322,7 @@ static TOLD: Mutex<Vec<kernel::ProjectId>> = Mutex::new(Vec::new());
 pub(crate) fn told(
     project: kernel::ProjectId,
     key: &str,
-    state: Option<contracts::terminal::TerminalState>,
+    state: Option<contracts::sleep::SleepState>,
 ) {
     set_state(key, state);
     let mut told = lock(&TOLD);
@@ -342,8 +342,8 @@ pub(crate) fn take_told(project: Option<kernel::ProjectId>) -> bool {
 }
 
 /// Tab `key` just asked to sleep or to wake (`to`: `Sleeping` or `Waking`): its menus say
-/// so at once, before its terminal tells how it went (its `TerminalStateChanged`).
-pub(crate) fn expect(key: &str, to: contracts::terminal::CanSleep) {
+/// so at once, before the sleeping tells how it went (its `SleepStateChanged`).
+pub(crate) fn expect(key: &str, to: contracts::sleep::CanSleep) {
     let mut followed = lock(&FOLLOWED);
     let Some(f) = followed.iter_mut().find(|f| f.key == key) else { return };
     let state = f.state.get_or_insert_with(Default::default);
@@ -351,7 +351,7 @@ pub(crate) fn expect(key: &str, to: contracts::terminal::CanSleep) {
 }
 
 /// What the terminal of agent `agent`'s session `id` said last, if it has a tab followed.
-pub(crate) fn state_of(agent: &str, id: &str) -> Option<contracts::terminal::TerminalState> {
+pub(crate) fn state_of(agent: &str, id: &str) -> Option<contracts::sleep::SleepState> {
     lock(&FOLLOWED)
         .iter()
         .find(|f| f.agent == agent && f.id.as_deref() == Some(id))

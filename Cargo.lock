@@ -492,6 +492,7 @@ dependencies = [
  "serde_json",
  "services-panel",
  "settings-model",
+ "sleep-timer",
  "storage",
  "structure",
  "syntax-ts",
@@ -1408,6 +1409,7 @@ dependencies = [
  "agents",
  "diff",
  "kernel",
+ "sleep",
 ]
 
 [[package]]
@@ -2167,10 +2169,13 @@ dependencies = [
  "extensions",
  "files",
  "i18n",
+ "icons",
  "kernel",
  "pinned-downloads",
  "render-api",
  "serde_json",
+ "settings-model",
+ "text-layout",
  "tracing",
  "ui-components",
  "ui-kit",
@@ -8679,6 +8684,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
+name = "sleep"
+version = "0.0.0"
+
+[[package]]
+name = "sleep-timer"
+version = "0.0.0"
+dependencies = [
+ "command-model",
+ "contracts",
+ "extensions",
+ "i18n",
+ "kernel",
+ "sleep",
+ "tracing",
+ "ui-components",
+ "version-control",
+ "workbench-model",
+]
+
+[[package]]
 name = "slotmap"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9171,7 +9196,6 @@ dependencies = [
  "tracing",
  "ui-components",
  "ui-kit",
- "version-control",
  "workbench-model",
 ]
 
@@ -9986,6 +10010,7 @@ dependencies = [
  "charts-model",
  "code-intelligence",
  "command-model",
+ "contracts",
  "diff",
  "extractors",
  "flate2",
@@ -9995,6 +10020,7 @@ dependencies = [
  "proptest",
  "refactor",
  "render-api",
+ "sleep",
  "text-layout",
  "theming",
  "tracing",

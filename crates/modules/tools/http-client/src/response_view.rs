@@ -635,6 +635,7 @@ impl Viewer for ResponseView {
             id: self.page_id,
             source: ui_components::WebSource::Html(Arc::clone(self.page.as_ref()?)),
             area: self.body,
+            freeze: false,
         })
     }
 

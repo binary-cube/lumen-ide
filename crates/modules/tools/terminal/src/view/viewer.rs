@@ -14,10 +14,7 @@ impl Viewer for TerminalView {
 
     /// An order to sleep or to wake waits (given from elsewhere while it's idle): polled.
     fn wants_poll(&self) -> bool {
-        self.renamed.as_ref().is_some_and(|slot| {
-            let asked = asked(slot);
-            asked.sleep.is_some() || asked.wake
-        })
+        self.sleep.as_ref().is_some_and(ui_components::sleep::SleepPart::order_waits)
     }
 
     /// Its tab chosen or left: chosen, it's touched (its time untouched starts again). Asleep,
@@ -45,18 +42,30 @@ impl Viewer for TerminalView {
             self.key.clone_from(&start.key);
             self.root.clone_from(&start.root);
             if let Some(key) = &start.key {
-                let title = start.title.clone();
-                let in_editor = start.in_editor;
-                let asked = Asked { project: start.project, title, in_editor, ..Asked::default() };
+                // Asked again by its name, its tab comes to the front (woken from elsewhere).
+                let name = contracts::terminal::tab_key(key);
+                let place = if start.in_editor {
+                    SleepPlace::Editor { name, extension: crate::EXTENSION }
+                } else {
+                    SleepPlace::Panel { tool: crate::TOOL, name, extension: crate::EXTENSION }
+                };
+                let part =
+                    SleepPart::new(&crate::sleep::SESSIONS, key.clone(), start.project, place);
+                let asked = Asked {
+                    project: start.project,
+                    title: start.title.clone(),
+                    // Made to run a program: running until its view says otherwise.
+                    running: true,
+                    sleeping: Some(Arc::clone(part.slot())),
+                    ..Asked::default()
+                };
                 let slot = Arc::new(Mutex::new(asked));
                 NAMED
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner)
                     .push((key.clone(), Arc::downgrade(&slot)));
                 self.renamed = Some(slot);
-                self._gone = Some(Gone { key: key.clone(), project: start.project });
-                // Watched while it lives (what it holds; asleep when untouched and idle).
-                crate::sleep::ensure_running();
+                self.sleep = Some(part);
             }
             self.project = start.project;
             // A program another module runs isn't one of the shells (they're numbered apart).
@@ -78,25 +87,14 @@ impl Viewer for TerminalView {
         if b.size.width <= 0.0 || b.size.height <= 0.0 {
             return;
         }
-        // What wakes its window, for orders from elsewhere (once: the same every frame).
-        if let (Some(slot), Some(waker)) = (&self.renamed, &ctx.waker) {
-            let mut asked = asked(slot);
-            if asked.waker.is_none() {
-                asked.waker = Some(Arc::clone(waker));
+        // What wakes its window, for orders from elsewhere; with the keyboard, what "Put Tab
+        // to Sleep" acts on (drawn without it, no longer).
+        if let Some(part) = &self.sleep {
+            if let Some(waker) = &ctx.waker {
+                part.give_waker(waker);
             }
+            part.focus(ctx.focused);
         }
-        // With the keyboard: what "Put Session to Sleep" acts on (a plain shell with it: none);
-        // drawn without it, no longer.
-        let renamed = self.renamed.as_ref();
-        with_focused(|focused| {
-            let mine =
-                renamed.is_some_and(|slot| std::ptr::eq(focused.as_ptr(), Arc::as_ptr(slot)));
-            if ctx.focused {
-                *focused = renamed.map(Arc::downgrade).unwrap_or_default();
-            } else if mine {
-                *focused = std::sync::Weak::new();
-            }
-        });
         let palette = ctx.palette;
         let s = ctx.scale;
         let px = |v: f32| (v * s).round();
@@ -252,8 +250,8 @@ impl Viewer for TerminalView {
                 self.paint_asleep(over, (ctx.text, ctx.icons), (palette, s), true);
             }
         }
-        if !resuming {
-            self.wake_button = None;
+        if !resuming && let Some(part) = &mut self.sleep {
+            part.forget_card();
         }
         self.paint_bar(ctx.scene, palette, s);
     }
@@ -263,7 +261,7 @@ impl Viewer for TerminalView {
         let dirty = self.session.as_ref().is_some_and(|s| s.take_dirty());
         // Orders first, a session still settling too. Woken from elsewhere (the sessions'
         // panel): started again at the next paint.
-        let woken = self.renamed.as_ref().is_some_and(|slot| std::mem::take(&mut asked(slot).wake));
+        let woken = self.sleep.as_ref().is_some_and(SleepPart::take_wake);
         if woken && self.wake_by_user() {
             return true;
         }
@@ -271,26 +269,15 @@ impl Viewer for TerminalView {
         // pressed while it settled, its program failing to start).
         if !self.asleep
             && !(self.resuming && self.settling.is_some())
-            && let Some(slot) = &self.renamed
+            && let Some(part) = &mut self.sleep
+            && part.slot().lock().waking
         {
-            asked(slot).waking = false;
+            part.waking(false);
         }
         // Put to sleep: by hand now, shown or not (it stays asleep until the user acts on
         // it); when idle, unless it was touched since it was asked (used again: awake).
-        let order = self.renamed.as_ref().and_then(|slot| {
-            let mut asked = asked(slot);
-            let (launch, at) = asked.sleep.take()?;
-            let by_hand = std::mem::take(&mut asked.by_hand);
-            // Too old (not taken in time): let go, never applied late.
-            if at.elapsed() >= SLEEP_ORDER_FRESH {
-                return None;
-            }
-            // Touched since it was asked: awake.
-            let untouched = asked.touched.is_none_or(|touched| touched <= at);
-            (by_hand || untouched).then_some((launch, by_hand))
-        });
-        if let Some((launch, by_hand)) = order {
-            self.fall_asleep(launch, by_hand);
+        if let Some(why) = self.sleep.as_ref().and_then(SleepPart::take_order) {
+            self.fall_asleep(why);
             return true;
         }
         // What changed since (typed, measured, back, an order let go): said to whoever
@@ -307,23 +294,28 @@ impl Viewer for TerminalView {
             }
             self.settling = None;
             self.resuming = false;
-            self.slept = None;
-            if let Some(slot) = &self.renamed {
-                asked(slot).waking = false;
+            if let Some(part) = &mut self.sleep {
+                part.waking(false);
             }
-            self.announce();
             return true;
         }
         // The screen changed: what the program calls itself may have too.
         let mut renamed = dirty && self.refresh_title();
         // Known by a key: renamed by it (its session renamed), and says whether it runs.
+        let running = self.session.as_ref().is_some_and(|s| s.exit_status().is_none());
+        let mut ended = false;
         let name = self.renamed.as_ref().and_then(|slot| {
-            let running = self.session.as_ref().is_some_and(|s| s.exit_status().is_none());
             let mut asked = asked(slot);
             // Asleep, it isn't running (its owner may write over its files), yet resumes.
+            ended = asked.running && !running;
             asked.running = running;
             asked.name.take()
         });
+        // Its program ended by itself: nothing left to put to sleep.
+        if ended && let (Some(slot), Some(part)) = (&self.renamed, &self.sleep) {
+            part.ended();
+            crate::sleep::tell_veto(slot);
+        }
         if let Some(title) = name {
             renamed |= self.title.as_deref() != Some(title.as_str());
             if let Some(slot) = &self.renamed {
@@ -526,7 +518,8 @@ impl Viewer for TerminalView {
     fn cursor_at(&self, p: Point) -> Option<ViewerCursor> {
         // Asleep: the arrow, a hand over the card's button.
         if self.frozen() {
-            let on_button = self.wake_button.is_some_and(|b| b.contains(p));
+            let on_button =
+                self.sleep.as_ref().and_then(SleepPart::wake_button).is_some_and(|b| b.contains(p));
             return Some(if on_button { ViewerCursor::Pointer } else { ViewerCursor::Arrow });
         }
         self.controls.bar_or(p, || match self.link {
@@ -650,36 +643,10 @@ impl Viewer for TerminalView {
         None
     }
 
-    /// A keyed session: "Put to Sleep", greyed out with why while it's starting (how it
-    /// resumes not known yet), something typed isn't sent or it's on its way to sleep;
-    /// asleep, "Wake Up", greyed out while it wakes; nothing while it can't sleep at all.
-    /// Read from memory.
+    /// A keyed session: its sleeping's rows ("Put to Sleep", greyed out with why; asleep,
+    /// "Wake Up"), read from memory.
     fn tab_menu(&self) -> Vec<ui_components::ViewMenuEntry> {
-        use contracts::terminal::CanSleep;
-        let Some(slot) = &self.renamed else { return Vec::new() };
-        let can = asked(slot).can_sleep();
-        // Asleep, or waking: waking it instead.
-        if self.asleep || can == CanSleep::Waking {
-            let waking = can == CanSleep::Waking;
-            let wake = i18n::t(if waking { "terminal.waking_up" } else { "terminal.wake_up" });
-            return vec![
-                ui_components::ViewMenuEntry::item(crate::WAKE_ACTION, wake)
-                    .with_icon("sun")
-                    .disabled_if(waking),
-            ];
-        }
-        let label = match can {
-            CanSleep::No | CanSleep::Waking => return Vec::new(),
-            CanSleep::Yes => i18n::t("terminal.sleep_now"),
-            CanSleep::Typed => i18n::t("terminal.sleep_now_typed"),
-            CanSleep::Sleeping => i18n::t("terminal.going_to_sleep"),
-            CanSleep::Starting => i18n::t("terminal.sleep_now_starting"),
-        };
-        vec![
-            ui_components::ViewMenuEntry::item(crate::SLEEP_ACTION, label)
-                .with_icon(ASLEEP_ICON)
-                .disabled_if(can != CanSleep::Yes),
-        ]
+        self.sleep.as_ref().map(SleepPart::tab_menu).unwrap_or_default()
     }
 
     /// "Wake Up" brings its tab to the front first: shown, it starts again.
@@ -701,16 +668,14 @@ impl Viewer for TerminalView {
             return self.wake_by_user();
         }
         if id == crate::SLEEP_ACTION {
-            let Some(slot) = &self.renamed else { return false };
-            let can = asked(slot).can_sleep();
-            if can != contracts::terminal::CanSleep::Yes {
+            let Some(part) = &self.sleep else { return false };
+            if let Err(can) = part.sleep_by_hand() {
                 // Never silently nothing: why it can't, told.
-                self.notices.push(cant_sleep(can));
+                self.notices.push(part.refusal(can));
                 return true;
             }
-            let asked_now = asked(slot).sleep_by_hand();
             // Asleep at once (this frame draws it), not at a later poll.
-            return asked_now && self.poll();
+            return self.poll();
         }
         if id != crate::CLEAR_ACTION {
             return false;

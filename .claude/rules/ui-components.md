@@ -69,6 +69,7 @@ every caller has today: a new option never moves a pixel where it isn't asked fo
 | A tab tinted to draw the eye (a theme's tone, animated) | `WorkbenchHost::tint_tab` (the app's tabs: never drawn over by a module) |
 | A settings form inside a panel | `form` |
 | Side panels and their buttons | `tool_window`, `tool_panel` (registered, never hard-coded) |
+| A heavy view put to sleep when left alone (its slot, the orders at its poll, its menu rows, the moon, the asleep card); its module only stops and brings back what it holds | `sleep::SleepPart` + a `SleepKind` (the timer is the `sleep` module's) |
 
 Menus are the app's (`ViewMenuEntry`), modals and overlays the app's frame
 ([modals](modals.md)), the status bar the app's (below).

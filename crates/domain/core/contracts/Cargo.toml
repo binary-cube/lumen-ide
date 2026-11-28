@@ -12,6 +12,7 @@ doctest = false
 kernel.workspace = true
 agents.workspace = true
 diff.workspace = true
+sleep.workspace = true
 
 [lints]
 workspace = true

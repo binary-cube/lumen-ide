@@ -173,3 +173,68 @@ fn a_conflict_gives_the_page_the_file_as_it_is() {
     assert_eq!(s.on_disk().as_deref(), Some("<theirs/>"));
     assert_eq!(s.unsaved(), None);
 }
+
+/// A page made anew (a theme changed, a tab hidden long enough, a sleep) is given back where
+/// the user was, after the diagram — and told whether undo goes on here.
+#[test]
+fn a_page_made_anew_is_put_back_where_the_user_was() {
+    let mut s = session();
+    s.page_message(r#"{"event":"init"}"#);
+    s.file_read(Arc::from("<mxfile>1</mxfile>"));
+    let first = sent(&s.page_message(r#"{"event":"init"}"#));
+    assert_eq!(first[1]["action"], "hostRestore");
+    assert_eq!(first[1]["state"], Value::Null, "nothing known yet");
+    let state = r#"{"event":"hostState","page":1,"scale":2,"tx":5,"ty":6,"left":7,"top":8,"selection":["a"],"busy":true}"#;
+    assert!(s.page_message(state).is_empty());
+    assert!(s.busy(), "typing into a cell, or a dialog open");
+    s.page_message(r#"{"event":"autosave","xml":"<mxfile>2</mxfile>"}"#);
+    s.written(&Arc::from("<mxfile>2</mxfile>"), true);
+    s.new_page();
+    s.page_message(r#"{"event":"configure"}"#);
+    let again = sent(&s.page_message(r#"{"event":"init"}"#));
+    assert_eq!(again[0]["xml"], "<mxfile>2</mxfile>");
+    assert_eq!(again[1]["state"]["page"], 1);
+    assert_eq!(again[1]["state"]["scale"], 2.0);
+    assert_eq!(again[1]["state"]["selection"], json!(["a"]));
+    assert_eq!((again[1]["past"].clone(), again[1]["future"].clone()), (json!(true), json!(false)));
+    // Garbage changes nothing.
+    assert!(s.page_message(r#"{"event":"hostState","page":"x"}"#).is_empty());
+    assert!(s.busy());
+}
+
+/// Past the new page's own history, an undo here loads the diagram as it was and writes it;
+/// a redo brings it forward again; with nothing to take back, nothing happens.
+#[test]
+fn undo_past_a_page_made_anew_loads_and_writes_what_it_was() {
+    let mut s = session();
+    s.page_message(r#"{"event":"init"}"#);
+    s.file_read(Arc::from("<a/>"));
+    assert!(s.page_message(r#"{"event":"hostUndo"}"#).is_empty(), "nothing to take back");
+    s.page_message(r#"{"event":"autosave","xml":"<b/>"}"#);
+    s.written(&Arc::from("<b/>"), true);
+    s.new_page();
+    s.page_message(r#"{"event":"init"}"#);
+    let undo = s.page_message(r#"{"event":"hostUndo"}"#);
+    let said = sent(&undo);
+    assert_eq!(said[0]["xml"], "<a/>", "loaded as it was");
+    assert_eq!((said[1]["past"].clone(), said[1]["future"].clone()), (json!(false), json!(true)));
+    assert!(undo.contains(&Effect::Write(Arc::from("<a/>"))), "and written");
+    s.written(&Arc::from("<a/>"), true);
+    let redo = s.page_message(r#"{"event":"hostRedo"}"#);
+    assert_eq!(sent(&redo)[0]["xml"], "<b/>");
+    assert!(redo.contains(&Effect::Write(Arc::from("<b/>"))));
+}
+
+/// A page reloaded on its own (the same page, made again after its tab was hidden long
+/// enough) says `configure` first: undo goes on here from then too.
+#[test]
+fn a_page_reloaded_on_its_own_offers_undo_here_too() {
+    let mut s = session();
+    s.page_message(r#"{"event":"init"}"#);
+    s.file_read(Arc::from("<a/>"));
+    s.page_message(r#"{"event":"autosave","xml":"<b/>"}"#);
+    s.written(&Arc::from("<b/>"), true);
+    s.page_message(r#"{"event":"configure"}"#);
+    let again = sent(&s.page_message(r#"{"event":"init"}"#));
+    assert_eq!(again[1]["past"], json!(true));
+}

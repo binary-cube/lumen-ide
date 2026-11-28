@@ -1,81 +1,38 @@
 use super::*;
 
-/// A program quiet for a given time.
-struct Quiet(Duration);
-
-impl terminal_session::SessionWatch for Quiet {
-    fn foreground(&self) -> terminal_session::history::Foreground {
-        terminal_session::history::Foreground::Unknown
-    }
-    fn program(&self) -> Option<String> {
-        None
-    }
-    fn title(&self) -> Option<String> {
-        None
-    }
-    fn quiet_for(&self) -> Option<Duration> {
-        Some(self.0)
-    }
-}
-
-const IDLE: Duration = Duration::from_secs(3600);
-
-/// A keyed terminal untouched and quiet for `untouched` and `quiet`.
-fn state(untouched: Duration, quiet: Duration) -> (Asked, Instant) {
-    let now = Instant::now() + IDLE * 3;
-    let asked = Asked {
-        touched: Some(now - untouched),
-        watch: Some(Arc::new(Quiet(quiet))),
+/// A running session, its owner knowing how it resumes.
+fn running() -> Asked {
+    Asked {
+        running: true,
         pid: Some(4_000_001),
+        resume: Some(agents::Launch::default()),
+        started: Some(Instant::now()),
         ..Asked::default()
-    };
-    (asked, now)
+    }
 }
 
-/// Only a program untouched (no key, click, wheel, paste, its tab not chosen) and quiet for
-/// the whole idle time sleeps, on screen or not; anything else keeps it awake, each named:
-/// used or writing lately, text typed and not sent, ended, already asleep or about to be,
-/// never started, its quiet not known.
+/// What keeps a session awake, the terminal's own reasons, the first that holds: its program
+/// ended, nobody can resume it (or not yet: it's starting), something typed isn't sent, its
+/// owner at work; none, nothing.
 #[test]
-fn only_an_untouched_quiet_program_sleeps() {
-    let (asked, now) = state(IDLE, IDLE);
-    assert!(sleepy(&asked, IDLE, now));
-    let awake = |asked: &Asked, now| awake_because(asked, IDLE, now);
-    let (asked, now) = state(IDLE / 2, IDLE);
-    assert_eq!(awake(&asked, now), Some("used lately"));
-    let (asked, now) = state(IDLE, IDLE / 2);
-    assert_eq!(awake(&asked, now), Some("output lately"), "at work: it wrote lately");
-    let (mut asked, now) = state(IDLE, IDLE);
-    asked.typed = true;
-    assert_eq!(awake(&asked, now), Some("text typed, not sent"));
-    let (mut asked, now) = state(IDLE, IDLE);
-    asked.running = false;
-    assert_eq!(awake(&asked, now), Some("not running"), "its program ended");
-    let (mut asked, now) = state(IDLE, IDLE);
-    asked.asleep = true;
-    assert_eq!(awake(&asked, now), Some("asleep"));
-    let (mut asked, now) = state(IDLE, IDLE);
-    asked.sleep = Some((agents::Launch::default(), Instant::now()));
-    assert_eq!(awake(&asked, now), Some("ordered to sleep"));
-    let (mut asked, now) = state(IDLE, IDLE);
-    asked.touched = None;
-    assert_eq!(awake(&asked, now), Some("never started"));
-    let (mut asked, now) = state(IDLE, IDLE);
-    asked.watch = None;
-    assert!(!sleepy(&asked, IDLE, now), "its quiet not known");
-    let (mut asked, now) = state(IDLE, IDLE);
-    asked.pid = None;
-    assert_eq!(awake(&asked, now), Some("no process"));
-}
-
-/// Why a session stays awake is kept as last told: told again only when it changes.
-#[test]
-fn why_a_session_stays_awake_is_told_once_per_change() {
-    let slot = crate::view::NameSlot::new(Asked::default());
-    tell_awake(&slot, "told-key", Some("used lately"));
-    assert_eq!(asked(&slot).awake, Some(Some("used lately")));
-    tell_awake(&slot, "told-key", None);
-    assert_eq!(asked(&slot).awake, Some(None), "may sleep: kept apart from never told");
+fn a_session_says_what_of_its_own_keeps_it_awake() {
+    let now = Instant::now();
+    assert_eq!(veto(&running(), now), None);
+    assert_eq!(veto(&Asked { running: false, ..running() }, now), Some(ENDED));
+    assert_eq!(veto(&Asked { pid: None, ..running() }, now), Some(ENDED));
+    let unknown = Asked { resume: None, started: Some(now), ..running() };
+    let starting = veto(&unknown, now);
+    assert!(starting == Some(STARTING) || starting == Some(NO_RESUME), "as someone answers");
+    let later = now + STARTING_WITHIN;
+    assert_eq!(veto(&unknown, later), Some(NO_RESUME), "never starting for good");
+    assert_eq!(veto(&Asked { typed: true, ..running() }, now), Some(TYPED));
+    assert_eq!(veto(&Asked { owner_busy: true, ..running() }, now), Some(OWNER_BUSY));
+    let holds = |veto: Veto| (veto.by_hand, veto.never);
+    assert_eq!(holds(TYPED), (true, false), "the user's own order waits for it, greyed out");
+    assert_eq!(holds(STARTING), (true, false));
+    assert_eq!(holds(OWNER_BUSY), (false, false), "not the user's: they chose");
+    assert_eq!(holds(ENDED), (true, true), "its row hidden");
+    assert_eq!(holds(NO_RESUME), (true, true));
 }
 
 /// Each project's window asks how its terminals resume on its own clock: one asking never
@@ -122,25 +79,11 @@ fn a_terminal_of_no_project_wakes_any_window() {
     assert_eq!(woken.load(Ordering::SeqCst), 1, "closed: not woken");
 }
 
-/// The watching thread runs only while there's work: a keyed terminal, and sleeping on or
-/// its memory asked lately — not every tick for nothing.
-#[test]
-fn the_watch_runs_only_while_needed() {
-    let now = Instant::now();
-    assert!(!watch_needed(true, false, None, now), "sleeping off, nobody asking");
-    assert!(watch_needed(true, true, None, now), "sleeping on");
-    assert!(watch_needed(true, false, Some(now), now), "asked lately");
-    assert!(!watch_needed(true, false, Some(now - ASKED_WITHIN * 2), now), "asked long ago");
-    assert!(!watch_needed(false, true, Some(now), now), "no keyed terminal");
-}
-
-/// A project closed: nothing is kept for it (its sleeps due, its asking clock).
+/// A project closed: nothing is kept for it (its asking clock).
 #[test]
 fn a_closed_project_leaves_nothing_behind() {
     let project = kernel::ProjectId::new();
-    lock(&DUE).push(Some(project));
     note_resumes_asked(&mut lock(&RESUMES_ASKED), Some(project), Instant::now());
     forget_project(project);
-    assert!(!lock(&DUE).contains(&Some(project)));
     assert!(lock(&RESUMES_ASKED).iter().all(|(p, _)| *p != Some(project)));
 }

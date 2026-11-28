@@ -355,7 +355,10 @@ impl Importer {
         let device = &self.ctx.device;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("web-page"),
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            // Copied from too: a page's last frame kept after it goes (`ImageData::copy_of`).
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
             ..frame_descriptor(size)
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());

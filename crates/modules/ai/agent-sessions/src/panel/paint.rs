@@ -225,7 +225,7 @@ impl SessionsPanel {
     fn paint_held(
         &mut self,
         pen: &mut Pen<'_, '_>,
-        state: contracts::terminal::TerminalState,
+        state: contracts::sleep::SleepState,
         (right, top): (f32, f32),
     ) -> f32 {
         let (ds, p) = (pen.ds, pen.ds.palette);

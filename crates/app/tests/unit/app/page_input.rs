@@ -177,7 +177,12 @@ fn with_page_image(
     let calls = Arc::new(Mutex::new(Vec::new()));
     let made = Arc::clone(&calls);
     let html: Arc<str> = "<p>a</p>".into();
-    let page = ui_workbench::WebPage { id: 1, source: ui_workbench::WebSource::Html(html), area };
+    let page = ui_workbench::WebPage {
+        id: 1,
+        source: ui_workbench::WebSource::Html(html),
+        area,
+        freeze: false,
+    };
     let image = render_api::ImageData::live();
     let drawn = image.clone();
     app.web_views.sync(vec![(page, true)], false, Instant::now(), move |_, _, _| {
@@ -288,6 +293,7 @@ fn a_pages_new_frame_alone_draws_only_the_pages() {
         id: 1,
         source: ui_workbench::WebSource::Html(Arc::clone(&html)),
         area,
+        freeze: false,
     };
     // Its first frame shows it: a whole frame.
     image.frame_copied(copied());

@@ -9,7 +9,8 @@
 //! around draw.io ([`page`]) and talks to it ([`protocol`]): the file read and written by
 //! us on workers (autosave, through a temporary file), a change on disk merged in when
 //! nothing's unsaved, the theme's colors over draw.io's ([`theme`]). The page exists only
-//! while its tab is open.
+//! while its tab is open — and, left alone with sleeping on ([`settings`]), not even then:
+//! its picture stays in its place, its page let go, made again as it was when woken.
 //!
 //! draw.io is © JGraph Ltd and draw.io AG, Apache 2.0; the name says what's run, never an
 //! affiliation (no logo, an attribution in the offer and the notice).
@@ -19,6 +20,8 @@ pub mod install;
 pub mod package;
 pub mod page;
 pub mod protocol;
+pub mod settings;
+pub mod state;
 pub mod theme;
 pub mod view;
 
@@ -38,6 +41,13 @@ pub const FILE_EXTENSION: &str = "drawio";
 
 /// Edit in draw.io: the target `.drawio` file opened in a draw.io tab.
 pub const EDIT: command_model::CommandId = command_model::CommandId("diagram_web.edit");
+/// Turns on putting draw.io tabs left alone to sleep (the hint's "Turn on").
+pub const SLEEP_ON: command_model::CommandId = command_model::CommandId("diagram_web.sleep_on");
+/// The diagrams' page of the settings.
+pub const SETTINGS: command_model::CommandId = command_model::CommandId("diagram_web.settings");
+/// The hint telling that draw.io tabs can sleep (shown at the first one opened while
+/// sleeping is off).
+pub const SLEEP_HINT: &str = "diagram_web.sleep";
 
 static MANIFEST: ModuleManifest = ModuleManifest {
     id: ModuleId::new_static("tool.diagram-web"),
@@ -68,6 +78,51 @@ impl Module for DiagramWebModule {
             },
             icon: Some("file-pen"),
             handler: Arc::new(Edit),
+        });
+        // Its tabs left alone, asleep when the user chose it.
+        ctx.contribute::<Arc<dyn workbench_model::SettingsContribution>>(Arc::new(
+            settings::SleepSettings,
+        ));
+        ctx.contribute(CommandContribution {
+            spec: command_model::CommandSpec {
+                id: SLEEP_ON,
+                label: "Put Idle Diagrams to Sleep",
+                menu: None,
+                shortcuts: &[],
+            },
+            icon: Some(ui_components::sleep::ASLEEP_ICON),
+            handler: Arc::new(SleepOn),
+        });
+        ctx.contribute(CommandContribution {
+            spec: command_model::CommandSpec {
+                id: SETTINGS,
+                label: "Diagram Settings…",
+                menu: None,
+                shortcuts: &[],
+            },
+            icon: Some("settings"),
+            handler: Arc::new(OpenSettings),
+        });
+        // Told once, at a diagram opened while sleeping is off: it can be turned on there.
+        ctx.contribute(workbench_model::HintContribution {
+            hint: workbench_model::Hint {
+                id: SLEEP_HINT,
+                steps: vec![workbench_model::HintStep {
+                    icon: Some(ui_components::sleep::ASLEEP_ICON),
+                    eyebrow: None,
+                    title: "diagram_web.sleep_hint_title",
+                    body: "diagram_web.sleep_hint_body",
+                    place: Some("diagram_web.sleep_hint_place"),
+                    anchor: Some(workbench_model::hints::ANCHOR_ACTIVE_TAB),
+                    actions: vec![
+                        workbench_model::HintAction::secondary(
+                            "diagram_web.sleep_hint_settings",
+                            SETTINGS,
+                        ),
+                        workbench_model::HintAction::primary("diagram_web.sleep_hint_on", SLEEP_ON),
+                    ],
+                }],
+            },
         });
         // A `.drawio` file's menu in the project tree, and its tab's.
         ctx.contribute(ContextMenuItem::new(
@@ -124,7 +179,27 @@ fn opens_diagrams() -> bool {
 }
 
 /// Its viewer's id.
-const PROVIDER_ID: &str = "diagram-web";
+pub(crate) const PROVIDER_ID: &str = "diagram-web";
+
+/// [`SLEEP_ON`]: draw.io tabs left alone put to sleep from now on.
+struct SleepOn;
+
+impl CommandHandler for SleepOn {
+    fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
+        let Some(user) = host.user_settings() else { return false };
+        settings::enable_sleep(user);
+        true
+    }
+}
+
+/// [`SETTINGS`]: the settings, at the diagrams' page.
+struct OpenSettings;
+
+impl CommandHandler for OpenSettings {
+    fn run(&self, host: &mut dyn WorkbenchHost) -> bool {
+        host.open_settings_page("diagrams")
+    }
+}
 
 /// The tabs it opens: its own (by their virtual extension) and a `.drawio` file's, when no
 /// viewer asked before it opens the file.
@@ -146,7 +221,7 @@ impl ViewerProvider for Provider {
     /// from a session; the command's open gives it too, with the project's events).
     fn open(&self, path: &Path) -> std::io::Result<Box<dyn Viewer>> {
         let file = if is_diagram(path) { Some(path.to_path_buf()) } else { file_of_view(path) };
-        Ok(Box::new(DiagramWebView::for_file(file)))
+        Ok(Box::new(DiagramWebView::in_tab(path, file)))
     }
 }
 

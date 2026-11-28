@@ -171,7 +171,8 @@ impl GpuImage {
         if self.image.released() {
             return false;
         }
-        if shown {
+        // Nothing could make it again (a sleeping view's picture): kept until released.
+        if shown || self.image.is_held() {
             return true;
         }
         let recent = self.last_used.elapsed() < IMAGE_IDLE;

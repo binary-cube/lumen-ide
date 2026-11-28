@@ -606,7 +606,9 @@ fn a_program_runs_in_a_terminal_tab_of_the_editor() {
     let name = tab.doc.path().and_then(Path::file_stem).unwrap().to_string_lossy().into_owned();
     assert_eq!(name, "claude-1----x", "known by its key, never a path");
     assert_eq!(wb.keyed_view_kind(), Some(terminal_panel::VIEWER), "its own keys (⌘K)");
-    // Sleeping idle sessions is off: the terminal's hint tells it could be on.
+    // Sleeping idle sessions is off: the terminal's hint tells it could be on (asked by the
+    // sleeping at the window's next poll).
+    wb.poll_viewers();
     assert_eq!(wb.hint_shown(), Some(terminal_panel::SLEEP_HINT));
     // Nobody knows how it resumes (no agent follows this key): no "Put to Sleep" on its tab,
     // the command off; a row asked anyway refused, saying why (never silently nothing).
@@ -618,7 +620,7 @@ fn a_program_runs_in_a_terminal_tab_of_the_editor() {
     assert_eq!(wb.last_notification(), Some(i18n::t("terminal.cant_sleep")), "told why");
     assert!(!wb.run_tab_view_menu(&mut text, "not-a-doc:sleep-now"));
     let host: &dyn workbench_model::WorkbenchHost = &wb;
-    let sleep = wb.support.commands.iter().find(|c| c.spec.id == terminal_panel::SLEEP_NOW);
+    let sleep = wb.support.commands.iter().find(|c| c.spec.id == sleep_timer::SLEEP_NOW);
     assert!(sleep.is_some_and(|c| !c.handler.enabled(host)), "off: it can't sleep now");
     let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
     assert_eq!(host.ask(run()), Some(true));
@@ -811,6 +813,7 @@ impl ui_workbench::Viewer for AppView {
                 entry: "index.html".into(),
             },
             area: Rect::new(0.0, 0.0, 10.0, 10.0),
+            freeze: false,
         })
     }
     fn web_event(&mut self, page: u128, event: ui_workbench::WebEvent) {
@@ -1177,6 +1180,8 @@ fn a_session_s_hint_points_at_its_own_tab() {
     };
     let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
     assert_eq!(host.ask(run), Some(true));
+    // Its hint, asked by the sleeping at the window's poll.
+    wb.poll_viewers();
     let session = wb.active;
     wb.open_file(&dir.join("a.txt")).unwrap();
     paint(&mut wb);
@@ -1268,6 +1273,8 @@ fn a_hint_finds_its_tab_in_another_group() {
     };
     let host: &mut dyn workbench_model::WorkbenchHost = &mut wb;
     assert_eq!(host.ask(run), Some(true));
+    // Its hint, asked by the sleeping at the window's poll.
+    wb.poll_viewers();
     let session = wb.active;
     assert!(wb.split_tab(session, Split::Right, true), "moved to a group of its own");
     paint(&mut wb);

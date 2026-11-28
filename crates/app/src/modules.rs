@@ -214,6 +214,7 @@ pub fn builtin() -> ModuleRegistry {
     add(&mut registry, Box::new(project_switcher::SwitcherModule), "project_switcher");
     add(&mut registry, Box::new(focus_mode::FocusModule), "focus_mode");
     add(&mut registry, Box::new(running_work::RunningWorkModule), "running_work");
+    add(&mut registry, Box::new(sleep_timer::SleepModule), "sleep_timer");
     add(&mut registry, Box::new(terminal_panel::TerminalModule), "terminal_panel");
     add(&mut registry, Box::new(agent_claude::ClaudeModule), "agent_claude");
     add(&mut registry, Box::new(agent_cline::ClineModule), "agent_cline");

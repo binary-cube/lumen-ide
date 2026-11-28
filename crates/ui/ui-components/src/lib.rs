@@ -44,6 +44,7 @@ pub mod search_field;
 pub mod services;
 pub mod severity;
 pub mod shortcuts;
+pub mod sleep;
 pub mod slider;
 pub mod snippets;
 pub mod splitter;
