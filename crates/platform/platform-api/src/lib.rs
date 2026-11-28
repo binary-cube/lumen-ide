@@ -775,6 +775,13 @@ pub enum NamedKey {
     Insert,
     Space,
     F(u8),
+    /// A modifier pressed or let go alone (a page sees its own key: draw.io readies its
+    /// clipboard as ⌘ / Ctrl goes down); never a shortcut of the app's.
+    Shift,
+    Control,
+    Alt,
+    /// Cmd on macOS, the Windows / Super key elsewhere.
+    Meta,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -799,6 +806,16 @@ pub struct KeyEvent {
     /// key left of `s`, whatever the layout writes there): what web pages' key codes are
     /// named by. `None`: a key with no such place (a named key, the keypad) or unknown.
     pub physical: Option<char>,
+}
+
+impl KeyEvent {
+    /// A modifier pressed or let go alone (Shift, Ctrl, Alt, ⌘).
+    pub fn is_modifier(&self) -> bool {
+        matches!(
+            self.key,
+            Key::Named(NamedKey::Shift | NamedKey::Control | NamedKey::Alt | NamedKey::Meta)
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

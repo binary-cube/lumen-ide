@@ -302,3 +302,24 @@ fn a_pages_new_frame_alone_draws_only_the_pages() {
     app.on_wake();
     assert!(app.frames.only_pages && !app.frames.dirty, "only the pages drawn again");
 }
+
+/// ⌘ / Ctrl pressed alone (before C or V) reaches the page as its own key, down and up —
+/// draw.io readies its clipboard then; its copy and paste follow as editing actions.
+#[test]
+fn a_modifier_alone_reaches_the_page_before_its_copy() {
+    use platform_api::{Key, NamedKey};
+    let (mut app, calls) = with_page(kernel::Rect::new(0.0, 0.0, 300.0, 300.0));
+    pressed_on(&mut app, Point::new(50.0, 50.0));
+    calls.lock().unwrap().clear();
+    let named = if MAC { NamedKey::Meta } else { NamedKey::Control };
+    let down = key(Key::Named(named), primary());
+    assert!(app.key_to_page(&down), "the page's, never a shortcut");
+    let copy = KeyEvent { physical: Some('c'), ..key(Key::Character("c".into()), primary()) };
+    assert!(app.key_to_page(&copy));
+    let up = KeyEvent { pressed: false, modifiers: Default::default(), ..down };
+    assert!(app.key_to_page(&up));
+    let told = calls.lock().unwrap();
+    assert_eq!(told[0], format!("key Named({named:?}) true"));
+    assert_eq!(told[1], "edit Copy");
+    assert_eq!(told[2], format!("key Named({named:?}) false"));
+}

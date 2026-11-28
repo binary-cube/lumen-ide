@@ -23,6 +23,10 @@ pub(super) fn chord(event: &KeyEvent) -> Option<KeyChord> {
                 c => c,
             })
         }
+        // A modifier alone is no shortcut.
+        Key::Named(NamedKey::Shift | NamedKey::Control | NamedKey::Alt | NamedKey::Meta) => {
+            return None;
+        }
         Key::Named(named) => ChordKey::Named(
             match named {
                 NamedKey::ArrowUp => "Up",
@@ -41,6 +45,9 @@ pub(super) fn chord(event: &KeyEvent) -> Option<KeyChord> {
                 NamedKey::Insert => "Insert",
                 NamedKey::Space => return Some(chord_with(event, ChordKey::Char(' '))),
                 NamedKey::F(n) => return Some(chord_with(event, ChordKey::Named(format!("F{n}")))),
+                NamedKey::Shift | NamedKey::Control | NamedKey::Alt | NamedKey::Meta => {
+                    return None;
+                }
             }
             .to_owned(),
         ),

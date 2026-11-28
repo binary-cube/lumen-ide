@@ -95,3 +95,26 @@ fn a_key_is_coded_by_its_place_on_any_layout() {
     assert_eq!(sent[0].native_code, a[0].native_code);
     assert_eq!(sent[1].character, u32::from('ф'), "what it typed stays its own");
 }
+
+/// A modifier pressed alone reaches the page as its own key (draw.io readies its clipboard
+/// as ⌘ / Ctrl goes down, then copy and paste land there): its codes, no character.
+#[test]
+fn a_modifier_alone_goes_down_with_its_codes() {
+    let meta = Modifiers { meta: true, ..Modifiers::default() };
+    let cases = [
+        (NamedKey::Meta, 0x5B, 0x37),
+        (NamedKey::Control, 0x11, 0x3B),
+        (NamedKey::Shift, 0x10, 0x38),
+        (NamedKey::Alt, 0x12, 0x3A),
+    ];
+    for (key, windows, mac) in cases {
+        let event = press(Key::Named(key), None, meta);
+        assert!(event.is_modifier());
+        let sent: Vec<_> = key_events(&event).collect();
+        assert_eq!(sent.len(), 1, "{key:?}: its down alone");
+        assert_eq!(sent[0].windows_code, windows, "{key:?}");
+        let native = if cfg!(target_os = "macos") { mac } else { 0 };
+        assert_eq!((sent[0].native_code, sent[0].character), (native, 0), "{key:?}");
+    }
+    assert!(!press(Key::Named(NamedKey::Escape), None, meta).is_modifier());
+}

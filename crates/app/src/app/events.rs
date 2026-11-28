@@ -689,9 +689,9 @@ impl EditorApp {
     }
 
     fn on_key(&mut self, key: KeyEvent) -> Control {
-        // Modifier keys alone arrive as `Unidentified`; anything else breaks a
-        // double Shift.
-        if key.pressed && key.key != platform_api::Key::Unidentified {
+        // A modifier alone (or a key nobody names) never breaks a double Shift; anything
+        // else does.
+        if key.pressed && !key.is_modifier() && key.key != platform_api::Key::Unidentified {
             self.double_shift.cancel();
             self.alt_tap.cancel();
         }

@@ -44,24 +44,7 @@ impl EditorApp {
         }
         use ui_workbench::{KeyPress, PressedKey};
         let key = match &event.key {
-            Key::Named(named) => Some(match named {
-                NamedKey::ArrowUp => PressedKey::Up,
-                NamedKey::ArrowDown => PressedKey::Down,
-                NamedKey::ArrowLeft => PressedKey::Left,
-                NamedKey::ArrowRight => PressedKey::Right,
-                NamedKey::PageUp => PressedKey::PageUp,
-                NamedKey::PageDown => PressedKey::PageDown,
-                NamedKey::Home => PressedKey::Home,
-                NamedKey::End => PressedKey::End,
-                NamedKey::Enter => PressedKey::Enter,
-                NamedKey::Escape => PressedKey::Escape,
-                NamedKey::Tab => PressedKey::Tab,
-                NamedKey::Backspace => PressedKey::Backspace,
-                NamedKey::Delete => PressedKey::Delete,
-                NamedKey::Insert => PressedKey::Insert,
-                NamedKey::Space => PressedKey::Char(' '),
-                NamedKey::F(n) => PressedKey::F(*n),
-            }),
+            Key::Named(named) => view_key(*named),
             // Ctrl+letter (Ctrl+C, Ctrl+D, Ctrl+R…): the control code.
             Key::Character(c) if m.ctrl => c.chars().next().map(PressedKey::Char),
             _ => None,
@@ -364,4 +347,28 @@ impl EditorApp {
             self.pending.exit_request.get_or_insert(control);
         }
     }
+}
+
+/// A named key as a view takes it (`None`: a modifier alone, nothing for a view).
+fn view_key(named: NamedKey) -> Option<ui_workbench::PressedKey> {
+    use ui_workbench::PressedKey;
+    Some(match named {
+        NamedKey::ArrowUp => PressedKey::Up,
+        NamedKey::ArrowDown => PressedKey::Down,
+        NamedKey::ArrowLeft => PressedKey::Left,
+        NamedKey::ArrowRight => PressedKey::Right,
+        NamedKey::PageUp => PressedKey::PageUp,
+        NamedKey::PageDown => PressedKey::PageDown,
+        NamedKey::Home => PressedKey::Home,
+        NamedKey::End => PressedKey::End,
+        NamedKey::Enter => PressedKey::Enter,
+        NamedKey::Escape => PressedKey::Escape,
+        NamedKey::Tab => PressedKey::Tab,
+        NamedKey::Backspace => PressedKey::Backspace,
+        NamedKey::Delete => PressedKey::Delete,
+        NamedKey::Insert => PressedKey::Insert,
+        NamedKey::Space => PressedKey::Char(' '),
+        NamedKey::F(n) => PressedKey::F(n),
+        NamedKey::Shift | NamedKey::Control | NamedKey::Alt | NamedKey::Meta => return None,
+    })
 }

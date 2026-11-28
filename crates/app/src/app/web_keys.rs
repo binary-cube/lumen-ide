@@ -118,6 +118,11 @@ fn named_codes(key: NamedKey) -> (i32, i32, u32) {
         NamedKey::Backspace => (0x08, 0x33, 0x7F),
         NamedKey::Space => (0x20, 0x31, 0x20),
         NamedKey::F(n) => function_codes(n),
+        // Their left ones' (AppKit: Shift, Control, Option, Command; no character).
+        NamedKey::Shift => (0x10, 0x38, 0),
+        NamedKey::Control => (0x11, 0x3B, 0),
+        NamedKey::Alt => (0x12, 0x3A, 0),
+        NamedKey::Meta => (0x5B, 0x37, 0),
     }
 }
 
